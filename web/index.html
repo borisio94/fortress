@@ -1,92 +1,36 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
+  <!--
+    Le placeholder $FLUTTER_BASE_HREF est remplacé au build par la valeur
+    passée à `flutter build web --base-href "..."`.
+      - Build local par défaut         → "/"
+      - GitHub Actions (production)    → "/fortress/" (cf. workflow CI)
+    Ne PAS coder en dur "/fortress/" ici, sinon `flutter run -d chrome`
+    casse en dev.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Fortress POS — caisse multi-boutique pour commerçants.">
-  <title>Fortress POS</title>
-  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <!-- iOS meta tags & icons -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Fortress POS">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-      color: #f1f5f9;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-    }
-    .card {
-      max-width: 480px;
-      width: 100%;
-      background: rgba(255, 255, 255, 0.05);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 20px;
-      padding: 40px 32px;
-      text-align: center;
-    }
-    .logo {
-      width: 72px;
-      height: 72px;
-      margin: 0 auto 24px;
-      border-radius: 18px;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 32px;
-      font-weight: 700;
-    }
-    h1 { font-size: 28px; margin-bottom: 8px; font-weight: 700; }
-    p.subtitle { color: #94a3b8; margin-bottom: 32px; line-height: 1.5; }
-    .stores { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
-    .store-btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      padding: 14px 20px;
-      border-radius: 12px;
-      background: #0f172a;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      color: #f1f5f9;
-      text-decoration: none;
-      font-weight: 600;
-      transition: all 0.2s;
-    }
-    .store-btn:hover { background: #1e293b; border-color: #6366f1; }
-    .hint {
-      font-size: 13px;
-      color: #64748b;
-      padding-top: 16px;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-    }
-  </style>
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>Fortress POS</title>
+  <link rel="manifest" href="manifest.json">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#534AB7">
 </head>
 <body>
-  <main class="card">
-    <div class="logo">F</div>
-    <h1>Fortress POS</h1>
-    <p class="subtitle">
-      Pour ouvrir ce lien, installez l'application Fortress
-      sur votre téléphone.
-    </p>
-    <div class="stores">
-      <a class="store-btn" href="https://play.google.com/store/apps/details?id=com.fortress.pos">
-        Télécharger sur Google Play
-      </a>
-      <a class="store-btn" href="https://apps.apple.com/app/fortress-pos/id000000000">
-        Télécharger sur l'App Store
-      </a>
-    </div>
-    <p class="hint">
-      Si l'application est déjà installée, le lien s'ouvrira
-      automatiquement dans Fortress.
-    </p>
-  </main>
+  <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

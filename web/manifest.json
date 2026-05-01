@@ -1,11 +1,11 @@
 {
-    "name": "fortress",
-    "short_name": "fortress",
+    "name": "Fortress POS",
+    "short_name": "Fortress",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#1a1a2e",
     "theme_color": "#534AB7",
-    "description": "A new Flutter project.",
+    "description": "Point de vente pour boutiques africaines",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
