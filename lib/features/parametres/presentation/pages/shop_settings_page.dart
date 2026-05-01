@@ -66,10 +66,6 @@ class _ShopSettingsPageState extends ConsumerState<ShopSettingsPage>
       ? const [_overviewTabDef, ..._baseTabs]
       : _baseTabs;
 
-  /// Suffixe `?with_overview=1` à conserver lors de la sync URL ↔ tab
-  /// pour ne pas perdre l'onglet Boutique en changeant d'onglet.
-  String get _querySuffix => widget.showOverviewTab ? '?with_overview=1' : '';
-
   /// Mapping enum → index de tab. L'offset dépend de la présence de
   /// l'onglet Boutique (overview) en première position. `danger` est
   /// historique (onglet retiré) — mappé sur Membres pour rétro-compat.
@@ -91,6 +87,9 @@ class _ShopSettingsPageState extends ConsumerState<ShopSettingsPage>
 
   /// Index de l'onglet « Membres » selon le mode d'affichage.
   int get _membersIndex => widget.showOverviewTab ? 1 : 0;
+
+  /// Index de l'onglet « Copier » (toujours le dernier).
+  int get _copyIndex => _tabs.length - 1;
 
   @override
   void initState() {
@@ -122,10 +121,23 @@ class _ShopSettingsPageState extends ConsumerState<ShopSettingsPage>
     if (_tab.indexIsChanging) return;
     if (!mounted) return;
     // Membres → /parametres/users (active le bouton « + » dans la topbar
-    // shell). Boutique/Copier/Danger → URL générique /parametres/shop.
-    final target = _tab.index == _membersIndex
-        ? '/shop/${widget.shopId}/parametres/users$_querySuffix'
-        : '/shop/${widget.shopId}/parametres/shop$_querySuffix';
+    // shell). Boutique/Copier → URL générique /parametres/shop. Pour
+    // Copier on ajoute `tab=copy` car le path /parametres/shop seul est
+    // ambigu (Boutique vs Copier) — sans ce marqueur, le push démontait
+    // la page et la reconstruisait avec l'onglet Boutique par défaut,
+    // d'où le clignotement Copier→Boutique signalé.
+    final isMembers = _tab.index == _membersIndex;
+    final isCopy    = _tab.index == _copyIndex && !isMembers;
+    final basePath  = isMembers
+        ? '/shop/${widget.shopId}/parametres/users'
+        : '/shop/${widget.shopId}/parametres/shop';
+    final queryParts = <String>[
+      if (widget.showOverviewTab) 'with_overview=1',
+      if (isCopy)                 'tab=copy',
+    ];
+    final target = queryParts.isEmpty
+        ? basePath
+        : '$basePath?${queryParts.join('&')}';
     final loc = GoRouterState.of(context).matchedLocation;
     final currentQuery = GoRouterState.of(context).uri.query;
     final currentFull = currentQuery.isEmpty ? loc : '$loc?$currentQuery';

@@ -472,11 +472,24 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               builder: (c, s) {
                 final showOverview =
                     s.uri.queryParameters['with_overview'] == '1';
-                return ShopSettingsPage(
-                  shopId: s.pathParameters['shopId']!,
-                  initialTab: showOverview
+                // Query `tab` (overview|members|copy) prioritaire — utilisé
+                // par le sync URL ↔ tab de ShopSettingsPage pour préserver
+                // l'onglet courant lors d'une navigation Membres ↔ Copier
+                // qui change de path. Sans ça, on retombait sur le tab
+                // par défaut (Boutique) après le push, ce qui faisait
+                // « clignoter » Copier vers Boutique.
+                final tabParam = s.uri.queryParameters['tab'];
+                final initialTab = switch (tabParam) {
+                  'overview' => ShopSettingsTab.overview,
+                  'members'  => ShopSettingsTab.members,
+                  'copy'     => ShopSettingsTab.copy,
+                  _ => showOverview
                       ? ShopSettingsTab.overview
                       : ShopSettingsTab.members,
+                };
+                return ShopSettingsPage(
+                  shopId: s.pathParameters['shopId']!,
+                  initialTab: initialTab,
                   showOverviewTab: showOverview,
                 );
               }),
