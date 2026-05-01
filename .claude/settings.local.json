@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter analyze:*)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -E \"\\\\.dart$\")",
+      "Bash(find C:\\\\Users\\\\DELL PRO\\\\Desktop\\\\flutter_projets\\\\pratique_app\\\\fortress\\\\lib *)",
+      "Bash(grep -E \"\\\\.sql$\")",
+      "Bash(grep -h \"CREATE TABLE\\\\|ALTER TABLE\" \"/c/Users/DELL PRO/Desktop/flutter_projets/pratique_app/fortress/supabase\"/*.sql)",
+      "Bash(grep -h \"CREATE TABLE IF NOT EXISTS\\\\|CREATE TABLE\" \"/c/Users/DELL PRO/Desktop/flutter_projets/pratique_app/fortress/supabase\"/*.sql)",
+      "Bash(grep -oP 'CREATE TABLE\\\\s+\\(?:IF NOT EXISTS\\\\s+\\)?\\(\\\\w+\\)\\\\s*\\\\\\(' \"/c/Users/DELL PRO/Desktop/flutter_projets/pratique_app/fortress/supabase\"/*.sql)",
+      "Bash(grep *)",
+      "Bash(find lib/features -name \"*.dart\" -type f ! -path \"*/caisse/*\" -exec grep -l \"import.*caisse\" {} \\\\;)",
+      "Bash(find lib *)",
+      "Bash(find lib/features -name \"*.dart\" -type f ! -path \"*/caisse/*\" -exec grep -l \"SaleStatus\\\\|SaleItem\\\\|PaymentMethod\" {} \\\\;)",
+      "Bash(nslookup hyxvussnlnvbkalqzovb.supabase.co)",
+      "Bash(flutter pub *)",
+      "Read(//c/c/Users/DELL PRO/Desktop/flutter_projets/pratique_app/fortress/lib/features/super_admin/presentation/pages/**)",
+      "Bash(flutter test *)",
+      "Bash(flutter gen-l10n *)",
+      "Bash(flutter --version)",
+      "Bash(python -c ' *)",
+      "Bash(flutter analyze *)",
+      "Read(//tmp/**)",
+      "Bash(flutter build *)",
+      "Bash(awk '/return AppScaffold\\\\\\(/,/^  }$/' lib/features/inventaire/presentation/pages/inventaire_page.dart)",
+      "Bash(awk 'NR>=293 && NR<=630' \"lib/shared/widgets/adaptive_scaffold.dart\")",
+      "Bash(dart run *)",
+      "Bash(wait)",
+      "Bash(where python *)",
+      "Bash(where python3 *)",
+      "Bash(python -c \"import cairosvg; print\\('cairosvg:', cairosvg.__version__\\)\")",
+      "Bash(python -c \"from PIL import Image, ImageDraw, ImageFont; print\\('Pillow OK'\\)\")",
+      "Bash(pip install *)",
+      "Bash(python *)",
+      "Bash(PYTHONIOENCODING=utf-8 python *)",
+      "Bash(xargs -I {} echo \"ERRORS={}\")",
+      "Bash(awk 'NR>=576 && NR<=900 && /\\\\bmobile\\\\b/' lib/features/inventaire/presentation/pages/inventaire_page.dart)"
+    ]
+  }
+}

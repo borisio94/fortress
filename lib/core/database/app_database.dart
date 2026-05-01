@@ -1,0 +1,3467 @@
+import 'package:hive_flutter/hive_flutter.dart';
+import 'dart:async';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide User;
+import '../config/supabase_config.dart';
+import '../storage/hive_boxes.dart';
+import '../storage/local_storage_service.dart';
+import '../../features/auth/domain/entities/user.dart';
+import '../../features/shop_selector/domain/entities/shop_summary.dart';
+import '../../features/inventaire/domain/entities/product.dart';
+import '../../features/inventaire/domain/entities/stock_location.dart';
+import '../../features/inventaire/domain/entities/stock_level.dart';
+import '../../features/inventaire/domain/entities/stock_transfer.dart';
+import '../../features/crm/domain/entities/client.dart';
+import '../../features/expenses/domain/entities/expense.dart';
+import '../../features/caisse/domain/entities/sale.dart' show PaymentMethod;
+import '../../features/auth/data/models/user_model.dart';
+import '../services/activity_log_service.dart';
+
+typedef OnDataChanged = void Function(String table, String shopId);
+
+// ─── Résultat d'une invitation ────────────────────────────────────────────────
+enum InviteOutcome {
+  /// L'utilisateur avait déjà un compte → ajouté directement comme membre.
+  addedImmediately,
+  /// Nouvel email → invitation enregistrée + magic-link envoyé.
+  invitationSent,
+}
+
+class InviteResult {
+  final InviteOutcome outcome;
+  final String        email;
+  final String?       invitedName; // renseigné si addedImmediately
+  const InviteResult({required this.outcome, required this.email, this.invitedName});
+}
+
+class AppDatabase {
+  static final AppDatabase _i = AppDatabase._();
+  factory AppDatabase() => _i;
+  AppDatabase._();
+
+  static SupabaseClient get _db => Supabase.instance.client;
+  static String? get _userId => Supabase.instance.client.auth.currentUser?.id;
+
+  StreamSubscription? _connectivitySub;
+  bool _syncing  = false;
+  bool _isOnline = false;
+  final Map<String, RealtimeChannel> _channels  = {};
+  final List<OnDataChanged>          _listeners = [];
+
+  /// Anti-écho realtime : timestamp ms de la dernière écriture locale par
+  /// productId. Quand un event realtime arrive sur un produit qu'on a écrit
+  /// très récemment, c'est presque toujours notre propre upsert qui revient
+  /// — Supabase ne garantit pas l'ordre d'arrivée pour des écritures
+  /// rapprochées sur la même ligne, donc un snapshot intermédiaire peut
+  /// écraser un état local plus à jour. Cas reproduit : vente multi-variantes
+  /// (4 variantes × 5, vente var A + var B) → l'event de l'écriture var A
+  /// (snapshot var B encore à 5) arrivait après le débit local de var B et
+  /// remettait var B à 5 → -1 au lieu de -2.
+  final Map<String, int> _recentLocalProductWrites = {};
+  static const int _localWriteEchoWindowMs = 10000;
+
+  static void addListener(OnDataChanged cb)    => _i._listeners.add(cb);
+  static void removeListener(OnDataChanged cb) => _i._listeners.remove(cb);
+  static void notifyOrderChange(String shopId) => _notify('orders', shopId);
+  static void notifyProductChange(String shopId) => _notify('products', shopId);
+
+  /// Notifie tous les listeners pour toutes les tables et tous les shops connus.
+  /// À appeler après un reset global ou un clear complet des Hive boxes.
+  static void notifyAllChanged() {
+    final shopIds = <String>{};
+    for (final v in HiveBoxes.productsBox.values) {
+      final sid = (v is Map ? v['store_id'] : null) as String?;
+      if (sid != null) shopIds.add(sid);
+    }
+    for (final v in HiveBoxes.ordersBox.values) {
+      final sid = (v is Map ? v['shop_id'] : null) as String?;
+      if (sid != null) shopIds.add(sid);
+    }
+    // Même si les boxes sont vides, notifier avec un shopId "global"
+    if (shopIds.isEmpty) shopIds.add('_all');
+    for (final sid in shopIds) {
+      _notify('products', sid);
+      _notify('orders', sid);
+    }
+  }
+  static void _notify(String table, String shopId) {
+    for (final l in List.of(_i._listeners)) l(table, shopId);
+  }
+
+  /// Notifier manuellement les listeners (ex: après setMain)
+  static void notifyListeners(String table, String shopId) =>
+      _notify(table, shopId);
+
+  /// Sync les rôles ET les statuts (active/suspended/archived) des
+  /// boutiques de l'utilisateur depuis Supabase → Hive.
+  /// Retourne uniquement la map shop_id → role pour compat existante.
+  /// Le statut est stocké séparément dans `shop_status_$userId` et lu
+  /// par [getMembershipStatus] (cf. P0-5 : bloquer un employé suspendu
+  /// qui voudrait vendre offline).
+  static Future<Map<String, String>> syncMemberships(String userId) async {
+    try {
+      final rows = await _db
+          .from('shop_memberships')
+          .select('shop_id, role, status')
+          .eq('user_id', userId);
+      final roles    = <String, String>{};
+      final statuses = <String, String>{};
+      for (final r in rows as List) {
+        final shopId = r['shop_id'] as String;
+        roles[shopId]    = r['role']   as String;
+        statuses[shopId] = (r['status'] as String?) ?? 'active';
+      }
+      await HiveBoxes.settingsBox.put('shop_roles_$userId',  roles);
+      await HiveBoxes.settingsBox.put('shop_status_$userId', statuses);
+      return roles;
+    } catch (e) {
+      debugPrint('[DB] syncMemberships error: $e');
+      return Map<String, String>.from(
+          HiveBoxes.settingsBox.get('shop_roles_$userId') as Map? ?? {});
+    }
+  }
+
+  /// Lire les rôles depuis Hive (offline)
+  static Map<String, String> getMemberships(String userId) =>
+      Map<String, String>.from(
+          HiveBoxes.settingsBox.get('shop_roles_$userId') as Map? ?? {});
+
+  /// Statut du membership de l'utilisateur dans une boutique
+  /// ('active' / 'suspended' / 'archived'). Default 'active' si la map
+  /// n'a jamais été synchronisée (compat ancienne installation).
+  static String getMembershipStatus(String userId, String shopId) {
+    final raw = HiveBoxes.settingsBox.get('shop_status_$userId') as Map?;
+    if (raw == null) return 'active';
+    return (raw[shopId] as String?) ?? 'active';
+  }
+
+  /// Vrai si l'utilisateur peut effectuer des actions dans cette boutique
+  /// (statut != suspended/archived). Utilisé pour bloquer la création de
+  /// ventes depuis la caisse et autres écritures critiques en offline.
+  static bool canActInShop(String userId, String shopId) =>
+      getMembershipStatus(userId, shopId) == 'active';
+
+  /// Cache le plan Supabase dans Hive pour accès offline
+  static Future<void> _cachePlanToHive(String userId) async {
+    try {
+      final result = await _db.rpc('get_user_plan',
+          params: {'p_user_id': userId});
+      if (result != null && (result as List).isNotEmpty) {
+        final map = Map<String, dynamic>.from(result[0] as Map);
+        await HiveBoxes.settingsBox.put('user_plan_$userId', map);
+      }
+      // Vérifier aussi is_super_admin
+      final profile = await _db
+          .from('profiles')
+          .select('is_super_admin, prof_status')
+          .eq('id', userId)
+          .maybeSingle();
+      if (profile != null) {
+        await HiveBoxes.settingsBox.put('user_profile_$userId', profile);
+      }
+    } catch (e) {
+      debugPrint('[DB] _cachePlanToHive error: $e');
+    }
+  }
+
+  /// Lire le plan depuis Hive (offline)
+  static Map<String, dynamic>? getCachedPlan(String userId) {
+    final map = HiveBoxes.settingsBox.get('user_plan_$userId');
+    return map != null ? Map<String, dynamic>.from(map as Map) : null;
+  }
+
+  /// Lire le profil depuis Hive (offline)
+  static Map<String, dynamic>? getCachedProfile(String userId) {
+    final map = HiveBoxes.settingsBox.get('user_profile_$userId');
+    return map != null ? Map<String, dynamic>.from(map as Map) : null;
+  }
+
+  // ══ INIT ══════════════════════════════════════════════════════════
+
+  static Future<void> init() async {
+    // Au boot, on évite isOnline() qui ping Supabase : l'utilisateur n'est
+    // pas encore authentifié, le ping échoue par RLS/timeout et `_isOnline`
+    // resterait à false jusqu'au prochain changement d'interface.
+    // L'état d'interface de connectivity_plus suffit pour l'init ;
+    // les opérations qui ont besoin d'une vérif réelle appellent isOnline().
+    final results = await Connectivity().checkConnectivity();
+    _i._isOnline = results.any((r) =>
+        r == ConnectivityResult.wifi ||
+        r == ConnectivityResult.mobile ||
+        r == ConnectivityResult.ethernet);
+    _i._listenConnectivity();
+    debugPrint('[DB] Init — online: ${_i._isOnline}');
+  }
+
+  void _listenConnectivity() {
+    _connectivitySub?.cancel();
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
+      final wasOnline = _isOnline;
+      _isOnline = results.any((r) =>
+      r == ConnectivityResult.wifi ||
+          r == ConnectivityResult.mobile ||
+          r == ConnectivityResult.ethernet);
+
+      if (!wasOnline && _isOnline) {
+        debugPrint('[DB] ✅ Réseau rétabli');
+        _onNetworkRestored();
+      } else if (wasOnline && !_isOnline) {
+        debugPrint('[DB] ⚠️ Réseau perdu — mode offline');
+      }
+    });
+  }
+
+  /// Appelé automatiquement au retour du réseau.
+  /// 1. Envoie les ops en attente (écritures faites offline)
+  /// 2. Re-sync les données de chaque boutique abonnée (lecture des changements distants)
+  Future<void> _onNetworkRestored() async {
+    // 1. Flush les ops en attente
+    await flushOfflineQueue();
+
+    // 2. Re-sync toutes les boutiques actuellement abonnées
+    // pour récupérer les changements faits sur d'autres appareils pendant l'offline
+    for (final shopId in List.of(_channels.keys)) {
+      try {
+        await syncProducts(shopId);
+        await syncMetadata(shopId);
+        await syncOrders(shopId);
+        await syncClients(shopId);
+        await syncActivityLogs(shopId);
+        await syncExpenses(shopId);
+        await syncSuppliers(shopId);
+        await syncIncidents(shopId);
+        await syncStockMovements(shopId);
+        await syncReceptions(shopId);
+        await syncPurchaseOrders(shopId);
+        await syncStockArrivals(shopId);
+        _notify('products', shopId);
+        _notify('clients',  shopId);
+        debugPrint('[DB] Re-sync après reconnexion: $shopId');
+      } catch (e) {
+        debugPrint('[DB] Re-sync erreur: $e');
+      }
+    }
+  }
+
+  static void dispose() {
+    _i._connectivitySub?.cancel();
+    _i._channels.forEach((_, ch) => ch.unsubscribe());
+    _i._channels.clear();
+  }
+
+  // ══ REALTIME ══════════════════════════════════════════════════════
+
+  static void subscribeToShop(String shopId) {
+    if (_i._channels.containsKey(shopId)) return;
+    debugPrint('[DB] 📡 Realtime subscribe: $shopId');
+
+    // Pull initial depuis Supabase — les abonnements realtime ne notifient
+    // que les changements FUTURS. Sans ce pull, un appareil qui entre dans
+    // une boutique ne voit pas les données créées auparavant par un autre
+    // appareil tant qu'aucune page déclenchante n'est ouverte.
+    // Fire-and-forget : n'attend pas, ne bloque pas l'UI.
+    _initialPullForShop(shopId);
+
+    final ch = _db.channel('shop_$shopId')
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'products',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'store_id', value: shopId),
+        callback: (p) => _i._onProductChange(p, shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'categories',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (_) async {
+          await syncMetadata(shopId);
+          _notify('categories', shopId);
+        })
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'brands',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (_) async {
+          await syncMetadata(shopId);
+          _notify('brands', shopId);
+        })
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'units',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (_) async {
+          await syncMetadata(shopId);
+          _notify('units', shopId);
+        })
+        .onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public', table: 'activity_logs',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onActivityLogChange(p, shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'expenses',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onExpenseChange(p, shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'clients',
+        // Note : la table clients utilise `store_id` (pas `shop_id`).
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'store_id', value: shopId),
+        callback: (p) => _i._onClientChange(p, shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'orders',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onOrderChange(p, shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'suppliers',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.suppliersBox, 'suppliers', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'incidents',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.incidentsBox, 'incidents', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'stock_movements',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.stockMovementsBox, 'stock_movements', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'receptions',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.receptionsBox, 'receptions', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'purchase_orders',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.purchaseOrdersBox, 'purchase_orders', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'stock_arrivals',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.stockArrivalsBox, 'stock_arrivals', shopId))
+        .subscribe((status, [err]) =>
+        debugPrint('[DB] Realtime $shopId: $status${err != null ? " err=$err" : ""}'));
+
+    _i._channels[shopId] = ch;
+  }
+
+  static void unsubscribeFromShop(String shopId) {
+    _i._channels.remove(shopId)?.unsubscribe();
+  }
+
+  /// Pull initial de toutes les tables métier pour une boutique.
+  /// Appelé au `subscribeToShop` — idempotent, safe à rappeler.
+  /// Fire-and-forget : n'attend pas, ne bloque pas l'UI.
+  static Future<void> _initialPullForShop(String shopId) async {
+    try {
+      await syncClients(shopId);
+      _notify('clients', shopId);
+    } catch (e) { debugPrint('[DB] initial syncClients: $e'); }
+    try {
+      await syncProducts(shopId);
+      _notify('products', shopId);
+    } catch (e) { debugPrint('[DB] initial syncProducts: $e'); }
+    try {
+      await syncOrders(shopId);
+      _notify('orders', shopId);
+    } catch (e) { debugPrint('[DB] initial syncOrders: $e'); }
+    try {
+      await syncExpenses(shopId);
+      _notify('expenses', shopId);
+    } catch (e) { debugPrint('[DB] initial syncExpenses: $e'); }
+    try {
+      await syncMetadata(shopId);
+    } catch (e) { debugPrint('[DB] initial syncMetadata: $e'); }
+    try {
+      await syncSuppliers(shopId);
+    } catch (e) { debugPrint('[DB] initial syncSuppliers: $e'); }
+    try {
+      await syncIncidents(shopId);
+    } catch (e) { debugPrint('[DB] initial syncIncidents: $e'); }
+    try {
+      await syncStockMovements(shopId);
+    } catch (e) { debugPrint('[DB] initial syncStockMovements: $e'); }
+    try {
+      await syncReceptions(shopId);
+    } catch (e) { debugPrint('[DB] initial syncReceptions: $e'); }
+    try {
+      await syncPurchaseOrders(shopId);
+    } catch (e) { debugPrint('[DB] initial syncPurchaseOrders: $e'); }
+    try {
+      await syncStockArrivals(shopId);
+    } catch (e) { debugPrint('[DB] initial syncStockArrivals: $e'); }
+    try {
+      await syncActivityLogs(shopId);
+      _notify('activity_logs', shopId);
+    } catch (e) { debugPrint('[DB] initial syncActivityLogs: $e'); }
+  }
+
+  Future<void> _onProductChange(PostgresChangePayload p, String shopId) async {
+    try {
+      switch (p.eventType) {
+        case PostgresChangeEvent.insert:
+        case PostgresChangeEvent.update:
+          final prod = _supabaseToProduct(p.newRecord);
+          if (prod.id != null) {
+            final id = prod.id!;
+            // Anti-stale realtime v2 : check `row_version` (cf. migration
+            // 015). Plus fiable que la fenêtre temporelle car insensible
+            // au timing d'arrivée des events.
+            final remoteVersion =
+                (p.newRecord['row_version'] as num?)?.toInt() ?? 0;
+            final localRaw = HiveBoxes.productsBox.get(id);
+            if (localRaw is Map) {
+              final localVersion =
+                  (localRaw['_row_version'] as num?)?.toInt() ?? 0;
+              if (remoteVersion <= localVersion && remoteVersion > 0) {
+                debugPrint('[DB] ⏭️ realtime stale '
+                    '(remote v=$remoteVersion <= local v=$localVersion) '
+                    'product=$id');
+                break;
+              }
+            }
+            // Filet de sécurité conservé : fenêtre 10s pour les écritures
+            // tout juste poussées qui n'ont pas encore reçu leur version.
+            final recentMs = _recentLocalProductWrites[id];
+            if (recentMs != null) {
+              final age =
+                  DateTime.now().millisecondsSinceEpoch - recentMs;
+              if (age < _localWriteEchoWindowMs && remoteVersion == 0) {
+                debugPrint('[DB] ⏭️ realtime écho local '
+                    '${age}ms (sans version) product=$id');
+                break;
+              }
+            }
+            // Cohérent avec saveProduct : invalider le cache AVANT le put
+            // sinon une lecture concurrente (boucle de débit) servirait la
+            // valeur en cache.
+            LocalStorageService.invalidateProductsCache();
+            final mapToWrite = _productToMap(prod)
+              ..['_row_version'] = remoteVersion;
+            await HiveBoxes.productsBox.put(id, mapToWrite);
+            // Phase 5 : les écritures realtime n'allaient pas dans le
+            // pipeline saveProduct, donc le StockLevel shop ne suivait pas.
+            await _syncShopStockLevelsFromProduct(prod);
+          }
+        case PostgresChangeEvent.delete:
+          final id = p.oldRecord['id'] as String?;
+          if (id != null) await HiveBoxes.productsBox.delete(id);
+        default: break;
+      }
+      _notify('products', shopId);
+    } catch (e) {
+      debugPrint('[DB] Erreur onProductChange: $e');
+    }
+  }
+
+  // ══ CONNECTIVITÉ ══════════════════════════════════════════════════
+
+  static Future<bool> isOnline() async {
+    try {
+      // connectivity_plus vérifie l'interface réseau (peut donner faux positifs)
+      final r = await Connectivity().checkConnectivity();
+      final hasInterface = r.any((x) =>
+      x == ConnectivityResult.wifi ||
+          x == ConnectivityResult.mobile ||
+          x == ConnectivityResult.ethernet);
+      if (!hasInterface) return false;
+
+      // Vérification réelle : tenter un appel Supabase léger
+      // Si ça répond → vraiment online
+      await _db.from('shops').select('id').limit(1)
+          .timeout(const Duration(seconds: 3));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ══ FILE D'ATTENTE OFFLINE ════════════════════════════════════════
+
+  static Future<void> _enqueue(Map<String, dynamic> op) async {
+    await HiveBoxes.offlineQueueBox.add({
+      ...op, 'queued_at': DateTime.now().toIso8601String(),
+    });
+    debugPrint('[DB] 📦 Enqueued: ${op["table"]} ${op["op"]}');
+  }
+
+  static Future<void> flushOfflineQueue() async {
+    if (_i._syncing || _userId == null) return;
+    _i._syncing = true;
+    int success = 0, failed = 0, skipped = 0;
+    try {
+      final box  = HiveBoxes.offlineQueueBox;
+      final keys = box.keys.toList();
+      if (keys.isEmpty) return;
+      debugPrint('[DB] 🚀 Flush ${keys.length} ops en attente');
+
+      for (final key in keys) {
+        final raw = box.get(key);
+        if (raw == null) { await box.delete(key); continue; }
+
+        final op  = Map<String, dynamic>.from(raw as Map);
+        final retries = (op['_retries'] as int?) ?? 0;
+        final table   = op['table'] as String? ?? '';
+
+        // Tables CRITIQUES : ne JAMAIS abandonner. Une vente perdue = du
+        // cash perdu. On les garde indéfiniment dans la queue et on alerte
+        // l'utilisateur (badge + son) pour qu'il sache qu'une action manuelle
+        // est requise (resync ou contact support).
+        const criticalTables = {'orders', 'sales', 'expenses'};
+        final isCritical = criticalTables.contains(table);
+
+        // Pour les tables non-critiques : abandon après 10 essais (sinon
+        // on garde une queue qui grossit à l'infini sur des erreurs réelles).
+        if (!isCritical && retries >= 10) {
+          debugPrint('[DB] ⛔ Op non-critique abandonnée après 10 tentatives: '
+              '$table');
+          await box.delete(key);
+          _logSyncError(op, 'Abandoned after 10 retries');
+          skipped++;
+          continue;
+        }
+
+        // Pour les critiques : log persistant à chaque palier de 10 retries
+        // pour que la queue ne soit pas vidée silencieusement.
+        if (isCritical && retries > 0 && retries % 10 == 0) {
+          _logSyncError(op,
+              'CRITIQUE — vente bloquée après $retries tentatives. '
+              'Vérifier réseau ou contacter support.');
+        }
+
+        final ok = await _executeOp(op);
+        if (ok) {
+          await box.delete(key);
+          success++;
+        } else {
+          // Incrémenter le compteur de tentatives
+          op['_retries'] = retries + 1;
+          op['_last_retry'] = DateTime.now().toIso8601String();
+          await box.put(key, op);
+          debugPrint('[DB] ⚠️ Op échouée (tentative ${retries+1}'
+              '${isCritical ? "/∞" : "/10"}): $table');
+          failed++;
+        }
+      }
+      debugPrint('[DB] ✅ Flush terminé: $success succès, $failed échecs, $skipped abandonnés');
+      if (success > 0) notifyAllChanged();
+    } finally {
+      _i._syncing = false;
+    }
+  }
+
+  /// Nombre d'opérations en attente avec leur état
+  static Map<String, int> get syncQueueStats {
+    try { HiveBoxes.offlineQueueBox; } catch (_) { return {'pending': 0, 'failed': 0}; }
+    final box = HiveBoxes.offlineQueueBox;
+    int pending = 0, failed = 0;
+    for (final key in box.keys) {
+      final raw = box.get(key);
+      if (raw == null) continue;
+      final retries = (raw['_retries'] as int?) ?? 0;
+      if (retries > 0) failed++; else pending++;
+    }
+    return {'pending': pending, 'failed': failed};
+  }
+
+  /// Réinitialiser la queue (à utiliser avec précaution — perte de données non sync)
+  static Future<void> clearSyncQueue() async {
+    await HiveBoxes.offlineQueueBox.clear();
+    debugPrint('[DB] 🗑️ Queue sync vidée');
+  }
+
+  /// Remettre toutes les ops à 0 tentatives pour les réessayer
+  static Future<void> resetQueueRetries() async {
+    final box = HiveBoxes.offlineQueueBox;
+    for (final key in box.keys.toList()) {
+      final raw = box.get(key);
+      if (raw == null) continue;
+      final op = Map<String, dynamic>.from(raw as Map);
+      op.remove('_retries');
+      op.remove('_last_retry');
+      await box.put(key, op);
+    }
+    debugPrint('[DB] 🔄 Retries réinitialisés: ${box.length} ops prêtes');
+  }
+
+  /// Lire les erreurs de sync journalisées
+  static List<Map> getSyncErrors() {
+    try {
+      return List<Map>.from(
+          (HiveBoxes.settingsBox.get('sync_errors') as List?) ?? []);
+    } catch (_) { return []; }
+  }
+
+  static Future<bool> _executeOp(Map<String, dynamic> op) async {
+    try {
+      final table = op['table'] as String;
+      final type  = op['op']    as String;
+      final data  = Map<String, dynamic>.from(op['data'] as Map);
+      // onConflict : nom(s) de la contrainte unique à utiliser pour résoudre
+      // les doublons quand la clé primaire n'est pas la bonne cible (ex:
+      // categories où la PK est id mais l'unicité métier est (shop_id, name)).
+      final onConflict = op['onConflict'] as String?;
+      switch (type) {
+        case 'upsert':
+          if (onConflict != null) {
+            await _db.from(table).upsert(data, onConflict: onConflict);
+          } else {
+            await _db.from(table).upsert(data);
+          }
+        case 'delete': await _db.from(table).delete()
+            .eq(op['col'] as String, op['val']);
+        case 'insert': await _db.from(table).insert(data);
+      }
+      return true;
+    } catch (e) {
+      final err = e.toString();
+      debugPrint('[DB] ✗ Op failed table=${op['table']} op=${op['op']} err=$err');
+
+      // ── Erreurs PERMANENTES → supprimer de la queue (réessayer ne sert à rien)
+      if (_isPermanentError(err)) {
+        debugPrint('[DB] Erreur permanente → supprimé de la queue');
+        _logSyncError(op, err); // journaliser pour débogage
+        return true;
+      }
+
+      // ── Table inexistante (42P01) → afficher le SQL de création
+      if (err.contains('42P01') || err.contains('does not exist')) {
+        final tbl = op['table'] as String? ?? '?';
+        final sql = getSqlForTable(tbl);
+        debugPrint('[DB] ⚠️ Table "$tbl" inexistante → op gardée en queue');
+        if (sql != null) {
+          debugPrint('[DB] 📋 Créez la table avec ce SQL dans Supabase > SQL Editor:\n$sql');
+        }
+        return false;
+      }
+
+      // ── Erreur temporaire (réseau, timeout) → garder en queue
+      return false;
+    }
+  }
+
+  /// Erreurs qui ne peuvent pas être résolues en réessayant
+  static bool _isPermanentError(String err) =>
+      err.contains('23505') || // duplicate key
+          err.contains('23503') || // FK violation
+          err.contains('42501') || // permission denied
+          err.contains('42502') || // insufficient privilege
+          err.contains('23502');   // not null violation
+
+  /// Émet un bip + vibration pour signaler une erreur de sync à l'utilisateur
+  /// (sans UI). Best-effort : si la plateforme ne supporte pas, on ignore.
+  static void _alertUser() {
+    try { SystemSound.play(SystemSoundType.alert); } catch (_) {}
+    try { HapticFeedback.heavyImpact(); } catch (_) {}
+  }
+
+  /// Journaliser les erreurs de sync dans Hive pour consultation ultérieure.
+  /// Conserve le payload `data` complet pour permettre un replay manuel
+  /// (cf. UI Paramètres → Erreurs de synchronisation, à venir).
+  static void _logSyncError(Map<String, dynamic> op, String error) {
+    _alertUser();
+    try {
+      final logBox = HiveBoxes.settingsBox;
+      final logs = List<Map>.from(
+          (logBox.get('sync_errors') as List?) ?? []);
+      logs.add({
+        'table':  op['table'],
+        'op':     op['op'],
+        'col':    op['col'],
+        'val':    op['val'],
+        'data':   op['data'],   // ← payload complet pour replay
+        'error':  error,
+        'time':   DateTime.now().toIso8601String(),
+      });
+      // Garder seulement les 50 dernières erreurs
+      if (logs.length > 50) logs.removeRange(0, logs.length - 50);
+      logBox.put('sync_errors', logs);
+    } catch (_) {}
+  }
+
+  /// Nombre total d'opérations en attente de sync (toutes tables).
+  static int get pendingOpsCount => HiveBoxes.offlineQueueBox.length;
+
+  /// Nombre de ventes / commandes en échec de sync depuis ≥ 10 tentatives.
+  /// Utilisé par la bannière offline pour alerter l'utilisateur qu'il y a
+  /// des transactions financières qui n'ont pas atteint Supabase.
+  static int get stuckCriticalOpsCount {
+    const criticalTables = {'orders', 'sales', 'expenses'};
+    var n = 0;
+    for (final raw in HiveBoxes.offlineQueueBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw as Map);
+        final table = m['table'] as String? ?? '';
+        final retries = (m['_retries'] as int?) ?? 0;
+        if (criticalTables.contains(table) && retries >= 10) n++;
+      } catch (_) {}
+    }
+    return n;
+  }
+
+  // Écrire en arrière-plan si online, sinon enqueue
+  static void _bgWrite(Map<String, dynamic> op) {
+    if (_i._isOnline) {
+      _executeOp(op).then((ok) { if (!ok) _enqueue(op); })
+          .catchError((e) { _enqueue(op); });
+    } else {
+      _enqueue(op);
+    }
+  }
+
+  /// Insère une ligne dans une table via la file offline (réessayé au retour online).
+  /// Utilisé par ActivityLogService pour que les logs d'action ne soient
+  /// jamais perdus en mode hors-ligne.
+  static void bgInsert(String table, Map<String, dynamic> data) {
+    _bgWrite({'table': table, 'op': 'insert', 'data': data});
+  }
+
+
+  // ══ DÉFINITIONS SQL DES TABLES ════════════════════════════════════════════════
+  // Exécuter dans Supabase → SQL Editor si la table n'existe pas encore
+
+  static const Map<String, String> _tableSql = {
+    'orders': """
+create table if not exists public.orders (
+  id               text             primary key,
+  shop_id          text             not null references public.shops(id) on delete cascade,
+  status           text             not null default 'scheduled'
+                   check (status in ('scheduled','processing','completed',
+                                     'cancelled','refused','refunded')),
+  items            jsonb            not null default '[]',
+  discount_amount  double precision not null default 0,
+  tax_rate         double precision not null default 0,
+  payment_method   text             not null default 'cash',
+  client_id        text,
+  client_name      text,
+  client_phone     text,
+  notes            text,
+  fees             jsonb            not null default '[]'::jsonb,
+  scheduled_at     timestamptz,
+  created_at       timestamptz      not null default now(),
+  completed_at     timestamptz,
+  synced_to_cloud  boolean          not null default false
+);
+create index if not exists orders_shop_id_idx on public.orders(shop_id);
+create index if not exists orders_status_idx  on public.orders(status);
+alter table public.orders enable row level security;
+do \$\$ begin
+  if not exists (select 1 from pg_policies where tablename='orders' and policyname='orders_members') then
+    create policy "orders_members" on public.orders for all using (
+      shop_id in (select shop_id from public.shop_memberships where user_id=(auth.uid())::text));
+  end if;
+end \$\$;""",
+
+    'clients': """
+create table if not exists public.clients (
+  id          text primary key,
+  store_id    text not null references public.shops(id) on delete cascade,
+  name        text not null,
+  phone       text,
+  email       text,
+  address     text,
+  notes       text,
+  tag         text default 'none',
+  created_at  timestamptz not null default now(),
+  unique(store_id, email),
+  unique(store_id, phone)
+);
+alter table public.clients enable row level security;
+do \$\$ begin
+  if not exists (select 1 from pg_policies where tablename='clients' and policyname='clients_members') then
+    create policy "clients_members" on public.clients for all using (
+      store_id in (select shop_id from public.shop_memberships where user_id=(auth.uid())::text));
+  end if;
+end \$\$;""",
+
+    'products': """
+create table if not exists public.products (
+  id          text primary key,
+  shop_id     text not null references public.shops(id) on delete cascade,
+  name        text not null,
+  sku         text,
+  barcode     text,
+  category_id text,
+  brand_id    text,
+  price_sell  double precision default 0,
+  price_buy   double precision default 0,
+  stock       integer default 0,
+  is_active   boolean default true,
+  created_at  timestamptz not null default now(),
+  data        jsonb default '{}'
+);
+alter table public.products enable row level security;
+do \$\$ begin
+  if not exists (select 1 from pg_policies where tablename='products' and policyname='products_members') then
+    create policy "products_members" on public.products for all using (
+      shop_id in (select shop_id from public.shop_memberships where user_id=(auth.uid())::text));
+  end if;
+end \$\$;""",
+  };
+
+  /// Retourne le SQL de création pour une table donnée.
+  /// Afficher dans l'UI ou logger si la table est manquante.
+  static String? getSqlForTable(String tableName) =>
+      _tableSql[tableName];
+
+  /// Retourne toutes les tables avec leur SQL
+  static Map<String, String> get allTablesSql => Map.unmodifiable(_tableSql);
+
+  // ══ AUTH ══════════════════════════════════════════════════════════
+
+  static Future<void> saveProfile(UserModel user) async {
+    await LocalStorageService.saveUser(user.toEntity());
+    await LocalStorageService.setCurrentUserId(user.id);
+    _bgWrite({'table': 'profiles', 'op': 'upsert',
+      'data': {'id': user.id, 'name': user.name,
+        'email': user.email, 'phone': user.phone}});
+  }
+
+  // ══ BOUTIQUES ═════════════════════════════════════════════════════
+
+  /// Vérifie qu'aucune entité de stockage du même owner (boutique, magasin
+  /// warehouse ou dépôt partenaire) ne porte déjà le nom donné. La
+  /// comparaison est insensible à la casse et trimmée.
+  ///
+  /// `excludeShopId` permet d'ignorer la boutique en cours de modification
+  /// (cas du renommage). La `StockLocation` type=shop associée est aussi
+  /// exclue automatiquement (elle porte le même nom que sa boutique).
+  ///
+  /// Lance une [Exception] si le nom est déjà utilisé.
+  static Future<void> _ensureLocationNameAvailable({
+    required String userId,
+    required String name,
+    String? excludeShopId,
+  }) async {
+    final lowered = name.toLowerCase();
+
+    // 1. Hive local — couvre l'offline + filet rapide.
+    for (final raw in HiveBoxes.shopsBox.values) {
+      final m = Map<String, dynamic>.from(raw);
+      if (m['owner_id'] != userId) continue;
+      if (excludeShopId != null && m['id'] == excludeShopId) continue;
+      final n = (m['name'] ?? '').toString().trim().toLowerCase();
+      if (n == lowered) {
+        throw Exception('Vous avez déjà une boutique nommée "$name"');
+      }
+    }
+    final excludeShopLocId =
+        excludeShopId != null ? _shopLocationId(excludeShopId) : null;
+    for (final loc in getStockLocationsForOwner(userId)) {
+      if (loc.id == excludeShopLocId) continue;
+      if (loc.name.trim().toLowerCase() != lowered) continue;
+      switch (loc.type) {
+        case StockLocationType.warehouse:
+          throw Exception('Vous avez déjà un magasin nommé "$name"');
+        case StockLocationType.partner:
+          throw Exception(
+              'Vous avez déjà un dépôt partenaire nommé "$name"');
+        case StockLocationType.shop:
+          throw Exception('Vous avez déjà une boutique nommée "$name"');
+      }
+    }
+
+    // 2. Supabase — blinde si Hive n'est pas à jour. On ignore les erreurs
+    //    réseau (offline-first) : l'utilisateur sera bloqué côté serveur si
+    //    une autre session a créé un doublon entretemps.
+    try {
+      var shopsQ = _db.from('shops').select('id')
+          .eq('owner_id', userId).ilike('name', name);
+      if (excludeShopId != null) shopsQ = shopsQ.neq('id', excludeShopId);
+      final shopHit = await shopsQ.maybeSingle();
+      if (shopHit != null) {
+        throw Exception('Vous avez déjà une boutique nommée "$name"');
+      }
+      var locsQ = _db.from('stock_locations').select('id, type')
+          .eq('owner_id', userId).ilike('name', name)
+          .neq('type', 'shop');
+      if (excludeShopLocId != null) {
+        locsQ = locsQ.neq('id', excludeShopLocId);
+      }
+      final locHit = await locsQ.maybeSingle();
+      if (locHit != null) {
+        final t = locHit['type']?.toString() ?? '';
+        throw Exception(t == 'partner'
+            ? 'Vous avez déjà un dépôt partenaire nommé "$name"'
+            : 'Vous avez déjà un magasin nommé "$name"');
+      }
+    } on Exception {
+      rethrow;
+    } catch (e) {
+      debugPrint('[DB] _ensureLocationNameAvailable Supabase: $e');
+    }
+  }
+
+  static Future<ShopSummary> createShop({
+    required String name, required String sector,
+    required String currency, required String country,
+    String? phone, String? email,
+  }) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Connexion requise pour créer une boutique');
+
+    final trimmed = name.trim();
+    await _ensureLocationNameAvailable(
+        userId: userId, name: trimmed);
+
+    final row = await _db.from('shops').insert({
+      'owner_id': userId, 'name': name, 'sector': sector,
+      'currency': currency, 'country': country,
+      'phone': phone, 'email': email, 'is_active': true,
+    }).select().single();
+
+    await _db.from('shop_memberships').insert(
+        {'shop_id': row['id'], 'user_id': userId, 'role': 'owner'});
+
+    final shop = _rowToShop(row);
+    await LocalStorageService.saveShop(shop);
+    await LocalStorageService.saveMembership(
+        userId: userId, shopId: shop.id,
+        shopName: shop.name, role: UserRole.admin);
+
+    // Amorce la liste des membres avec le créateur pour qu'il apparaisse
+    // immédiatement dans l'onglet Membres, même avant le 1er fetch Supabase.
+    final profile = LocalStorageService.getCurrentUser();
+    await HiveBoxes.settingsBox.put('members_${shop.id}', [{
+      'user_id':   userId,
+      'role':      'admin',
+      'joined_at': DateTime.now().toIso8601String(),
+      'profiles':  {
+        'id':    userId,
+        'name':  profile?.name  ?? '',
+        'email': profile?.email ?? '',
+        'phone': profile?.phone,
+      },
+    }]);
+
+    debugPrint('[DB] ✅ Boutique créée: ${shop.name}');
+    return shop;
+  }
+
+  /// Modifie les infos éditables d'une boutique (nom, secteur, pays, monnaie,
+  /// téléphone, email). Valide l'unicité du nom par propriétaire avant update.
+  /// Les champs à null sont ignorés (pas écrasés).
+  static Future<ShopSummary> updateShop({
+    required String shopId,
+    String? name, String? sector,
+    String? currency, String? country,
+    String? phone, String? email,
+  }) async {
+    final userId = _userId;
+    if (userId == null) throw Exception('Connexion requise pour modifier une boutique');
+
+    // 1. Unicité du nom (seulement si le nom change) — couvre boutiques,
+    //    magasins (warehouses) et dépôts partenaires du même owner.
+    if (name != null && name.trim().isNotEmpty) {
+      await _ensureLocationNameAvailable(
+          userId: userId, name: name.trim(), excludeShopId: shopId);
+    }
+
+    // 2. Payload sans les nulls
+    final payload = <String, dynamic>{};
+    if (name     != null) payload['name']     = name.trim();
+    if (sector   != null) payload['sector']   = sector;
+    if (currency != null) payload['currency'] = currency;
+    if (country  != null) payload['country']  = country;
+    if (phone    != null) payload['phone']    = phone.trim().isEmpty ? null : phone.trim();
+    if (email    != null) payload['email']    = email.trim().isEmpty ? null : email.trim();
+    if (payload.isEmpty) {
+      final cached = LocalStorageService.getShop(shopId);
+      if (cached != null) return cached;
+      throw Exception('Aucune modification à enregistrer');
+    }
+
+    // 3. Update Supabase → source de vérité
+    final row = await _db.from('shops').update(payload)
+        .eq('id', shopId).select().single();
+    final updated = _rowToShop(row);
+
+    // 4. Hive + notif listeners
+    await LocalStorageService.saveShop(updated);
+    _notify('shops', shopId);
+
+    // 5. Synchroniser le nom de la StockLocation associée (type=shop)
+    //    pour que les dropdowns / sliders / pages transferts reflètent
+    //    immédiatement le nouveau nom de la boutique.
+    if (name != null) {
+      final shopLoc = getShopLocation(shopId);
+      if (shopLoc != null && shopLoc.name != updated.name) {
+        await saveStockLocation(shopLoc.copyWith(name: updated.name));
+      }
+    }
+
+    debugPrint('[DB] ✅ Boutique modifiée: ${updated.name}');
+    return updated;
+  }
+
+  /// Active / désactive une boutique (Hive immédiat + Supabase background).
+  static Future<void> setShopActive(String shopId, bool active) async {
+    final cached = LocalStorageService.getShop(shopId);
+    if (cached != null) {
+      final updated = ShopSummary(
+        id: cached.id, name: cached.name, logoUrl: cached.logoUrl,
+        currency: cached.currency, country: cached.country,
+        sector: cached.sector, isActive: active,
+        todaySales: cached.todaySales, ownerId: cached.ownerId,
+        phone: cached.phone, email: cached.email,
+        createdAt: cached.createdAt, members: cached.members,
+      );
+      await LocalStorageService.saveShop(updated);
+    }
+    _bgWrite({'table': 'shops', 'op': 'upsert',
+      'data': {'id': shopId, 'is_active': active}});
+    _notify('shops', shopId);
+    debugPrint('[DB] ✅ Boutique $shopId is_active=$active');
+  }
+
+  static Future<List<ShopSummary>> getMyShops() async {
+    final userId = _userId ?? LocalStorageService.getCurrentUser()?.id;
+    if (userId == null) return [];
+    try {
+      final owned = await _db.from('shops').select().eq('owner_id', userId)
+          .timeout(const Duration(seconds: 10));
+      final mems  = await _db.from('shop_memberships')
+          .select('role, shops(*)').eq('user_id', userId);
+
+      final shops   = <ShopSummary>[];
+      final seenIds = <String>{};
+
+      for (final row in owned as List) {
+        final s = _rowToShop(row);
+        if (seenIds.add(s.id)) { shops.add(s); await _cacheShop(userId, s, UserRole.admin); }
+      }
+      for (final row in mems as List) {
+        final shopRow = row['shops'];
+        if (shopRow == null) continue;
+        final s = _rowToShop(shopRow as Map<String, dynamic>);
+        if (seenIds.add(s.id)) {
+          final role = _parseRole(row['role'] ?? 'cashier');
+          shops.add(s); await _cacheShop(userId, s, role);
+        }
+      }
+      debugPrint('[DB] ${shops.length} boutiques');
+      return shops;
+    } catch (e) {
+      debugPrint('[DB] Erreur getMyShops: $e');
+      return LocalStorageService.getShopsForUser(userId);
+    }
+  }
+
+  static Future<void> _cacheShop(String userId, ShopSummary s, UserRole role) async {
+    await LocalStorageService.saveShop(s);
+    await LocalStorageService.saveMembership(
+        userId: userId, shopId: s.id, shopName: s.name, role: role);
+  }
+
+  // ══ PRODUITS ══════════════════════════════════════════════════════
+
+  static Future<void> saveProduct(Product p, {bool skipValidation = false}) async {
+    if (p.id == null) return;
+
+    // 0. Validation unicité (SKU + nom) — seulement si online et pas skippée
+    if (!skipValidation && _i._isOnline) {
+      await _validateProductUniqueness(p);
+    }
+
+    // 1. Validation locale — SKU unique dans Hive
+    if (!skipValidation) {
+      _validateLocalUniqueness(p);
+    }
+
+    // 2. Hive IMMÉDIATEMENT — retour UI instantané.
+    //    Invalidation synchrone du cache produits AVANT le `put` : sinon
+    //    une lecture concurrente (StockService.sale dans une boucle multi-
+    //    variantes) lirait l'ancien produit et écraserait l'écriture
+    //    précédente. Le watcher async ne suffit pas (event loop pas encore
+    //    propagé pendant la boucle de débit).
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    _i._recentLocalProductWrites[p.id!] = nowMs;
+    // Purge léger : retirer les entrées plus vieilles que 2× la fenêtre.
+    // Garde la map petite sans coûter à chaque écriture (suppression rapide
+    // sur quelques entrées au plus).
+    _i._recentLocalProductWrites.removeWhere(
+        (_, ts) => nowMs - ts > _localWriteEchoWindowMs * 2);
+    LocalStorageService.invalidateProductsCache();
+    await HiveBoxes.productsBox.put(p.id!, _productToMap(p));
+
+    // 3. Notifier les listeners locaux
+    if (p.storeId != null) _notify('products', p.storeId!);
+
+    // 4. Supabase en arrière-plan
+    _bgWrite({'table': 'products', 'op': 'upsert', 'data': _productToSupabase(p)});
+
+    // 5. Phase 5 : synchroniser les StockLevel de la boutique avec les
+    //    variantes. Couvre ventes, arrivées, incidents, ajustements, retours,
+    //    création/édition produit, etc. — tous passent par saveProduct.
+    if (p.storeId != null) {
+      await _syncShopStockLevelsFromProduct(p);
+    }
+  }
+
+  /// Pour chaque variante d'un produit, met à jour le `StockLevel`
+  /// correspondant à la boutique (location type=shop).
+  /// Crée le StockLevel s'il n'existe pas. Silencieux si la boutique
+  /// n'a pas encore de shopLocation (cas d'une boutique créée hors migration).
+  static Future<void> _syncShopStockLevelsFromProduct(Product p) async {
+    final shopId = p.storeId;
+    if (shopId == null) return;
+    final shopLoc = getShopLocation(shopId);
+    if (shopLoc == null) return;
+
+    final now = DateTime.now();
+    for (final v in p.variants) {
+      final vid = v.id;
+      if (vid == null || vid.isEmpty) continue;
+      final lvlId = _stockLevelId(vid, shopLoc.id);
+      final existingRaw = HiveBoxes.stockLevelsBox.get(lvlId);
+
+      if (existingRaw != null) {
+        final existing = StockLevel.fromMap(
+            Map<String, dynamic>.from(existingRaw));
+        // Pas d'écriture si déjà synchronisé (évite notif + bgWrite inutile)
+        if (existing.stockAvailable == v.stockAvailable &&
+            existing.stockPhysical  == v.stockPhysical  &&
+            existing.stockBlocked   == v.stockBlocked   &&
+            existing.stockOrdered   == v.stockOrdered) {
+          continue;
+        }
+        final updated = existing.copyWith(
+          stockAvailable: v.stockAvailable,
+          stockPhysical:  v.stockPhysical,
+          stockBlocked:   v.stockBlocked,
+          stockOrdered:   v.stockOrdered,
+          updatedAt:      now,
+        );
+        await saveStockLevel(updated);
+      } else {
+        final created = StockLevel(
+          id:             lvlId,
+          variantId:      vid,
+          locationId:     shopLoc.id,
+          shopId:         shopId,
+          stockAvailable: v.stockAvailable,
+          stockPhysical:  v.stockPhysical,
+          stockBlocked:   v.stockBlocked,
+          stockOrdered:   v.stockOrdered,
+          updatedAt:      now,
+        );
+        await saveStockLevel(created);
+      }
+    }
+  }
+
+  /// Validation locale rapide : SKU unique dans le cache Hive
+  static void _validateLocalUniqueness(Product p) {
+    final shopId = p.storeId;
+    if (shopId == null) return;
+    final skus = p.variants
+        .where((v) => v.sku != null && v.sku!.isNotEmpty)
+        .map((v) => v.sku!.toLowerCase())
+        .toSet();
+    if (skus.isEmpty) return;
+
+    for (final raw in HiveBoxes.productsBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw as Map);
+        if (m['store_id'] != shopId || m['id'] == p.id) continue;
+        final variants = m['variants'] as List? ?? [];
+        for (final v in variants) {
+          final existingSku = ((v as Map)['sku'] as String?)?.toLowerCase();
+          if (existingSku != null && skus.contains(existingSku)) {
+            throw Exception(
+                'Le SKU "$existingSku" est déjà utilisé par "${m['name']}"');
+          }
+        }
+      } catch (e) {
+        if (e is Exception && e.toString().contains('SKU')) rethrow;
+      }
+    }
+  }
+
+  static Future<void> _validateProductUniqueness(Product p) async {
+    final shopId = p.storeId;
+    if (shopId == null) return;
+
+    // Collecter tous les SKU de toutes les variantes du produit à sauvegarder
+    final skus = p.variants
+        .where((v) => v.sku != null && v.sku!.isNotEmpty)
+        .map((v) => v.sku!.toLowerCase())
+        .toSet();
+
+    // Vérifier l'unicité des SKU dans la boutique
+    if (skus.isNotEmpty) {
+      final rows = await _db.from('products').select('id, name, variants')
+          .eq('store_id', shopId).neq('id', p.id ?? '');
+      for (final row in rows as List) {
+        for (final v in (row['variants'] as List?) ?? []) {
+          final existingSku = (v['sku'] as String?)?.toLowerCase();
+          if (existingSku != null && skus.contains(existingSku)) {
+            throw Exception(
+                'Le SKU "$existingSku" est déjà utilisé par "${row['name']}"');
+          }
+        }
+      }
+    }
+
+    // Vérifier l'unicité du nom de produit
+    final nr = await _db.from('products').select('id')
+        .eq('store_id', shopId).ilike('name', p.name.trim())
+        .neq('id', p.id ?? '').maybeSingle();
+    if (nr != null) throw Exception('Un produit nommé "${p.name}" existe déjà');
+  }
+
+  static Future<void> deleteProduct(String productId) async {
+    // Lire le shopId AVANT delete pour pouvoir notifier ensuite
+    final raw = HiveBoxes.productsBox.get(productId);
+    final shopId = raw is Map ? raw['store_id'] as String? : null;
+    final prodName = raw is Map ? (raw['name'] as String? ?? '') : '';
+
+    // Règle métier : refuser la suppression si le produit ou une de ses
+    // variantes est référencé dans une commande. On préserve l'historique.
+    final variantIds = <String>{};
+    if (raw is Map) {
+      final vars = (raw['variants'] as List?) ?? [];
+      for (final v in vars) {
+        final vid = (v as Map)['id'] as String?;
+        if (vid != null && vid.isNotEmpty) variantIds.add(vid);
+      }
+    }
+    bool usedInOrders = false;
+    for (final orderRaw in HiveBoxes.ordersBox.values) {
+      final om = Map<String, dynamic>.from(orderRaw as Map);
+      final items = (om['items'] as List?) ?? [];
+      for (final it in items) {
+        final pid = (it as Map)['product_id']?.toString();
+        if (pid == productId || variantIds.contains(pid)) {
+          usedInOrders = true; break;
+        }
+      }
+      if (usedInOrders) break;
+    }
+    if (usedInOrders) {
+      throw Exception(
+          'Impossible de supprimer "${prodName.isEmpty ? 'ce produit' : prodName}" : '
+          'il est référencé dans au moins une commande. Supprime/annule les '
+          'commandes concernées d\'abord, ou désactive ce produit à la place.');
+    }
+
+    LocalStorageService.invalidateProductsCache();
+    await HiveBoxes.productsBox.delete(productId);
+    if (shopId != null) _notify('products', shopId);
+    _bgWrite({'table': 'products', 'op': 'delete',
+      'col': 'id', 'val': productId, 'data': {'id': productId}});
+  }
+
+  static List<Product> getProductsForShop(String shopId) =>
+      LocalStorageService.getProductsForShop(shopId)
+          .where((p) => p.id != null).toList();
+
+  static Future<void> syncProducts(String shopId) async {
+    try {
+      // Vérifier que la session est valide
+      final session = _db.auth.currentSession;
+      debugPrint('[DB] syncProducts shopId=' + shopId + ' session=' + (session != null ? 'OK' : 'NULL'));
+
+      final rows = await _db.from('products').select().eq('store_id', shopId)
+          .timeout(const Duration(seconds: 10));
+      final remoteIds = <String>{};
+
+      final rowList = rows as List;
+      debugPrint('[DB] syncProducts ' + shopId + ' -> ' + rowList.length.toString() + ' produits Supabase');
+      if (rowList.isNotEmpty) {
+        debugPrint('[DB] 1er produit: id=' + (rowList.first['id']?.toString() ?? '?') + ' name=' + (rowList.first['name']?.toString() ?? '?'));
+      }
+      for (final row in rowList) {
+        final p = _supabaseToProduct(row);
+        if (p.id == null) { debugPrint('[DB] ⚠️ produit sans id: $row'); continue; }
+        remoteIds.add(p.id!);
+        // Anti-stale via row_version (cf. migration 015). On compare la
+        // version qui revient de Supabase à celle qu'on a en cache local.
+        // Si remote <= local → snapshot pull obsolète (cas typique :
+        // débit multi-variantes en cours), on garde la version locale.
+        final remoteVersion =
+            (row['row_version'] as num?)?.toInt() ?? 0;
+        final localRaw = HiveBoxes.productsBox.get(p.id!);
+        if (localRaw is Map) {
+          final localVersion =
+              (localRaw['_row_version'] as num?)?.toInt() ?? 0;
+          if (remoteVersion <= localVersion && remoteVersion > 0) {
+            debugPrint('[DB] ⏭️ syncProducts stale '
+                '(remote v=$remoteVersion <= local v=$localVersion) '
+                'product=${p.id}');
+            continue;
+          }
+        }
+        // Filet écho temporel pour la transition (avant que la 1re version
+        // remote ne soit disponible).
+        final recentMs = _i._recentLocalProductWrites[p.id!];
+        if (recentMs != null && remoteVersion == 0) {
+          final age = DateTime.now().millisecondsSinceEpoch - recentMs;
+          if (age < _localWriteEchoWindowMs) {
+            debugPrint('[DB] ⏭️ syncProducts écho temporel ${age}ms '
+                'product=${p.id}');
+            continue;
+          }
+        }
+        // Écrire dans Hive — Hive est le pont de lecture pour toute l'app
+        final mapToWrite = _productToMap(p)
+          ..['_row_version'] = remoteVersion;
+        await HiveBoxes.productsBox.put(p.id!, mapToWrite);
+        // Phase 5 : aligner le StockLevel de la boutique avec la variante
+        // telle qu'elle arrive de Supabase (sinon divergence sur ce device
+        // après une vente faite depuis un autre device ou une correction
+        // distante).
+        await _syncShopStockLevelsFromProduct(p);
+      }
+      debugPrint('[DB] syncProducts ' + shopId + ' -> ' + remoteIds.length.toString() + ' dans Hive');
+
+      // Supprimer de Hive les produits effacés dans Supabase
+      // SEULEMENT si remoteIds n'est pas vide (évite de tout supprimer si Supabase retourne vide)
+      if (remoteIds.isNotEmpty) {
+        final hiveKeys = HiveBoxes.productsBox.keys
+            .where((k) {
+          final raw = HiveBoxes.productsBox.get(k);
+          if (raw == null) return false;
+          final m = Map<String, dynamic>.from(raw as Map);
+          return m['store_id'] == shopId;
+        }).toList();
+
+        for (final key in hiveKeys) {
+          if (!remoteIds.contains(key.toString())) {
+            // Anti-écho : si une écriture locale très récente existe pour ce
+            // produit, c'est très probablement un produit qui n'est pas
+            // encore arrivé sur Supabase (latence d'upsert) — ne pas le
+            // supprimer aveuglément.
+            final recentMs = _i._recentLocalProductWrites[key.toString()];
+            if (recentMs != null) {
+              final age = DateTime.now().millisecondsSinceEpoch - recentMs;
+              if (age < _localWriteEchoWindowMs) continue;
+            }
+            await HiveBoxes.productsBox.delete(key);
+            debugPrint('[DB] Produit supprimé de Hive (absent Supabase): $key');
+          }
+        }
+      }
+
+      debugPrint('[DB] Produits sync: $shopId (${remoteIds.length} produits)');
+      _notify('products', shopId);
+
+      // Migration Phase 1 : stocks → StockLocation + StockLevel. Idempotent,
+      // ne tourne qu'une fois par boutique grâce à un flag dans settingsBox.
+      await migrateShopStocksToLocationsV1(shopId);
+    } catch (e, st) {
+      debugPrint('[DB] syncProducts ERROR: $e');
+      debugPrint('[DB] syncProducts STACK: $st');
+    }
+  }
+
+  // ══ STOCK MULTI-LOCATION (Phase 1) ═══════════════════════════════════
+  // Lectures : synchrones depuis Hive. Écritures : Hive immédiat + bg Supabase.
+  // Source de vérité future (Phase 2+) pour le stock par emplacement. Pendant
+  // la Phase 1, les champs stockXxx de ProductVariant restent le fallback.
+
+  // ─── Stock locations ─────────────────────────────────────────────────
+
+  /// ID déterministe de la location type='shop' liée à une boutique.
+  /// Permet l'idempotence entre devices qui migrent en parallèle.
+  static String _shopLocationId(String shopId) => 'loc_shop_$shopId';
+
+  /// Crée (ou récupère) la location type='shop' pour une boutique.
+  /// N'écrit PAS vers Supabase seule — c'est `migrateShopStocksToLocationsV1`
+  /// ou `saveStockLocation` qui le font.
+  static StockLocation _ensureShopLocation({
+    required String shopId,
+    required String ownerId,
+    required String shopName,
+  }) {
+    final locId = _shopLocationId(shopId);
+    final existing = HiveBoxes.stockLocationsBox.get(locId);
+    if (existing != null) {
+      return StockLocation.fromMap(Map<String, dynamic>.from(existing));
+    }
+    final loc = StockLocation(
+      id: locId,
+      ownerId: ownerId,
+      type: StockLocationType.shop,
+      name: shopName,
+      shopId: shopId,
+      createdAt: DateTime.now(),
+    );
+    HiveBoxes.stockLocationsBox.put(locId, loc.toMap());
+    return loc;
+  }
+
+  /// Lit depuis Hive la location type='shop' liée à la boutique. Null si absente.
+  static StockLocation? getShopLocation(String shopId) {
+    final raw = HiveBoxes.stockLocationsBox.get(_shopLocationId(shopId));
+    if (raw == null) return null;
+    return StockLocation.fromMap(Map<String, dynamic>.from(raw));
+  }
+
+  /// Toutes les locations d'un propriétaire (shops + warehouses + partners).
+  static List<StockLocation> getStockLocationsForOwner(String ownerId) =>
+      HiveBoxes.stockLocationsBox.values
+          .map((m) => StockLocation.fromMap(Map<String, dynamic>.from(m)))
+          .where((l) => l.ownerId == ownerId)
+          .toList()
+        ..sort((a, b) {
+          final typeOrder = a.type.index.compareTo(b.type.index);
+          return typeOrder != 0 ? typeOrder : a.name.compareTo(b.name);
+        });
+
+  /// Enregistre une location : Hive immédiat + bg Supabase.
+  static Future<void> saveStockLocation(StockLocation loc) async {
+    await HiveBoxes.stockLocationsBox.put(loc.id, loc.toMap());
+    _bgWrite({'table': 'stock_locations', 'op': 'upsert', 'data': loc.toMap()});
+    _notify('stock_locations', loc.shopId ?? loc.ownerId);
+  }
+
+  static Future<void> deleteStockLocation(String locId) async {
+    final raw = HiveBoxes.stockLocationsBox.get(locId);
+    await HiveBoxes.stockLocationsBox.delete(locId);
+    _bgWrite({'table': 'stock_locations', 'op': 'delete',
+      'col': 'id', 'val': locId, 'data': {}});
+    if (raw is Map) {
+      final shopId = raw['shop_id'] as String?;
+      final ownerId = raw['owner_id'] as String? ?? '';
+      _notify('stock_locations', shopId ?? ownerId);
+    }
+  }
+
+  /// Pull les locations du user courant depuis Supabase → Hive.
+  static Future<void> syncStockLocations() async {
+    final userId = _userId;
+    if (userId == null) return;
+    try {
+      final rows = await _db.from('stock_locations').select()
+          .eq('owner_id', userId)
+          .timeout(const Duration(seconds: 10));
+      for (final row in rows as List) {
+        final loc = StockLocation.fromMap(Map<String, dynamic>.from(row));
+        await HiveBoxes.stockLocationsBox.put(loc.id, loc.toMap());
+      }
+      debugPrint('[DB] syncStockLocations -> ${(rows as List).length} locations');
+    } catch (e) {
+      debugPrint('[DB] syncStockLocations error: $e');
+    }
+  }
+
+  // ─── Stock levels ────────────────────────────────────────────────────
+
+  /// ID déterministe (variante × location) — évite les doublons entre devices.
+  static String _stockLevelId(String variantId, String locationId) =>
+      'lvl_${variantId}_$locationId';
+
+  static StockLevel? getStockLevel(String variantId, String locationId) {
+    final raw = HiveBoxes.stockLevelsBox.get(_stockLevelId(variantId, locationId));
+    if (raw == null) return null;
+    return StockLevel.fromMap(Map<String, dynamic>.from(raw));
+  }
+
+  static List<StockLevel> getStockLevelsForVariant(String variantId) =>
+      HiveBoxes.stockLevelsBox.values
+          .map((m) => StockLevel.fromMap(Map<String, dynamic>.from(m)))
+          .where((l) => l.variantId == variantId)
+          .toList();
+
+  static List<StockLevel> getStockLevelsForLocation(String locationId) =>
+      HiveBoxes.stockLevelsBox.values
+          .map((m) => StockLevel.fromMap(Map<String, dynamic>.from(m)))
+          .where((l) => l.locationId == locationId)
+          .toList();
+
+  static Future<void> saveStockLevel(StockLevel lvl) async {
+    await HiveBoxes.stockLevelsBox.put(lvl.id, lvl.toMap());
+    // onConflict : la table porte une contrainte unique métier
+    // (variant_id, location_id). Sans ça, l'upsert se résout sur la PK id
+    // et déclenche un 23505 si un row existe déjà avec mêmes
+    // (variant_id, location_id) mais un id différent (autre device,
+    // migration, etc.).
+    _bgWrite({
+      'table': 'stock_levels',
+      'op': 'upsert',
+      'data': lvl.toMap(),
+      'onConflict': 'variant_id,location_id',
+    });
+    _notify('stock_levels', lvl.shopId ?? lvl.locationId);
+  }
+
+  /// Pull les niveaux de stock d'une boutique depuis Supabase → Hive.
+  static Future<void> syncStockLevels(String shopId) async {
+    try {
+      final rows = await _db.from('stock_levels').select().eq('shop_id', shopId)
+          .timeout(const Duration(seconds: 10));
+      for (final row in rows as List) {
+        final lvl = StockLevel.fromMap(Map<String, dynamic>.from(row));
+        await HiveBoxes.stockLevelsBox.put(lvl.id, lvl.toMap());
+      }
+      debugPrint('[DB] syncStockLevels shop=$shopId -> ${(rows as List).length} niveaux');
+    } catch (e) {
+      debugPrint('[DB] syncStockLevels error: $e');
+    }
+  }
+
+  // ─── Stock transfers ─────────────────────────────────────────────────
+
+  static Future<void> saveStockTransfer(StockTransfer t) async {
+    await HiveBoxes.stockTransfersBox.put(t.id, t.toMap());
+    _bgWrite({'table': 'stock_transfers', 'op': 'upsert', 'data': t.toMap()});
+    _notify('stock_transfers', t.ownerId);
+  }
+
+  static StockTransfer? getStockTransferById(String id) {
+    final raw = HiveBoxes.stockTransfersBox.get(id);
+    if (raw == null) return null;
+    return StockTransfer.fromMap(Map<String, dynamic>.from(raw));
+  }
+
+  static List<StockTransfer> getStockTransfersForOwner(String ownerId) =>
+      HiveBoxes.stockTransfersBox.values
+          .map((m) => StockTransfer.fromMap(Map<String, dynamic>.from(m)))
+          .where((t) => t.ownerId == ownerId)
+          .toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+  static List<StockTransfer> getTransfersForLocation(String locationId) =>
+      HiveBoxes.stockTransfersBox.values
+          .map((m) => StockTransfer.fromMap(Map<String, dynamic>.from(m)))
+          .where((t) => t.fromLocationId == locationId
+                     || t.toLocationId == locationId)
+          .toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+  /// Pull les transferts du user courant depuis Supabase → Hive.
+  static Future<void> syncStockTransfers() async {
+    final userId = _userId;
+    if (userId == null) return;
+    try {
+      final rows = await _db.from('stock_transfers').select()
+          .eq('owner_id', userId)
+          .timeout(const Duration(seconds: 10));
+      for (final row in rows as List) {
+        final t = StockTransfer.fromMap(Map<String, dynamic>.from(row));
+        await HiveBoxes.stockTransfersBox.put(t.id, t.toMap());
+      }
+      debugPrint('[DB] syncStockTransfers -> ${(rows as List).length} transferts');
+    } catch (e) {
+      debugPrint('[DB] syncStockTransfers error: $e');
+    }
+  }
+
+  // ─── Migration one-shot (Phase 1) ────────────────────────────────────
+
+  // v1d : diagnostic des variantes sans id skippées (ajout des logs détaillés).
+  static const _kMigrationV1FlagPrefix = 'migrated_to_locations_v1d_';
+
+  /// Migre les stocks existants d'une boutique vers le nouveau modèle.
+  /// - Crée une `StockLocation` type='shop' pour la boutique si absente.
+  /// - Crée un `StockLevel` par variante en copiant les 4 valeurs de stock
+  ///   actuelles (stockAvailable/physical/blocked/ordered).
+  ///
+  /// Ordonnancement Supabase (crucial pour RLS) : on AWAITE explicitement
+  /// l'upsert de la location AVANT d'envoyer les levels, car la policy RLS
+  /// des stock_levels interroge stock_locations. Un INSERT parallèle via
+  /// bgWrite peut arriver avant que la location ne soit commit → refus RLS.
+  ///
+  /// Idempotent : flag par boutique dans settingsBox. Ne modifie PAS les
+  /// tables existantes (products, variants, shops). Sans danger.
+  static Future<void> migrateShopStocksToLocationsV1(String shopId) async {
+    final flagKey = '$_kMigrationV1FlagPrefix$shopId';
+    if (HiveBoxes.settingsBox.get(flagKey) == true) return;
+
+    final shop = LocalStorageService.getShop(shopId);
+    if (shop == null) return;
+    final ownerId = shop.ownerId ?? _userId ?? '';
+    if (ownerId.isEmpty) return;
+
+    // 1. Garantir la location type='shop' côté Hive
+    final location = _ensureShopLocation(
+      shopId:   shopId,
+      ownerId:  ownerId,
+      shopName: shop.name,
+    );
+
+    // 2. Pousser la location Supabase en AWAITANT (requis avant les levels)
+    if (_i._isOnline) {
+      try {
+        await _db.from('stock_locations').upsert(location.toMap())
+            .timeout(const Duration(seconds: 10));
+      } catch (e) {
+        debugPrint('[DB] Migration v1 shop=$shopId : location upsert KO ($e), '
+            'on réessaiera au prochain syncProducts.');
+        return; // flag non posé → retry au prochain sync
+      }
+    } else {
+      // Offline : pousser via la queue FIFO, mais ne pas poser le flag
+      // (la migration se finalisera au retour online).
+      _bgWrite({'table': 'stock_locations', 'op': 'upsert',
+        'data': location.toMap()});
+    }
+
+    // 3. Collecter tous les levels (depuis la variante = source de vérité
+    //    Phase 1). On re-pousse TOUJOURS, même si un StockLevel existe déjà
+    //    dans Hive : ça garantit la convergence si un retry après échec
+    //    Supabase est nécessaire. L'upsert est idempotent (ID déterministe).
+    final products = LocalStorageService.getProductsForShop(shopId);
+    final levelMaps = <Map<String, dynamic>>[];
+    int created = 0;
+    int totalVariants = 0;
+    int skippedNoId   = 0;
+    for (final p in products) {
+      for (final v in p.variants) {
+        totalVariants++;
+        final vid = v.id;
+        if (vid == null || vid.isEmpty) {
+          skippedNoId++;
+          debugPrint('[DB] Migration v1 shop=$shopId : variante sans id skippée '
+              '→ produit="${p.name}" (id=${p.id}), variante="${v.name}"');
+          continue;
+        }
+        final lvlId = _stockLevelId(vid, location.id);
+        final wasMissing = !HiveBoxes.stockLevelsBox.containsKey(lvlId);
+        final lvl = StockLevel(
+          id:             lvlId,
+          variantId:      vid,
+          locationId:     location.id,
+          shopId:         shopId,
+          stockAvailable: v.stockAvailable,
+          stockPhysical:  v.stockPhysical,
+          stockBlocked:   v.stockBlocked,
+          stockOrdered:   v.stockOrdered,
+          updatedAt:      DateTime.now(),
+        );
+        await HiveBoxes.stockLevelsBox.put(lvl.id, lvl.toMap());
+        levelMaps.add(lvl.toMap());
+        if (wasMissing) created++;
+      }
+    }
+    if (skippedNoId > 0) {
+      debugPrint('[DB] Migration v1 shop=$shopId : $skippedNoId variantes '
+          'sur $totalVariants skippées faute d\'id.');
+    }
+
+    // 4. Bulk upsert des levels en une seule requête (await, après location)
+    if (levelMaps.isNotEmpty) {
+      if (_i._isOnline) {
+        try {
+          await _db.from('stock_levels').upsert(
+              levelMaps, onConflict: 'variant_id,location_id')
+              .timeout(const Duration(seconds: 20));
+        } catch (e) {
+          debugPrint('[DB] Migration v1 shop=$shopId : levels upsert KO ($e)');
+          return; // flag non posé → retry au prochain sync
+        }
+      } else {
+        for (final m in levelMaps) {
+          _bgWrite({
+            'table': 'stock_levels',
+            'op': 'upsert',
+            'data': m,
+            'onConflict': 'variant_id,location_id',
+          });
+        }
+        // Offline : on ne pose pas le flag, la queue se videra au retour online
+        // et la prochaine passe posera le flag si tout est bien parti.
+        debugPrint('[DB] Migration v1 shop=$shopId : offline, $created niveaux '
+            'en queue. Le flag sera posé au prochain sync online.');
+        return;
+      }
+    }
+
+    // 5. Pose le flag : migration finalisée avec succès
+    await HiveBoxes.settingsBox.put(flagKey, true);
+    debugPrint('[DB] ✅ Migration stock v1 shop=$shopId : location + '
+        '${levelMaps.length} niveaux poussés Supabase (dont $created nouveaux)');
+  }
+
+  // ══ ACTIVITY LOGS ═════════════════════════════════════════════════
+  // Cache offline-first + realtime. Les lectures partent de Hive, le sync
+  // en arrière-plan complète les logs anciens, et la realtime pousse les
+  // nouvelles lignes dès qu'elles sont créées côté Supabase.
+
+  /// Synchroniser les logs d'activité d'une boutique (pull depuis Supabase
+  /// → Hive). Résout les noms d'acteurs depuis `profiles` en une seule
+  /// requête pour éviter les N+1.
+  static Future<void> syncActivityLogs(String shopId) async {
+    try {
+      if (!Hive.isBoxOpen(HiveBoxes.activityLogs)) return;
+      final session = _db.auth.currentSession;
+      if (session == null) return;
+
+      final rows = List<Map<String, dynamic>>.from(
+          await _db.from('activity_logs')
+              .select('id,action,actor_id,actor_email,target_type,target_id,'
+                      'target_label,shop_id,details,created_at')
+              .eq('shop_id', shopId)
+              .order('created_at', ascending: false)
+              .limit(500)
+              .timeout(const Duration(seconds: 10)) as List);
+
+      // Résoudre les noms d'acteurs en une seule requête
+      final actorIds = rows
+          .map((r) => r['actor_id'] as String?)
+          .whereType<String>()
+          .toSet()
+          .toList();
+      final nameByActor = <String, String>{};
+      if (actorIds.isNotEmpty) {
+        try {
+          final profs = List<Map<String, dynamic>>.from(
+              await _db.from('profiles')
+                  .select('id,name')
+                  .inFilter('id', actorIds) as List);
+          for (final p in profs) {
+            final id = p['id'] as String?;
+            final name = p['name'] as String?;
+            if (id != null && name != null) nameByActor[id] = name;
+          }
+        } catch (_) {}
+      }
+
+      for (final r in rows) {
+        final id = r['id']?.toString();
+        if (id == null) continue;
+        await HiveBoxes.activityLogsBox.put(id, {
+          ...r,
+          '_actor_name': nameByActor[r['actor_id'] as String?],
+        });
+      }
+      debugPrint('[DB] syncActivityLogs: $shopId (${rows.length} logs)');
+      _notify('activity_logs', shopId);
+    } catch (e) {
+      debugPrint('[DB] syncActivityLogs ERROR: $e');
+    }
+  }
+
+  /// Lire les logs d'une boutique depuis Hive, triés du plus récent au plus ancien.
+  static List<Map<String, dynamic>> getActivityLogsForShop(String shopId) {
+    try {
+      if (!Hive.isBoxOpen(HiveBoxes.activityLogs)) return [];
+      final list = HiveBoxes.activityLogsBox.values
+          .map((m) => Map<String, dynamic>.from(m))
+          .where((m) => m['shop_id']?.toString() == shopId)
+          .toList();
+      list.sort((a, b) {
+        final da = DateTime.tryParse(a['created_at']?.toString() ?? '')
+            ?? DateTime(1970);
+        final db = DateTime.tryParse(b['created_at']?.toString() ?? '')
+            ?? DateTime(1970);
+        return db.compareTo(da);
+      });
+      return list;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Purger tous les logs d'une boutique via RPC Supabase, puis vider le
+  /// cache Hive local pour cette boutique. Retourne le nombre de lignes
+  /// supprimées côté serveur. L'appelant doit avoir été ré-authentifié
+  /// (le dialogue UI s'en charge via re-auth mot de passe).
+  static Future<int> purgeShopActivityLogs(String shopId) async {
+    final result = await _db.rpc(
+        'purge_shop_activity_logs', params: {'p_shop_id': shopId});
+    // Vider le cache Hive local pour cette boutique
+    if (Hive.isBoxOpen(HiveBoxes.activityLogs)) {
+      final keys = HiveBoxes.activityLogsBox.keys.where((k) {
+        final raw = HiveBoxes.activityLogsBox.get(k);
+        return raw is Map && raw['shop_id']?.toString() == shopId;
+      }).toList();
+      for (final k in keys) {
+        await HiveBoxes.activityLogsBox.delete(k);
+      }
+    }
+    _notify('activity_logs', shopId);
+    return (result as num?)?.toInt() ?? 0;
+  }
+
+  /// Purger tous les logs de la plateforme (super admin). Retourne le nombre
+  /// supprimé serveur. Vide aussi le cache Hive local complet.
+  static Future<int> purgeAllActivityLogs() async {
+    final result = await _db.rpc('purge_all_activity_logs');
+    if (Hive.isBoxOpen(HiveBoxes.activityLogs)) {
+      await HiveBoxes.activityLogsBox.clear();
+    }
+    _notify('activity_logs', '_all');
+    return (result as num?)?.toInt() ?? 0;
+  }
+
+  /// Callback realtime : ligne `activity_logs` INSERT → ajouter à Hive +
+  /// résoudre le nom d'acteur (best-effort), puis notifier les listeners.
+  Future<void> _onActivityLogChange(
+      PostgresChangePayload p, String shopId) async {
+    try {
+      if (p.eventType != PostgresChangeEvent.insert) return;
+      final r = Map<String, dynamic>.from(p.newRecord);
+      final id = r['id']?.toString();
+      if (id == null) return;
+      String? actorName;
+      final actorId = r['actor_id'] as String?;
+      if (actorId != null) {
+        try {
+          final prof = await _db.from('profiles')
+              .select('name').eq('id', actorId).maybeSingle();
+          actorName = (prof?['name']) as String?;
+        } catch (_) {}
+      }
+      await HiveBoxes.activityLogsBox.put(id, {
+        ...r,
+        '_actor_name': actorName,
+      });
+      _notify('activity_logs', shopId);
+    } catch (e) {
+      debugPrint('[DB] onActivityLogChange err: $e');
+    }
+  }
+
+  // ══ EXPENSES (dépenses opérationnelles) ═══════════════════════════
+  // Cache offline-first + realtime. Même pattern que activity_logs :
+  // lectures depuis Hive, sync background complète, push Supabase via
+  // l'offline-queue pour que les créations hors ligne soient conservées.
+
+  /// Sauver ou mettre à jour une dépense (Hive immédiat + Supabase en queue).
+  static Future<void> saveExpense(Expense e) async {
+    if (!Hive.isBoxOpen(HiveBoxes.expenses)) return;
+    final map = _expenseToMap(e);
+    await HiveBoxes.expensesBox.put(e.id, map);
+    _notify('expenses', e.shopId);
+    _bgWrite({'table': 'expenses', 'op': 'upsert', 'data': _expenseToSupabase(e)});
+  }
+
+  /// Supprimer une dépense (Hive + Supabase).
+  static Future<void> deleteExpense(String id, String shopId) async {
+    await HiveBoxes.expensesBox.delete(id);
+    _notify('expenses', shopId);
+    _bgWrite({'table': 'expenses', 'op': 'delete',
+      'col': 'id', 'val': id, 'data': {}});
+  }
+
+  /// Lire les dépenses d'une boutique, triées du plus récent paidAt au plus ancien.
+  static List<Expense> getExpensesForShop(String shopId) {
+    try {
+      if (!Hive.isBoxOpen(HiveBoxes.expenses)) return [];
+      final list = HiveBoxes.expensesBox.values
+          .map((m) => _expenseFromMap(Map<String, dynamic>.from(m)))
+          .where((e) => e.shopId == shopId)
+          .toList();
+      list.sort((a, b) => b.paidAt.compareTo(a.paidAt));
+      return list;
+    } catch (_) { return []; }
+  }
+
+  /// Pull Supabase → Hive. À appeler au montage de la page Dépenses et au
+  /// retour en ligne (déjà intégré à _onNetworkRestored).
+  static Future<void> syncExpenses(String shopId) async {
+    try {
+      if (!Hive.isBoxOpen(HiveBoxes.expenses)) return;
+      final session = _db.auth.currentSession;
+      if (session == null) return;
+      final rows = await _db.from('expenses')
+          .select()
+          .eq('shop_id', shopId)
+          .order('paid_at', ascending: false)
+          .limit(500)
+          .timeout(const Duration(seconds: 10));
+      final list = rows as List;
+      final remoteIds = <String>{};
+      for (final row in list) {
+        final id = row['id']?.toString();
+        if (id == null) continue;
+        remoteIds.add(id);
+        await HiveBoxes.expensesBox.put(id, _mapFromSupabase(row));
+      }
+      // Diff purge : supprimer les dépenses locales de ce shop
+      // qui n'existent plus distant (reset / suppression depuis autre appareil).
+      final staleKeys = <dynamic>[];
+      for (final key in HiveBoxes.expensesBox.keys) {
+        final raw = HiveBoxes.expensesBox.get(key);
+        if (raw is! Map) continue;
+        if (raw['shop_id']?.toString() != shopId) continue;
+        if (!remoteIds.contains(key.toString())) staleKeys.add(key);
+      }
+      for (final k in staleKeys) {
+        await HiveBoxes.expensesBox.delete(k);
+      }
+      debugPrint('[DB] syncExpenses: $shopId '
+          '(${list.length} remote, ${staleKeys.length} purgés)');
+      _notify('expenses', shopId);
+    } catch (e) {
+      debugPrint('[DB] syncExpenses ERROR: $e');
+    }
+  }
+
+  // ══ SYNC GÉNÉRIQUE (inventaire étendu) ════════════════════════════
+  // Pull passthrough pour les tables où le format Supabase est directement
+  // compatible avec le format Hive (suppliers, incidents, stock_movements,
+  // receptions, purchase_orders, stock_arrivals). Aucune conversion —
+  // chaque ligne est écrite telle quelle dans la box Hive par son `id`.
+
+  /// Pull toutes les lignes d'une table pour une boutique et les écrit dans
+  /// la box Hive correspondante. **Diff sync** : les lignes Hive de cette
+  /// boutique qui ne sont plus présentes côté Supabase sont supprimées.
+  /// Essentiel pour propager un reset fait depuis un autre appareil.
+  static Future<void> _syncTablePassthrough({
+    required String tableName,
+    required String shopId,
+    required Box<Map> box,
+    String shopIdColumn = 'shop_id',
+    String orderBy = 'created_at',
+    int limit = 500,
+  }) async {
+    try {
+      if (!box.isOpen) return;
+      final session = _db.auth.currentSession;
+      if (session == null) return;
+      final rows = await _db.from(tableName)
+          .select()
+          .eq(shopIdColumn, shopId)
+          .order(orderBy, ascending: false)
+          .limit(limit)
+          .timeout(const Duration(seconds: 10));
+      final list = rows as List;
+      final remoteIds = <String>{};
+      for (final row in list) {
+        final id = row['id']?.toString();
+        if (id == null) continue;
+        remoteIds.add(id);
+        await box.put(id, Map<String, dynamic>.from(row));
+      }
+      // Purge : supprimer les lignes Hive de ce shop absentes distant.
+      final staleKeys = <dynamic>[];
+      for (final key in box.keys) {
+        final raw = box.get(key);
+        if (raw is! Map) continue;
+        if (raw[shopIdColumn]?.toString() != shopId) continue;
+        if (!remoteIds.contains(key.toString())) staleKeys.add(key);
+      }
+      for (final k in staleKeys) {
+        await box.delete(k);
+      }
+      if (staleKeys.isNotEmpty) {
+        debugPrint('[DB] sync $tableName: purge ${staleKeys.length} stale');
+      }
+      debugPrint('[DB] sync $tableName: $shopId '
+          '(${list.length} remote, ${staleKeys.length} purgés)');
+      _notify(tableName, shopId);
+    } catch (e) {
+      debugPrint('[DB] sync $tableName ERROR: $e');
+    }
+  }
+
+  /// Callback realtime passthrough — applique INSERT/UPDATE/DELETE sur la
+  /// box Hive correspondante dès qu'un changement arrive d'un autre appareil.
+  Future<void> _onTablePassthroughChange(
+      PostgresChangePayload p,
+      Box<Map> box,
+      String tableName,
+      String shopId) async {
+    try {
+      switch (p.eventType) {
+        case PostgresChangeEvent.insert:
+        case PostgresChangeEvent.update:
+          final id = p.newRecord['id']?.toString();
+          if (id == null) return;
+          await box.put(id, Map<String, dynamic>.from(p.newRecord));
+        case PostgresChangeEvent.delete:
+          final id = p.oldRecord['id']?.toString();
+          if (id != null) await box.delete(id);
+        default: break;
+      }
+      _notify(tableName, shopId);
+    } catch (e) {
+      debugPrint('[DB] on${tableName}Change err: $e');
+    }
+  }
+
+  static Future<void> syncSuppliers(String shopId) =>
+      _syncTablePassthrough(tableName: 'suppliers',
+          shopId: shopId, box: HiveBoxes.suppliersBox);
+  static Future<void> syncIncidents(String shopId) =>
+      _syncTablePassthrough(tableName: 'incidents',
+          shopId: shopId, box: HiveBoxes.incidentsBox);
+  static Future<void> syncStockMovements(String shopId) =>
+      _syncTablePassthrough(tableName: 'stock_movements',
+          shopId: shopId, box: HiveBoxes.stockMovementsBox);
+  static Future<void> syncReceptions(String shopId) =>
+      _syncTablePassthrough(tableName: 'receptions',
+          shopId: shopId, box: HiveBoxes.receptionsBox);
+  static Future<void> syncPurchaseOrders(String shopId) =>
+      _syncTablePassthrough(tableName: 'purchase_orders',
+          shopId: shopId, box: HiveBoxes.purchaseOrdersBox);
+  static Future<void> syncStockArrivals(String shopId) =>
+      _syncTablePassthrough(tableName: 'stock_arrivals',
+          shopId: shopId, box: HiveBoxes.stockArrivalsBox);
+
+  /// Callback realtime pour orders. Reprend le format de `syncOrders` :
+  /// inclut `fees` et `completed_at` pour éviter l'écrasement de ces
+  /// colonnes sur le push distant.
+  Future<void> _onOrderChange(
+      PostgresChangePayload p, String shopId) async {
+    try {
+      switch (p.eventType) {
+        case PostgresChangeEvent.insert:
+        case PostgresChangeEvent.update:
+          final id = p.newRecord['id']?.toString();
+          if (id == null) return;
+          final row = p.newRecord;
+          final hiveMap = <String, dynamic>{
+            'id':             id,
+            'shop_id':        row['shop_id'],
+            'status':         row['status'] ?? 'scheduled',
+            'discount_amount': row['discount_amount'] ?? 0,
+            'tax_rate':       row['tax_rate'] ?? 0,
+            'payment_method': row['payment_method'] ?? 'cash',
+            'client_id':      row['client_id'],
+            'client_name':    row['client_name'],
+            'client_phone':   row['client_phone'],
+            'notes':          row['notes'],
+            'scheduled_at':   row['scheduled_at'],
+            'created_at':     row['created_at'],
+            'completed_at':   row['completed_at'],
+            'items':          row['items'] ?? [],
+            'fees':           row['fees'] ?? [],
+          };
+          await HiveBoxes.ordersBox.put(id, hiveMap);
+        case PostgresChangeEvent.delete:
+          final id = p.oldRecord['id']?.toString();
+          if (id != null) await HiveBoxes.ordersBox.delete(id);
+        default: break;
+      }
+      _notify('orders', shopId);
+    } catch (e) {
+      debugPrint('[DB] onOrderChange err: $e');
+    }
+  }
+
+  /// Callback realtime pour la table clients.
+  /// Insère/update/delete sur Hive dès qu'un autre appareil (ou le même)
+  /// modifie un client sur Supabase. Sans ça, les clients créés depuis
+  /// desktop n'apparaissaient sur Android qu'à l'ouverture manuelle de la
+  /// page Clients (le seul appel existant à `syncClients`).
+  Future<void> _onClientChange(
+      PostgresChangePayload p, String shopId) async {
+    try {
+      switch (p.eventType) {
+        case PostgresChangeEvent.insert:
+        case PostgresChangeEvent.update:
+          final id = p.newRecord['id']?.toString();
+          if (id == null) return;
+          final client = _clientFromSupabase(
+              Map<String, dynamic>.from(p.newRecord));
+          HiveBoxes.clientsBox.put(id, _clientToMap(client));
+        case PostgresChangeEvent.delete:
+          final id = p.oldRecord['id']?.toString();
+          if (id != null) HiveBoxes.clientsBox.delete(id);
+        default: break;
+      }
+      _notify('clients', shopId);
+    } catch (e) {
+      debugPrint('[DB] onClientChange err: $e');
+    }
+  }
+
+  /// Callback realtime pour la table expenses.
+  Future<void> _onExpenseChange(
+      PostgresChangePayload p, String shopId) async {
+    try {
+      switch (p.eventType) {
+        case PostgresChangeEvent.insert:
+        case PostgresChangeEvent.update:
+          final id = p.newRecord['id']?.toString();
+          if (id == null) return;
+          await HiveBoxes.expensesBox.put(id, _mapFromSupabase(p.newRecord));
+        case PostgresChangeEvent.delete:
+          final id = p.oldRecord['id']?.toString();
+          if (id != null) await HiveBoxes.expensesBox.delete(id);
+        default: break;
+      }
+      _notify('expenses', shopId);
+    } catch (e) {
+      debugPrint('[DB] onExpenseChange err: $e');
+    }
+  }
+
+  // ── Sérialisation Expense ──────────────────────────────────────────
+  static Map<String, dynamic> _expenseToMap(Expense e) => {
+    'id':             e.id,
+    'shop_id':        e.shopId,
+    'amount':         e.amount,
+    'category':       e.category.name,
+    'label':          e.label,
+    'paid_at':        e.paidAt.toUtc().toIso8601String(),
+    'payment_method': e.paymentMethod.name,
+    'receipt_url':    e.receiptUrl,
+    'notes':          e.notes,
+    'created_by':     e.createdBy,
+    'created_at':     e.createdAt.toUtc().toIso8601String(),
+  };
+
+  static Map<String, dynamic> _expenseToSupabase(Expense e) =>
+      _expenseToMap(e); // mêmes colonnes
+
+  static Expense _expenseFromMap(Map<String, dynamic> m) => Expense(
+    id:       m['id'] as String,
+    shopId:   m['shop_id'] as String,
+    amount:   (m['amount'] as num).toDouble(),
+    category: ExpenseCategoryX.fromString(m['category'] as String?),
+    label:    (m['label'] as String?) ?? '',
+    paidAt:   DateTime.parse(m['paid_at'] as String).toLocal(),
+    paymentMethod: PaymentMethod.values.firstWhere(
+        (p) => p.name == m['payment_method'],
+        orElse: () => PaymentMethod.cash),
+    receiptUrl: m['receipt_url'] as String?,
+    notes:      m['notes'] as String?,
+    createdBy:  m['created_by']?.toString(),
+    createdAt:  m['created_at'] != null
+        ? DateTime.parse(m['created_at'] as String).toLocal()
+        : DateTime.now(),
+  );
+
+  /// Convertit une ligne Supabase en map Hive (mêmes colonnes, conversion UUID).
+  static Map<String, dynamic> _mapFromSupabase(Map<dynamic, dynamic> row) => {
+    'id':             row['id']?.toString(),
+    'shop_id':        row['shop_id'],
+    'amount':         row['amount'],
+    'category':       row['category'],
+    'label':          row['label'],
+    'paid_at':        row['paid_at'],
+    'payment_method': row['payment_method'] ?? 'cash',
+    'receipt_url':    row['receipt_url'],
+    'notes':          row['notes'],
+    'created_by':     row['created_by']?.toString(),
+    'created_at':     row['created_at'],
+  };
+
+  /// Synchroniser les commandes depuis Supabase vers Hive (pull)
+  static Future<void> syncOrders(String shopId) async {
+    try {
+      if (!Hive.isBoxOpen(HiveBoxes.orders)) return;
+
+      final session = _db.auth.currentSession;
+      if (session == null) {
+        debugPrint('[DB] syncOrders: session null, skip');
+        return;
+      }
+
+      debugPrint('[DB] syncOrders: pull depuis Supabase pour $shopId');
+      final rows = await _db
+          .from('orders')
+          .select()
+          .eq('shop_id', shopId)
+          .order('created_at', ascending: false)
+          .limit(200)
+          .timeout(const Duration(seconds: 10));
+
+      final rowList = rows as List;
+      debugPrint('[DB] syncOrders: ${rowList.length} commandes reçues');
+
+      final remoteIds = <String>{};
+      for (final row in rowList) {
+        final id = row['id']?.toString();
+        if (id == null) continue;
+        remoteIds.add(id);
+        // Écrire dans Hive — format compatible avec getOrders().
+        // IMPORTANT : inclure `fees` et `completed_at` sinon la sync écrase
+        // localement les frais de livraison et l'horodatage d'encaissement
+        // de chaque commande (bug de persistance côté Finances/Dépenses).
+        final hiveMap = <String, dynamic>{
+          'id':             id,
+          'shop_id':        row['shop_id'],
+          'status':         row['status'] ?? 'scheduled',
+          'discount_amount': row['discount_amount'] ?? 0,
+          'tax_rate':       row['tax_rate'] ?? 0,
+          'payment_method': row['payment_method'] ?? 'cash',
+          'client_id':      row['client_id'],
+          'client_name':    row['client_name'],
+          'client_phone':   row['client_phone'],
+          'notes':          row['notes'],
+          'scheduled_at':   row['scheduled_at'],
+          'created_at':     row['created_at'],
+          'completed_at':   row['completed_at'],
+          'items':          row['items'] ?? [],
+          'fees':           row['fees'] ?? [],
+        };
+        await HiveBoxes.ordersBox.put(id, hiveMap);
+      }
+      // Diff purge : supprimer les commandes locales de ce shop
+      // qui ne sont plus distantes.
+      final staleKeys = <dynamic>[];
+      for (final key in HiveBoxes.ordersBox.keys) {
+        final raw = HiveBoxes.ordersBox.get(key);
+        if (raw is! Map) continue;
+        if (raw['shop_id']?.toString() != shopId) continue;
+        if (!remoteIds.contains(key.toString())) staleKeys.add(key);
+      }
+      for (final k in staleKeys) {
+        await HiveBoxes.ordersBox.delete(k);
+      }
+      debugPrint('[DB] syncOrders: ${rowList.length} remote, '
+          '${staleKeys.length} purgés');
+      _notify('orders', shopId);
+    } catch (e) {
+      final err = e.toString();
+      if (err.contains('42P01') || err.contains('does not exist')) {
+        final sql = getSqlForTable('orders');
+        debugPrint('[DB] ⚠️ Table "orders" inexistante. SQL:\n$sql');
+      } else {
+        debugPrint('[DB] syncOrders ERROR: $e');
+      }
+    }
+  }
+
+  // ══ CATÉGORIES / MARQUES / UNITÉS ═════════════════════════════════
+
+  static Future<void> saveCategory(String shopId, String name) async {
+    final list = LocalStorageService.getCategories(shopId);
+    final isNew = !list.contains(name);
+    if (isNew) { list.add(name); await HiveBoxes.settingsBox.put('categories_$shopId', list); }
+    _bgWrite({'table': 'categories', 'op': 'upsert',
+      'data': {'shop_id': shopId, 'name': name},
+      'onConflict': 'shop_id,name'});
+    if (isNew) {
+      await ActivityLogService.log(
+        action: 'category_created', targetType: 'category',
+        targetId: name, targetLabel: name, shopId: shopId,
+      );
+    }
+  }
+
+  static Future<void> deleteCategory(String shopId, String name) async {
+    if (LocalStorageService.getProductsForShop(shopId).any((p) => p.categoryId == name))
+      throw Exception('Impossible de supprimer "$name" : utilisée par des produits.');
+    if (_i._isOnline) {
+      final rows = await _db.from('products').select('id').eq('store_id', shopId).eq('category_id', name).limit(1);
+      if ((rows as List).isNotEmpty) throw Exception('Impossible de supprimer "$name" : utilisée par des produits.');
+    }
+    final list = LocalStorageService.getCategories(shopId)..remove(name);
+    await HiveBoxes.settingsBox.put('categories_$shopId', list);
+    _bgWrite({'table': 'categories', 'op': 'delete', 'col': 'name', 'val': name, 'data': {'shop_id': shopId, 'name': name}});
+    await ActivityLogService.log(
+      action: 'category_deleted', targetType: 'category',
+      targetId: name, targetLabel: name, shopId: shopId,
+    );
+  }
+
+  static Future<void> renameCategory(String shopId, String oldName, String newName) async {
+    await deleteCategory(shopId, oldName);
+    await saveCategory(shopId, newName);
+    int used = 0;
+    for (final p in LocalStorageService.getProductsForShop(shopId)) {
+      if (p.categoryId == oldName) {
+        final u = p.copyWith(categoryId: newName);
+        await HiveBoxes.productsBox.put(p.id!, _productToMap(u));
+        _bgWrite({'table': 'products', 'op': 'upsert', 'data': _productToSupabase(u)});
+        used++;
+      }
+    }
+    await ActivityLogService.log(
+      action: 'category_updated', targetType: 'category',
+      targetId: newName, targetLabel: newName, shopId: shopId,
+      details: {'old_name': oldName, if (used > 0) 'used_by': used},
+    );
+  }
+
+  static Future<void> saveBrand(String shopId, String name) async {
+    final list = LocalStorageService.getBrands(shopId);
+    final isNew = !list.contains(name);
+    if (isNew) { list.add(name); await HiveBoxes.settingsBox.put('brands_$shopId', list); }
+    _bgWrite({'table': 'brands', 'op': 'upsert',
+      'data': {'shop_id': shopId, 'name': name},
+      'onConflict': 'shop_id,name'});
+    if (isNew) {
+      await ActivityLogService.log(
+        action: 'brand_created', targetType: 'brand',
+        targetId: name, targetLabel: name, shopId: shopId,
+      );
+    }
+  }
+
+  static Future<void> deleteBrand(String shopId, String name) async {
+    if (LocalStorageService.getProductsForShop(shopId).any((p) => p.brand?.toLowerCase() == name.toLowerCase()))
+      throw Exception('Impossible de supprimer "$name" : utilisée par des produits.');
+    if (_i._isOnline) {
+      final rows = await _db.from('products').select('id').eq('store_id', shopId).ilike('brand', name).limit(1);
+      if ((rows as List).isNotEmpty) throw Exception('Impossible de supprimer "$name" : utilisée par des produits.');
+    }
+    final list = LocalStorageService.getBrands(shopId)..remove(name);
+    await HiveBoxes.settingsBox.put('brands_$shopId', list);
+    _bgWrite({'table': 'brands', 'op': 'delete', 'col': 'name', 'val': name, 'data': {'shop_id': shopId, 'name': name}});
+    await ActivityLogService.log(
+      action: 'brand_deleted', targetType: 'brand',
+      targetId: name, targetLabel: name, shopId: shopId,
+    );
+  }
+
+  static Future<void> renameBrand(String shopId, String old, String neo) async {
+    await deleteBrand(shopId, old); await saveBrand(shopId, neo);
+    await ActivityLogService.log(
+      action: 'brand_updated', targetType: 'brand',
+      targetId: neo, targetLabel: neo, shopId: shopId,
+      details: {'old_name': old},
+    );
+  }
+
+  static Future<void> saveUnit(String shopId, String name) async {
+    final list = LocalStorageService.getUnits(shopId);
+    final isNew = !list.contains(name);
+    if (isNew) { list.add(name); await HiveBoxes.settingsBox.put('units_$shopId', list); }
+    _bgWrite({'table': 'units', 'op': 'upsert',
+      'data': {'shop_id': shopId, 'name': name},
+      'onConflict': 'shop_id,name'});
+    if (isNew) {
+      await ActivityLogService.log(
+        action: 'unit_created', targetType: 'unit',
+        targetId: name, targetLabel: name, shopId: shopId,
+      );
+    }
+  }
+
+  static Future<void> deleteUnit(String shopId, String name) async {
+    final list = LocalStorageService.getUnits(shopId)..remove(name);
+    await HiveBoxes.settingsBox.put('units_$shopId', list);
+    _bgWrite({'table': 'units', 'op': 'delete', 'col': 'name', 'val': name, 'data': {'shop_id': shopId, 'name': name}});
+    await ActivityLogService.log(
+      action: 'unit_deleted', targetType: 'unit',
+      targetId: name, targetLabel: name, shopId: shopId,
+    );
+  }
+
+  static Future<void> renameUnit(String shopId, String old, String neo) async {
+    await deleteUnit(shopId, old); await saveUnit(shopId, neo);
+    await ActivityLogService.log(
+      action: 'unit_updated', targetType: 'unit',
+      targetId: neo, targetLabel: neo, shopId: shopId,
+      details: {'old_name': old},
+    );
+  }
+
+  static Future<void> syncMetadata(String shopId) async {
+    try {
+      final cats   = await _db.from('categories').select('name').eq('shop_id', shopId);
+      final brands = await _db.from('brands').select('name').eq('shop_id', shopId);
+      final units  = await _db.from('units').select('name').eq('shop_id', shopId);
+      final cl = (cats   as List).map((r) => r['name'] as String).toList();
+      final bl = (brands as List).map((r) => r['name'] as String).toList();
+      final ul = (units  as List).map((r) => r['name'] as String).toList();
+      // Supabase est source de vérité → toujours écrire dans Hive
+      await HiveBoxes.settingsBox.put('categories_$shopId', cl);
+      await HiveBoxes.settingsBox.put('brands_$shopId', bl);
+      await HiveBoxes.settingsBox.put('units_$shopId', ul);
+    } catch (e) { debugPrint('[DB] syncMetadata: $e'); }
+  }
+
+  // ══ SYNC LOGIN ════════════════════════════════════════════════════
+
+  static Future<void> syncOnLogin(String userId) async {
+    try {
+      final shops = await getMyShops();
+      for (final s in shops) {
+        await syncProducts(s.id);
+        await syncMetadata(s.id);
+        await syncOrders(s.id);
+      }
+      // Sync memberships → Hive (rôles de l'utilisateur dans ses boutiques)
+      await syncMemberships(userId);
+      // Sync plan → cache Hive (pour accès offline)
+      await _cachePlanToHive(userId);
+      await flushOfflineQueue();
+      debugPrint('[DB] ✅ Sync login: ${shops.length} boutiques');
+    } catch (e) {
+      debugPrint('[DB] syncOnLogin: $e');
+    }
+  }
+
+
+  // ══ RESET BOUTIQUE ════════════════════════════════════════════════
+
+  /// Vider une boutique (produits, catégories, marques, unités, memberships)
+  /// mais GARDER les coordonnées d'authentification de l'admin
+  static Future<void> resetShopData(String shopId) async {
+    // 1. Supprimer produits Hive
+    final prodKeys = HiveBoxes.productsBox.keys
+        .where((k) {
+      final raw = HiveBoxes.productsBox.get(k);
+      if (raw == null) return false;
+      final m = Map<String, dynamic>.from(raw as Map);
+      return m['store_id'] == shopId;
+    }).toList();
+    for (final k in prodKeys) await HiveBoxes.productsBox.delete(k);
+
+    // 2. Supprimer TOUTES les clés settings liées à cette boutique
+    final shopKeys = HiveBoxes.settingsBox.keys
+        .where((k) => k.toString().contains(shopId))
+        .toList();
+    for (final k in shopKeys) await HiveBoxes.settingsBox.delete(k);
+    // Clés metadata explicites (au cas où le shopId n'est pas dans la clé)
+    await HiveBoxes.settingsBox.delete('categories_$shopId');
+    await HiveBoxes.settingsBox.delete('brands_$shopId');
+    await HiveBoxes.settingsBox.delete('units_$shopId');
+    await HiveBoxes.settingsBox.delete('members_$shopId');
+
+    // 3. Supprimer les données cycle de vie produit liées à cette boutique
+    Future<void> clearBoxByShop(dynamic box, String field) async {
+      final keys = box.keys.where((k) {
+        final m = box.get(k);
+        return m is Map && m[field]?.toString() == shopId;
+      }).toList();
+      for (final k in keys) await box.delete(k);
+    }
+    await clearBoxByShop(HiveBoxes.suppliersBox, 'shop_id');
+    await clearBoxByShop(HiveBoxes.receptionsBox, 'shop_id');
+    await clearBoxByShop(HiveBoxes.incidentsBox, 'shop_id');
+    await clearBoxByShop(HiveBoxes.stockMovementsBox, 'shop_id');
+    await clearBoxByShop(HiveBoxes.purchaseOrdersBox, 'shop_id');
+    await clearBoxByShop(HiveBoxes.stockArrivalsBox, 'shop_id');
+    await clearBoxByShop(HiveBoxes.expensesBox, 'shop_id');
+    // Clients utilise `store_id` (pas `shop_id`).
+    await clearBoxByShop(HiveBoxes.clientsBox,   'store_id');
+    await clearBoxByShop(HiveBoxes.ordersBox,    'shop_id');
+
+    // 4. Supabase en arrière-plan
+    if (_i._isOnline) {
+      _executeOp({'table': 'products',       'op': 'delete', 'col': 'store_id', 'val': shopId, 'data': {}});
+      _executeOp({'table': 'categories',     'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
+      _executeOp({'table': 'brands',         'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
+      _executeOp({'table': 'units',          'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
+      _executeOp({'table': 'suppliers',      'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
+      _executeOp({'table': 'incidents',      'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
+      _executeOp({'table': 'stock_movements','op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
+      _executeOp({'table': 'receptions',     'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
+      _executeOp({'table': 'purchase_orders','op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
+      _executeOp({'table': 'stock_arrivals', 'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
+      _executeOp({'table': 'expenses',       'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
+      _executeOp({'table': 'clients',        'op': 'delete', 'col': 'store_id', 'val': shopId, 'data': {}});
+      _executeOp({'table': 'orders',         'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
+    }
+    _notify('products', shopId);
+    _notify('clients',  shopId);
+    _notify('orders',   shopId);
+    _notify('expenses', shopId);
+    debugPrint('[DB] ✅ Boutique réinitialisée: $shopId');
+  }
+
+  // ══ RESET BOUTIQUE — GARDER PRODUITS / CATEGORIES / MARQUES / UNITES ══
+
+  /// One-shot : réinitialise une boutique en GARDANT
+  /// produits, catégories, marques, unités et leurs stocks actuels.
+  /// Supprime ventes, commandes, clients, fournisseurs, réceptions,
+  /// incidents, mouvements de stock, bons de commande, arrivages,
+  /// dépenses, logs d'activité, et tous les emplacements warehouse /
+  /// partenaire de l'utilisateur (avec leurs StockLevels et transferts).
+  /// Hive + Supabase. Le panier (cart_box) est vidé par sécurité.
+  static Future<void> resetShopKeepProducts(String shopId) async {
+    final userId = LocalStorageService.getCurrentUser()?.id ?? '';
+
+    // 1. Vider boxes Hive filtrées par shop_id (ou store_id pour clients)
+    Future<void> clearByShop(dynamic box, String field) async {
+      final keys = box.keys.where((k) {
+        final m = box.get(k);
+        return m is Map && m[field]?.toString() == shopId;
+      }).toList();
+      for (final k in keys) {
+        await box.delete(k);
+      }
+    }
+
+    await clearByShop(HiveBoxes.salesBox,          'shop_id');
+    await clearByShop(HiveBoxes.ordersBox,         'shop_id');
+    await clearByShop(HiveBoxes.clientsBox,        'store_id');
+    await clearByShop(HiveBoxes.suppliersBox,      'shop_id');
+    await clearByShop(HiveBoxes.receptionsBox,     'shop_id');
+    await clearByShop(HiveBoxes.incidentsBox,      'shop_id');
+    await clearByShop(HiveBoxes.stockMovementsBox, 'shop_id');
+    await clearByShop(HiveBoxes.purchaseOrdersBox, 'shop_id');
+    await clearByShop(HiveBoxes.stockArrivalsBox,  'shop_id');
+    await clearByShop(HiveBoxes.expensesBox,       'shop_id');
+    await clearByShop(HiveBoxes.activityLogsBox,   'shop_id');
+
+    // 2. Vider le panier (panier global, pas filtrable par shop)
+    await HiveBoxes.cartBox.clear();
+
+    // 3. Identifier warehouses + partners de l'utilisateur (à supprimer).
+    //    On garde la StockLocation type=shop liée à shopId.
+    final shopLocId = _shopLocationId(shopId);
+    final delLocIds = <String>{};
+    for (final k in HiveBoxes.stockLocationsBox.keys) {
+      final raw = HiveBoxes.stockLocationsBox.get(k);
+      if (raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      final locId = m['id']?.toString();
+      final ownerIdLoc = m['owner_id']?.toString();
+      final type = m['type']?.toString();
+      if (locId == null || locId == shopLocId) continue;
+      if (ownerIdLoc == userId &&
+          (type == 'warehouse' || type == 'partner')) {
+        delLocIds.add(locId);
+      }
+    }
+
+    // 4. StockLevels rattachés à ces locations (pas ceux du shop)
+    final levelKeysToDelete = <dynamic>[];
+    for (final k in HiveBoxes.stockLevelsBox.keys) {
+      final raw = HiveBoxes.stockLevelsBox.get(k);
+      if (raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      if (delLocIds.contains(m['location_id']?.toString())) {
+        levelKeysToDelete.add(k);
+      }
+    }
+
+    // 5. Transferts touchés (from OU to fait partie des locations à supprimer)
+    final transferKeysToDelete = <dynamic>[];
+    for (final k in HiveBoxes.stockTransfersBox.keys) {
+      final raw = HiveBoxes.stockTransfersBox.get(k);
+      if (raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      final from = m['from_location_id']?.toString();
+      final to   = m['to_location_id']?.toString();
+      if (delLocIds.contains(from) || delLocIds.contains(to)) {
+        transferKeysToDelete.add(k);
+      }
+    }
+
+    for (final k in levelKeysToDelete) {
+      await HiveBoxes.stockLevelsBox.delete(k);
+    }
+    for (final k in transferKeysToDelete) {
+      await HiveBoxes.stockTransfersBox.delete(k);
+    }
+    for (final k in delLocIds) {
+      await HiveBoxes.stockLocationsBox.delete(k);
+    }
+
+    // 6. Settings : tout sauf les caches métadata produits.
+    final keepKeys = {
+      'categories_$shopId',
+      'brands_$shopId',
+      'units_$shopId',
+    };
+    final settingsKeys = HiveBoxes.settingsBox.keys
+        .where((k) {
+          final s = k.toString();
+          return s.contains(shopId) && !keepKeys.contains(s);
+        })
+        .toList();
+    for (final k in settingsKeys) {
+      await HiveBoxes.settingsBox.delete(k);
+    }
+
+    // 7. Supabase : purge serveur des mêmes tables.
+    if (_i._isOnline) {
+      Future<void> tryDelete(String table, String col, String val) async {
+        try {
+          await _db.from(table).delete().eq(col, val);
+        } catch (e) {
+          debugPrint('[DB] resetShopKeepProducts $table: $e');
+          _enqueue({
+            'table': table, 'op': 'delete',
+            'col': col, 'val': val, 'data': {},
+          });
+        }
+      }
+      await tryDelete('sales',           'shop_id',  shopId);
+      await tryDelete('orders',          'shop_id',  shopId);
+      await tryDelete('clients',         'store_id', shopId);
+      await tryDelete('suppliers',       'shop_id',  shopId);
+      await tryDelete('receptions',      'shop_id',  shopId);
+      await tryDelete('incidents',       'shop_id',  shopId);
+      await tryDelete('stock_movements', 'shop_id',  shopId);
+      await tryDelete('purchase_orders', 'shop_id',  shopId);
+      await tryDelete('stock_arrivals',  'shop_id',  shopId);
+      await tryDelete('expenses',        'shop_id',  shopId);
+      await tryDelete('activity_logs',   'shop_id',  shopId);
+
+      // Warehouses + partners → suppression par ID (pas filtrable par shop)
+      for (final locId in delLocIds) {
+        try {
+          await _db.from('stock_levels')
+              .delete().eq('location_id', locId);
+          await _db.from('stock_transfers')
+              .delete().or('from_location_id.eq.$locId,'
+                           'to_location_id.eq.$locId');
+          await _db.from('stock_locations')
+              .delete().eq('id', locId);
+        } catch (e) {
+          debugPrint('[DB] resetShopKeepProducts loc $locId: $e');
+          _enqueue({
+            'table': 'stock_locations', 'op': 'delete',
+            'col': 'id', 'val': locId, 'data': {},
+          });
+        }
+      }
+    } else {
+      void enq(String table, String col, String val) =>
+          _enqueue({
+            'table': table, 'op': 'delete',
+            'col': col, 'val': val, 'data': {},
+          });
+      enq('sales',           'shop_id',  shopId);
+      enq('orders',          'shop_id',  shopId);
+      enq('clients',         'store_id', shopId);
+      enq('suppliers',       'shop_id',  shopId);
+      enq('receptions',      'shop_id',  shopId);
+      enq('incidents',       'shop_id',  shopId);
+      enq('stock_movements', 'shop_id',  shopId);
+      enq('purchase_orders', 'shop_id',  shopId);
+      enq('stock_arrivals',  'shop_id',  shopId);
+      enq('expenses',        'shop_id',  shopId);
+      enq('activity_logs',   'shop_id',  shopId);
+      for (final locId in delLocIds) {
+        enq('stock_locations', 'id', locId);
+      }
+    }
+
+    // 8. Notifs UI
+    _notify('clients',         shopId);
+    _notify('orders',          shopId);
+    _notify('sales',           shopId);
+    _notify('expenses',        shopId);
+    _notify('stock_locations', shopId);
+    _notify('stock_levels',    shopId);
+    _notify('stock_transfers', shopId);
+    _notify('activity_logs',   shopId);
+    debugPrint(
+        '[DB] ✅ Boutique réinitialisée (produits gardés): $shopId '
+        '— ${delLocIds.length} emplacement(s) supprimé(s)');
+    await ActivityLogService.log(
+      action:      'shop_reset_keep_products',
+      targetType:  'shop',
+      targetId:    shopId,
+      targetLabel: LocalStorageService.getShop(shopId)?.name,
+      shopId:      shopId,
+      details: {
+        'locations': delLocIds.length,
+      },
+    );
+  }
+
+  // ══ SUPPRIMER BOUTIQUE ════════════════════════════════════════════
+
+  static Future<void> deleteShop(String shopId) async {
+    // Pas de garde "stock > 0" ici : la saisie du nom exact dans le dialogue
+    // de confirmation suffit comme preuve d'intention. La perte du stock est
+    // une conséquence interne à la boutique supprimée — annoncée à
+    // l'utilisateur via shopDeleteConseqAll — pas un dysfonctionnement
+    // d'une autre entité liée.
+    final shopName     = LocalStorageService.getShop(shopId)?.name;
+    final products     = LocalStorageService.getProductsForShop(shopId);
+    final productsCount = products.length;
+
+    // Reset données d'abord
+    await resetShopData(shopId);
+
+    // Purger la StockLocation type=shop associée + ses StockLevels
+    // (créés par la migration Phase 1). Sans ça, l'onglet Emplacements
+    // continuerait d'afficher la boutique fantôme.
+    final shopLocId = _shopLocationId(shopId);
+    final levelKeys = HiveBoxes.stockLevelsBox.values
+        .where((raw) {
+          final m = Map<String, dynamic>.from(raw as Map);
+          return m['location_id'] == shopLocId;
+        })
+        .map((raw) =>
+            (Map<String, dynamic>.from(raw as Map))['id'] as String?)
+        .whereType<String>()
+        .toList();
+    for (final k in levelKeys) {
+      await HiveBoxes.stockLevelsBox.delete(k);
+    }
+    await HiveBoxes.stockLocationsBox.delete(shopLocId);
+
+    // Supprimer la boutique et ses memberships de Hive
+    await HiveBoxes.shopsBox.delete(shopId);
+    final memKeys = HiveBoxes.membershipsBox.keys
+        .where((k) => k.toString().contains('_$shopId')).toList();
+    for (final k in memKeys) await HiveBoxes.membershipsBox.delete(k);
+
+    // Supabase : la cascade ON DELETE CASCADE sur stock_locations.shop_id
+    // + stock_levels.location_id supprime tout côté serveur. On envoie aussi
+    // un delete explicite des locations pour les cas sans cascade.
+    if (_i._isOnline) {
+      try {
+        await _db.from('stock_levels').delete().eq('location_id', shopLocId);
+        await _db.from('stock_locations').delete().eq('shop_id', shopId);
+        await _db.from('shop_memberships').delete().eq('shop_id', shopId);
+        await _db.from('shops').delete().eq('id', shopId);
+      } catch (e) {
+        debugPrint('[DB] deleteShop Supabase: $e');
+        _enqueue({'table': 'shops', 'op': 'delete', 'col': 'id', 'val': shopId, 'data': {}});
+      }
+    } else {
+      _enqueue({'table': 'stock_locations', 'op': 'delete',
+        'col': 'shop_id', 'val': shopId, 'data': {}});
+      _enqueue({'table': 'shops', 'op': 'delete',
+        'col': 'id', 'val': shopId, 'data': {}});
+    }
+
+    // Effacer aussi le flag de migration v1 pour cette boutique :
+    // si une boutique avec le même id est recréée plus tard (rare),
+    // la migration repartira proprement.
+    await HiveBoxes.settingsBox.delete('$_kMigrationV1FlagPrefix$shopId');
+
+    _notify('stock_locations', shopId);
+    _notify('shops', shopId);
+    debugPrint('[DB] ✅ Boutique supprimée: $shopId');
+    await ActivityLogService.log(
+      action:      'shop_deleted',
+      targetType:  'shop',
+      targetId:    shopId,
+      targetLabel: shopName,
+      shopId:      shopId,
+      details: {
+        if (productsCount > 0) 'products_count': productsCount,
+      },
+    );
+  }
+
+  // ══ COPIER PRODUIT VERS AUTRE BOUTIQUE ════════════════════════════
+
+  static Future<Product> copyProductToShop(Product source, String targetShopId) async {
+    final ts      = DateTime.now().microsecondsSinceEpoch;
+    final newId   = 'prod_${ts}_copy';
+
+    final copied = Product(
+      id:            newId,
+      storeId:       targetShopId,
+      categoryId:    source.categoryId,
+      brand:         source.brand,
+      name:          source.name,
+      description:   source.description,
+      barcode:       null, // reset pour éviter doublons
+      sku:           null, // reset pour éviter doublons
+      priceBuy:      source.priceBuy,
+      customsFee:    source.customsFee,
+      priceSellPos:  source.priceSellPos,
+      priceSellWeb:  source.priceSellWeb,
+      taxRate:       source.taxRate,
+      stockQty:      source.stockQty,
+      stockMinAlert: source.stockMinAlert,
+      isActive:      source.isActive,
+      isVisibleWeb:  false,
+      imageUrl:      source.imageUrl,
+      rating:        source.rating,
+      variants:      source.variants.asMap().entries.map((e) =>
+          ProductVariant(
+            id:                 'var_${ts}_${e.key}',
+            name:               e.value.name,
+            sku:                null,
+            barcode:            null,
+            supplier:           e.value.supplier,
+            supplierRef:        e.value.supplierRef,
+            priceBuy:           e.value.priceBuy,
+            priceSellPos:       e.value.priceSellPos,
+            priceSellWeb:       e.value.priceSellWeb,
+            stockAvailable:     e.value.stockAvailable,
+            stockPhysical:      e.value.stockPhysical,
+            stockOrdered:       e.value.stockOrdered,
+            stockBlocked:       e.value.stockBlocked,
+            stockMinAlert:      e.value.stockMinAlert,
+            imageUrl:           e.value.imageUrl,
+            secondaryImageUrls: List.from(e.value.secondaryImageUrls),
+            isMain:             e.value.isMain,
+            promoEnabled:       false,
+          )
+      ).toList(),
+      expenses: List.from(source.expenses),
+    );
+
+    await saveProduct(copied);
+    debugPrint('[DB] ✅ Produit copié: ${source.name} → $targetShopId');
+
+    // Audit bidirectionnel : log dans la boutique SOURCE et la boutique
+    // DESTINATION pour que les deux historiques voient l'opération.
+    final sourceShopId = source.storeId;
+    final sourceShopName = sourceShopId != null
+        ? LocalStorageService.getShop(sourceShopId)?.name : null;
+    final targetShopName = LocalStorageService.getShop(targetShopId)?.name;
+    final commonCopyDetails = <String, dynamic>{
+      'product':     source.name,
+      'from_shop':   sourceShopName,
+      'to_shop':     targetShopName,
+      if ((source.sku ?? '').isNotEmpty) 'sku': source.sku,
+      if (source.variants.isNotEmpty)
+        'variant_count': source.variants.length,
+    };
+    if (sourceShopId != null) {
+      await ActivityLogService.log(
+        action:      'product_copied_out',
+        targetType:  'product',
+        targetId:    source.id,
+        targetLabel: source.name,
+        shopId:      sourceShopId,
+        details:     {...commonCopyDetails, 'direction': 'out'},
+      );
+    }
+    if (sourceShopId != targetShopId) {
+      await ActivityLogService.log(
+        action:      'product_copied_in',
+        targetType:  'product',
+        targetId:    newId,
+        targetLabel: copied.name,
+        shopId:      targetShopId,
+        details:     {...commonCopyDetails, 'direction': 'in'},
+      );
+    }
+
+    return copied;
+  }
+
+  // ══ GESTION UTILISATEURS ══════════════════════════════════════════
+
+  /// Charger les membres d'une boutique depuis Supabase.
+  ///
+  /// Utilise la RPC `list_shop_employees` (cf. hotfix_018) qui fait le JOIN
+  /// `shop_memberships` × `profiles` côté serveur via SECURITY DEFINER.
+  /// Évite l'erreur PostgREST "Could not find a relationship between
+  /// shop_memberships and profiles in the schema cache" (cas où la FK
+  /// déclarative manque).
+  ///
+  /// Le shape de retour est massé pour rester compatible avec les callers
+  /// existants (champ `profiles` embarqué).
+  static Future<List<Map<String, dynamic>>> getShopMembers(String shopId) async {
+    try {
+      if (!await isOnline()) return _getShopMembersLocal(shopId);
+      final rows = await _db.rpc(
+        'list_shop_employees',
+        params: {'p_shop_id': shopId},
+      );
+      final list = (rows as List).map((r) {
+        final m = Map<String, dynamic>.from(r as Map);
+        return <String, dynamic>{
+          'user_id':   m['user_id'],
+          'role':      m['role'],
+          'joined_at': m['created_at'],
+          'status':    m['status'],
+          'is_owner':  m['is_owner'],
+          // Sous-objet `profiles` reconstruit pour rétrocompat callers UI.
+          'profiles': <String, dynamic>{
+            'id':         m['user_id'],
+            'name':       m['full_name'],
+            'email':      m['email'],
+            'phone':      null,
+            'avatar_url': null,
+          },
+        };
+      }).toList();
+      await HiveBoxes.settingsBox.put('members_$shopId', list);
+      return list;
+    } catch (e) {
+      debugPrint('[DB] getShopMembers: $e');
+      return _getShopMembersLocal(shopId);
+    }
+  }
+
+  static List<Map<String, dynamic>> _getShopMembersLocal(String shopId) {
+    final raw = HiveBoxes.settingsBox.get('members_$shopId');
+    if (raw == null) return [];
+    return (raw as List).map((m) => Map<String, dynamic>.from(m as Map)).toList();
+  }
+
+  /// Changer le rôle d'un membre
+  static Future<void> updateMemberRole(
+      String shopId, String userId, UserRole role) async {
+    // Hive local
+    final cached = _getShopMembersLocal(shopId);
+    for (final m in cached) {
+      if (m['user_id'] == userId) m['role'] = role.key;
+    }
+    await HiveBoxes.settingsBox.put('members_$shopId', cached);
+
+    // Supabase
+    _bgWrite({
+      'table': 'shop_memberships',
+      'op':    'upsert',
+      'data':  {'shop_id': shopId, 'user_id': userId, 'role': role.key},
+    });
+    debugPrint('[DB] ✅ Rôle mis à jour: $userId → ${role.key}');
+  }
+
+  /// Supprimer un membre d'une boutique
+  static Future<void> removeMember(String shopId, String userId) async {
+    final cached = _getShopMembersLocal(shopId)
+        .where((m) => m['user_id'] != userId).toList();
+    await HiveBoxes.settingsBox.put('members_$shopId', cached);
+
+    if (_i._isOnline) {
+      try {
+        await _db.from('shop_memberships')
+            .delete()
+            .eq('shop_id', shopId)
+            .eq('user_id', userId);
+      } catch (e) {
+        debugPrint('[DB] removeMember: $e');
+      }
+    }
+    debugPrint('[DB] ✅ Membre retiré: $userId');
+  }
+
+  /// Inviter un utilisateur par email.
+  /// Si l'email existe dans profiles → ajout immédiat du membership.
+  /// Sinon → crée une pending_invitation + envoie un magic-link.
+  static Future<InviteResult> inviteMember(
+      String shopId, String email, UserRole role) async {
+    if (!await isOnline()) throw Exception('Connexion requise pour inviter un membre');
+
+    final normalizedEmail = email.trim().toLowerCase();
+
+    // 1. Essayer de retrouver un profil existant
+    final profile = await _db
+        .from('profiles')
+        .select('id, name, email')
+        .eq('email', normalizedEmail)
+        .maybeSingle();
+
+    if (profile != null) {
+      final userId = profile['id'] as String;
+      final existing = await _db
+          .from('shop_memberships')
+          .select('id')
+          .eq('shop_id', shopId)
+          .eq('user_id', userId)
+          .maybeSingle();
+      if (existing != null) {
+        throw Exception("${profile['name']} est déjà membre de cette boutique.");
+      }
+      await _db.from('shop_memberships').insert({
+        'shop_id': shopId, 'user_id': userId, 'role': role.key,
+      });
+      await getShopMembers(shopId);
+      debugPrint('[DB] ✅ Membre ajouté: $normalizedEmail → ${role.key}');
+      return InviteResult(
+        outcome:     InviteOutcome.addedImmediately,
+        email:       normalizedEmail,
+        invitedName: profile['name'] as String?,
+      );
+    }
+
+    // 2. Email inconnu → créer une invitation et envoyer un magic-link
+    final rpcResult = await _db.rpc('create_shop_invitation', params: {
+      'p_shop_id': shopId,
+      'p_email':   normalizedEmail,
+      'p_role':    role.key,
+    });
+    final token = (rpcResult as Map)['token'] as String;
+
+    final redirectUrl =
+        '${SupabaseConfig.acceptInviteBaseUrl}?token=${Uri.encodeComponent(token)}';
+    await _db.auth.signInWithOtp(
+      email:            normalizedEmail,
+      emailRedirectTo:  redirectUrl,
+      shouldCreateUser: true,
+    );
+
+    debugPrint('[DB] ✉️ Invitation envoyée: $normalizedEmail → ${role.key}');
+    return InviteResult(
+      outcome: InviteOutcome.invitationSent,
+      email:   normalizedEmail,
+    );
+  }
+
+  /// Liste les invitations en attente (non expirées) pour une boutique.
+  static Future<List<Map<String, dynamic>>> getPendingInvitations(
+      String shopId) async {
+    if (!await isOnline()) return [];
+    try {
+      final rows = await _db
+          .from('pending_invitations')
+          .select('id, email, role, invited_by, created_at, expires_at')
+          .eq('shop_id', shopId)
+          .gt('expires_at', DateTime.now().toUtc().toIso8601String())
+          .order('created_at', ascending: false);
+      return List<Map<String, dynamic>>.from(rows as List);
+    } catch (e) {
+      debugPrint('[DB] getPendingInvitations error: $e');
+      return [];
+    }
+  }
+
+  /// Annule une invitation en attente (RLS : admin de la boutique uniquement).
+  static Future<void> cancelInvitation(String invitationId) async {
+    if (!await isOnline()) throw Exception('Connexion requise');
+    await _db.from('pending_invitations').delete().eq('id', invitationId);
+  }
+  // ══ MAPPERS ═══════════════════════════════════════════════════════
+
+  static ShopSummary _rowToShop(Map<String, dynamic> r) => ShopSummary(
+    id: r['id'] as String, name: r['name'] as String,
+    currency: r['currency'] as String? ?? 'XAF',
+    country: r['country'] as String? ?? 'CM',
+    sector: r['sector'] as String? ?? 'retail',
+    isActive: r['is_active'] as bool? ?? true,
+    ownerId: r['owner_id']?.toString(),
+    phone: r['phone'] as String?, email: r['email'] as String?,
+    createdAt: r['created_at'] != null
+        ? DateTime.tryParse(r['created_at'] as String) : null,
+  );
+
+  static UserRole _parseRole(String r) => switch (r) {
+    'admin' => UserRole.admin, 'manager' => UserRole.manager, _ => UserRole.cashier,
+  };
+
+  static Map<String, dynamic> _productToMap(Product p) =>
+      LocalStorageService.productToMap(p);
+
+  static Map<String, dynamic> _productToSupabase(Product p) => {
+    'id': p.id ?? '', 'store_id': p.storeId, 'category_id': p.categoryId,
+    'brand': p.brand, 'name': p.name, 'description': p.description,
+    'barcode': p.barcode, 'sku': p.sku,
+    'price_buy': p.priceBuy, 'price_sell_pos': p.priceSellPos,
+    'price_sell_web': p.priceSellWeb, 'tax_rate': p.taxRate,
+    'stock_qty': p.stockQty, 'stock_min_alert': p.stockMinAlert,
+    'status': p.status.key,
+    'is_active': p.isActive, 'is_visible_web': p.isVisibleWeb,
+    'image_url': p.imageUrl, 'rating': p.rating,
+    'variants': p.variants.map(LocalStorageService.variantToMap).toList(),
+    // expenses est List<Map> en local — Supabase stocke la somme en double
+    'expenses': p.expenses.fold<double>(
+        0, (sum, e) => sum + ((e['amount'] as num?)?.toDouble() ?? 0)),
+  };
+
+  static Product _supabaseToProduct(Map<String, dynamic> r) {
+    final variants = ((r['variants'] as List?) ?? [])
+        .map((v) => LocalStorageService.variantFromMap(Map<String, dynamic>.from(v as Map)))
+        .toList();
+    final createdRaw = r['created_at'];
+    return Product(
+      id: r['id'], storeId: r['store_id'], categoryId: r['category_id'],
+      brand: r['brand'], name: r['name'], description: r['description'],
+      barcode: r['barcode'], sku: r['sku'],
+      priceBuy: (r['price_buy'] as num?)?.toDouble() ?? 0,
+      priceSellPos: (r['price_sell_pos'] as num?)?.toDouble() ?? 0,
+      priceSellWeb: (r['price_sell_web'] as num?)?.toDouble() ?? 0,
+      taxRate: (r['tax_rate'] as num?)?.toDouble() ?? 0,
+      stockQty: r['stock_qty'] as int? ?? 0,
+      stockMinAlert: r['stock_min_alert'] as int? ?? 5,
+      status: ProductStatusX.fromString(r['status'] as String?),
+      isActive: r['is_active'] as bool? ?? true,
+      isVisibleWeb: r['is_visible_web'] as bool? ?? false,
+      imageUrl: r['image_url'], rating: r['rating'] as int? ?? 0,
+      createdAt: createdRaw is String
+          ? DateTime.tryParse(createdRaw)
+          : (createdRaw is DateTime ? createdRaw : null),
+      variants: variants,
+      // Supabase stocke expenses comme un double (somme totale),
+      // Hive stocke comme List<Map>. Gérer les deux formats.
+      expenses: r['expenses'] is List
+          ? (r['expenses'] as List)
+              .map((e) => Map<String, dynamic>.from(e as Map)).toList()
+          : r['expenses'] is num
+              ? [{'description': 'Dépenses', 'amount': (r['expenses'] as num).toDouble()}]
+              : [],
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // CLIENTS
+  // ══════════════════════════════════════════════════════════════════
+
+  /// Sauvegarder un client : Hive immédiat + Supabase background.
+  /// Valide l'unicité email/téléphone par boutique (sauf si skipValidation).
+  static Future<void> saveClient(Client c, {bool skipValidation = false}) async {
+    // 0. Validation unicité (email + phone par boutique)
+    if (!skipValidation) {
+      _validateClientLocalUniqueness(c);
+      if (_i._isOnline) await _validateClientRemoteUniqueness(c);
+    }
+    // 1. Hive IMMÉDIATEMENT — offline-first
+    HiveBoxes.clientsBox.put(c.id, _clientToMap(c));
+    // 2. Supabase en arrière-plan — jamais bloquant
+    _bgWrite({'table': 'clients', 'op': 'upsert', 'data': _clientToSupabase(c)});
+    if (c.storeId != null) _notify('clients', c.storeId!);
+  }
+
+  /// Vérifie en local (Hive) qu'aucun autre client de la même boutique
+  /// n'utilise déjà le même email ou téléphone. Jette une Exception FR sinon.
+  static void _validateClientLocalUniqueness(Client c) {
+    final shopId = c.storeId;
+    if (shopId == null) return;
+    final email = c.email?.trim().toLowerCase();
+    final phone = _normalizePhone(c.phone);
+    if ((email == null || email.isEmpty) && (phone == null || phone.isEmpty)) {
+      return;
+    }
+    for (final raw in HiveBoxes.clientsBox.values) {
+      final m = Map<String, dynamic>.from(raw as Map);
+      if (m['store_id'] != shopId || m['id'] == c.id) continue;
+      if (email != null && email.isNotEmpty) {
+        final other = (m['email'] as String?)?.trim().toLowerCase();
+        if (other != null && other.isNotEmpty && other == email) {
+          throw Exception('Un client avec l\'email "$email" existe déjà');
+        }
+      }
+      if (phone != null && phone.isNotEmpty) {
+        final other = _normalizePhone(m['phone'] as String?);
+        if (other != null && other.isNotEmpty && other == phone) {
+          throw Exception('Un client avec le téléphone "${c.phone}" existe déjà');
+        }
+      }
+    }
+  }
+
+  /// Vérifie en base Supabase qu'aucun autre client de la même boutique
+  /// n'utilise déjà le même email ou téléphone.
+  static Future<void> _validateClientRemoteUniqueness(Client c) async {
+    final shopId = c.storeId;
+    if (shopId == null) return;
+    final email = c.email?.trim();
+    final phone = c.phone?.trim();
+
+    if (email != null && email.isNotEmpty) {
+      final row = await _db.from('clients').select('id')
+          .eq('store_id', shopId).ilike('email', email)
+          .neq('id', c.id).maybeSingle();
+      if (row != null) {
+        throw Exception('Un client avec l\'email "$email" existe déjà');
+      }
+    }
+    if (phone != null && phone.isNotEmpty) {
+      final row = await _db.from('clients').select('id')
+          .eq('store_id', shopId).eq('phone', phone)
+          .neq('id', c.id).maybeSingle();
+      if (row != null) {
+        throw Exception('Un client avec le téléphone "$phone" existe déjà');
+      }
+    }
+  }
+
+  /// Normalise un numéro : retire espaces et tirets pour comparer
+  /// "+237 6 11 22 33 44" et "+237611223344" comme identiques.
+  static String? _normalizePhone(String? raw) {
+    if (raw == null) return null;
+    return raw.replaceAll(RegExp(r'[\s\-\.]'), '').trim();
+  }
+
+  /// Sync une commande vers Supabase en arrière-plan
+  static void bgWriteOrder(Map<String, dynamic> orderMap) {
+    _bgWrite({'table': 'orders', 'op': 'upsert', 'data': orderMap});
+  }
+
+  /// Supprimer une commande sur Supabase (immédiat si online, sinon queued)
+  static void bgDeleteOrder(String orderId) {
+    _bgWrite({'table': 'orders', 'op': 'delete',
+      'col': 'id', 'val': orderId, 'data': {}});
+  }
+
+  /// Archive un client (soft-delete) : le masque des listes par défaut
+  /// mais préserve son lien avec les commandes existantes.
+  /// Inverse : pass `archived: false` pour désarchiver.
+  static Future<void> archiveClient(String clientId,
+      {bool archived = true}) async {
+    final raw = HiveBoxes.clientsBox.get(clientId);
+    if (raw == null) return;
+    final client = _clientFromMap(Map<String, dynamic>.from(raw as Map));
+    final updated = client.copyWith(isArchived: archived);
+    HiveBoxes.clientsBox.put(client.id, _clientToMap(updated));
+    _bgWrite({'table': 'clients', 'op': 'upsert',
+      'data': _clientToSupabase(updated)});
+    _notify('clients', client.storeId);
+  }
+
+  /// Supprimer un client. Règle métier : refusé si le client est lié à
+  /// au moins une commande (on préserve l'historique pour les rapports).
+  static Future<void> deleteClient(String clientId, String storeId) async {
+    final hasOrders = HiveBoxes.ordersBox.values.any((raw) {
+      final m = Map<String, dynamic>.from(raw as Map);
+      return m['client_id'] == clientId;
+    });
+    if (hasOrders) {
+      final raw = HiveBoxes.clientsBox.get(clientId);
+      final name = raw is Map ? (raw['name'] as String? ?? '') : '';
+      throw Exception(
+          'Impossible de supprimer "${name.isEmpty ? 'ce client' : name}" : '
+          'il a au moins une commande enregistrée. Supprime les commandes '
+          'd\'abord ou archive ce client.');
+    }
+    HiveBoxes.clientsBox.delete(clientId);
+    _bgWrite({'table': 'clients', 'op': 'delete',
+      'col': 'id', 'val': clientId, 'data': {}});
+    _notify('clients', storeId);
+  }
+
+  /// Lire les clients d'une boutique depuis Hive (lecture instantanée)
+  /// Liste les clients d'une boutique.
+  /// Par défaut les clients archivés sont masqués. Passer
+  /// [includeArchived] = true pour récupérer la liste complète (utile
+  /// pour la gestion / réactivation).
+  static List<Client> getClientsForShop(String shopId,
+      {bool includeArchived = false}) =>
+      HiveBoxes.clientsBox.values
+          .map((m) => _clientFromMap(Map<String, dynamic>.from(m)))
+          .where((c) => c.storeId == shopId
+                     && (includeArchived || !c.isArchived))
+          .toList()
+        ..sort((a, b) => a.name.compareTo(b.name));
+
+  /// Recalcule totalSpent / totalOrders / lastVisitAt d'un client à partir
+  /// des commandes complétées présentes dans Hive, puis sauvegarde.
+  /// Appelé après chaque vente encaissée ou changement de statut → completed.
+  static Future<void> refreshClientMetrics(String clientId, String shopId) async {
+    final raw = HiveBoxes.clientsBox.get(clientId);
+    if (raw == null) return;
+    final client = _clientFromMap(Map<String, dynamic>.from(raw as Map));
+
+    double totalSpent = 0;
+    int    totalOrders = 0;
+    DateTime? lastVisit;
+
+    for (final v in HiveBoxes.ordersBox.values) {
+      final o = Map<String, dynamic>.from(v as Map);
+      if (o['shop_id']   != shopId)   continue;
+      if (o['client_id'] != clientId) continue;
+      if ((o['status'] as String?) != 'completed') continue;
+
+      // Montant total = Σ lignes (custom_price ?? unit_price) × qty × (1 - disc/100)
+      // + Σ frais - discount_amount + TVA sur (sous-total + frais - discount)
+      final items = (o['items'] as List?) ?? [];
+      double subtotal = 0;
+      for (final raw in items) {
+        final it = Map<String, dynamic>.from(raw as Map);
+        final qty   = ((it['quantity'] ?? it['qty']) as num?)?.toInt() ?? 0;
+        final unit  = ((it['unit_price'] ?? it['price']) as num?)?.toDouble() ?? 0;
+        final cust  = (it['custom_price'] as num?)?.toDouble();
+        final disc  = (it['discount'] as num?)?.toDouble() ?? 0;
+        subtotal += (cust ?? unit) * qty * (1 - disc / 100);
+      }
+      double fees = 0;
+      final rawFees = o['fees'] as List?;
+      if (rawFees != null) {
+        for (final f in rawFees) {
+          if (f is Map) fees += (f['amount'] as num?)?.toDouble() ?? 0;
+        }
+      }
+      final discountAmt = (o['discount_amount'] as num?)?.toDouble() ?? 0;
+      final taxRate     = (o['tax_rate'] as num?)?.toDouble() ?? 0;
+      final taxable     = subtotal + fees - discountAmt;
+      final orderTotal  = taxable + taxable * taxRate / 100;
+
+      totalSpent  += orderTotal;
+      totalOrders += 1;
+
+      final dateStr = (o['completed_at'] ?? o['created_at']) as String?;
+      final date = dateStr != null ? DateTime.tryParse(dateStr) : null;
+      if (date != null && (lastVisit == null || date.isAfter(lastVisit))) {
+        lastVisit = date;
+      }
+    }
+
+    final updated = client.copyWith(
+      totalSpent:  totalSpent,
+      totalOrders: totalOrders,
+      lastVisitAt: lastVisit ?? client.lastVisitAt,
+    );
+    // Le client existe déjà avec ce même email/téléphone — pas de validation
+    await saveClient(updated, skipValidation: true);
+  }
+
+  /// Sync clients depuis Supabase → Hive
+
+  static Future<void> syncClients(String shopId) async {
+    try {
+      final rows = await _db.from('clients').select()
+          .eq('store_id', shopId)
+          .timeout(const Duration(seconds: 10));
+      final list = rows as List;
+      final remoteIds = <String>{};
+      for (final row in list) {
+        final c = _clientFromSupabase(Map<String, dynamic>.from(row));
+        remoteIds.add(c.id);
+        await HiveBoxes.clientsBox.put(c.id, _clientToMap(c));
+      }
+      // Diff purge : supprimer les clients locaux de ce shop
+      // qui n'existent plus distant.
+      final staleKeys = <dynamic>[];
+      for (final key in HiveBoxes.clientsBox.keys) {
+        final raw = HiveBoxes.clientsBox.get(key);
+        if (raw is! Map) continue;
+        if (raw['store_id']?.toString() != shopId) continue;
+        if (!remoteIds.contains(key.toString())) staleKeys.add(key);
+      }
+      for (final k in staleKeys) {
+        await HiveBoxes.clientsBox.delete(k);
+      }
+      debugPrint('[DB] Clients sync: $shopId '
+          '(${list.length} remote, ${staleKeys.length} purgés)');
+    } catch (e) {
+      debugPrint('[DB] syncClients erreur: $e');
+    }
+  }
+
+
+  // ── Sérialisation Client ──────────────────────────────────────────
+
+  // Hive persiste city/district séparément + address legacy pour compat.
+  static Map<String, dynamic> _clientToMap(Client c) => {
+    'id':           c.id,
+    'store_id':     c.storeId,
+    'name':         c.name,
+    'phone':        c.phone,
+    'email':        c.email,
+    'city':         c.city,
+    'district':     c.district,
+    'address':      c.address,
+    'notes':        c.notes,
+    'created_at':   c.createdAt.toIso8601String(),
+    'last_visit_at':c.lastVisitAt?.toIso8601String(),
+    'total_orders': c.totalOrders,
+    'total_spent':  c.totalSpent,
+    'is_archived':  c.isArchived,
+  };
+
+  static Client _clientFromMap(Map<String, dynamic> m) => Client(
+    id:           m['id'] as String,
+    storeId:      m['store_id'] as String,
+    name:         m['name'] as String,
+    phone:        m['phone'] as String?,
+    email:        m['email'] as String?,
+    city:         m['city'] as String?,
+    district:     m['district'] as String?,
+    address:      m['address'] as String?,
+    notes:        m['notes'] as String?,
+    createdAt:    DateTime.parse(m['created_at'] as String),
+    lastVisitAt:  m['last_visit_at'] != null
+        ? DateTime.parse(m['last_visit_at'] as String) : null,
+    totalOrders:  (m['total_orders'] as num?)?.toInt() ?? 0,
+    totalSpent:   (m['total_spent']  as num?)?.toDouble() ?? 0,
+    isArchived:   m['is_archived'] as bool? ?? false,
+  );
+
+  // Supabase : écrit address = "quartier, ville" pour rester compatible avec
+  // la colonne existante. La colonne `tag` est toujours écrite à NULL — le
+  // segment est désormais dérivé de totalOrders côté client.
+  static Map<String, dynamic> _clientToSupabase(Client c) {
+    final composite = _composeAddress(city: c.city, district: c.district,
+        fallback: c.address);
+    return {
+      'id':           c.id,
+      'store_id':     c.storeId,
+      'name':         c.name,
+      'phone':        c.phone,
+      'email':        c.email,
+      'address':      composite,
+      'notes':        c.notes,
+      'tag':          null,
+      'created_at':   c.createdAt.toIso8601String(),
+      'last_visit_at':c.lastVisitAt?.toIso8601String(),
+      'total_orders': c.totalOrders,
+      'total_spent':  c.totalSpent,
+      'is_archived':  c.isArchived,
+    };
+  }
+
+  // Lecture depuis Supabase : si city/district absents (colonnes legacy),
+  // on tente de parser `address` au format "quartier, ville".
+  static Client _clientFromSupabase(Map<String, dynamic> m) {
+    final hasSplit = m['city'] != null || m['district'] != null;
+    if (hasSplit) return _clientFromMap(m);
+    final parsed = _parseLegacyAddress(m['address'] as String?);
+    return _clientFromMap({
+      ...m,
+      'city':     parsed.city,
+      'district': parsed.district,
+    });
+  }
+
+  static String? _composeAddress({String? city, String? district,
+      String? fallback}) {
+    final c = city?.trim();
+    final d = district?.trim();
+    if ((c == null || c.isEmpty) && (d == null || d.isEmpty)) {
+      return fallback?.trim().isEmpty == true ? null : fallback?.trim();
+    }
+    if (c != null && c.isNotEmpty && d != null && d.isNotEmpty) return '$d, $c';
+    return (d != null && d.isNotEmpty) ? d : c;
+  }
+
+  static ({String? city, String? district}) _parseLegacyAddress(String? raw) {
+    final s = raw?.trim() ?? '';
+    if (s.isEmpty) return (city: null, district: null);
+    final parts = s.split(',').map((p) => p.trim()).where((p) => p.isNotEmpty)
+        .toList();
+    if (parts.length >= 2) return (city: parts[1], district: parts[0]);
+    return (city: null, district: null);
+  }
+
+  // Valeurs distinctes pour autocomplétion — lecture Hive instantanée.
+  static List<String> getDistinctClientCities(String shopId) =>
+      _distinct(getClientsForShop(shopId).map((c) => c.city));
+
+  static List<String> getDistinctClientDistricts(String shopId) =>
+      _distinct(getClientsForShop(shopId).map((c) => c.district));
+
+  /// Libellés distincts des frais déjà saisis sur les commandes de la
+  /// boutique (ex: "Frais de livraison", "Emballage"). Utilisé pour
+  /// l'autocomplétion dans le dialog d'ajout de frais de commande.
+  static List<String> getDistinctOrderFeeLabels(String shopId) {
+    final labels = <String>[];
+    try {
+      if (!Hive.isBoxOpen(HiveBoxes.orders)) return const [];
+      for (final raw in HiveBoxes.ordersBox.values) {
+        final o = Map<String, dynamic>.from(raw as Map);
+        if (o['shop_id'] != shopId) continue;
+        final fees = o['fees'] as List?;
+        if (fees == null) continue;
+        for (final f in fees) {
+          if (f is Map) {
+            final label = (f['label'] as String?)?.trim();
+            if (label != null && label.isNotEmpty) labels.add(label);
+          }
+        }
+      }
+    } catch (_) {}
+    return _distinct(labels);
+  }
+
+  static List<String> _distinct(Iterable<String?> values) {
+    final seen = <String>{};
+    final out  = <String>[];
+    for (final v in values) {
+      final s = v?.trim();
+      if (s == null || s.isEmpty) continue;
+      final k = s.toLowerCase();
+      if (seen.add(k)) out.add(s);
+    }
+    out.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return out;
+  }
+
+}

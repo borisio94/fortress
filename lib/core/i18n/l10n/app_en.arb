@@ -1,0 +1,91 @@
+{
+  "@@locale": "en",
+
+  "appName": "Fortress",
+
+  "loginTitle": "Welcome back 👋",
+  "loginSubtitle": "Sign in to your workspace",
+  "loginEmail": "Email address",
+  "loginEmailHint": "example@email.com",
+  "loginPassword": "Password",
+  "loginPasswordHint": "••••••••",
+  "loginForgotPassword": "Forgot password?",
+  "loginButton": "Sign in",
+  "loginOrWith": "Or sign in with",
+  "loginNoAccount": "Don't have an account? ",
+  "loginCreateAccount": "Create one",
+  "loginRememberMe": "Remember me",
+
+  "loginErrorEmailRequired": "Email required",
+  "loginErrorEmailInvalid": "Invalid email",
+  "loginErrorPasswordRequired": "Password required",
+  "loginErrorPasswordTooShort": "Minimum 6 characters",
+
+  "leftPanelTagline": "Manage your business\neffortlessly.",
+  "leftPanelSubtitle": "Sales · Stock · CRM · Analytics",
+
+  "featureCaisse": "Checkout",
+  "featureStock": "Stock",
+  "featureCrm": "CRM",
+  "featureAnalytics": "Analytics",
+
+  "socialGoogle": "Google",
+  "socialApple": "Apple",
+
+  "errorGeneric": "An error occurred",
+
+  "registerTitle": "Create an account",
+  "registerName": "Full name",
+  "registerNameHint": "John Doe",
+  "registerEmail": "Email address",
+  "registerPhone": "Phone (optional)",
+  "registerPassword": "Password",
+  "registerButton": "Create my account",
+  "registerAlreadyAccount": "Already have an account? ",
+  "registerSignIn": "Sign in",
+
+  "forgotPasswordTitle": "Forgot password",
+  "forgotPasswordSubtitle": "Enter your email to receive a reset link.",
+  "forgotPasswordButton": "Send",
+  "forgotPasswordSuccess": "Reset email sent",
+
+  "caisse": "Checkout",
+  "inventaire": "Inventory",
+  "clients": "Customers",
+  "finances": "Finances",
+  "parametres": "Settings",
+  "hub": "Central Hub",
+  "total": "Total",
+  "encaisser": "Checkout",
+  "cancel": "Cancel",
+  "save": "Save",
+  "search": "Search...",
+  "noData": "No data",
+  "loading": "Loading...",
+  "offlineMode": "Offline mode — data will sync when back online",
+  "today": "Today",
+  "week": "Week",
+  "month": "Month",
+  "year": "Year",
+
+  "dangerConfirmTypeToConfirm": "Type {name} to confirm",
+  "@dangerConfirmTypeToConfirm": {
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "dangerConfirmConsequencesTitle": "Consequences of this action",
+  "dangerConfirmCancel": "Cancel",
+  "dangerConfirmConfirm": "Confirm",
+  "dangerConfirmInputHint": "Type here",
+
+  "ownerPinAttemptsRemaining": "{count, plural, =1{{count} attempt remaining} other{{count} attempts remaining}}",
+  "@ownerPinAttemptsRemaining": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "ownerPinIncorrect": "Incorrect PIN code",
+  "ownerPinLocked": "Too many attempts — locked for 15 minutes",
+  "ownerPinLockedUntil": "Locked — try again in {minutes} min",
+  "@ownerPinLockedUntil": {
+    "placeholders": { "minutes": { "type": "int" } }
+  },
+  "ownerPinSubtitle": "Enter your owner PIN code"
+}

@@ -1,0 +1,91 @@
+{
+  "@@locale": "fr",
+
+  "appName": "Fortress",
+
+  "loginTitle": "Bon retour 👋",
+  "loginSubtitle": "Connectez-vous à votre espace",
+  "loginEmail": "Adresse email",
+  "loginEmailHint": "exemple@email.com",
+  "loginPassword": "Mot de passe",
+  "loginPasswordHint": "••••••••",
+  "loginForgotPassword": "Mot de passe oublié ?",
+  "loginButton": "Se connecter",
+  "loginOrWith": "Ou se connecter avec",
+  "loginNoAccount": "Pas encore de compte ? ",
+  "loginCreateAccount": "Créer un compte",
+  "loginRememberMe": "Se souvenir de moi",
+
+  "loginErrorEmailRequired": "Email requis",
+  "loginErrorEmailInvalid": "Email invalide",
+  "loginErrorPasswordRequired": "Mot de passe requis",
+  "loginErrorPasswordTooShort": "Minimum 6 caractères",
+
+  "leftPanelTagline": "Gérez votre commerce\nsans effort.",
+  "leftPanelSubtitle": "Ventes · Stocks · CRM · Analytics",
+
+  "featureCaisse": "Caisse",
+  "featureStock": "Stock",
+  "featureCrm": "CRM",
+  "featureAnalytics": "Analytics",
+
+  "socialGoogle": "Google",
+  "socialApple": "Apple",
+
+  "errorGeneric": "Une erreur est survenue",
+
+  "registerTitle": "Créer un compte",
+  "registerName": "Nom complet",
+  "registerNameHint": "Jean Dupont",
+  "registerEmail": "Adresse email",
+  "registerPhone": "Téléphone (optionnel)",
+  "registerPassword": "Mot de passe",
+  "registerButton": "Créer mon compte",
+  "registerAlreadyAccount": "Déjà un compte ? ",
+  "registerSignIn": "Se connecter",
+
+  "forgotPasswordTitle": "Mot de passe oublié",
+  "forgotPasswordSubtitle": "Entrez votre email pour recevoir un lien de réinitialisation.",
+  "forgotPasswordButton": "Envoyer",
+  "forgotPasswordSuccess": "Email de réinitialisation envoyé",
+
+  "caisse": "Caisse",
+  "inventaire": "Inventaire",
+  "clients": "Clients",
+  "finances": "Finances",
+  "parametres": "Paramètres",
+  "hub": "Hub central",
+  "total": "Total",
+  "encaisser": "Encaisser",
+  "cancel": "Annuler",
+  "save": "Enregistrer",
+  "search": "Rechercher...",
+  "noData": "Aucune donnée",
+  "loading": "Chargement...",
+  "offlineMode": "Mode hors-ligne — données synchronisées dès le retour",
+  "today": "Aujourd'hui",
+  "week": "Semaine",
+  "month": "Mois",
+  "year": "Année",
+
+  "dangerConfirmTypeToConfirm": "Tapez {name} pour confirmer",
+  "@dangerConfirmTypeToConfirm": {
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "dangerConfirmConsequencesTitle": "Conséquences de cette action",
+  "dangerConfirmCancel": "Annuler",
+  "dangerConfirmConfirm": "Confirmer",
+  "dangerConfirmInputHint": "Saisissez ici",
+
+  "ownerPinAttemptsRemaining": "{count, plural, =1{{count} tentative restante} other{{count} tentatives restantes}}",
+  "@ownerPinAttemptsRemaining": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "ownerPinIncorrect": "Code PIN incorrect",
+  "ownerPinLocked": "Trop de tentatives — bloqué pendant 15 minutes",
+  "ownerPinLockedUntil": "Bloqué — réessayez dans {minutes} min",
+  "@ownerPinLockedUntil": {
+    "placeholders": { "minutes": { "type": "int" } }
+  },
+  "ownerPinSubtitle": "Entrez votre code PIN propriétaire"
+}

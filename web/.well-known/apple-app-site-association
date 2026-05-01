@@ -1,0 +1,19 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "TEAMID.com.fortress.pos",
+        "paths": [
+          "/accept-invite",
+          "/accept-invite/*"
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": [
+      "TEAMID.com.fortress.pos"
+    ]
+  }
+}

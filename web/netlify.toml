@@ -1,0 +1,32 @@
+[build]
+  publish = "."
+
+# Les fichiers .well-known doivent être servis en application/json
+# sinon Android App Links et iOS Universal Links refusent la vérification.
+
+[[headers]]
+  for = "/.well-known/assetlinks.json"
+  [headers.values]
+    Content-Type = "application/json"
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/.well-known/apple-app-site-association"
+  [headers.values]
+    Content-Type = "application/json"
+    Cache-Control = "public, max-age=3600"
+
+# Netlify masque par défaut les dossiers qui commencent par un point.
+# On force l'exposition de .well-known/ via des redirections explicites.
+
+[[redirects]]
+  from = "/.well-known/assetlinks.json"
+  to = "/.well-known/assetlinks.json"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/.well-known/apple-app-site-association"
+  to = "/.well-known/apple-app-site-association"
+  status = 200
+  force = true

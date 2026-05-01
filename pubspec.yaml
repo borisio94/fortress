@@ -1,0 +1,143 @@
+name: fortress
+description: Fortress POS — Application de gestion multi-boutiques
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  sentry_flutter: ^9.19.0
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # ── State management ────────────────────────────────────────────
+  flutter_riverpod: ^2.5.1
+  riverpod_annotation: ^2.3.5
+  flutter_bloc: ^8.1.5
+  bloc: ^8.1.4
+
+  # ── Navigation ──────────────────────────────────────────────────
+  go_router: ^13.2.1
+
+  # ── Backend / Cloud ─────────────────────────────────────────────
+  supabase_flutter: ^2.8.4   # Auth + DB + Storage
+  cached_network_image: ^3.4.1  # Cache images réseau pour offline
+
+  # ── Network (REST fallback) ─────────────────────────────────────
+  dio: ^5.4.3
+  http: ^1.2.1
+
+  # ── Local storage (offline-first) ───────────────────────────────
+  hive_flutter: ^1.1.0
+  path_provider: ^2.1.3
+  path: ^1.9.0
+
+  # ── Sécurité ────────────────────────────────────────────────────
+  flutter_secure_storage: ^9.0.0
+  crypto: ^3.0.3
+
+  # ── i18n ────────────────────────────────────────────────────────
+  intl: ^0.20.2
+
+  # ── Téléphone ───────────────────────────────────────────────────
+  phone_numbers_parser: ^5.0.3
+
+  # ── Charts & graphiques ─────────────────────────────────────────
+  fl_chart: ^0.68.0
+
+  # ── Utilitaires ─────────────────────────────────────────────────
+  equatable: ^2.0.5
+  dartz: ^0.10.1
+  json_annotation: ^4.9.0
+  logger: ^2.3.0
+  connectivity_plus: ^6.0.3
+  url_launcher: ^6.3.0
+  pdf: ^3.11.0
+  printing: ^5.13.0
+  share_plus: ^10.0.0
+  open_filex: ^4.3.4
+  shared_preferences: ^2.2.3
+
+  # ── Notifications locales (rappels de livraison) ─────────────────
+  flutter_local_notifications: ^17.2.3
+  timezone: ^0.9.4
+  image_picker: ^1.1.2
+
+  # ── Deep links (fortress://reset-password, universal links, …) ──
+  app_links: ^6.3.2
+
+dev_dependencies:
+  sentry_dart_plugin: ^3.3.0
+  flutter_test:
+    sdk: flutter
+  build_runner: ^2.4.11
+  json_serializable: ^6.8.0
+  riverpod_generator: ^2.4.0
+  flutter_lints: ^4.0.0
+  mocktail: ^1.0.4
+  # Génération pure Dart des PNG logos via tools/generate_logos.dart
+  # (sans dépendance Python/Pillow). Régénérer après modif :
+  #   dart run tools/generate_logos.dart
+  image: ^4.0.0
+  # Génère les icônes Android/iOS/Web depuis fortress_app_icon.png.
+  # Régénérer après modif :
+  #   dart run flutter_launcher_icons
+  flutter_launcher_icons: ^0.14.1
+  # Génère le splash natif Android/iOS (drawable + storyboard) — élimine
+  # l'écran blanc pendant l'init Dart sur cold start. Couleur baked au
+  # build = violet primary par défaut. Régénérer après modif :
+  #   dart run flutter_native_splash:create
+  flutter_native_splash: ^2.4.0
+
+flutter:
+  uses-material-design: true
+  generate: true
+  assets:
+    - assets/images/
+    - assets/icons/
+    - assets/logos/
+    - supabase/migrations/
+
+# ── Icônes app (Android/iOS/Web) ──────────────────────────────────────
+# Régénérer après modif de fortress_app_icon.png :
+#   dart run flutter_launcher_icons
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/logos/fortress_app_icon.png
+  # Apple App Store refuse les icônes RGBA (alpha) — on aplatit sur fond opaque
+  # avant emballage iOS. Sans ça : warning au build + rejet upload TestFlight.
+  remove_alpha_ios: true
+  adaptive_icon_background: "#1a1a2e"
+  adaptive_icon_foreground: assets/logos/fortress_app_icon.png
+  min_sdk_android: 21
+  web:
+    generate: true
+    image_path: assets/logos/fortress_app_icon.png
+    background_color: "#1a1a2e"
+    theme_color: "#534AB7"
+sentry:
+  upload_debug_symbols: true
+  upload_source_maps: true
+  project: flutter
+  org: fortresspos
+
+# ── Native splash screen (généré au build) ────────────────────────────
+# Couleur fixe = violet primary par défaut (palette `kDefaultPalette`
+# dans theme_palette.dart). Ne suit PAS la palette dynamique de
+# l'utilisateur (techniquement impossible sans code natif custom).
+# Pour les ~10-20 % d'utilisateurs sur une autre palette, bref flash
+# violet (~300-500ms) puis leur palette reprend après le first frame.
+flutter_native_splash:
+  color:    "#6C3FC7"
+  color_dark: "#6C3FC7"
+  android: true
+  ios:     true
+  web:     false
+  # Android 12+ utilise la nouvelle SplashScreen API — bloc dédié.
+  android_12:
+    color:    "#6C3FC7"
+    color_dark: "#6C3FC7"
