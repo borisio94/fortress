@@ -45,3 +45,9 @@ app.*.map.json
 /android/app/release
 
 sentry.properties
+sentry-wizard.exe
+.sentry-native/
+
+# Build artefacts
+*.apk
+*.aab

@@ -35,7 +35,18 @@
       "Bash(python *)",
       "Bash(PYTHONIOENCODING=utf-8 python *)",
       "Bash(xargs -I {} echo \"ERRORS={}\")",
-      "Bash(awk 'NR>=576 && NR<=900 && /\\\\bmobile\\\\b/' lib/features/inventaire/presentation/pages/inventaire_page.dart)"
+      "Bash(awk 'NR>=576 && NR<=900 && /\\\\bmobile\\\\b/' lib/features/inventaire/presentation/pages/inventaire_page.dart)",
+      "Bash(FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch --force --index-filter 'git rm -rf --cached --ignore-unmatch sentry-wizard.exe .sentry-native' --prune-empty --tag-name-filter cat -- --all)",
+      "Bash(git stash *)",
+      "Bash(git rev-list *)",
+      "Bash(git cat-file *)",
+      "Bash(awk '$2==\"blob\" && $3 > 1000000 {print $3, $4}')",
+      "Bash(git update-ref *)",
+      "Bash(git reflog *)",
+      "Bash(git gc *)",
+      "Bash(git ls-tree *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
