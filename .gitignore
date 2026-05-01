@@ -51,3 +51,9 @@ sentry-wizard.exe
 # Build artefacts
 *.apk
 *.aab
+
+# Firebase CLI local cache + logs
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+.runtimeconfig.json
