@@ -17,8 +17,11 @@ const Color _kStatusDangerText  = Color(0xFF991B1B); // red-800
 const Color _kStatusWarningText = Color(0xFF92400E); // amber-800
 const Color _kStatusSuccessText = Color(0xFF065F46); // emerald-800
 
-/// Card produit unifiée — design « overlay bas dégradé » :
-/// image plein cadre 3:4 + dégradé sombre bas + overlays flottants.
+/// Card produit unifiée — design « bandeau bas plein » :
+/// image plein cadre 3:4 + bandeau noir opaque 70 % en bas + overlays
+/// flottants. Le bandeau opaque (vs ancien dégradé) garantit la lisibilité
+/// maximale du texte produit quel que soit le rendu de l'image en
+/// dessous (claire / foncée / dorée / contraste fort indifférent).
 ///
 /// Présentation pure, **zéro logique métier**. Cinq overlays sur l'image :
 ///   1. Pastille statut (haut-gauche) : disponible / stock bas / rupture.
@@ -28,8 +31,9 @@ const Color _kStatusSuccessText = Color(0xFF065F46); // emerald-800
 ///      blanc → brand cochée. Bord violet brand 2 px autour de la card
 ///      quand `selected`.
 ///   4. Rangée pastilles variantes (bas avec offset 60) si `showVariantsRow`.
-///   5. Bloc texte produit (bas) : nom 13 px blanc + SKU 10 px white@0.7
-///      mono + prix 15 px blanc + symbole 9 px white@0.7.
+///   5. Bandeau texte produit (bas) : Container `Colors.black@0.7` avec
+///      nom 13 px blanc + SKU 10 px white@0.7 mono + prix 15 px blanc +
+///      symbole 9 px white@0.7. Hauteur AUTO calée sur le contenu.
 ///
 /// Image en rupture : opacity 1.0 — c'est le statut + la pastille qty noire
 /// qui signalent, pas la désaturation. Le marchand doit pouvoir reconnaître
@@ -153,33 +157,6 @@ class ProductGridCard extends StatelessWidget {
             fillParent: true,
           ),
 
-          // ② Dégradé sombre bas (~40 % hauteur) — IgnorePointer pour
-          //    laisser passer les clics vers l'InkWell parent.
-          const Positioned(
-            left: 0, right: 0, bottom: 0,
-            child: IgnorePointer(
-              child: FractionallySizedBox(
-                alignment: Alignment.bottomCenter,
-                heightFactor: 0.4,
-                widthFactor: 1.0,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end:   Alignment.bottomCenter,
-                      colors: [
-                        Color(0x00000000),
-                        Color(0x73000000),
-                        Color(0xBF000000),
-                      ],
-                      stops: [0.0, 0.6, 1.0],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-
           // ③ Pastille statut (top-left) — masquée si !showStockBadge.
           if (showStockBadge)
             Positioned(
@@ -217,14 +194,16 @@ class ProductGridCard extends StatelessWidget {
               ),
             ),
 
-          // ⑦ Bloc texte bas — Padding fromLTRB(12, 24, 12, 10).
-          //    Le 24 top est crucial pour que le nom ne soit pas collé
-          //    au haut visible du dégradé. NE PAS RÉDUIRE.
+          // ⑦ Bandeau bas plein opaque (overlay noir 70 %) — remplace
+          //    l'ancien dégradé pour garantir la lisibilité du texte
+          //    produit dans tous les cas (image claire / foncée / dorée
+          //    indifférent). Hauteur AUTO calée sur le contenu.
           Positioned(
             left: 0, right: 0, bottom: 0,
             child: IgnorePointer(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 24, 12, 10),
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.7),
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                 child: _BottomTextBlock(product: product, l: l),
               ),
             ),
