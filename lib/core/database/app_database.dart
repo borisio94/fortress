@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 import '../config/supabase_config.dart';
+import '../services/notification_service.dart';
 import '../storage/hive_boxes.dart';
 import '../storage/local_storage_service.dart';
 import '../../features/auth/domain/entities/user.dart';
@@ -12,6 +13,7 @@ import '../../features/shop_selector/domain/entities/shop_summary.dart';
 import '../../features/inventaire/domain/entities/product.dart';
 import '../../features/inventaire/domain/entities/stock_location.dart';
 import '../../features/inventaire/domain/entities/stock_level.dart';
+import '../../features/inventaire/domain/entities/stock_movement.dart';
 import '../../features/inventaire/domain/entities/stock_transfer.dart';
 import '../../features/crm/domain/entities/client.dart';
 import '../../features/expenses/domain/entities/expense.dart';
@@ -62,6 +64,44 @@ class AppDatabase {
   final Map<String, int> _recentLocalProductWrites = {};
   static const int _localWriteEchoWindowMs = 10000;
 
+  /// Échos temporels pour les `stock_levels` — même rôle que pour les
+  /// produits, mais clé = `lvl.id` (déterministe via `_stockLevelId`).
+  ///
+  /// Pourquoi : un transfert local fait 2-3 écritures stock_levels via
+  /// `saveStockLevel` (débit source + crédit destination, +éventuellement
+  /// shop fallback). Le `_bgWrite` Supabase est asynchrone. Si un
+  /// `syncStockLevels` ou un `_syncShopStockLevelsFromProduct` arrive
+  /// pendant que le bgWrite est en route, il peut récupérer la valeur
+  /// remote périmée et écraser la valeur locale toute fraîche → on perd
+  /// le décrément du transfert (= « stock reste à l'ancien emplacement »).
+  ///
+  /// Pour résister à un reload navigateur (web) ou à un cold start mobile,
+  /// la map est aussi **persistée dans settingsBox** sous la clé
+  /// `_kStockLevelEchoKey`. Au boot, on la recharge ; à chaque
+  /// `saveStockLevel`, on la flush. TTL = 1 h (au-delà on accepte que
+  /// Supabase soit la source de vérité).
+  final Map<String, int> _recentLocalStockLevelWrites = {};
+
+  /// Tombstones persistants des produits supprimés localement mais dont
+  /// la propagation Supabase peut ne pas être encore confirmée (DELETE
+  /// en queue, RLS rejet, conflit avec un push concurrent d'un autre
+  /// device, etc.).
+  ///
+  /// Sans ça, le scénario suivant ressuscite un produit supprimé :
+  ///   1. User supprime P1 sur device A → Hive delete + queue DELETE
+  ///   2. Pendant l'envoi, device B push un UPDATE pour P1 (snapshot
+  ///      antérieur à la suppression) → Supabase réapparait avec P1
+  ///   3. Realtime notifie device A « P1 inséré » → A le réintroduit
+  ///      en Hive → user voit P1 ressusciter sans raison
+  ///
+  /// La présence d'un id dans cette set bloque toute réinsertion locale
+  /// par `syncProducts` ou `_onProductChange`. TTL 7 jours (largement
+  /// suffisant pour la convergence multi-device).
+  static const String _kDeletedProductsKey = '_deleted_products_pending';
+  static const int _kDeletedProductsTtlMs = 7 * 24 * 60 * 60 * 1000;
+  static const String _kStockLevelEchoKey = '_recent_stock_level_writes';
+  static const int _kStockLevelEchoTtlMs = 60 * 60 * 1000;
+
   static void addListener(OnDataChanged cb)    => _i._listeners.add(cb);
   static void removeListener(OnDataChanged cb) => _i._listeners.remove(cb);
   static void notifyOrderChange(String shopId) => _notify('orders', shopId);
@@ -72,11 +112,11 @@ class AppDatabase {
   static void notifyAllChanged() {
     final shopIds = <String>{};
     for (final v in HiveBoxes.productsBox.values) {
-      final sid = (v is Map ? v['store_id'] : null) as String?;
+      final sid = v['store_id'] as String?;
       if (sid != null) shopIds.add(sid);
     }
     for (final v in HiveBoxes.ordersBox.values) {
-      final sid = (v is Map ? v['shop_id'] : null) as String?;
+      final sid = v['shop_id'] as String?;
       if (sid != null) shopIds.add(sid);
     }
     // Même si les boxes sont vides, notifier avec un shopId "global"
@@ -192,7 +232,116 @@ class AppDatabase {
         r == ConnectivityResult.mobile ||
         r == ConnectivityResult.ethernet);
     _i._listenConnectivity();
+    // Purge unique des entrées notifications au format historique
+    // (id aléatoire pré-déterministe). Cf. NotificationService.notify
+    // qui utilise désormais `kind|targetId|shopId` pour écraser au lieu
+    // d'accumuler à chaque relance.
+    NotificationService.purgeLegacyEntries();
+    // Recharger les marqueurs anti-stale persistants (survivent au reload)
+    // et purger ceux trop vieux pour rester pertinents.
+    await _bootstrapAntiStaleMarkers();
+    // Purge opportuniste des `sync_errors` au démarrage : si la queue
+    // est vide et qu'aucune op critique n'est bloquée, les erreurs
+    // journalisées sont par définition résolues — pas la peine de
+    // garder la bannière "Synchro incomplète" affichée jusqu'à
+    // expiration 24 h chez un utilisateur qui ferme/rouvre l'app.
+    try {
+      if (HiveBoxes.offlineQueueBox.isEmpty && stuckCriticalOpsCount == 0) {
+        await clearSyncErrors();
+      }
+    } catch (_) {/* best effort */}
     debugPrint('[DB] Init — online: ${_i._isOnline}');
+  }
+
+  /// Charge les tombstones de produits supprimés et les échos
+  /// stock_levels persistés depuis settingsBox vers la map en mémoire.
+  /// Purge les entrées expirées au passage (TTL 7j produits, 1h stock).
+  static Future<void> _bootstrapAntiStaleMarkers() async {
+    try {
+      final box = HiveBoxes.settingsBox;
+      final now = DateTime.now().millisecondsSinceEpoch;
+
+      // Stock level echoes : recharger en mémoire (filtre TTL).
+      final rawSL = box.get(_kStockLevelEchoKey);
+      if (rawSL is Map) {
+        for (final e in rawSL.entries) {
+          final ts = e.value is num ? (e.value as num).toInt() : 0;
+          if (now - ts < _kStockLevelEchoTtlMs) {
+            _i._recentLocalStockLevelWrites[e.key.toString()] = ts;
+          }
+        }
+        // Réécrire la version compactée pour la prochaine session.
+        await box.put(_kStockLevelEchoKey,
+            Map<String, int>.from(_i._recentLocalStockLevelWrites));
+      }
+
+      // Tombstones produits : purge des entrées expirées.
+      final rawDel = box.get(_kDeletedProductsKey);
+      if (rawDel is Map) {
+        final m = Map<String, dynamic>.from(rawDel);
+        m.removeWhere((_, ts) => ts is! num
+            || now - ts.toInt() > _kDeletedProductsTtlMs);
+        await box.put(_kDeletedProductsKey, m);
+        debugPrint('[DB] Tombstones produits actifs: ${m.length}');
+      }
+    } catch (e) {
+      debugPrint('[DB] _bootstrapAntiStaleMarkers error: $e');
+    }
+  }
+
+  /// Marque un produit comme supprimé localement. Empêche `syncProducts`
+  /// et `_onProductChange` realtime de le ressusciter avant que le DELETE
+  /// remote ait propagé. TTL 7j.
+  static Future<void> _markProductDeletionPending(String productId) async {
+    try {
+      final box = HiveBoxes.settingsBox;
+      final raw = box.get(_kDeletedProductsKey);
+      final m = raw is Map
+          ? Map<String, dynamic>.from(raw)
+          : <String, dynamic>{};
+      m[productId] = DateTime.now().millisecondsSinceEpoch;
+      await box.put(_kDeletedProductsKey, m);
+    } catch (e) {
+      debugPrint('[DB] _markProductDeletionPending error: $e');
+    }
+  }
+
+  /// Le produit est-il marqué pour suppression en attente de propagation ?
+  static bool _isProductDeletionPending(String productId) {
+    try {
+      final raw = HiveBoxes.settingsBox.get(_kDeletedProductsKey);
+      if (raw is! Map) return false;
+      final ts = raw[productId];
+      if (ts is! num) return false;
+      final age = DateTime.now().millisecondsSinceEpoch - ts.toInt();
+      return age < _kDeletedProductsTtlMs;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Retire le tombstone d'un produit (typiquement après confirmation que
+  /// la suppression a propagé via realtime DELETE).
+  static Future<void> _clearProductDeletionPending(String productId) async {
+    try {
+      final box = HiveBoxes.settingsBox;
+      final raw = box.get(_kDeletedProductsKey);
+      if (raw is! Map) return;
+      final m = Map<String, dynamic>.from(raw);
+      if (m.remove(productId) != null) {
+        await box.put(_kDeletedProductsKey, m);
+      }
+    } catch (_) {/* best effort */}
+  }
+
+  /// Persiste la map des échos stock_levels après chaque écriture.
+  /// Coût négligeable (Hive est sync rapide) et évite la perte au reload.
+  static Future<void> _persistStockLevelEchoes() async {
+    try {
+      await HiveBoxes.settingsBox.put(
+          _kStockLevelEchoKey,
+          Map<String, int>.from(_i._recentLocalStockLevelWrites));
+    } catch (_) {/* best effort */}
   }
 
   void _listenConnectivity() {
@@ -236,8 +385,17 @@ class AppDatabase {
         await syncReceptions(shopId);
         await syncPurchaseOrders(shopId);
         await syncStockArrivals(shopId);
-        _notify('products', shopId);
-        _notify('clients',  shopId);
+        await syncDeliveryTransfers(shopId);
+        await syncPartnerLedger(shopId);
+        await syncStockLocations();
+        await syncStockLevels(shopId);
+        _notify('products',     shopId);
+        _notify('clients',      shopId);
+        _notify('stock_levels', shopId);
+        // Rejoue les alertes stock après resync — les changements survenus
+        // pendant l'offline arrivent en bloc via syncProducts (pas via
+        // Realtime), donc _emitStockNotification ne s'est pas déclenché.
+        scanStockNotifications(shopId);
         debugPrint('[DB] Re-sync après reconnexion: $shopId');
       } catch (e) {
         debugPrint('[DB] Re-sync erreur: $e');
@@ -379,6 +537,29 @@ class AppDatabase {
             column: 'shop_id', value: shopId),
         callback: (p) => _i._onTablePassthroughChange(
             p, HiveBoxes.stockArrivalsBox, 'stock_arrivals', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'partner_ledger_entries',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.partnerLedgerBox,
+            'partner_ledger_entries', shopId))
+        // ── Tickets de messagerie (phase 4 + notifs cloche) ────────────
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'shop_tickets',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTicketChange(p, shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public', table: 'shop_ticket_messages',
+        // Pas de filtre direct sur shop_id (la table n'a pas ce champ) ;
+        // on filtre côté callback via le ticket associé.
+        callback: (p) => _i._onTicketMessageChange(p, shopId))
         .subscribe((status, [err]) =>
         debugPrint('[DB] Realtime $shopId: $status${err != null ? " err=$err" : ""}'));
 
@@ -389,10 +570,29 @@ class AppDatabase {
     _i._channels.remove(shopId)?.unsubscribe();
   }
 
+  /// Pull complet déclenchable depuis l'UI (pull-to-refresh) — variante
+  /// publique de `_initialPullForShop`. À utiliser depuis un
+  /// `RefreshIndicator.onRefresh`. Awaitable, pour que le spinner
+  /// natif disparaisse à la fin.
+  static Future<void> pullAllForShop(String shopId) =>
+      _initialPullForShop(shopId);
+
   /// Pull initial de toutes les tables métier pour une boutique.
   /// Appelé au `subscribeToShop` — idempotent, safe à rappeler.
   /// Fire-and-forget : n'attend pas, ne bloque pas l'UI.
   static Future<void> _initialPullForShop(String shopId) async {
+    // stock_locations + stock_levels en TÊTE DE FILE : si un sync ultérieur
+    // (typiquement syncProducts → migrateShopStocksToLocationsV1) hang sur
+    // web, on ne perd pas la sync des niveaux de stock partenaires —
+    // requis pour que le filtre « Vue partenaire » affiche les produits
+    // transférés depuis un autre appareil.
+    try {
+      await syncStockLocations();
+    } catch (e) { debugPrint('[DB] initial syncStockLocations: $e'); }
+    try {
+      await syncStockLevels(shopId);
+      _notify('stock_levels', shopId);
+    } catch (e) { debugPrint('[DB] initial syncStockLevels: $e'); }
     try {
       await syncClients(shopId);
       _notify('clients', shopId);
@@ -400,6 +600,10 @@ class AppDatabase {
     try {
       await syncProducts(shopId);
       _notify('products', shopId);
+      // Une fois les produits synchronisés, on rejoue les alertes stock pour
+      // les produits déjà bas/épuisés (le Realtime ne notifie que les changements
+      // futurs).
+      scanStockNotifications(shopId);
     } catch (e) { debugPrint('[DB] initial syncProducts: $e'); }
     try {
       await syncOrders(shopId);
@@ -431,6 +635,12 @@ class AppDatabase {
       await syncStockArrivals(shopId);
     } catch (e) { debugPrint('[DB] initial syncStockArrivals: $e'); }
     try {
+      await syncDeliveryTransfers(shopId);
+    } catch (e) { debugPrint('[DB] initial syncDeliveryTransfers: $e'); }
+    try {
+      await syncPartnerLedger(shopId);
+    } catch (e) { debugPrint('[DB] initial syncPartnerLedger: $e'); }
+    try {
       await syncActivityLogs(shopId);
       _notify('activity_logs', shopId);
     } catch (e) { debugPrint('[DB] initial syncActivityLogs: $e'); }
@@ -444,6 +654,13 @@ class AppDatabase {
           final prod = _supabaseToProduct(p.newRecord);
           if (prod.id != null) {
             final id = prod.id!;
+            // Tombstone : produit supprimé localement, on ignore tout
+            // INSERT/UPDATE remote tant que la propagation DELETE n'a
+            // pas convergé (TTL 7j). Évite la résurrection silencieuse.
+            if (_isProductDeletionPending(id)) {
+              debugPrint('[DB] ⏭️ realtime tombstone product=$id');
+              break;
+            }
             // Anti-stale realtime v2 : check `row_version` (cf. migration
             // 015). Plus fiable que la fenêtre temporelle car insensible
             // au timing d'arrivée des events.
@@ -482,15 +699,76 @@ class AppDatabase {
             // Phase 5 : les écritures realtime n'allaient pas dans le
             // pipeline saveProduct, donc le StockLevel shop ne suivait pas.
             await _syncShopStockLevelsFromProduct(prod);
+            _emitStockNotification(prod, shopId);
           }
         case PostgresChangeEvent.delete:
           final id = p.oldRecord['id'] as String?;
-          if (id != null) await HiveBoxes.productsBox.delete(id);
+          if (id != null) {
+            await HiveBoxes.productsBox.delete(id);
+            // La suppression a propagé côté Supabase → on peut retirer
+            // le tombstone (au-delà, il aurait expiré via TTL de toute
+            // façon, mais on libère la map plus tôt).
+            await _clearProductDeletionPending(id);
+          }
         default: break;
       }
       _notify('products', shopId);
     } catch (e) {
       debugPrint('[DB] Erreur onProductChange: $e');
+    }
+  }
+
+  /// Parcourt les produits en cache d'une boutique et émet une notif pour
+  /// chaque produit en rupture / stock bas. Utile au démarrage et après
+  /// reconnexion : sans ce scan, seuls les changements Realtime futurs
+  /// déclenchent `_emitStockNotification`. Le dédup 60s côté `NotificationService`
+  /// empêche les doublons si le scan est rappelé.
+  static void scanStockNotifications(String shopId) {
+    if (!NotificationService.enabledForCurrentUser.value) return;
+    try {
+      final products = getProductsForShop(shopId);
+      for (final p in products) {
+        _i._emitStockNotification(p, shopId);
+      }
+    } catch (e) {
+      debugPrint('[DB] scanStockNotifications: $e');
+    }
+  }
+
+  /// `true` si l'utilisateur courant a un rôle admin/owner sur ce shop —
+  /// porte d'entrée pour les notifs stock et orders qui ne sont pas
+  /// pertinentes pour les vendeurs (rôle 'user').
+  bool _isAdminOrOwner(String shopId) {
+    final uid = _userId;
+    if (uid == null) return false;
+    final role = _roleOf(shopId, uid);
+    if (role == 'admin' || role == 'owner') return true;
+    return LocalStorageService.getShop(shopId)?.ownerId == uid;
+  }
+
+  /// Émet une notification stock bas / épuisé selon le stock total et
+  /// le seuil d'alerte. Le `NotificationService` dédoublonne sur 60s.
+  void _emitStockNotification(Product prod, String shopId) {
+    if (!NotificationService.enabledForCurrentUser.value) return;
+    if (!_isAdminOrOwner(shopId)) return;
+    final stock     = prod.totalStock;
+    final threshold = prod.stockMinAlert;
+    if (stock <= 0) {
+      NotificationService.notify(
+        kind:    NotifKind.stockOut,
+        title:   '🚫 Stock épuisé',
+        message: '${prod.name} · Réapprovisionner',
+        shopId:   shopId,
+        targetId: prod.id,
+      );
+    } else if (threshold > 0 && stock <= threshold) {
+      NotificationService.notify(
+        kind:    NotifKind.stockLow,
+        title:   '⚠ Stock bas',
+        message: '${prod.name} · Stock : $stock',
+        shopId:   shopId,
+        targetId: prod.id,
+      );
     }
   }
 
@@ -532,14 +810,26 @@ class AppDatabase {
     try {
       final box  = HiveBoxes.offlineQueueBox;
       final keys = box.keys.toList();
-      if (keys.isEmpty) return;
+      if (keys.isEmpty) {
+        // Bug "bannière Synchro incomplète à vie" : sans cette purge,
+        // d'anciennes `sync_errors` (FK 23503, perm 42501, abandons après
+        // 10 retries…) restaient affichées jusqu'à expiration 24 h car
+        // le bloc de purge en fin de flush était court-circuité par ce
+        // early-return. On purge ici aussi quand la queue est déjà vide
+        // au moment du flush — tant qu'aucune op critique n'est bloquée,
+        // ces erreurs sont par définition résolues.
+        if (stuckCriticalOpsCount == 0) {
+          await clearSyncErrors();
+        }
+        return;
+      }
       debugPrint('[DB] 🚀 Flush ${keys.length} ops en attente');
 
       for (final key in keys) {
         final raw = box.get(key);
         if (raw == null) { await box.delete(key); continue; }
 
-        final op  = Map<String, dynamic>.from(raw as Map);
+        final op  = Map<String, dynamic>.from(raw);
         final retries = (op['_retries'] as int?) ?? 0;
         final table   = op['table'] as String? ?? '';
 
@@ -585,6 +875,15 @@ class AppDatabase {
       }
       debugPrint('[DB] ✅ Flush terminé: $success succès, $failed échecs, $skipped abandonnés');
       if (success > 0) notifyAllChanged();
+
+      // Si la queue est entièrement vide et qu'aucune op critique n'est
+      // bloquée, on purge les erreurs journalisées : elles sont par
+      // définition résolues (l'op a soit été rejouée avec succès, soit
+      // abandonnée). Sans ça, la bannière "Synchro incomplète" reste
+      // affichée à vie sur d'anciennes erreurs déjà traitées.
+      if (HiveBoxes.offlineQueueBox.isEmpty && stuckCriticalOpsCount == 0) {
+        await clearSyncErrors();
+      }
     } finally {
       _i._syncing = false;
     }
@@ -616,7 +915,7 @@ class AppDatabase {
     for (final key in box.keys.toList()) {
       final raw = box.get(key);
       if (raw == null) continue;
-      final op = Map<String, dynamic>.from(raw as Map);
+      final op = Map<String, dynamic>.from(raw);
       op.remove('_retries');
       op.remove('_last_retry');
       await box.put(key, op);
@@ -624,12 +923,44 @@ class AppDatabase {
     debugPrint('[DB] 🔄 Retries réinitialisés: ${box.length} ops prêtes');
   }
 
-  /// Lire les erreurs de sync journalisées
+  /// Lire les erreurs de sync journalisées (filtrées : on ignore les
+  /// entrées de plus de 24 h pour que la bannière "Synchro incomplète"
+  /// finisse par disparaître toute seule, même si l'utilisateur n'ouvre
+  /// jamais le sheet pour cliquer "Tout réessayer").
+  ///
+  /// Si le filtrage retire des entrées, on persiste la liste épurée en
+  /// best-effort pour éviter que `sync_errors` grossisse à l'infini
+  /// (sinon chaque appel filtre la même cargaison de vieilles entrées
+  /// sans jamais les supprimer du stockage).
   static List<Map> getSyncErrors() {
     try {
-      return List<Map>.from(
+      final all = List<Map>.from(
           (HiveBoxes.settingsBox.get('sync_errors') as List?) ?? []);
+      final cutoff = DateTime.now().subtract(const Duration(hours: 24));
+      final kept = all.where((e) {
+        final t = e['time'] as String?;
+        if (t == null) return true; // sans horodatage : on garde
+        try {
+          return DateTime.parse(t).isAfter(cutoff);
+        } catch (_) { return true; }
+      }).toList();
+      if (kept.length != all.length) {
+        try {
+          HiveBoxes.settingsBox.put('sync_errors', kept);
+        } catch (_) {/* best effort */}
+      }
+      return kept;
     } catch (_) { return []; }
+  }
+
+  /// Vide la liste des erreurs sync journalisées (purge UI). Utile après
+  /// un "Tout réessayer" réussi pour ne pas garder visibles des erreurs
+  /// désormais résolues. Les erreurs futures ré-écriront cette liste via
+  /// `_logSyncError`.
+  static Future<void> clearSyncErrors() async {
+    try {
+      await HiveBoxes.settingsBox.put('sync_errors', <Map>[]);
+    } catch (_) {/* best effort */}
   }
 
   static Future<bool> _executeOp(Map<String, dynamic> op) async {
@@ -659,8 +990,16 @@ class AppDatabase {
 
       // ── Erreurs PERMANENTES → supprimer de la queue (réessayer ne sert à rien)
       if (_isPermanentError(err)) {
-        debugPrint('[DB] Erreur permanente → supprimé de la queue');
-        _logSyncError(op, err); // journaliser pour débogage
+        // Duplicate key (23505) = idempotence normale (rejeu offline d'une op
+        // déjà appliquée par realtime, double-tap UI, etc.). On avale
+        // silencieusement, sinon la bannière "Synchro incomplète" reste
+        // affichée à vie alors que tout est cohérent côté serveur.
+        if (err.contains('23505')) {
+          debugPrint('[DB] 23505 ignoré (idempotence) → supprimé de la queue');
+        } else {
+          debugPrint('[DB] Erreur permanente → supprimé de la queue');
+          _logSyncError(op, err); // journaliser pour débogage
+        }
         return true;
       }
 
@@ -704,6 +1043,28 @@ class AppDatabase {
       final logBox = HiveBoxes.settingsBox;
       final logs = List<Map>.from(
           (logBox.get('sync_errors') as List?) ?? []);
+
+      // Déduplication par signature {table, op, val, code-erreur}.
+      // Sans ça, une RLS bloquante (42501) répétée à chaque tentative
+      // accumule des dizaines de doublons dans la liste — la bannière
+      // "Synchro incomplète" donne l'impression que des dizaines d'ops
+      // distinctes échouent alors qu'il s'agit toujours de la même.
+      // On extrait juste le code Postgres (5 chiffres) pour la signature,
+      // pour ne pas être sensible aux variations de message (timestamps, ids).
+      final codeMatch = RegExp(r'\b(\d{5})\b').firstMatch(error);
+      final codeKey = codeMatch?.group(1) ?? error.substring(
+          0, error.length > 60 ? 60 : error.length);
+      final sig = '${op['table']}|${op['op']}|${op['val']}|$codeKey';
+      logs.removeWhere((e) {
+        final eCodeMatch = RegExp(r'\b(\d{5})\b').firstMatch(
+            e['error']?.toString() ?? '');
+        final eCodeKey = eCodeMatch?.group(1) ?? (e['error']?.toString() ?? '')
+            .substring(0, ((e['error']?.toString() ?? '').length > 60
+                ? 60 : (e['error']?.toString() ?? '').length));
+        final eSig = '${e['table']}|${e['op']}|${e['val']}|$eCodeKey';
+        return eSig == sig;
+      });
+
       logs.add({
         'table':  op['table'],
         'op':     op['op'],
@@ -730,7 +1091,7 @@ class AppDatabase {
     var n = 0;
     for (final raw in HiveBoxes.offlineQueueBox.values) {
       try {
-        final m = Map<String, dynamic>.from(raw as Map);
+        final m = Map<String, dynamic>.from(raw);
         final table = m['table'] as String? ?? '';
         final retries = (m['_retries'] as int?) ?? 0;
         if (criticalTables.contains(table) && retries >= 10) n++;
@@ -754,6 +1115,13 @@ class AppDatabase {
   /// jamais perdus en mode hors-ligne.
   static void bgInsert(String table, Map<String, dynamic> data) {
     _bgWrite({'table': table, 'op': 'insert', 'data': data});
+  }
+
+  /// Supprime une ligne par sa clé via la file offline.
+  /// Utilisé pour les services Hive-first qui doivent répliquer un delete.
+  static void bgDelete(String table, {String col = 'id', required dynamic val}) {
+    _bgWrite({'table': table, 'op': 'delete', 'col': col, 'val': val,
+              'data': const {}});
   }
 
 
@@ -1045,6 +1413,7 @@ end \$\$;""",
         todaySales: cached.todaySales, ownerId: cached.ownerId,
         phone: cached.phone, email: cached.email,
         createdAt: cached.createdAt, members: cached.members,
+        kind: cached.kind, parentShopId: cached.parentShopId,
       );
       await LocalStorageService.saveShop(updated);
     }
@@ -1095,8 +1464,25 @@ end \$\$;""",
 
   // ══ PRODUITS ══════════════════════════════════════════════════════
 
-  static Future<void> saveProduct(Product p, {bool skipValidation = false}) async {
+  static Future<void> saveProduct(Product p, {
+    bool skipValidation = false,
+    bool skipStockLog   = false,
+    bool forceStockLevelSync = false,
+  }) async {
     if (p.id == null) return;
+
+    // 0bis. Cohérence stockQty ↔ variantes : quand un produit a des variantes,
+    //       son stockQty (champ persisté + Supabase) DOIT être la somme des
+    //       stockAvailable. Sinon les écrans qui lisent stockQty (au lieu du
+    //       getter totalStock) divergent du total réel — typiquement après
+    //       une vente, une arrivée ou une édition de variantes via
+    //       StockService._saveVariant qui ne touche pas stockQty.
+    if (p.variants.isNotEmpty) {
+      final sum = p.variants.fold<int>(0, (s, v) => s + v.stockAvailable);
+      if (sum != p.stockQty) {
+        p = p.copyWith(stockQty: sum);
+      }
+    }
 
     // 0. Validation unicité (SKU + nom) — seulement si online et pas skippée
     if (!skipValidation && _i._isOnline) {
@@ -1107,6 +1493,14 @@ end \$\$;""",
     if (!skipValidation) {
       _validateLocalUniqueness(p);
     }
+
+    // 1bis. Diff stock AVANT le put — détecte les ajustements manuels via
+    //       product_form (ou autres call sites). Ce log permet à l'historique
+    //       de tracer l'origine de chaque variation, complémentaire des
+    //       logs ventes/transferts/réceptions/incidents déjà émis ailleurs.
+    final stockDiffs = !skipStockLog
+        ? _computeStockDiffs(p)
+        : const <_StockDiff>[];
 
     // 2. Hive IMMÉDIATEMENT — retour UI instantané.
     //    Invalidation synchrone du cache produits AVANT le `put` : sinon
@@ -1134,7 +1528,97 @@ end \$\$;""",
     //    variantes. Couvre ventes, arrivées, incidents, ajustements, retours,
     //    création/édition produit, etc. — tous passent par saveProduct.
     if (p.storeId != null) {
-      await _syncShopStockLevelsFromProduct(p);
+      await _syncShopStockLevelsFromProduct(p, force: forceStockLevelSync);
+    }
+
+    // 6. Persister les mouvements de stock détectés au step 1bis.
+    //    Fait APRÈS le put pour garantir que tout consommateur lit la
+    //    version finale (pas d'incohérence read-your-write).
+    if (stockDiffs.isNotEmpty && p.storeId != null) {
+      final user = LocalStorageService.getCurrentUser();
+      for (final d in stockDiffs) {
+        final mvt = StockMovement(
+          id: 'sm_${DateTime.now().microsecondsSinceEpoch}_${d.variantId}',
+          shopId:    p.storeId!,
+          productId: p.id,
+          variantId: d.variantId,
+          type:      d.isCreation
+              ? StockMovementType.entry
+              : StockMovementType.adjustment,
+          quantity:  d.delta,
+          createdBy: user?.name,
+          createdAt: DateTime.now(),
+          notes:     d.isCreation
+              ? 'Stock initial à la création'
+              : 'Ajustement manuel via fiche produit '
+                '(${d.before} → ${d.after})',
+        );
+        try {
+          await HiveBoxes.stockMovementsBox.put(mvt.id, mvt.toMap());
+          _bgWrite({'table': 'stock_movements', 'op': 'upsert',
+              'data': mvt.toMap()});
+          _notify('stock_movements', p.storeId!);
+        } catch (e) {
+          debugPrint('[DB] saveProduct stock log error: $e');
+        }
+      }
+    }
+  }
+
+  /// Diff stockAvailable de chaque variante entre le produit déjà en Hive
+  /// et celui qu'on s'apprête à sauver. Utilisé pour générer un log
+  /// stock_movement quand un user édite un stock manuellement (cas non
+  /// couvert par les logs ventes/transferts/réceptions automatiques).
+  static List<_StockDiff> _computeStockDiffs(Product p) {
+    if (p.id == null) return const [];
+    final out = <_StockDiff>[];
+    final existingRaw = HiveBoxes.productsBox.get(p.id!);
+    if (existingRaw == null) {
+      // Création : tout stock initial > 0 = entrée.
+      for (final v in p.variants) {
+        if (v.id == null || v.id!.isEmpty) continue;
+        if (v.stockAvailable > 0) {
+          out.add(_StockDiff(
+              variantId: v.id!,
+              before: 0, after: v.stockAvailable,
+              isCreation: true));
+        }
+      }
+      return out;
+    }
+    try {
+      final existing = LocalStorageService.productFromMap(
+          Map<String, dynamic>.from(existingRaw));
+      final beforeByVid = <String, int>{};
+      for (final v in existing.variants) {
+        if (v.id != null) beforeByVid[v.id!] = v.stockAvailable;
+      }
+      for (final v in p.variants) {
+        if (v.id == null || v.id!.isEmpty) continue;
+        final before = beforeByVid[v.id!] ?? 0;
+        final after  = v.stockAvailable;
+        if (before == after) continue;
+        out.add(_StockDiff(
+            variantId: v.id!,
+            before: before, after: after,
+            isCreation: !beforeByVid.containsKey(v.id!)));
+      }
+    } catch (_) {/* ignore — pas de log si on ne peut pas diff */}
+    return out;
+  }
+
+  /// Force `is_visible_web=true` sur une liste de produits.
+  /// Utilisé par le partage catalogue WhatsApp pour s'assurer que la RLS
+  /// publique (`products_anon_read_visible_web`) laissera passer la lecture
+  /// anonyme via le lien partagé. Update Hive immédiat + push Supabase
+  /// en arrière-plan via la file offline.
+  static Future<void> markProductsVisibleWeb(List<Product> products) async {
+    if (products.isEmpty) return;
+    for (final p in products) {
+      if (p.id == null || p.isVisibleWeb) continue;
+      final updated = p.copyWith(isVisibleWeb: true);
+      // saveProduct fait Hive + bgWrite + sync StockLevels — tout en un.
+      await saveProduct(updated, skipValidation: true);
     }
   }
 
@@ -1142,17 +1626,38 @@ end \$\$;""",
   /// correspondant à la boutique (location type=shop).
   /// Crée le StockLevel s'il n'existe pas. Silencieux si la boutique
   /// n'a pas encore de shopLocation (cas d'une boutique créée hors migration).
-  static Future<void> _syncShopStockLevelsFromProduct(Product p) async {
+  static Future<void> _syncShopStockLevelsFromProduct(Product p,
+      {bool force = false}) async {
     final shopId = p.storeId;
     if (shopId == null) return;
     final shopLoc = getShopLocation(shopId);
     if (shopLoc == null) return;
 
     final now = DateTime.now();
+    final nowMs = now.millisecondsSinceEpoch;
     for (final v in p.variants) {
       final vid = v.id;
       if (vid == null || vid.isEmpty) continue;
       final lvlId = _stockLevelId(vid, shopLoc.id);
+      // Anti-stale persistant : si on a écrit ce StockLevel localement
+      // dans le TTL `_kStockLevelEchoTtlMs` (1 h, persisté en settingsBox),
+      // ne pas écraser depuis la variante — la valeur fraîche reste la
+      // nôtre. Sans ça, un pull syncProducts immédiat après un transfert
+      // undo le décrément côté StockLevel boutique (= « stock reste à
+      // l'ancien emplacement »).
+      // EXCEPTION : `force=true` (édition utilisateur explicite via la
+      // fiche produit) bypass cet anti-stale — l'utilisateur a délibéré-
+      // ment redéfini le stock, sa valeur PRIME sur tout transfert récent.
+      // Sans ça, l'écran "vue boutique" restait sur l'ancien StockLevel
+      // alors que `variant.stockAvailable` venait d'être mise à jour →
+      // « stock global > somme variantes » visuel.
+      if (!force) {
+        final recentMs = _i._recentLocalStockLevelWrites[lvlId];
+        if (recentMs != null
+            && nowMs - recentMs < _kStockLevelEchoTtlMs) {
+          continue;
+        }
+      }
       final existingRaw = HiveBoxes.stockLevelsBox.get(lvlId);
 
       if (existingRaw != null) {
@@ -1202,7 +1707,7 @@ end \$\$;""",
 
     for (final raw in HiveBoxes.productsBox.values) {
       try {
-        final m = Map<String, dynamic>.from(raw as Map);
+        final m = Map<String, dynamic>.from(raw);
         if (m['store_id'] != shopId || m['id'] == p.id) continue;
         final variants = m['variants'] as List? ?? [];
         for (final v in variants) {
@@ -1268,7 +1773,7 @@ end \$\$;""",
     }
     bool usedInOrders = false;
     for (final orderRaw in HiveBoxes.ordersBox.values) {
-      final om = Map<String, dynamic>.from(orderRaw as Map);
+      final om = Map<String, dynamic>.from(orderRaw);
       final items = (om['items'] as List?) ?? [];
       for (final it in items) {
         final pid = (it as Map)['product_id']?.toString();
@@ -1287,6 +1792,10 @@ end \$\$;""",
 
     LocalStorageService.invalidateProductsCache();
     await HiveBoxes.productsBox.delete(productId);
+    // Tombstone persistant : empêche les sync/realtime futurs de
+    // ressusciter ce produit si la propagation Supabase a un retard ou
+    // si un autre device pousse en parallèle un snapshot pré-suppression.
+    await _markProductDeletionPending(productId);
     if (shopId != null) _notify('products', shopId);
     _bgWrite({'table': 'products', 'op': 'delete',
       'col': 'id', 'val': productId, 'data': {'id': productId}});
@@ -1315,6 +1824,13 @@ end \$\$;""",
         final p = _supabaseToProduct(row);
         if (p.id == null) { debugPrint('[DB] ⚠️ produit sans id: $row'); continue; }
         remoteIds.add(p.id!);
+        // Tombstone : on a supprimé ce produit localement mais le remote
+        // l'a (encore). Ignorer cette ligne pour ne pas le ressusciter en
+        // Hive — la queue DELETE s'en occupera côté Supabase.
+        if (_isProductDeletionPending(p.id!)) {
+          debugPrint('[DB] ⏭️ syncProducts tombstone product=${p.id}');
+          continue;
+        }
         // Anti-stale via row_version (cf. migration 015). On compare la
         // version qui revient de Supabase à celle qu'on a en cache local.
         // Si remote <= local → snapshot pull obsolète (cas typique :
@@ -1362,7 +1878,7 @@ end \$\$;""",
             .where((k) {
           final raw = HiveBoxes.productsBox.get(k);
           if (raw == null) return false;
-          final m = Map<String, dynamic>.from(raw as Map);
+          final m = Map<String, dynamic>.from(raw);
           return m['store_id'] == shopId;
         }).toList();
 
@@ -1428,6 +1944,15 @@ end \$\$;""",
       createdAt: DateTime.now(),
     );
     HiveBoxes.stockLocationsBox.put(locId, loc.toMap());
+    // Pousser aussi vers Supabase. Sans ça, tous les `stock_levels` qui
+    // référencent cette location échouent en 42501 (la sub-query RLS de
+    // stock_levels ne trouve pas la location côté serveur). Le fait que
+    // _bgWrite soit fire-and-forget convient ici : si on est offline, l'op
+    // est mise en queue et flushera dès le retour réseau, débloquant
+    // ensuite tous les stock_levels en attente.
+    _bgWrite({'table': 'stock_locations', 'op': 'upsert',
+        'data': loc.toMap()});
+    _notify('stock_locations', shopId);
     return loc;
   }
 
@@ -1476,11 +2001,44 @@ end \$\$;""",
       final rows = await _db.from('stock_locations').select()
           .eq('owner_id', userId)
           .timeout(const Duration(seconds: 10));
-      for (final row in rows as List) {
+
+      // 1. Upsert toutes les locations remote dans Hive + collecter leurs IDs.
+      final remoteIds = <String>{};
+      final list = rows as List;
+      for (final row in list) {
         final loc = StockLocation.fromMap(Map<String, dynamic>.from(row));
         await HiveBoxes.stockLocationsBox.put(loc.id, loc.toMap());
+        remoteIds.add(loc.id);
       }
-      debugPrint('[DB] syncStockLocations -> ${(rows as List).length} locations');
+
+      // 2. Purge defensive des partenaires stale en Hive : tout `partner`
+      //    qui n'est pas dans la réponse Supabase pour cet user n'a aucune
+      //    raison d'être visible. Cas typiques :
+      //      a) Le partenaire appartenait à un autre compte utilisé sur le
+      //         même device avant un logout/login (Hive n'est pas purgé).
+      //      b) Le partenaire a été supprimé sur Supabase depuis un autre
+      //         device et n'a pas été notifié à celui-ci.
+      //      c) Un ownership a changé côté serveur sans propagation locale.
+      //    On ne touche PAS aux `shop` ni aux `warehouse` (cycles de vie
+      //    différents, gérés par _ensureShopLocation et la logique dépôts).
+      final toRemove = <dynamic>[];
+      for (final key in HiveBoxes.stockLocationsBox.keys) {
+        final raw = HiveBoxes.stockLocationsBox.get(key);
+        if (raw == null) continue;
+        try {
+          final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+          if (loc.type == StockLocationType.partner
+              && !remoteIds.contains(loc.id)) {
+            toRemove.add(key);
+          }
+        } catch (_) {/* skip ligne corrompue */}
+      }
+      for (final key in toRemove) {
+        await HiveBoxes.stockLocationsBox.delete(key);
+      }
+
+      debugPrint('[DB] syncStockLocations -> ${list.length} kept, '
+          '${toRemove.length} stale partners purged');
     } catch (e) {
       debugPrint('[DB] syncStockLocations error: $e');
     }
@@ -1512,6 +2070,16 @@ end \$\$;""",
 
   static Future<void> saveStockLevel(StockLevel lvl) async {
     await HiveBoxes.stockLevelsBox.put(lvl.id, lvl.toMap());
+    // Marqueur d'écho temporel : empêche tout sync remote dans la
+    // fenêtre suivante d'écraser cette valeur (cf. _recentLocalStockLevelWrites).
+    // PERSISTÉ dans settingsBox pour survivre à un reload navigateur :
+    // sans ça, un transfert offline puis un cold start résultait en perte
+    // de l'écho, donc remote (vieux) écrasait local (frais) au prochain pull.
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    _i._recentLocalStockLevelWrites[lvl.id] = nowMs;
+    _i._recentLocalStockLevelWrites.removeWhere(
+        (_, ts) => nowMs - ts > _kStockLevelEchoTtlMs);
+    await _persistStockLevelEchoes();
     // onConflict : la table porte une contrainte unique métier
     // (variant_id, location_id). Sans ça, l'upsert se résout sur la PK id
     // et déclenche un 23505 si un row existe déjà avec mêmes
@@ -1526,16 +2094,42 @@ end \$\$;""",
     _notify('stock_levels', lvl.shopId ?? lvl.locationId);
   }
 
-  /// Pull les niveaux de stock d'une boutique depuis Supabase → Hive.
+  /// Pull les niveaux de stock visibles par l'utilisateur depuis Supabase → Hive.
+  ///
+  /// On NE filtre PAS par `shop_id` : les stock_levels des partenaires
+  /// (`StockLocation type='partner'`) ont `shop_id = NULL` car les partenaires
+  /// ne sont pas rattachés à une shop. La RLS côté Supabase filtre déjà sur
+  /// `location_id IN (locations dont l'owner est l'utilisateur)`, donc une
+  /// requête sans filtre WHERE retourne uniquement ce que l'utilisateur a
+  /// le droit de voir — boutique + partenaires.
   static Future<void> syncStockLevels(String shopId) async {
+    debugPrint('[DB] syncStockLevels shop=$shopId : start');
     try {
-      final rows = await _db.from('stock_levels').select().eq('shop_id', shopId)
+      final rows = await _db.from('stock_levels').select()
           .timeout(const Duration(seconds: 10));
-      for (final row in rows as List) {
+      final list = rows as List;
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      int skippedEcho = 0;
+      for (final row in list) {
         final lvl = StockLevel.fromMap(Map<String, dynamic>.from(row));
+        // Anti-stale persistant : si on a écrit cette ligne localement
+        // dans le TTL `_kStockLevelEchoTtlMs` (1 h), le remote est presque
+        // certainement en retard. La map est rechargée depuis settingsBox
+        // au boot, donc cet anti-stale survit à un reload navigateur ou
+        // un cold start mobile pendant qu'un bgWrite est en queue.
+        final recentMs = _i._recentLocalStockLevelWrites[lvl.id];
+        if (recentMs != null
+            && nowMs - recentMs < _kStockLevelEchoTtlMs) {
+          skippedEcho++;
+          continue;
+        }
         await HiveBoxes.stockLevelsBox.put(lvl.id, lvl.toMap());
       }
-      debugPrint('[DB] syncStockLevels shop=$shopId -> ${(rows as List).length} niveaux');
+      if (skippedEcho > 0) {
+        debugPrint('[DB] syncStockLevels shop=$shopId : '
+            '$skippedEcho ligne(s) skipped (echo écriture locale récente)');
+      }
+      debugPrint('[DB] syncStockLevels shop=$shopId -> ${list.length} niveaux');
     } catch (e) {
       debugPrint('[DB] syncStockLevels error: $e');
     }
@@ -2031,6 +2625,17 @@ end \$\$;""",
   static Future<void> syncStockArrivals(String shopId) =>
       _syncTablePassthrough(tableName: 'stock_arrivals',
           shopId: shopId, box: HiveBoxes.stockArrivalsBox);
+  /// Sync des transferts de commandes vers livreurs/partenaires (hotfix_049).
+  /// Utilisé par le filtre dashboard / commandes / finances pour scoper aux
+  /// commandes assignées à un partenaire spécifique.
+  static Future<void> syncDeliveryTransfers(String shopId) =>
+      _syncTablePassthrough(tableName: 'delivery_transfers',
+          shopId: shopId, box: HiveBoxes.deliveryTransfersBox);
+  /// Sync du livre de comptes partenaires (hotfix_062). Format Supabase
+  /// directement compatible avec Hive — passthrough.
+  static Future<void> syncPartnerLedger(String shopId) =>
+      _syncTablePassthrough(tableName: 'partner_ledger_entries',
+          shopId: shopId, box: HiveBoxes.partnerLedgerBox);
 
   /// Callback realtime pour orders. Reprend le format de `syncOrders` :
   /// inclut `fees` et `completed_at` pour éviter l'écrasement de ces
@@ -2044,6 +2649,10 @@ end \$\$;""",
           final id = p.newRecord['id']?.toString();
           if (id == null) return;
           final row = p.newRecord;
+          // Idem syncOrders : conserver TOUS les champs livraison/expédition
+          // pour préserver le snapshot de localisation côté Hive (sinon les
+          // updates realtime effacent le delivery_location_id et la commande
+          // « remonte » dans la boutique de base).
           final hiveMap = <String, dynamic>{
             'id':             id,
             'shop_id':        row['shop_id'],
@@ -2058,10 +2667,22 @@ end \$\$;""",
             'scheduled_at':   row['scheduled_at'],
             'created_at':     row['created_at'],
             'completed_at':   row['completed_at'],
+            'delivery_mode':        row['delivery_mode'],
+            'delivery_location_id': row['delivery_location_id'],
+            'delivery_person_name': row['delivery_person_name'],
+            'delivery_city':        row['delivery_city'],
+            'delivery_address':     row['delivery_address'],
+            'shipment_city':        row['shipment_city'],
+            'shipment_agency':      row['shipment_agency'],
+            'shipment_handler':     row['shipment_handler'],
+            'cancellation_reason':  row['cancellation_reason'],
+            'reschedule_reason':    row['reschedule_reason'],
+            'created_by_user_id':   row['created_by_user_id'],
             'items':          row['items'] ?? [],
             'fees':           row['fees'] ?? [],
           };
           await HiveBoxes.ordersBox.put(id, hiveMap);
+          _emitOrderNotification(p, shopId, id, row);
         case PostgresChangeEvent.delete:
           final id = p.oldRecord['id']?.toString();
           if (id != null) await HiveBoxes.ordersBox.delete(id);
@@ -2071,6 +2692,260 @@ end \$\$;""",
     } catch (e) {
       debugPrint('[DB] onOrderChange err: $e');
     }
+  }
+
+  /// Émet une notification in-app pour les évènements de commande pertinents
+  /// (nouvelle commande / completed / cancelled / rejected). Filtré au niveau
+  /// `NotificationService.enabledForCurrentUser` (admins + owners).
+  void _emitOrderNotification(PostgresChangePayload p, String shopId,
+      String id, Map<String, dynamic> row) {
+    if (!NotificationService.enabledForCurrentUser.value) return;
+    // Stock et orders restent réservés aux admins/owners — pas de spam
+    // sur la cloche d'un vendeur qui ne peut rien faire avec.
+    if (!_isAdminOrOwner(shopId)) return;
+    final status = (row['status'] as String?) ?? 'scheduled';
+    final clientName = (row['client_name'] as String?)?.trim() ?? '';
+    final amount = ((row['amount_total'] ?? row['total'] ?? 0) as num)
+        .toStringAsFixed(0);
+    final shortId = id.length > 6 ? id.substring(0, 6).toUpperCase() : id;
+
+    if (p.eventType == PostgresChangeEvent.insert) {
+      // `source` (cf. hotfix_047) : permet d'afficher un badge canal
+      // (Web / WhatsApp) dans le panel cloche.
+      final src = (row['source'] as String?) ?? 'pos';
+      NotificationService.notify(
+        kind:    NotifKind.orderNew,
+        title:   src == 'web' ? 'Nouvelle commande web' : 'Nouvelle commande',
+        message: 'Commande #$shortId · $amount XAF',
+        shopId:   shopId,
+        targetId: id,
+        source:   src,
+      );
+      return;
+    }
+    if (p.eventType == PostgresChangeEvent.update) {
+      // Ne notifier que si le status a changé.
+      final oldStatus = (p.oldRecord['status'] as String?) ?? '';
+      if (oldStatus == status) return;
+      switch (status) {
+        case 'completed':
+          NotificationService.notify(
+            kind:    NotifKind.orderCompleted,
+            title:   'Commande terminée',
+            message: '#$shortId · ${clientName.isEmpty ? '—' : clientName}',
+            shopId:   shopId,
+            targetId: id,
+          );
+          break;
+        case 'cancelled':
+          NotificationService.notify(
+            kind:    NotifKind.orderCancelled,
+            title:   'Commande annulée',
+            message: '#$shortId · ${clientName.isEmpty ? '—' : clientName}',
+            shopId:   shopId,
+            targetId: id,
+          );
+          break;
+        case 'rejected':
+        case 'refused':
+          NotificationService.notify(
+            kind:    NotifKind.orderRejected,
+            title:   'Commande rejetée',
+            message: '#$shortId · ${clientName.isEmpty ? '—' : clientName}',
+            shopId:   shopId,
+            targetId: id,
+          );
+          break;
+      }
+    }
+  }
+
+  // ══ TICKETS — callbacks realtime + notifs cloche ══════════════════
+  //
+  // Logique de routage des notifs selon le rôle de l'utilisateur courant :
+  //   * `ticketNew`        → admins/owners de la shop quand un membre
+  //                          ouvre un ticket (current_level='admin').
+  //   * `ticketEscalated`  → owner quand un ticket monte à 'owner' ;
+  //                          super_admin quand il monte à 'super_admin'.
+  //   * `ticketReply`      → toute personne « impliquée » dans le ticket
+  //                          (auteur du ticket OU admin/owner de la shop)
+  //                          sauf l'auteur du message lui-même.
+  //
+  // Le filtre `enabledForCurrentUser` continue de gater l'insertion. Les
+  // ids déterministes côté `NotificationService` empêchent les doublons.
+
+  Future<void> _onTicketChange(
+      PostgresChangePayload p, String shopId) async {
+    try {
+      // Mise à jour cache Hive (read-through pour les widgets locaux).
+      switch (p.eventType) {
+        case PostgresChangeEvent.insert:
+        case PostgresChangeEvent.update:
+          final id = p.newRecord['id']?.toString();
+          if (id == null) return;
+          await HiveBoxes.shopTicketsBox.put(id,
+              Map<String, dynamic>.from(p.newRecord));
+        case PostgresChangeEvent.delete:
+          final id = p.oldRecord['id']?.toString();
+          if (id != null) await HiveBoxes.shopTicketsBox.delete(id);
+        default: break;
+      }
+      _notify('shop_tickets', shopId);
+      _emitTicketNotification(p, shopId);
+    } catch (e) {
+      debugPrint('[DB] onTicketChange err: $e');
+    }
+  }
+
+  Future<void> _onTicketMessageChange(
+      PostgresChangePayload p, String shopId) async {
+    try {
+      if (p.eventType != PostgresChangeEvent.insert) return;
+      final row = p.newRecord;
+      final id  = row['id']?.toString();
+      final ticketId = row['ticket_id']?.toString();
+      if (id == null || ticketId == null) return;
+      // Vérifier que le ticket appartient bien au shop courant (ce canal).
+      final raw = HiveBoxes.shopTicketsBox.get(ticketId);
+      if (raw is! Map) return;
+      final ticketShop = raw['shop_id']?.toString();
+      if (ticketShop != shopId) return;
+      // Cache Hive du message.
+      await HiveBoxes.ticketMessagesBox.put(id,
+          Map<String, dynamic>.from(row));
+      _notify('shop_ticket_messages', shopId);
+      _emitTicketReplyNotification(row, raw, shopId);
+    } catch (e) {
+      debugPrint('[DB] onTicketMessageChange err: $e');
+    }
+  }
+
+  /// Émet `ticketNew` (sur INSERT) ou `ticketEscalated` (sur UPDATE quand
+  /// `current_level` a changé), filtré au rôle de l'utilisateur courant.
+  void _emitTicketNotification(PostgresChangePayload p, String shopId) {
+    if (!NotificationService.enabledForCurrentUser.value) return;
+    final myUid = _userId;
+    if (myUid == null) return;
+
+    final row     = p.newRecord;
+    final id      = row['id']?.toString() ?? '';
+    final subject = (row['subject'] as String?)?.trim() ?? 'Ticket';
+    final level   = (row['current_level'] as String?) ?? 'admin';
+    final opener  = (row['opened_by']     as String?) ?? '';
+
+    // Le rôle est déterminé par les memberships locales — déjà synchronisées
+    // au login. Owner peut être détecté soit par membership='owner' soit
+    // via shops.owner_id.
+    final myRole = _roleOf(shopId, myUid);
+    final isOwner = myRole == 'owner'
+        || LocalStorageService.getShop(shopId)?.ownerId == myUid;
+
+    if (p.eventType == PostgresChangeEvent.insert) {
+      // ticketNew — seuls admins/owners reçoivent ; le créateur ne se
+      // notifie pas lui-même.
+      if (opener == myUid) return;
+      final isAdmin = myRole == 'admin' || isOwner;
+      if (!isAdmin) return;
+      NotificationService.notify(
+        kind:     NotifKind.ticketNew,
+        title:    'Nouveau ticket',
+        message:  subject,
+        shopId:   shopId,
+        targetId: id,
+      );
+      return;
+    }
+
+    if (p.eventType == PostgresChangeEvent.update) {
+      // Détection du saut de niveau via comparaison newRecord/oldRecord.
+      final oldLevel = (p.oldRecord['current_level'] as String?) ?? '';
+      if (oldLevel == level) return; // pas un changement de niveau
+      // ticketEscalated — destinataire = porteur du nouveau niveau.
+      if (level == 'owner' && isOwner) {
+        NotificationService.notify(
+          kind:     NotifKind.ticketEscalated,
+          title:    'Ticket escaladé — propriétaire',
+          message:  subject,
+          shopId:   shopId,
+          // targetId enrichi du level pour que chaque escalade donne
+          // sa propre notif (le dédup ne fusionne pas owner vs super_admin).
+          targetId: '${id}_owner',
+        );
+      } else if (level == 'super_admin') {
+        // Le client local n'est pas forcément super_admin ; on émet
+        // uniquement si c'est le cas (sinon l'utilisateur n'est pas le
+        // bon destinataire de cette escalade).
+        final isSuper = LocalStorageService.getCurrentUser()?.isSuperAdmin
+            ?? false;
+        if (!isSuper) return;
+        NotificationService.notify(
+          kind:     NotifKind.ticketEscalated,
+          title:    'Ticket escaladé — support',
+          message:  subject,
+          shopId:   shopId,
+          targetId: '${id}_super',
+        );
+      }
+    }
+  }
+
+  /// Émet `ticketReply` au porteur courant du ticket sauf si c'est lui
+  /// qui vient de répondre. « Porteur » = auteur du ticket OU admin/owner
+  /// de la shop selon le `current_level`.
+  void _emitTicketReplyNotification(
+      Map<String, dynamic> messageRow,
+      Map ticketRaw,
+      String shopId) {
+    if (!NotificationService.enabledForCurrentUser.value) return;
+    final myUid = _userId;
+    if (myUid == null) return;
+    final author = messageRow['author_id']?.toString();
+    if (author == myUid) return; // pas auto-notif
+
+    final messageId = messageRow['id']?.toString() ?? '';
+    final t = Map<String, dynamic>.from(ticketRaw);
+    final subject = (t['subject'] as String?)?.trim() ?? 'Ticket';
+    final level   = (t['current_level'] as String?) ?? 'admin';
+    final opener  = (t['opened_by']     as String?) ?? '';
+
+    final myRole = _roleOf(shopId, myUid);
+    final isOwner = myRole == 'owner'
+        || LocalStorageService.getShop(shopId)?.ownerId == myUid;
+    final isAdmin = myRole == 'admin' || isOwner;
+    final isSuper = LocalStorageService.getCurrentUser()?.isSuperAdmin
+        ?? false;
+
+    // Critère « impliqué » :
+    //   - auteur du ticket (suit toujours), OU
+    //   - rôle au-dessus du current_level (peut le traiter).
+    final relevantByLevel = switch (level) {
+      'admin'        => isAdmin,
+      'owner'        => isOwner,
+      'super_admin'  => isSuper,
+      _              => false,
+    };
+    if (opener != myUid && !relevantByLevel) return;
+
+    final body = (messageRow['body'] as String?) ?? '';
+    final preview = body.length > 60 ? '${body.substring(0, 60)}…' : body;
+    NotificationService.notify(
+      kind:     NotifKind.ticketReply,
+      title:    'Réponse — $subject',
+      message:  preview.isEmpty ? subject : preview,
+      shopId:   shopId,
+      // targetId = messageId pour qu'un nouveau message ne fusionne pas
+      // avec le précédent (chaque message = sa propre notif jusqu'à FIFO).
+      targetId: messageId,
+    );
+  }
+
+  /// Rôle local de [userId] sur [shopId] depuis le cache memberships.
+  /// Retourne `null` si pas membre. La key Hive est `${userId}_$shopId`,
+  /// la valeur contient un champ `role` ('admin'|'owner'|'user'|...).
+  String? _roleOf(String shopId, String userId) {
+    final raw = HiveBoxes.membershipsBox.get('${userId}_$shopId');
+    if (raw is! Map) return null;
+    return raw['role']?.toString();
   }
 
   /// Callback realtime pour la table clients.
@@ -2201,9 +3076,10 @@ end \$\$;""",
         if (id == null) continue;
         remoteIds.add(id);
         // Écrire dans Hive — format compatible avec getOrders().
-        // IMPORTANT : inclure `fees` et `completed_at` sinon la sync écrase
-        // localement les frais de livraison et l'horodatage d'encaissement
-        // de chaque commande (bug de persistance côté Finances/Dépenses).
+        // IMPORTANT : inclure TOUS les champs livraison/expédition/audit
+        // sinon la sync écrase localement le snapshot de localisation
+        // (bug : la commande revient à la boutique de base après reload
+        // car delivery_location_id n'était pas réinjecté).
         final hiveMap = <String, dynamic>{
           'id':             id,
           'shop_id':        row['shop_id'],
@@ -2218,8 +3094,20 @@ end \$\$;""",
           'scheduled_at':   row['scheduled_at'],
           'created_at':     row['created_at'],
           'completed_at':   row['completed_at'],
+          'delivery_mode':        row['delivery_mode'],
+          'delivery_location_id': row['delivery_location_id'],
+          'delivery_person_name': row['delivery_person_name'],
+          'delivery_city':        row['delivery_city'],
+          'delivery_address':     row['delivery_address'],
+          'shipment_city':        row['shipment_city'],
+          'shipment_agency':      row['shipment_agency'],
+          'shipment_handler':     row['shipment_handler'],
+          'cancellation_reason':  row['cancellation_reason'],
+          'reschedule_reason':    row['reschedule_reason'],
+          'created_by_user_id':   row['created_by_user_id'],
           'items':          row['items'] ?? [],
           'fees':           row['fees'] ?? [],
+          'source':         row['source'] ?? 'pos',
         };
         await HiveBoxes.ordersBox.put(id, hiveMap);
       }
@@ -2422,7 +3310,7 @@ end \$\$;""",
         .where((k) {
       final raw = HiveBoxes.productsBox.get(k);
       if (raw == null) return false;
-      final m = Map<String, dynamic>.from(raw as Map);
+      final m = Map<String, dynamic>.from(raw);
       return m['store_id'] == shopId;
     }).toList();
     for (final k in prodKeys) await HiveBoxes.productsBox.delete(k);
@@ -2489,6 +3377,123 @@ end \$\$;""",
   /// dépenses, logs d'activité, et tous les emplacements warehouse /
   /// partenaire de l'utilisateur (avec leurs StockLevels et transferts).
   /// Hive + Supabase. Le panier (cart_box) est vidé par sécurité.
+  /// Nettoie les données Hive locales d'une boutique APRÈS qu'un reset
+  /// remote a déjà eu lieu (typiquement via le RPC `reset_shop_data`).
+  ///
+  /// Périmètre : ventes, commandes, clients, fournisseurs, réceptions,
+  /// incidents, mouvements stock, expenses, activity_logs, panier, et —
+  /// crucial — partenaires/warehouses **owner-scoped** + leurs stock_levels
+  /// et transferts. La location type='shop' est conservée (recréée par la
+  /// migration Phase 1 au prochain démarrage si besoin).
+  ///
+  /// Conserve : produits, catégories, marques, unités, stock_locations
+  /// type='shop' (la base d'inventaire).
+  ///
+  /// Utilisé par `_resetShop` (bouton réutilisable) pour aligner Hive
+  /// immédiatement après le RPC, sans dépendre de la propagation realtime
+  /// (qui peut être lente ou ne pas couvrir les delete partner-level).
+  static Future<void> clearShopLocalData(String shopId) async {
+    final shop = LocalStorageService.getShop(shopId);
+    final ownerId = shop?.ownerId;
+
+    Future<void> clearByShop(dynamic box, String field) async {
+      final keys = box.keys.where((k) {
+        final m = box.get(k);
+        return m is Map && m[field]?.toString() == shopId;
+      }).toList();
+      for (final k in keys) {
+        await box.delete(k);
+      }
+    }
+
+    await clearByShop(HiveBoxes.salesBox,            'shop_id');
+    await clearByShop(HiveBoxes.ordersBox,           'shop_id');
+    await clearByShop(HiveBoxes.clientsBox,          'store_id');
+    await clearByShop(HiveBoxes.suppliersBox,        'shop_id');
+    await clearByShop(HiveBoxes.receptionsBox,       'shop_id');
+    await clearByShop(HiveBoxes.incidentsBox,        'shop_id');
+    await clearByShop(HiveBoxes.stockMovementsBox,   'shop_id');
+    await clearByShop(HiveBoxes.purchaseOrdersBox,   'shop_id');
+    await clearByShop(HiveBoxes.stockArrivalsBox,    'shop_id');
+    await clearByShop(HiveBoxes.expensesBox,         'shop_id');
+    await clearByShop(HiveBoxes.activityLogsBox,     'shop_id');
+    await clearByShop(HiveBoxes.deliveryTransfersBox,'shop_id');
+
+    // Panier global (pas filtrable par shop)
+    await HiveBoxes.cartBox.clear();
+
+    // Partenaires + warehouses du même owner (shop_id NULL par design,
+    // donc pas attrapés par clearByShop). On garde la location type='shop'
+    // — c'est la base de stock locale ré-utilisable.
+    final shopLocId = _shopLocationId(shopId);
+    final delLocIds = <String>{};
+    if (ownerId != null && ownerId.isNotEmpty) {
+      for (final k in HiveBoxes.stockLocationsBox.keys) {
+        final raw = HiveBoxes.stockLocationsBox.get(k);
+        if (raw is! Map) continue;
+        final m = Map<String, dynamic>.from(raw);
+        final locId = m['id']?.toString();
+        if (locId == null || locId == shopLocId) continue;
+        final type = m['type']?.toString();
+        if (m['owner_id']?.toString() == ownerId
+            && (type == 'partner' || type == 'warehouse')) {
+          delLocIds.add(locId);
+        }
+      }
+    }
+
+    // stock_levels rattachés aux partenaires + ceux du shop (le RPC les
+    // a déjà supprimés côté serveur, on aligne ici).
+    final levelKeysToDelete = <dynamic>[];
+    for (final k in HiveBoxes.stockLevelsBox.keys) {
+      final raw = HiveBoxes.stockLevelsBox.get(k);
+      if (raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      final locId = m['location_id']?.toString();
+      if (delLocIds.contains(locId) || locId == shopLocId
+          || m['shop_id']?.toString() == shopId) {
+        levelKeysToDelete.add(k);
+      }
+    }
+    for (final k in levelKeysToDelete) {
+      await HiveBoxes.stockLevelsBox.delete(k);
+    }
+
+    // stock_transfers touchés par les locations supprimées
+    final transferKeysToDelete = <dynamic>[];
+    for (final k in HiveBoxes.stockTransfersBox.keys) {
+      final raw = HiveBoxes.stockTransfersBox.get(k);
+      if (raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      final from = m['from_location_id']?.toString();
+      final to   = m['to_location_id']?.toString();
+      if (delLocIds.contains(from) || delLocIds.contains(to)
+          || from == shopLocId || to == shopLocId) {
+        transferKeysToDelete.add(k);
+      }
+    }
+    for (final k in transferKeysToDelete) {
+      await HiveBoxes.stockTransfersBox.delete(k);
+    }
+
+    // Locations partenaires/warehouses elles-mêmes
+    for (final k in delLocIds) {
+      await HiveBoxes.stockLocationsBox.delete(k);
+    }
+
+    // Notifs UI : tous les listeners rebuild
+    _notify('clients',         shopId);
+    _notify('orders',          shopId);
+    _notify('sales',           shopId);
+    _notify('expenses',        shopId);
+    _notify('stock_locations', shopId);
+    _notify('stock_levels',    shopId);
+    _notify('stock_transfers', shopId);
+    _notify('activity_logs',   shopId);
+    debugPrint('[DB] clearShopLocalData $shopId — '
+        '${delLocIds.length} location(s) partenaire/warehouse supprimée(s)');
+  }
+
   static Future<void> resetShopKeepProducts(String shopId) async {
     final userId = LocalStorageService.getCurrentUser()?.id ?? '';
 
@@ -2696,11 +3701,11 @@ end \$\$;""",
     final shopLocId = _shopLocationId(shopId);
     final levelKeys = HiveBoxes.stockLevelsBox.values
         .where((raw) {
-          final m = Map<String, dynamic>.from(raw as Map);
+          final m = Map<String, dynamic>.from(raw);
           return m['location_id'] == shopLocId;
         })
         .map((raw) =>
-            (Map<String, dynamic>.from(raw as Map))['id'] as String?)
+            (Map<String, dynamic>.from(raw))['id'] as String?)
         .whereType<String>()
         .toList();
     for (final k in levelKeys) {
@@ -3032,6 +4037,8 @@ end \$\$;""",
     phone: r['phone'] as String?, email: r['email'] as String?,
     createdAt: r['created_at'] != null
         ? DateTime.tryParse(r['created_at'] as String) : null,
+    kind:         ShopKindX.fromKey(r['kind'] as String?),
+    parentShopId: r['parent_shop_id'] as String?,
   );
 
   static UserRole _parseRole(String r) => switch (r) {
@@ -3107,21 +4114,20 @@ end \$\$;""",
     HiveBoxes.clientsBox.put(c.id, _clientToMap(c));
     // 2. Supabase en arrière-plan — jamais bloquant
     _bgWrite({'table': 'clients', 'op': 'upsert', 'data': _clientToSupabase(c)});
-    if (c.storeId != null) _notify('clients', c.storeId!);
+    _notify('clients', c.storeId);
   }
 
   /// Vérifie en local (Hive) qu'aucun autre client de la même boutique
   /// n'utilise déjà le même email ou téléphone. Jette une Exception FR sinon.
   static void _validateClientLocalUniqueness(Client c) {
     final shopId = c.storeId;
-    if (shopId == null) return;
     final email = c.email?.trim().toLowerCase();
     final phone = _normalizePhone(c.phone);
     if ((email == null || email.isEmpty) && (phone == null || phone.isEmpty)) {
       return;
     }
     for (final raw in HiveBoxes.clientsBox.values) {
-      final m = Map<String, dynamic>.from(raw as Map);
+      final m = Map<String, dynamic>.from(raw);
       if (m['store_id'] != shopId || m['id'] == c.id) continue;
       if (email != null && email.isNotEmpty) {
         final other = (m['email'] as String?)?.trim().toLowerCase();
@@ -3142,7 +4148,6 @@ end \$\$;""",
   /// n'utilise déjà le même email ou téléphone.
   static Future<void> _validateClientRemoteUniqueness(Client c) async {
     final shopId = c.storeId;
-    if (shopId == null) return;
     final email = c.email?.trim();
     final phone = c.phone?.trim();
 
@@ -3189,7 +4194,7 @@ end \$\$;""",
       {bool archived = true}) async {
     final raw = HiveBoxes.clientsBox.get(clientId);
     if (raw == null) return;
-    final client = _clientFromMap(Map<String, dynamic>.from(raw as Map));
+    final client = _clientFromMap(Map<String, dynamic>.from(raw));
     final updated = client.copyWith(isArchived: archived);
     HiveBoxes.clientsBox.put(client.id, _clientToMap(updated));
     _bgWrite({'table': 'clients', 'op': 'upsert',
@@ -3201,7 +4206,7 @@ end \$\$;""",
   /// au moins une commande (on préserve l'historique pour les rapports).
   static Future<void> deleteClient(String clientId, String storeId) async {
     final hasOrders = HiveBoxes.ordersBox.values.any((raw) {
-      final m = Map<String, dynamic>.from(raw as Map);
+      final m = Map<String, dynamic>.from(raw);
       return m['client_id'] == clientId;
     });
     if (hasOrders) {
@@ -3238,14 +4243,14 @@ end \$\$;""",
   static Future<void> refreshClientMetrics(String clientId, String shopId) async {
     final raw = HiveBoxes.clientsBox.get(clientId);
     if (raw == null) return;
-    final client = _clientFromMap(Map<String, dynamic>.from(raw as Map));
+    final client = _clientFromMap(Map<String, dynamic>.from(raw));
 
     double totalSpent = 0;
     int    totalOrders = 0;
     DateTime? lastVisit;
 
     for (final v in HiveBoxes.ordersBox.values) {
-      final o = Map<String, dynamic>.from(v as Map);
+      final o = Map<String, dynamic>.from(v);
       if (o['shop_id']   != shopId)   continue;
       if (o['client_id'] != clientId) continue;
       if ((o['status'] as String?) != 'completed') continue;
@@ -3255,7 +4260,7 @@ end \$\$;""",
       final items = (o['items'] as List?) ?? [];
       double subtotal = 0;
       for (final raw in items) {
-        final it = Map<String, dynamic>.from(raw as Map);
+        final it = Map<String, dynamic>.from(raw);
         final qty   = ((it['quantity'] ?? it['qty']) as num?)?.toInt() ?? 0;
         final unit  = ((it['unit_price'] ?? it['price']) as num?)?.toDouble() ?? 0;
         final cust  = (it['custom_price'] as num?)?.toDouble();
@@ -3436,7 +4441,7 @@ end \$\$;""",
     try {
       if (!Hive.isBoxOpen(HiveBoxes.orders)) return const [];
       for (final raw in HiveBoxes.ordersBox.values) {
-        final o = Map<String, dynamic>.from(raw as Map);
+        final o = Map<String, dynamic>.from(raw);
         if (o['shop_id'] != shopId) continue;
         final fees = o['fees'] as List?;
         if (fees == null) continue;
@@ -3464,4 +4469,21 @@ end \$\$;""",
     return out;
   }
 
+}
+
+/// Représente la variation de stock d'une variante détectée par
+/// `_computeStockDiffs` lors d'un `saveProduct`. Utilisé pour générer
+/// les `StockMovement` d'audit (type=adjustment ou entry).
+class _StockDiff {
+  final String variantId;
+  final int    before;
+  final int    after;
+  final bool   isCreation;
+  const _StockDiff({
+    required this.variantId,
+    required this.before,
+    required this.after,
+    required this.isCreation,
+  });
+  int get delta => after - before;
 }
