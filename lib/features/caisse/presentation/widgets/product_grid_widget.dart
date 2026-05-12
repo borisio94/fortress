@@ -1,14 +1,79 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../bloc/caisse_bloc.dart';
+import '../../domain/entities/sale.dart' show DeliveryMode;
 import '../../domain/entities/sale_item.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../features/dashboard/data/dashboard_providers.dart';
 import '../../../../features/inventaire/domain/entities/product.dart';
+import '../../../../shared/widgets/product_image_card.dart';
+import '../../../../shared/widgets/product_grid_card.dart';
+import '../../../../shared/widgets/view_filter_chip_bar.dart';
+
+/// Stock à afficher pour une variante selon la source active.
+/// - Pas de source partenaire → stock cumulé (`variant.stockAvailable`).
+/// - Source = partenaire → `stock_levels[variant_id, location_id]` ou 0.
+int _stockForVariant(ProductVariant v, String? deliveryLocationId) {
+  if (deliveryLocationId == null || deliveryLocationId.isEmpty) {
+    return v.stockAvailable;
+  }
+  final id = v.id;
+  if (id == null) return 0;
+  final lvl = AppDatabase.getStockLevel(id, deliveryLocationId);
+  return lvl?.stockAvailable ?? 0;
+}
+
+/// Stock à afficher pour un produit selon la source active.
+/// - Pas de source partenaire → `product.totalStock` (cumul historique).
+/// - Source = partenaire → somme des `stock_levels` des variantes à cette
+///   location.
+int _stockForProduct(Product p, String? deliveryLocationId) {
+  if (deliveryLocationId == null || deliveryLocationId.isEmpty) {
+    return p.totalStock;
+  }
+  if (p.variants.isEmpty) return 0; // pas de variantes → pas de stock_levels
+  var total = 0;
+  for (final v in p.variants) {
+    total += _stockForVariant(v, deliveryLocationId);
+  }
+  return total;
+}
+
+/// Variante mise en avant pour l'affichage card en mode caisse, **adaptée
+/// à la source active** (boutique cumul vs partenaire). Différence avec
+/// `Product.featuredVariant()` : ce dernier se base sur `stockAvailable`
+/// (boutique uniquement) ; ici on prend le stock partenaire si applicable
+/// pour que l'image affichée et le compteur ×N soient cohérents avec la
+/// situation chez ce partenaire.
+///
+/// Règle : variante avec le plus grand stock à la source. En cas d'égalité,
+/// celle marquée `isMain` ; sinon, première par id (déterministe). Retourne
+/// `null` si le produit n'a pas de variantes.
+ProductVariant? _featuredVariantFor(Product p, String? deliveryLocationId) {
+  if (p.variants.isEmpty) return null;
+  // Mode boutique : déléguer au getter standard (gère déjà tie-breaker
+  // isMain + rotation temporelle).
+  if (deliveryLocationId == null || deliveryLocationId.isEmpty) {
+    return p.featuredVariant();
+  }
+  // Mode partenaire : on RECALCULE en lisant les StockLevel partenaire,
+  // car `featuredVariant()` regarde stockAvailable (= boutique).
+  ProductVariant? best;
+  int bestStock = -1;
+  for (final v in p.variants) {
+    final s = _stockForVariant(v, deliveryLocationId);
+    if (s > bestStock || (s == bestStock && v.isMain && best?.isMain != true)) {
+      bestStock = s;
+      best = v;
+    }
+  }
+  return best;
+}
 
 /// Tente d'ajouter [item] au panier en validant le stock disponible.
 ///
@@ -76,30 +141,38 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
   String _query = '';
   String _filter = 'Tous'; // Tous | Stock faible | Actifs
 
-  List<Product> get _products {
-    final all = AppDatabase.getProductsForShop(widget.shopId)
+  /// Liste filtrée. Quand [deliveryLocationId] est non null (vente livrée
+  /// par un partenaire), on masque les produits absents chez ce partenaire
+  /// pour rester cohérent avec la grille principale.
+  List<Product> _productsFor(String? deliveryLocationId) {
+    var list = AppDatabase.getProductsForShop(widget.shopId)
         .where((p) => p.isActive)
         .toList();
-
-    var list = _query.isEmpty
-        ? all
-        : all.where((p) =>
-    p.name.toLowerCase().contains(_query.toLowerCase()) ||
-        (p.sku ?? '').toLowerCase().contains(_query.toLowerCase()) ||
-        (p.barcode ?? '').contains(_query)).toList();
-
+    if (deliveryLocationId != null && deliveryLocationId.isNotEmpty) {
+      list = list
+          .where((p) => _stockForProduct(p, deliveryLocationId) > 0)
+          .toList();
+    }
+    if (_query.isNotEmpty) {
+      final q = _query.toLowerCase();
+      list = list.where((p) =>
+          p.name.toLowerCase().contains(q) ||
+          (p.sku ?? '').toLowerCase().contains(q) ||
+          (p.barcode ?? '').contains(_query)).toList();
+    }
     if (_filter == 'Stock faible') {
       list = list.where((p) => p.isLowStock && !p.isOutOfStock).toList();
     } else if (_filter == 'Rupture') {
       list = list.where((p) => p.isOutOfStock).toList();
     }
-
     return list;
   }
 
   @override
   Widget build(BuildContext context) {
-    final products = _products;
+    final deliveryLocId = context.select<CaisseBloc, String?>(
+        (b) => b.state.deliveryLocationId);
+    final products = _productsFor(deliveryLocId);
     final all      = AppDatabase.getProductsForShop(widget.shopId).where((p) => p.isActive).toList();
 
     return Column(children: [
@@ -201,12 +274,20 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
   }
 
   void _handleProductTap(BuildContext context, Product product) {
+    // Source de stock active (boutique vs partenaire). On l'utilise pour
+    // le contrôle préliminaire avant ajout au panier — la validation finale
+    // côté `caisse_bloc._validateStock` reste en place avec le même
+    // `locationId`, donc cohérence garantie.
+    final deliveryLocId =
+        context.read<CaisseBloc>().state.deliveryLocationId;
     // Pas de variantes → ajouter directement au panier
     if (product.variants.isEmpty || product.variants.length == 1) {
       final v = product.variants.isNotEmpty ? product.variants.first : null;
       final price = v?.priceSellPos ?? product.priceSellPos;
       final id = v?.id ?? (product.id ?? product.name);
-      final stock = v?.stockAvailable ?? product.totalStock;
+      final stock = v != null
+          ? _stockForVariant(v, deliveryLocId)
+          : _stockForProduct(product, deliveryLocId);
       _addToCart(
         context,
         id,
@@ -315,9 +396,15 @@ class _ProductCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final price      = _displayPrice();
-    final stockColor = product.isOutOfStock
+    // Stock conditionnel à la source active (boutique vs partenaire).
+    final deliveryLocId = context.select<CaisseBloc, String?>(
+        (b) => b.state.deliveryLocationId);
+    final stockAt    = _stockForProduct(product, deliveryLocId);
+    final outOfStockAt = stockAt <= 0;
+    final lowStockAt   = stockAt > 0 && stockAt <= product.stockMinAlert;
+    final stockColor = outOfStockAt
         ? const Color(0xFFEF4444)
-        : product.isLowStock
+        : lowStockAt
         ? const Color(0xFFF59E0B)
         : AppColors.secondary;
     final hasVariants = product.variants.length > 1;
@@ -331,13 +418,13 @@ class _ProductCard extends StatelessWidget {
     //   - Produit sans variantes (length ≤ 1) ET en rupture → click bloqué
     //   - Produit avec variantes → toujours cliquable (l'utilisateur voit
     //     l'état de chacune et choisit celle qui a du stock).
-    final canTap = !product.isOutOfStock || hasVariants;
+    final canTap = !outOfStockAt || hasVariants;
 
     return GestureDetector(
       onTap: canTap ? onTap : null,
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 150),
-        opacity: product.isOutOfStock ? 0.4 : 1.0,
+        opacity: outOfStockAt ? 0.4 : 1.0,
         child: Container(
           decoration: BoxDecoration(
             color: Colors.white,
@@ -345,7 +432,7 @@ class _ProductCard extends StatelessWidget {
             border: Border.all(color: const Color(0xFFE5E7EB)),
             boxShadow: [
               BoxShadow(
-                  color: Colors.black.withOpacity(0.03),
+                  color: Colors.black.withValues(alpha:0.03),
                   blurRadius: 4,
                   offset: const Offset(0, 1)),
             ],
@@ -353,16 +440,12 @@ class _ProductCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Image / Icône — gère URL distante ET chemin local
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(11)),
-                  child: _ProductImageSmart(
-                    url: product.mainImageUrl,
-                    fallback: _ProductIcon(),
-                  ),
-                ),
+              // Image — ratio carré 1:1 unifié, BoxFit.cover, placeholder
+              // neutre (cf. ProductImageCard).
+              ProductImageCard(
+                imageUrl: product.mainImageUrl,
+                borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(11)),
               ),
 
               // Infos
@@ -414,9 +497,9 @@ class _ProductCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          product.isOutOfStock
+                          outOfStockAt
                               ? 'Rupture'
-                              : '${product.totalStock} en stock',
+                              : '$stockAt en stock',
                           style: TextStyle(fontSize: 9, color: stockColor),
                         ),
                       ]),
@@ -447,17 +530,6 @@ class _ProductCard extends StatelessWidget {
         ? CurrencyFormatter.format(product.priceSellPos)
         : 'N/D';
   }
-}
-
-class _ProductIcon extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => Container(
-    color: const Color(0xFFF3F4F6),
-    child: const Center(
-      child: Icon(Icons.inventory_2_outlined,
-          size: 28, color: Color(0xFFD1D5DB)),
-    ),
-  );
 }
 
 // ─── Picker variantes ─────────────────────────────────────────────────────────
@@ -495,20 +567,11 @@ class _VariantPickerSheet extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(children: [
-              Container(
-                width: 44, height: 44,
-                decoration: BoxDecoration(
-                  color: AppColors.primarySurface,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: _ProductImageSmart(
-                    url: product.mainImageUrl,
-                    fallback: Icon(Icons.inventory_2_outlined,
-                        size: 20, color: AppColors.primary),
-                  ),
-                ),
+              ProductImageCard(
+                imageUrl: product.mainImageUrl,
+                width:  44,
+                height: 44,
+                borderRadius: BorderRadius.circular(10),
               ),
               const SizedBox(width: 12),
               Expanded(child: Column(
@@ -547,9 +610,12 @@ class _VariantPickerSheet extends StatelessWidget {
               const Divider(height: 1, color: Color(0xFFF3F4F6)),
               itemBuilder: (ctx, i) {
                 final v = product.variants[i];
-                final outOfStock = v.stockQty <= 0;
-                final lowStock   = v.stockQty > 0 &&
-                    v.stockQty <= v.stockMinAlert;
+                // Stock à afficher / valider selon la source active
+                // (boutique cumulée ou partenaire choisi).
+                final deliveryLocId = bloc.state.deliveryLocationId;
+                final stockAt = _stockForVariant(v, deliveryLocId);
+                final outOfStock = stockAt <= 0;
+                final lowStock   = stockAt > 0 && stockAt <= v.stockMinAlert;
 
                 return InkWell(
                   onTap: outOfStock
@@ -571,7 +637,7 @@ class _VariantPickerSheet extends StatelessWidget {
                         priceBuy:    v.priceBuy,
                         quantity:    1,
                       ),
-                      v.stockAvailable,
+                      stockAt,
                       displayName: name,
                     );
                     if (added) onAdded(); // ferme variantes + picker proprement
@@ -584,20 +650,11 @@ class _VariantPickerSheet extends StatelessWidget {
                           vertical: 12, horizontal: 4),
                       child: Row(children: [
                         // Miniature variante
-                        Container(
-                          width: 40, height: 40,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF3F4F6),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: _ProductImageSmart(
-                              url: v.imageUrl,
-                              fallback: Icon(Icons.layers_rounded,
-                                  size: 18, color: AppColors.primary),
-                            ),
-                          ),
+                        ProductImageCard(
+                          imageUrl: v.imageUrl,
+                          width:  40,
+                          height: 40,
+                          borderRadius: BorderRadius.circular(8),
                         ),
                         const SizedBox(width: 12),
 
@@ -606,11 +663,15 @@ class _VariantPickerSheet extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(children: [
-                                Text(v.name,
-                                    style: const TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                        color: Color(0xFF0F172A))),
+                                Flexible(
+                                  child: Text(v.name,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF0F172A))),
+                                ),
                                 if (v.isMain) ...[
                                   const SizedBox(width: 6),
                                   Container(
@@ -630,6 +691,8 @@ class _VariantPickerSheet extends StatelessWidget {
                               ]),
                               if (v.sku != null)
                                 Text('SKU: ${v.sku}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
                                         fontSize: 10,
                                         color: Color(0xFF9CA3AF))),
@@ -665,7 +728,7 @@ class _VariantPickerSheet extends StatelessWidget {
                                 Text(
                                   outOfStock
                                       ? 'Rupture'
-                                      : '${v.stockAvailable} dispo',
+                                      : '$stockAt dispo',
                                   style: TextStyle(
                                       fontSize: 9,
                                       color: outOfStock
@@ -755,22 +818,26 @@ class _EmptyProducts extends StatelessWidget {
 /// Version compacte du picker, affichée en colonne dans le layout de vente.
 /// Différente de [ProductPickerSheet] : pas de header "sheet", design orienté
 /// rapidité — tuiles plus petites, barre de recherche légère, pas de filtres lourds.
-class PosProductPanel extends StatefulWidget {
+class PosProductPanel extends ConsumerStatefulWidget {
   final String shopId;
   const PosProductPanel({super.key, required this.shopId});
   @override
-  State<PosProductPanel> createState() => _PosProductPanelState();
+  ConsumerState<PosProductPanel> createState() => _PosProductPanelState();
 }
 
-class _PosProductPanelState extends State<PosProductPanel> {
+class _PosProductPanelState extends ConsumerState<PosProductPanel> {
   String _query = '';
-  // ─── État filtres (étape 5 : bottom sheet pour éditer) ─────────────
+  // ─── État filtres ──────────────────────────────────────────────────
   Set<String> _filterCategories = {};
   Set<String> _filterBrands     = {};
   RangeValues? _priceRange;   // null = pas de filtre
   String? _stockFilter;       // null | 'in_stock' | 'low_stock' | 'out_of_stock'
-  // ─── État tri (étape 6) ─────────────────────────────────────────────
+  // ─── État tri ──────────────────────────────────────────────────────
   String _sort = 'name';     // 'name' | 'price_asc' | 'price_desc' | 'stock'
+
+  // GlobalKeys pour positionner les popups juste sous les boutons.
+  final GlobalKey _filtersBtnKey = GlobalKey();
+  final GlobalKey _sortBtnKey    = GlobalKey();
   // ─── Mode d'affichage : grille ou liste (persisté) ────────────────
   static const _prefViewMode = 'pos_view_mode';
   String _viewMode = 'grid';  // 'grid' | 'list'
@@ -815,20 +882,138 @@ class _PosProductPanelState extends State<PosProductPanel> {
     }
   }
 
-  List<Product> get _products {
-    final all = AppDatabase.getProductsForShop(widget.shopId)
+  /// Liste filtrée des produits affichés dans la grille / liste POS.
+  ///
+  /// [deliveryLocationId] : id de la `StockLocation` partenaire active si
+  /// la caisse est en mode livraison partenaire (cf. CaisseBloc). Quand
+  /// non-null, on **masque les produits dont le stock à ce partenaire est
+  /// nul** — la vue POS reflète alors uniquement le catalogue réellement
+  /// disponible chez ce partenaire, jamais celui de la boutique de base.
+  List<Product> _productsFor(String? deliveryLocationId) {
+    var all = AppDatabase.getProductsForShop(widget.shopId)
         .where((p) => p.isActive)
         .toList();
-    if (_query.isEmpty) return all;
-    return all.where((p) =>
-    p.name.toLowerCase().contains(_query.toLowerCase()) ||
-        (p.sku ?? '').toLowerCase().contains(_query.toLowerCase())).toList();
+
+    // Vue Partenaire : on n'affiche que les produits qui existent (stock > 0)
+    // chez ce partenaire. Sans ce filtre, la grille contiendrait tous les
+    // produits de la boutique avec un badge « Rupture » massif — bruit
+    // inutile, et risque pour l'utilisateur d'ajouter au panier des produits
+    // que le partenaire n'a pas.
+    if (deliveryLocationId != null && deliveryLocationId.isNotEmpty) {
+      all = all
+          .where((p) => _stockForProduct(p, deliveryLocationId) > 0)
+          .toList();
+    }
+
+    // Recherche textuelle (nom + SKU).
+    if (_query.isNotEmpty) {
+      final q = _query.toLowerCase();
+      all = all.where((p) =>
+          p.name.toLowerCase().contains(q) ||
+          (p.sku ?? '').toLowerCase().contains(q)).toList();
+    }
+
+    // Filtre stock (Tous / En stock / Stock faible / Rupture).
+    // Calcul aligné sur la source active (partenaire ou cumul).
+    if (_stockFilter != null) {
+      all = all.where((p) {
+        final stock = _stockForProduct(p, deliveryLocationId);
+        switch (_stockFilter) {
+          case 'in_stock':     return stock > 0;
+          case 'low_stock':    return stock > 0 && stock <= 5;
+          case 'out_of_stock': return stock <= 0;
+        }
+        return true;
+      }).toList();
+    }
+
+    // Filtres catégorie / marque (correspondance exacte si non vide).
+    if (_filterCategories.isNotEmpty) {
+      all = all.where((p) =>
+          p.categoryId != null && _filterCategories.contains(p.categoryId))
+          .toList();
+    }
+    if (_filterBrands.isNotEmpty) {
+      all = all.where((p) =>
+          p.brand != null && _filterBrands.contains(p.brand)).toList();
+    }
+
+    // Filtre fourchette de prix (sur prix de vente principal).
+    if (_priceRange != null) {
+      final r = _priceRange!;
+      all = all.where((p) {
+        final price = p.priceSellPos;
+        return price >= r.start && price <= r.end;
+      }).toList();
+    } else {
+      // r non utilisé pour l'instant — réservé à une future extension
+      // (slider RangeValues dans le menu filtres).
+    }
+
+    // Tri.
+    switch (_sort) {
+      case 'price_asc':
+        all.sort((a, b) => a.priceSellPos.compareTo(b.priceSellPos));
+        break;
+      case 'price_desc':
+        all.sort((a, b) => b.priceSellPos.compareTo(a.priceSellPos));
+        break;
+      case 'stock':
+        all.sort((a, b) => _stockForProduct(b, deliveryLocationId)
+            .compareTo(_stockForProduct(a, deliveryLocationId)));
+        break;
+      case 'name':
+      default:
+        all.sort((a, b) =>
+            a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    }
+    return all;
   }
 
   @override
   Widget build(BuildContext context) {
     final l        = context.l10n;
-    final products = _products;
+    // ── Synchro chip ViewFilterChipBar → CaisseBloc ────────────────
+    // La barre de chips (boutique / partenaire X / partenaire Y) écrit dans
+    // `dashViewFilterProvider` (Riverpod). On dispatche `SetDeliveryMode`
+    // pour aligner le bloc, sinon le catalogue ne change pas (PosProductPanel
+    // filtre via `state.deliveryLocationId`).
+    //   * Chip = id de partenaire → mode partner + locationId
+    //   * Chip = '_base' (Boutique) → reset vers pickup UNIQUEMENT si on
+    //     était en mode partner. Préserve les modes inHouse/shipment qui
+    //     ne viennent pas des chips.
+    ref.listen<String?>(dashViewFilterProvider, (prev, next) {
+      final bloc = context.read<CaisseBloc>();
+      if (next == null) {
+        // Vue Globale : aucune vente possible (cf. principe métier
+        // "toute commande doit être rattachée à un lieu"). Le bouton
+        // Enregistrer est bloqué côté UI ; on n'efface PAS le mode/loc
+        // pour préserver une éventuelle saisie en cours si l'opérateur
+        // revient sur une vue spécifique.
+      } else if (next == '_base') {
+        // Boutique principale : pickup + locationId = stock_location de
+        // la boutique. Permet à la page Commandes de router cette vente
+        // vers la vue Boutique (et plus comme « location null » par défaut).
+        final shopLoc = AppDatabase.getShopLocation(widget.shopId);
+        bloc.add(SetDeliveryMode(
+          mode:       DeliveryMode.pickup,
+          locationId: shopLoc?.id,
+        ));
+      } else {
+        // Partenaire X : mode partner + locationId = X.
+        bloc.add(SetDeliveryMode(
+          mode:       DeliveryMode.partner,
+          locationId: next,
+        ));
+      }
+    });
+
+    // Lit la source active (boutique cumul vs partenaire) — la liste de
+    // produits en dépend : on masque les produits absents chez le
+    // partenaire pour éviter les ajouts panier impossibles.
+    final deliveryLocId = context.select<CaisseBloc, String?>(
+        (b) => b.state.deliveryLocationId);
+    final products = _productsFor(deliveryLocId);
     final isCompact = MediaQuery.of(context).size.width < 900;
     final searchField = SizedBox(
       height: isCompact ? 38 : 40,
@@ -872,24 +1057,33 @@ class _PosProductPanelState extends State<PosProductPanel> {
       ),
     );
     final filtersBtn = _ToolbarButton(
+      key: _filtersBtnKey,
       icon: Icons.tune_rounded,
       label: l.boutiqueFilters,
       badge: _activeFilterCount,
       onTap: _openFiltersSheet,
     );
     final sortBtn = _ToolbarButton(
+      key: _sortBtnKey,
       icon: Icons.sort_rounded,
       label: l.boutiqueSort,
       onTap: _openSortSheet,
     );
 
     return Column(children: [
+      // ── Onglets « Vue » : Boutique / Partenaires (sans Globale) ──────
+      // Tap → ref.listen dans CaissePage dispatche SetDeliveryMode pour
+      // basculer la source de stock effective. Globale est masqué : on ne
+      // peut pas vendre depuis « toutes les sources à la fois ».
+      ViewFilterChipBar(
+          shopId: widget.shopId, showGlobal: false, useTabs: true),
+
       // ── Barre recherche + filtres + tri ─────────────────────────
       // Mobile : tout sur 1 ligne pour libérer ~40px au profit de la
       // grille. Desktop : layout 2 lignes (search pleine largeur, puis
       // boutons en dessous) — comportement original Material.
       Container(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         padding: isCompact
             ? const EdgeInsets.fromLTRB(12, 8, 12, 6)
             : const EdgeInsets.fromLTRB(12, 10, 12, 8),
@@ -915,7 +1109,7 @@ class _PosProductPanelState extends State<PosProductPanel> {
       // ── Compteur produits/variantes + toggle grille/liste ──────
       // Bandeau compact : padding minimal pour ne pas grignoter la grille.
       Container(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         padding: const EdgeInsets.fromLTRB(14, 0, 8, 2),
         child: Row(children: [
           Expanded(child: Text(
@@ -970,40 +1164,69 @@ class _PosProductPanelState extends State<PosProductPanel> {
                           context, products[i], idx),
                     ),
                   )
-                : Align(
-                    alignment: Alignment.topLeft,
-                    child: SingleChildScrollView(
+                : LayoutBuilder(builder: (_, c) {
+                    // Spec : mobile 2 cols, tablette 3, desktop 5+ avec
+                    // auto-fit minWidth ~180 px. childAspectRatio = 0.75
+                    // (3:4 portrait) — calé sur le nouveau design overlay
+                    // dégradé de ProductGridCard. Les infos produit
+                    // (nom/SKU/prix) flottent en blanc sur le dégradé bas
+                    // de l'image, donc plus besoin de marge dédiée sous
+                    // l'image comme l'ancien ratio 0.57.
+                    final cols = c.maxWidth < 600
+                        ? 2
+                        : (c.maxWidth ~/ 180).clamp(2, 8);
+                    return GridView.builder(
                       padding: const EdgeInsets.fromLTRB(12, 12, 12, 80),
-                      child: Wrap(
-                        alignment:   WrapAlignment.start,
-                        spacing:     12,
-                        runSpacing:  12,
-                        children: products.map((p) => SizedBox(
-                          width:  200,
-                          height: 320,
-                          child: _PosProductTile(
-                            product: p,
-                            onTap:         () => _handleTap(context, p),
-                            onAddVariant:  (idx) => _addVariantToCart(
-                                context, p, idx),
-                          ),
-                        )).toList(),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: cols,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                        childAspectRatio: 0.75,
                       ),
-                    ),
-                  ),
+                      itemCount: products.length,
+                      itemBuilder: (_, i) {
+                        final p = products[i];
+                        // Featured variant adaptée au mode (boutique vs
+                        // partenaire) : son stock + son image + son seuil
+                        // sont passés au card pour que tout matche l'image
+                        // mise en avant — pas la somme totale.
+                        final feat = _featuredVariantFor(p, deliveryLocId);
+                        return ProductGridCard(
+                          product: p,
+                          stockOverride: feat != null
+                              ? _stockForVariant(feat, deliveryLocId)
+                              : null,
+                          imageUrlOverride: feat?.imageUrl ?? p.imageUrl,
+                          stockMinAlertOverride: feat?.stockMinAlert,
+                          // Tap card hors pastilles → ouvre le sheet
+                          // variantes (ou ajoute direct si pas de variante).
+                          onTap: () => _handleTap(context, p),
+                          // Tap pastille → ajout direct au panier sans sheet.
+                          onVariantTap: (v) {
+                            final idx = p.variants.indexOf(v);
+                            if (idx >= 0) _addVariantToCart(context, p, idx);
+                          },
+                        );
+                      },
+                    );
+                  }),
       ),
     ]);
   }
 
   void _handleTap(BuildContext context, Product product) {
+    final bloc = context.read<CaisseBloc>();
+    final deliveryLocId = bloc.state.deliveryLocationId;
     if (product.variants.isEmpty || product.variants.length == 1) {
       final v = product.variants.isNotEmpty ? product.variants.first : null;
       final price = v?.priceSellPos ?? product.priceSellPos;
       final id = v?.id ?? (product.id ?? product.name);
-      final stock = v?.stockAvailable ?? product.totalStock;
+      final stock = v != null
+          ? _stockForVariant(v, deliveryLocId)
+          : _stockForProduct(product, deliveryLocId);
       _tryAddToCart(
         context,
-        context.read<CaisseBloc>(),
+        bloc,
         SaleItem(
           productId:   id,
           productName: product.name,
@@ -1034,16 +1257,154 @@ class _PosProductPanelState extends State<PosProductPanel> {
     );
   }
 
-  /// Ouvre le bottom sheet de filtres (catégorie, marque, prix, stock).
-  /// Implémentation complète livrée à l'étape 5.
-  void _openFiltersSheet() {
-    // Placeholder — étape 5 : construira le bottom sheet et appellera setState
-    // sur _filterCategories / _filterBrands / _priceRange / _stockFilter.
+  /// Position d'un menu juste sous le widget anchor (via sa GlobalKey).
+  /// Retourne null si le RenderBox n'est pas encore monté.
+  RelativeRect? _menuPositionUnder(GlobalKey key) {
+    final box = key.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return null;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final pos = box.localToGlobal(Offset.zero, ancestor: overlay);
+    return RelativeRect.fromLTRB(
+      pos.dx,
+      pos.dy + box.size.height + 4,
+      overlay.size.width - pos.dx - box.size.width,
+      overlay.size.height - pos.dy - box.size.height,
+    );
   }
 
-  /// Ouvre le bottom sheet de tri. Implémentation complète livrée à l'étape 6.
-  void _openSortSheet() {
-    // Placeholder — étape 6 : setState sur _sort parmi les options.
+  /// Popup tri positionné juste sous le bouton « Trier ».
+  Future<void> _openSortSheet() async {
+    final position = _menuPositionUnder(_sortBtnKey);
+    if (position == null) return;
+    final options = <(String, String, IconData)>[
+      ('name',       'Nom (A → Z)',       Icons.sort_by_alpha_rounded),
+      ('price_asc',  'Prix croissant',    Icons.arrow_upward_rounded),
+      ('price_desc', 'Prix décroissant',  Icons.arrow_downward_rounded),
+      ('stock',      'Stock disponible',  Icons.inventory_2_outlined),
+    ];
+    final selected = await showMenu<String>(
+      context: context,
+      position: position,
+      constraints: const BoxConstraints(minWidth: 220, maxWidth: 280),
+      items: [
+        for (final o in options)
+          PopupMenuItem<String>(
+            value: o.$1,
+            child: Row(children: [
+              Icon(o.$3,
+                  size: 16,
+                  color: _sort == o.$1
+                      ? AppColors.primary
+                      : AppColors.textSecondary),
+              const SizedBox(width: 10),
+              Expanded(child: Text(o.$2,
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: _sort == o.$1
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                      color: _sort == o.$1
+                          ? AppColors.primary
+                          : AppColors.textPrimary))),
+              if (_sort == o.$1)
+                Icon(Icons.check_rounded,
+                    size: 14, color: AppColors.primary),
+            ]),
+          ),
+      ],
+    );
+    if (selected != null && mounted) {
+      setState(() => _sort = selected);
+    }
+  }
+
+  /// Popup filtres positionné juste sous le bouton « Filtrer ».
+  /// Stock + bouton « Effacer les filtres ». Catégorie/marque sont gérées
+  /// via les chips de la rangée principale (pas de doublon ici).
+  Future<void> _openFiltersSheet() async {
+    final position = _menuPositionUnder(_filtersBtnKey);
+    if (position == null) return;
+    final stockOptions = <(String?, String, IconData)>[
+      (null,             'Tous',          Icons.all_inclusive_rounded),
+      ('in_stock',       'En stock',      Icons.check_circle_outline_rounded),
+      ('low_stock',      'Stock faible',  Icons.warning_amber_rounded),
+      ('out_of_stock',   'Rupture',       Icons.remove_circle_outline_rounded),
+    ];
+    const _kClear = '__clear__';
+    final selected = await showMenu<String>(
+      context: context,
+      position: position,
+      constraints: const BoxConstraints(minWidth: 220, maxWidth: 280),
+      items: [
+        const PopupMenuItem<String>(
+          enabled: false,
+          height: 28,
+          child: Padding(
+            padding: EdgeInsets.only(top: 4),
+            child: Text('Stock',
+                style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.5,
+                    color: AppColors.textHint)),
+          ),
+        ),
+        for (final o in stockOptions)
+          PopupMenuItem<String>(
+            value: 'stock:${o.$1 ?? ''}',
+            child: Row(children: [
+              Icon(o.$3,
+                  size: 16,
+                  color: _stockFilter == o.$1
+                      ? AppColors.primary
+                      : AppColors.textSecondary),
+              const SizedBox(width: 10),
+              Expanded(child: Text(o.$2,
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: _stockFilter == o.$1
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                      color: _stockFilter == o.$1
+                          ? AppColors.primary
+                          : AppColors.textPrimary))),
+              if (_stockFilter == o.$1)
+                Icon(Icons.check_rounded,
+                    size: 14, color: AppColors.primary),
+            ]),
+          ),
+        if (_activeFilterCount > 0) const PopupMenuDivider(height: 8),
+        if (_activeFilterCount > 0)
+          PopupMenuItem<String>(
+            value: _kClear,
+            child: Row(children: [
+              Icon(Icons.clear_all_rounded,
+                  size: 16, color: AppColors.error),
+              const SizedBox(width: 10),
+              Text('Effacer les filtres',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.error)),
+            ]),
+          ),
+      ],
+    );
+    if (selected == null || !mounted) return;
+    if (selected == _kClear) {
+      setState(() {
+        _filterCategories.clear();
+        _filterBrands.clear();
+        _priceRange = null;
+        _stockFilter = null;
+      });
+      return;
+    }
+    if (selected.startsWith('stock:')) {
+      final v = selected.substring('stock:'.length);
+      setState(() => _stockFilter = v.isEmpty ? null : v);
+    }
   }
 
   /// Ajout direct d'une variante sélectionnée depuis la tile (chip + "+").
@@ -1055,9 +1416,11 @@ class _PosProductPanelState extends State<PosProductPanel> {
     final name = p.variants.length == 1
         ? p.name
         : '${p.name} — ${v.name}';
+    final bloc = context.read<CaisseBloc>();
+    final stock = _stockForVariant(v, bloc.state.deliveryLocationId);
     _tryAddToCart(
       context,
-      context.read<CaisseBloc>(),
+      bloc,
       SaleItem(
         productId:   id,
         productName: name,
@@ -1066,219 +1429,8 @@ class _PosProductPanelState extends State<PosProductPanel> {
         imageUrl:    v.imageUrl ?? p.mainImageUrl,
         quantity:    1,
       ),
-      v.stockAvailable,
+      stock,
       displayName: name,
-    );
-  }
-}
-
-// ─── Tuile POS (image carrée + corps surface) ────────────────────────────────
-class _PosProductTile extends StatefulWidget {
-  final Product                    product;
-  final VoidCallback               onTap;         // legacy — ouvre variant picker
-  final ValueChanged<int>?         onAddVariant;  // add direct depuis chip + "+"
-  const _PosProductTile({required this.product, required this.onTap,
-      this.onAddVariant});
-  @override
-  State<_PosProductTile> createState() => _PosProductTileState();
-}
-
-class _PosProductTileState extends State<_PosProductTile> {
-  int? _selectedIdx;
-
-  @override
-  void initState() {
-    super.initState();
-    // Sélection par défaut : variante principale ou premier avec prix > 0
-    final v = widget.product.variants;
-    if (v.isNotEmpty) {
-      final mainIdx = v.indexWhere((x) => x.isMain);
-      _selectedIdx = mainIdx >= 0 ? mainIdx
-          : v.indexWhere((x) => x.priceSellPos > 0);
-      if (_selectedIdx! < 0) _selectedIdx = 0;
-    }
-  }
-
-  ProductVariant? get _selectedVariant => _selectedIdx != null
-      && _selectedIdx! < widget.product.variants.length
-      ? widget.product.variants[_selectedIdx!] : null;
-
-  double _displayPrice() {
-    final v = _selectedVariant;
-    if (v != null && v.priceSellPos > 0) return v.priceSellPos;
-    // Fallback : premier prix variant > 0 ou prix produit
-    final withPrice = widget.product.variants
-        .where((x) => x.priceSellPos > 0);
-    if (withPrice.isNotEmpty) return withPrice.first.priceSellPos;
-    return widget.product.priceSellPos;
-  }
-
-  int _displayStock() {
-    final v = _selectedVariant;
-    if (v != null) return v.stockAvailable;
-    return widget.product.totalStock;
-  }
-
-  double? _displayMargin() {
-    final v = _selectedVariant;
-    if (v != null) return v.marginPos;
-    return widget.product.marginPos;
-  }
-
-  Color _stockColor(int stock, int minAlert) {
-    if (stock <= 0) return AppColors.error;
-    if (stock <= minAlert) return AppColors.warning;
-    return AppColors.secondary;
-  }
-
-  void _tapChip(int idx) {
-    setState(() => _selectedIdx = idx);
-  }
-
-  // _tapAdd supprimé (round 9) — était utilisé par le bouton "+" qui a
-  // été retiré. La card entière reste tappable via widget.onTap dans le
-  // GestureDetector ci-dessous.
-
-  @override
-  Widget build(BuildContext context) {
-    final l          = context.l10n;
-    final p          = widget.product;
-    final sel        = _selectedVariant;
-    final minAlert   = sel?.stockMinAlert ?? p.stockMinAlert;
-    final stock      = _displayStock();
-    final outOfStock = stock <= 0;
-    final lowStock   = !outOfStock && stock <= minAlert;
-    final price      = _displayPrice();
-    final margin     = _displayMargin();
-    final stockColor = _stockColor(stock, minAlert);
-    final rawRating  = p.rating.clamp(0, 5);
-    final stars      = rawRating > 5 ? 5 : rawRating;
-    final variants   = p.variants;
-    final hasVariants = variants.length > 1;
-
-    return GestureDetector(
-      // Si le produit a des variantes, on laisse cliquer même en rupture
-      // pour ouvrir le sélecteur. La validation finale du stock se fait
-      // dans caisse_bloc._validateStock à l'ajout au panier.
-      onTap: (outOfStock && !hasVariants) ? null : widget.onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.divider, width: 1),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.04),
-                blurRadius: 8, offset: const Offset(0, 2)),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-            // ═══ Zone image (1:1) avec badges et bouton + ═══
-            AspectRatio(
-              aspectRatio: 1,
-              child: Stack(fit: StackFit.expand, children: [
-                _ProductImageSmart(
-                  url: sel?.imageUrl ?? p.mainImageUrl,
-                  fallback: _PosProductIcon(),
-                ),
-                // Badge variantes (top-left)
-                if (hasVariants)
-                  Positioned(top: 8, left: 8, child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text('${variants.length}v',
-                        style: const TextStyle(fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white)),
-                  )),
-                // Badge statut stock (top-right)
-                if (outOfStock)
-                  Positioned(top: 8, right: 8, child: _StockBadgePill(
-                      label: l.boutiqueOutOfStock, color: AppColors.error)),
-                if (lowStock)
-                  Positioned(top: 8, right: 8, child: _StockBadgePill(
-                      label: l.boutiqueLowStock, color: AppColors.warning)),
-                // Bouton « + » bottom-right supprimé (round 9) — la card
-                // entière reste tappable pour ajouter au panier (cf.
-                // GestureDetector/InkWell wrapping la card).
-              ]),
-            ),
-
-            // ═══ Corps card (fond surface blanc) ═══
-            Expanded(child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                // Étoiles + nom + SKU
-                if (stars > 0) _StarRating(filled: stars, total: 5),
-                if (stars > 0) const SizedBox(height: 3),
-                Text(p.name,
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                        height: 1.15)),
-                if ((sel?.sku ?? p.sku) != null &&
-                    (sel?.sku ?? p.sku)!.isNotEmpty)
-                  Text(sel?.sku ?? p.sku!,
-                      maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 9,
-                          fontFamily: 'monospace',
-                          color: AppColors.textHint)),
-                const SizedBox(height: 4),
-                // Prix + stock
-                Row(crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                  Expanded(child: Text(
-                    price > 0
-                        ? CurrencyFormatter.format(price)
-                        : 'N/D',
-                    style: const TextStyle(fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textPrimary),
-                  )),
-                  Text('$stock',
-                      style: TextStyle(fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: stockColor)),
-                ]),
-                const SizedBox(height: 5),
-                // Chips variantes (max 4 + "+N")
-                if (hasVariants)
-                  _VariantChipRow(
-                    variants: variants,
-                    selectedIdx: _selectedIdx ?? 0,
-                    onSelect: _tapChip,
-                    onMore: widget.onTap,
-                  ),
-                const Spacer(),
-                // Pill marge (bottom-left)
-                if (margin != null)
-                  Align(alignment: Alignment.centerLeft,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 5, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: AppColors.secondary.withOpacity(0.14),
-                        borderRadius: BorderRadius.circular(5),
-                      ),
-                      child: Text('${margin.toStringAsFixed(0)}%',
-                          style: TextStyle(fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.secondary)),
-                    ),
-                  ),
-              ]),
-            )),
-          ]),
-        ),
-      ),
     );
   }
 }
@@ -1295,23 +1447,31 @@ class _PosProductListTile extends StatefulWidget {
 }
 
 class _PosProductListTileState extends State<_PosProductListTile> {
-  int? _selectedIdx;
+  /// `null` = aucun choix manuel → suit `Product.featuredVariant` (rotation
+  /// auto sur égalité de stock). Cf. `_PosProductTileState` pour le détail.
+  int? _userPickedIdx;
 
-  @override
-  void initState() {
-    super.initState();
+  int get _activeIdx {
     final v = widget.product.variants;
-    if (v.isNotEmpty) {
-      final mainIdx = v.indexWhere((x) => x.isMain);
-      _selectedIdx = mainIdx >= 0 ? mainIdx
-          : v.indexWhere((x) => x.priceSellPos > 0);
-      if (_selectedIdx! < 0) _selectedIdx = 0;
+    if (v.isEmpty) return 0;
+    if (_userPickedIdx != null && _userPickedIdx! < v.length) {
+      return _userPickedIdx!;
     }
+    final feat = widget.product.featuredVariant();
+    if (feat != null) {
+      final i = v.indexOf(feat);
+      if (i >= 0) return i;
+    }
+    final priced = v.indexWhere((x) => x.priceSellPos > 0);
+    return priced >= 0 ? priced : 0;
   }
 
-  ProductVariant? get _sel => _selectedIdx != null
-      && _selectedIdx! < widget.product.variants.length
-      ? widget.product.variants[_selectedIdx!] : null;
+  ProductVariant? get _sel {
+    final v = widget.product.variants;
+    if (v.isEmpty) return null;
+    final i = _activeIdx;
+    return (i >= 0 && i < v.length) ? v[i] : null;
+  }
 
   double _price() {
     final v = _sel;
@@ -1321,7 +1481,11 @@ class _PosProductListTileState extends State<_PosProductListTile> {
     return widget.product.priceSellPos;
   }
 
-  int _stock() => _sel?.stockAvailable ?? widget.product.totalStock;
+  int _stock(String? deliveryLocId) {
+    final v = _sel;
+    if (v != null) return _stockForVariant(v, deliveryLocId);
+    return _stockForProduct(widget.product, deliveryLocId);
+  }
 
   Color _stockColor(int stock, int minAlert) {
     if (stock <= 0) return AppColors.error;
@@ -1334,11 +1498,23 @@ class _PosProductListTileState extends State<_PosProductListTile> {
 
   @override
   Widget build(BuildContext context) {
+    if (_userPickedIdx == null) {
+      return ValueListenableBuilder<int>(
+        valueListenable: featuredRotationTicker,
+        builder: (_, __, ___) => _buildRow(context),
+      );
+    }
+    return _buildRow(context);
+  }
+
+  Widget _buildRow(BuildContext context) {
     final l          = context.l10n;
     final p          = widget.product;
     final sel        = _sel;
+    final deliveryLocId = context.select<CaisseBloc, String?>(
+        (b) => b.state.deliveryLocationId);
     final minAlert   = sel?.stockMinAlert ?? p.stockMinAlert;
-    final stock      = _stock();
+    final stock      = _stock(deliveryLocId);
     final outOfStock = stock <= 0;
     final lowStock   = !outOfStock && stock <= minAlert;
     final price      = _price();
@@ -1356,7 +1532,7 @@ class _PosProductListTileState extends State<_PosProductListTile> {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppColors.divider),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.03),
+            BoxShadow(color: Colors.black.withValues(alpha:0.03),
                 blurRadius: 4, offset: const Offset(0, 1)),
           ],
         ),
@@ -1369,18 +1545,11 @@ class _PosProductListTileState extends State<_PosProductListTile> {
             // ── Thumbnail 48×48 ─────────────────────────────────────
             Padding(
               padding: const EdgeInsets.all(10),
-              child: SizedBox(width: 48, height: 48,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: _ProductImageSmart(
-                    url: sel?.imageUrl ?? p.mainImageUrl,
-                    fallback: Container(
-                      color: AppColors.inputFill,
-                      child: const Icon(Icons.inventory_2_outlined,
-                          size: 20, color: AppColors.textHint),
-                    ),
-                  ),
-                ),
+              child: ProductImageCard(
+                imageUrl: sel?.imageUrl ?? p.mainImageUrl,
+                width:  48,
+                height: 48,
+                borderRadius: BorderRadius.circular(8),
               ),
             ),
             // ── Infos (nom + SKU + chips) ─────────────────────────
@@ -1419,8 +1588,8 @@ class _PosProductListTileState extends State<_PosProductListTile> {
                   const SizedBox(height: 4),
                   _VariantChipRow(
                     variants: variants,
-                    selectedIdx: _selectedIdx ?? 0,
-                    onSelect: (i) => setState(() => _selectedIdx = i),
+                    selectedIdx: _activeIdx,
+                    onSelect: (i) => setState(() => _userPickedIdx = i),
                     onMore: widget.onTap,
                   ),
                 ],
@@ -1510,7 +1679,7 @@ class _ViewModeBtn extends StatelessWidget {
             color: active ? Colors.white : Colors.transparent,
             borderRadius: BorderRadius.circular(6),
             boxShadow: active ? [
-              BoxShadow(color: Colors.black.withOpacity(0.05),
+              BoxShadow(color: Colors.black.withValues(alpha:0.05),
                   blurRadius: 4, offset: const Offset(0, 1)),
             ] : null,
           ),
@@ -1529,6 +1698,7 @@ class _ToolbarButton extends StatelessWidget {
   final VoidCallback onTap;
   final int badge;
   const _ToolbarButton({
+    super.key,
     required this.icon, required this.label, required this.onTap,
     this.badge = 0,
   });
@@ -1657,7 +1827,7 @@ class _VariantChipRow extends StatelessWidget {
               padding: const EdgeInsets.symmetric(
                   horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.1),
+                color: AppColors.primary.withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text('+$extra',
@@ -1672,85 +1842,3 @@ class _VariantChipRow extends StatelessWidget {
   }
 }
 
-// ─── Étoiles de notation ──────────────────────────────────────────────────────
-class _StarRating extends StatelessWidget {
-  final int filled;
-  final int total;
-  const _StarRating({required this.filled, this.total = 5});
-
-  @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: List.generate(total, (i) => Padding(
-      padding: const EdgeInsets.only(right: 1.5),
-      child: Icon(
-        i < filled
-            ? Icons.star_rounded
-            : Icons.star_outline_rounded,
-        size: 12,
-        color: i < filled
-            ? const Color(0xFFFFCC00)   // or doré
-            : const Color(0xFFDDDDDD),
-      ),
-    )),
-  );
-}
-
-class _PosProductIcon extends StatelessWidget {
-  const _PosProductIcon();
-  @override
-  Widget build(BuildContext context) => Container(
-    color: const Color(0xFFEDE9FA),
-    child: Center(
-      child: Icon(Icons.shopping_bag_outlined,
-          size: 44, color: AppColors.primary.withOpacity(0.3)),
-    ),
-  );
-}
-
-/// Widget intelligent qui détecte si l'URL est :
-///  - http/https → Image.network (avec error builder)
-///  - chemin local (file path) → Image.file
-///  - null/vide → fallback fourni
-class _ProductImageSmart extends StatelessWidget {
-  final String? url;
-  final Widget fallback;
-  const _ProductImageSmart({required this.url, required this.fallback});
-
-  @override
-  Widget build(BuildContext context) {
-    final u = url;
-    if (u == null || u.isEmpty) return fallback;
-
-    if (u.startsWith('http://') || u.startsWith('https://')) {
-      return Image.network(
-        u,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: double.infinity,
-        cacheWidth: 400,
-        loadingBuilder: (ctx, child, progress) {
-          if (progress == null) return child;
-          return Container(
-            color: const Color(0xFFF9FAFB),
-            alignment: Alignment.center,
-            child: const SizedBox(
-              width: 18, height: 18,
-              child: CircularProgressIndicator(
-                  strokeWidth: 1.5, color: Color(0xFFD1D5DB)),
-            ),
-          );
-        },
-        errorBuilder: (_, __, ___) => fallback,
-      );
-    }
-
-    return Image.file(
-      File(u),
-      fit: BoxFit.cover,
-      width: double.infinity,
-      height: double.infinity,
-      errorBuilder: (_, __, ___) => fallback,
-    );
-  }
-}
