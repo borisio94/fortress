@@ -1,16 +1,23 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../../../core/services/pending_image_upload_service.dart';
 import '../../../../core/services/storage_service.dart';
+import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/image_validation.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_section_card.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/app_switch.dart';
+import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../core/widgets/danger_confirm_dialog.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/database/app_database.dart';
@@ -22,6 +29,7 @@ import '../../../../features/inventaire/domain/entities/stock_location.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/services/stock_service.dart';
 import '../../../../shared/widgets/app_select_menu.dart';
+import '../widgets/adjust_stock_dialog.dart';
 
 // ─── Modèles internes ─────────────────────────────────────────────────────────
 
@@ -46,11 +54,13 @@ class _Variant {
   final TextEditingController length = TextEditingController();
   final TextEditingController width  = TextEditingController();
   final TextEditingController height = TextEditingController();
-  // Images
-  File?   imageFile;
-  String? imageUrl;
-  final List<File>   secondaryImageFiles = [];
-  final List<String> secondaryImageUrls  = [];
+  // Images — bytes en mémoire (compatible web + mobile/desktop). Sur web,
+  // image_picker retourne un blob URL non utilisable par dart:io File ;
+  // les bytes lus via xFile.readAsBytes() marchent partout.
+  Uint8List? imageBytes;
+  String?    imageUrl;
+  final List<Uint8List> secondaryImageBytes = [];
+  final List<String>    secondaryImageUrls  = [];
   bool    isMain     = false;
   bool    isExpanded = true;
   /// `true` = variante jamais persistée (ajoutée dans le form). En mode édition
@@ -389,11 +399,11 @@ class _ProductFormPageState extends State<ProductFormPage> {
           ? freshProduct.variants[i]
           : null;
 
-      // Image URL : utiliser ce qui existe déjà (local ou distant)
-      // L'upload vers Supabase se fera en arrière-plan après navigation
+      // Image URL : utiliser ce qui existe déjà (distant). Si l'utilisateur
+      // vient de choisir une nouvelle image (bytes en mémoire), on laisse
+      // imageUrl null — l'upload background la définira après navigation.
       String? varImageUrl;
-      if (v.imageFile != null) {
-        varImageUrl = v.imageFile!.path; // chemin local temporaire
+      if (v.imageBytes != null) {
         if (existingVariant?.imageUrl != null &&
             StorageService.isRemoteUrl(existingVariant!.imageUrl)) {
           StorageService.deleteImage(existingVariant.imageUrl!);
@@ -404,16 +414,17 @@ class _ProductFormPageState extends State<ProductFormPage> {
         varImageUrl = v.imageUrl;
       }
 
-      // Images secondaires — garder existantes, nouveaux fichiers en local temp
+      // Images secondaires — garder uniquement les URLs distantes ; les
+      // bytes locaux seront uploadés en background et ajoutés à la liste.
       final List<String> savedSecondaryUrls = [
         ...v.secondaryImageUrls.where(StorageService.isRemoteUrl),
-        ...v.secondaryImageFiles.map((f) => f.path),
       ];
 
-      // En édition d'une variante déjà persistée : le stock est géré par les
-      // arrivées/incidents, on préserve les valeurs actuelles. En création
-      // (produit neuf OU nouvelle variante ajoutée à un produit existant) :
-      // on lit depuis le champ "Stock initial" saisi par l'utilisateur.
+      // En édition d'une variante déjà persistée : on préserve les compteurs
+      // de stock — la modification se fait via le bouton "Corriger" (qui
+      // appelle StockService.adjustment, log un mouvement et propage proprement
+      // variant + StockLevel boutique). Le champ "Stock initial" du form n'est
+      // affiché qu'en création (cf. plus bas, `if (productId == null || variant.isNew)`).
       final isEditing = !v.isNew && existingVariant != null;
       final formStock = int.tryParse(v.stock.text) ?? 0;
 
@@ -476,10 +487,15 @@ class _ProductFormPageState extends State<ProductFormPage> {
       createdAt:     _editingProduct?.createdAt ?? DateTime.now(),
     );
 
-    // 1. Hive immédiat + Supabase background
+    // 1. Hive immédiat + Supabase background.
+    //    `forceStockLevelSync` : édition explicite par l'utilisateur, sa
+    //    valeur de stock doit écraser le StockLevel boutique même si un
+    //    transfert/vente récent a marqué l'écho local (sinon la "vue
+    //    boutique" affiche encore l'ancienne valeur, alors que la liste
+    //    des variantes affiche la nouvelle → divergence visuelle).
     final isEdit = existingId != null;
     try {
-      await AppDatabase.saveProduct(product);
+      await AppDatabase.saveProduct(product, forceStockLevelSync: true);
     } catch (e) {
       if (mounted) {
         AppSnack.error(context, e.toString().replaceAll('Exception: ', ''));
@@ -529,142 +545,189 @@ class _ProductFormPageState extends State<ProductFormPage> {
   }
 
 
-  /// Upload les images en arrière-plan après la navigation
-  void _uploadImagesInBackground(Product product, int baseTs) {
-    // Capturer les données MAINTENANT avant que le widget soit disposed
+  /// Persiste les bytes PNG des nouvelles images dans la file Hive
+  /// `pendingImageUploadsBox`, puis tente un flush immédiat. La file
+  /// survit à un refresh / fermeture d'onglet — sur 3G, l'utilisateur
+  /// peut quitter avant la fin de l'upload (20-30 s), au prochain boot
+  /// `AppDatabase.init()` reprend automatiquement.
+  ///
+  /// Ancien comportement (`Future.microtask` + `StorageService.uploadImage
+  /// Bytes` direct + `AppDatabase.saveProduct`) perdait les bytes en
+  /// mémoire JS si le user quittait avant la fin — image disparue
+  /// silencieusement. Le service gère désormais retry, cap FIFO 50,
+  /// suppression de l'ancienne image, et update du `Product` en Hive.
+  Future<void> _uploadImagesInBackground(Product product, int baseTs) async {
     final shopId = widget.shopId;
-    final variantImages = _variants.map((v) => (
-    imageFile:  v.imageFile,
-    secondaryFiles: List<File>.from(v.secondaryImageFiles),
-    )).toList();
+    final productId = product.id;
+    if (productId == null) return;
 
-    Future.microtask(() async {
-      bool needsUpdate = false;
-      final updatedVariants = List<ProductVariant>.from(product.variants);
+    for (int i = 0; i < _variants.length; i++) {
+      if (i >= product.variants.length) break;
+      final v = _variants[i];
 
-      for (int i = 0; i < variantImages.length; i++) {
-        if (i >= updatedVariants.length) break;
-        final imgs = variantImages[i];
-
-        // Upload image principale si c'est un fichier local
-        if (imgs.imageFile != null) {
-          try {
-            final name = 'shops/$shopId/products/${baseTs}_$i';
-            final url  = await StorageService.uploadImage(imgs.imageFile!, name: name);
-            updatedVariants[i] = updatedVariants[i].copyWith(imageUrl: url);
-            needsUpdate = true;
-          } catch (e) {
-            debugPrint('[Form] Upload image échoué: $e');
-          }
-        }
-
-        // Upload images secondaires locales
-        if (imgs.secondaryFiles.isNotEmpty) {
-          final newSecUrls = List<String>.from(
-              updatedVariants[i].secondaryImageUrls
-                  .where(StorageService.isRemoteUrl));
-          for (int j = 0; j < imgs.secondaryFiles.length; j++) {
-            try {
-              final name = 'shops/$shopId/products/${baseTs}_${i}_sec_$j';
-              final url  = await StorageService.uploadImage(
-                  imgs.secondaryFiles[j], name: name);
-              newSecUrls.add(url);
-              needsUpdate = true;
-            } catch (e) {
-              debugPrint('[Form] Upload image secondaire échoué: $e');
-            }
-          }
-          updatedVariants[i] = updatedVariants[i].copyWith(
-              secondaryImageUrls: newSecUrls);
-        }
+      if (v.imageBytes != null) {
+        await PendingImageUploadService.enqueue(
+          shopId:     shopId,
+          productId:  productId,
+          variantIdx: i,
+          bytes:      v.imageBytes!,
+          name:       'shops/$shopId/products/${baseTs}_$i',
+          mimeType:   'image/png',
+          isPrimary:  true,
+        );
       }
+      for (int j = 0; j < v.secondaryImageBytes.length; j++) {
+        await PendingImageUploadService.enqueue(
+          shopId:     shopId,
+          productId:  productId,
+          variantIdx: i,
+          bytes:      v.secondaryImageBytes[j],
+          name:       'shops/$shopId/products/${baseTs}_${i}_sec_$j',
+          mimeType:   'image/png',
+          isPrimary:  false,
+        );
+      }
+    }
 
-      if (!needsUpdate) return;
-
-      final mainVariant = updatedVariants
-          .where((v) => v.isMain).firstOrNull ?? updatedVariants.firstOrNull;
-      final updatedProduct = product.copyWith(
-        imageUrl: mainVariant?.imageUrl,
-        variants: updatedVariants,
-      );
-
-      await AppDatabase.saveProduct(updatedProduct);
-      debugPrint('[Form] ✅ Images uploadées → produit mis à jour');
-    });
+    // Flush immédiat : sur connexion rapide (wifi/4G stable) l'upload se
+    // termine en 1-3 s, équivalent comportement ancien microtask. Sur 3G
+    // ou si le user ferme l'onglet, le worker reprendra au boot suivant
+    // ou à la reconnexion (hooks dans AppDatabase.init/_onNetworkRestored).
+    unawaited(PendingImageUploadService.flush());
   }
 
   Future<void> _pickImage({int variantIdx = 0}) async {
-    final xFile = await ImagePicker().pickImage(
-        source: ImageSource.gallery, imageQuality: 80);
-    if (xFile == null) return;
-    setState(() => _variants[variantIdx].imageFile = File(xFile.path));
+    // Pas de maxWidth / imageQuality sur ImagePicker : sur web ils
+    // peuvent forcer une recompression JPEG silencieuse et tuer la
+    // transparence. On lit les bytes bruts puis `validateAndReadImage`
+    // décode, valide la résolution (min 800×800), redimensionne à
+    // 1600 px max et ré-encode en PNG lossless. Les bytes stockés dans
+    // `_variants[].imageBytes` sont donc DÉJÀ du PNG prêt à uploader —
+    // l'upload doit passer `mimeType: 'image/png'`, sinon Supabase
+    // enregistre du PNG sous extension .jpg.
+    final xFile = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (xFile == null || !mounted) return;
+    final result = await validateAndReadImage(xFile, context);
+    if (!mounted || !result.isValid) return;
+    setState(() => _variants[variantIdx].imageBytes = result.bytes);
+    _showImageSavedSnack(result.width, result.height);
   }
 
   Future<void> _pickSecondaryImage({int variantIdx = 0}) async {
-    final xFile = await ImagePicker().pickImage(
-        source: ImageSource.gallery, imageQuality: 75);
-    if (xFile == null) return;
-    setState(() =>
-        _variants[variantIdx].secondaryImageFiles.add(File(xFile.path)));
+    final xFile = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (xFile == null || !mounted) return;
+    final result = await validateAndReadImage(xFile, context);
+    if (!mounted || !result.isValid) return;
+    setState(() => _variants[variantIdx].secondaryImageBytes.add(result.bytes!));
+    _showImageSavedSnack(result.width, result.height);
   }
 
+  void _showImageSavedSnack(int w, int h) {
+    if (!mounted) return;
+    final theme = Theme.of(context);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(context.l10n.imageSaved(w, h)),
+      backgroundColor: theme.semantic.success,
+      duration: const Duration(seconds: 2),
+    ));
+  }
+
+  /// Bottom sheet pour ajouter rapidement une marque / catégorie / unité.
+  /// Refonte UX : remplace l'AlertDialog par un FormSheet verrouillé
+  /// (pas de tap-outside, X intégré au header).
   Future<String?> _addItemDialog(BuildContext ctx, String title, String hint,
       Future<String> Function(String) onSave) async {
     final ctrl = TextEditingController();
-    return showDialog<String>(
+    return showFormSheet<String>(
       context: ctx,
-      builder: (dc) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-        titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-        contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-        actionsPadding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-        title: Text(title,
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-        content: TextFormField(
-          controller: ctrl, autofocus: true,
-          style: const TextStyle(fontSize: 13, color: Color(0xFF1A1D2E)),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 12),
-            filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: AppColors.divider)),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: AppColors.divider)),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dc).pop(null),
-            style: TextButton.styleFrom(
-                foregroundColor: AppColors.textSecondary,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
-            child: Text(context.l10n.invCancel),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary, foregroundColor: Colors.white,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-              elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      builder: (dc) {
+        final mq = MediaQuery.of(dc);
+        return Padding(
+          padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FormSheetHeader(
+                  title: title,
+                  icon: Icons.add_box_outlined,
+                ),
+                const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                  child: TextFormField(
+                    controller: ctrl,
+                    autofocus: true,
+                    style: const TextStyle(
+                        fontSize: 13, color: Color(0xFF1A1D2E)),
+                    decoration: InputDecoration(
+                      hintText: hint,
+                      hintStyle: const TextStyle(
+                          color: Color(0xFFBBBBBB), fontSize: 12),
+                      filled: true,
+                      fillColor: const Color(0xFFF9FAFB),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 11),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                              color: AppColors.divider)),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                              color: AppColors.divider)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                              color: AppColors.primary, width: 1.5)),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                  child: Row(children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(dc).pop(null),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 44),
+                          foregroundColor: AppColors.textSecondary,
+                        ),
+                        child: Text(context.l10n.invCancel),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size(0, 44),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () async {
+                          final v = ctrl.text.trim();
+                          if (v.isNotEmpty) {
+                            final saved = await onSave(v);
+                            if (dc.mounted) {
+                              Navigator.of(dc).pop(saved);
+                            }
+                          }
+                        },
+                        child: Text(context.l10n.add),
+                      ),
+                    ),
+                  ]),
+                ),
+              ],
             ),
-            onPressed: () async {
-              final v = ctrl.text.trim();
-              if (v.isNotEmpty) {
-                final saved = await onSave(v);
-                if (dc.mounted) Navigator.of(dc).pop(saved);
-              }
-            },
-            child: Text(context.l10n.add),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -884,7 +947,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
               if (isUrl) {
                 _variants[i].secondaryImageUrls.removeAt(idx);
               } else {
-                _variants[i].secondaryImageFiles.removeAt(idx);
+                _variants[i].secondaryImageBytes.removeAt(idx);
               }
             }),
             onSetMain: () => setState(() {
@@ -974,8 +1037,8 @@ class _ProductFormPageState extends State<ProductFormPage> {
             _gap(h: 6),
             _CalcBanner(
               label: l.prodExpensePerUnit,
-              value: '${_expensePerUnit.ceilToDouble().toStringAsFixed(0)} XAF/u',
-              sub: '${_totalExpenses.toStringAsFixed(0)} XAF ÷ $_totalStock u',
+              value: '${CurrencyFormatter.format(_expensePerUnit.ceilToDouble())}/u',
+              sub: '${CurrencyFormatter.format(_totalExpenses)} ÷ $_totalStock u',
             ),
           ],
         ],
@@ -1018,15 +1081,11 @@ class _ProductFormPageState extends State<ProductFormPage> {
                   child: Stack(fit: StackFit.expand, children: [
                     ClipRRect(
                       borderRadius: BorderRadius.circular(9),
-                      child: v.imageFile != null
-                          ? Image.file(v.imageFile!, fit: BoxFit.cover)
-                          : v.imageUrl != null && v.imageUrl!.isNotEmpty
-                          ? (v.imageUrl!.startsWith('http')
-                          ? Image.network(v.imageUrl!, fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _ImgPlaceholderSmall())
-                          : Image.file(File(v.imageUrl!), fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _ImgPlaceholderSmall()))
-                          : _ImgPlaceholderSmall(),
+                      child: _buildVariantImage(
+                        bytes: v.imageBytes,
+                        url:   v.imageUrl,
+                        placeholder: _ImgPlaceholderSmall(),
+                      ),
                     ),
                     if (isMain)
                       Positioned(top: 4, right: 4,
@@ -1041,7 +1100,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 3),
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.45),
+                            color: Colors.black.withValues(alpha:0.45),
                             borderRadius: const BorderRadius.only(
                                 bottomLeft: Radius.circular(9),
                                 bottomRight: Radius.circular(9)),
@@ -1133,7 +1192,7 @@ class _VariantFullCard extends StatelessWidget {
     final eff    = buy > 0 ? (buy + expensePerUnit).ceilToDouble() : 0.0;
     final benef  = sell > 0 && eff > 0 ? sell - eff : 0.0;
     final margin = sell > 0 && eff > 0 ? benef / sell * 100 : 0.0;
-    final hasImg = variant.imageFile != null ||
+    final hasImg = variant.imageBytes != null ||
         (variant.imageUrl != null && variant.imageUrl!.isNotEmpty);
 
     return Container(
@@ -1143,7 +1202,7 @@ class _VariantFullCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
             color: isMain
-                ? AppColors.primary.withOpacity(0.4)
+                ? AppColors.primary.withValues(alpha:0.4)
                 : AppColors.divider,
             width: isMain ? 1.5 : 1),
       ),
@@ -1177,18 +1236,14 @@ class _VariantFullCard extends StatelessWidget {
               if (hasImg) ...[
                 ClipRRect(
                   borderRadius: BorderRadius.circular(6),
-                  child: variant.imageFile != null
-                      ? Image.file(variant.imageFile!,
-                      width: 32, height: 32, fit: BoxFit.cover)
-                      : variant.imageUrl!.startsWith('http')
-                      ? Image.network(variant.imageUrl!,
-                      width: 32, height: 32, fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                      const SizedBox(width: 32, height: 32))
-                      : Image.file(File(variant.imageUrl!),
-                      width: 32, height: 32, fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                      const SizedBox(width: 32, height: 32)),
+                  child: SizedBox(
+                    width: 32, height: 32,
+                    child: _buildVariantImage(
+                      bytes: variant.imageBytes,
+                      url:   variant.imageUrl,
+                      placeholder: const SizedBox(width: 32, height: 32),
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 6),
               ],
@@ -1200,7 +1255,7 @@ class _VariantFullCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 )),
                 if (sell > 0)
-                  Text('${sell.toStringAsFixed(0)} XAF',
+                  Text(CurrencyFormatter.format(sell),
                       style: TextStyle(fontSize: 11,
                           color: AppColors.primary, fontWeight: FontWeight.w600)),
               ] else
@@ -1215,7 +1270,7 @@ class _VariantFullCard extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: const Color(0xFFFAF5FF),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                      border: Border.all(color: AppColors.primary.withValues(alpha:0.3)),
                     ),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
                       Icon(Icons.star_outline_rounded, size: 12,
@@ -1254,6 +1309,18 @@ class _VariantFullCard extends StatelessWidget {
             padding: const EdgeInsets.all(12),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
+              // Hint qualité image (emplacement B — au-dessus du Row
+              // image+nom+SKU, sur toute la largeur du panneau variante).
+              Text(
+                l.imageUploadHint,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.textHint,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+              const SizedBox(height: 6),
+
               // Image + Nom + SKU
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 GestureDetector(
@@ -1261,34 +1328,31 @@ class _VariantFullCard extends StatelessWidget {
                   child: Stack(children: [
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: variant.imageFile != null
-                          ? Image.file(variant.imageFile!,
-                          width: 64, height: 64, fit: BoxFit.cover)
-                          : variant.imageUrl != null && variant.imageUrl!.isNotEmpty
-                          ? (variant.imageUrl!.startsWith('http')
-                          ? Image.network(variant.imageUrl!,
-                          width: 64, height: 64, fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _ImgPlaceholderSmall())
-                          : Image.file(File(variant.imageUrl!),
-                          width: 64, height: 64, fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => _ImgPlaceholderSmall()))
-                          : Container(
-                          width: 64, height: 64,
-                          decoration: BoxDecoration(
-                              color: AppColors.inputFill,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: AppColors.divider)),
-                          child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.add_photo_alternate_outlined,
-                                    size: 20, color: Color(0xFFD1D5DB)),
-                                const SizedBox(height: 2),
-                                Text(l.prodChooseFile,
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(fontSize: 8,
-                                        color: AppColors.textHint)),
-                              ])),
+                      child: SizedBox(
+                        width: 64, height: 64,
+                        child: hasImg
+                            ? _buildVariantImage(
+                                bytes: variant.imageBytes,
+                                url:   variant.imageUrl,
+                                placeholder: _ImgPlaceholderSmall(),
+                              )
+                            : Container(
+                                decoration: BoxDecoration(
+                                    color: AppColors.inputFill,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: AppColors.divider)),
+                                child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(Icons.add_photo_alternate_outlined,
+                                          size: 20, color: Color(0xFFD1D5DB)),
+                                      const SizedBox(height: 2),
+                                      Text(l.prodChooseFile,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(fontSize: 8,
+                                              color: AppColors.textHint)),
+                                    ])),
+                      ),
                     ),
                     if (hasImg)
                       Positioned(bottom: 0, right: 0,
@@ -1321,12 +1385,12 @@ class _VariantFullCard extends StatelessWidget {
               _gap(h: 10),
 
               // Images secondaires
-              if (variant.secondaryImageFiles.isNotEmpty ||
+              if (variant.secondaryImageBytes.isNotEmpty ||
                   variant.secondaryImageUrls.isNotEmpty) ...[
                 _SecondaryImagesRow(
-                  files: variant.secondaryImageFiles,
-                  urls:  variant.secondaryImageUrls,
-                  onAdd: onPickSecondaryImage,
+                  bytesList: variant.secondaryImageBytes,
+                  urls:      variant.secondaryImageUrls,
+                  onAdd:     onPickSecondaryImage,
                   onRemoveItem: onRemoveSecondaryImage,
                 ),
                 _gap(h: 10),
@@ -1340,7 +1404,7 @@ class _VariantFullCard extends StatelessWidget {
                       color: AppColors.primarySurface,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color: AppColors.primary.withOpacity(0.3)),
+                          color: AppColors.primary.withValues(alpha:0.3)),
                     ),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
                       Icon(Icons.add_photo_alternate_outlined,
@@ -1582,7 +1646,7 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                 margin: const EdgeInsets.only(right: 6),
-                decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1),
+                decoration: BoxDecoration(color: AppColors.primary.withValues(alpha:0.1),
                     borderRadius: BorderRadius.circular(8)),
                 child: Text('${_arrivals.length}', style: TextStyle(fontSize: 9,
                     fontWeight: FontWeight.w700, color: AppColors.primary)),
@@ -1639,7 +1703,7 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
               onTap: () => _showArrivalSheet(context, existing: a),
               child: Padding(padding: const EdgeInsets.all(4),
                   child: Icon(Icons.edit_rounded, size: 14,
-                      color: AppColors.primary.withOpacity(0.6))),
+                      color: AppColors.primary.withValues(alpha:0.6))),
             ),
             GestureDetector(
               onTap: () => _confirmDelete(context, a),
@@ -1747,7 +1811,7 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
               Row(children: [
                 Container(width: 34, height: 34,
                     decoration: BoxDecoration(
-                        color: AppColors.secondary.withOpacity(0.1),
+                        color: AppColors.secondary.withValues(alpha:0.1),
                         borderRadius: BorderRadius.circular(9)),
                     child: const Icon(Icons.inventory_rounded,
                         size: 17, color: AppColors.secondary)),
@@ -1966,15 +2030,13 @@ class _StockIndicatorsState extends State<_StockIndicators> {
   String? _selectedLocationId;
 
   Future<void> _openAdjust(BuildContext context, ProductVariant v) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => _AdjustStockDialog(
-        variant:   v,
-        shopId:    widget.shopId,
-        productId: widget.productId,
-      ),
+    final confirmed = await showAdjustStockSheet(
+      context:   context,
+      variant:   v,
+      shopId:    widget.shopId,
+      productId: widget.productId,
     );
-    if (confirmed == true) {
+    if (confirmed) {
       widget.onAdjusted?.call();
       if (context.mounted) {
         AppSnack.success(context, 'Stock corrigé avec succès');
@@ -2225,7 +2287,7 @@ class _LocationChip extends StatelessWidget {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? _color.withOpacity(0.12) : Colors.white,
+          color: selected ? _color.withValues(alpha:0.12) : Colors.white,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: selected ? _color : AppColors.divider,
@@ -2260,233 +2322,11 @@ class _LocationChip extends StatelessWidget {
   }
 }
 
-// ─── Dialogue de correction de stock ──────────────────────────────────────
-//
-// Corrige le stock DISPONIBLE d'une variante en cas d'erreur de saisie.
-// Appelle `StockService.adjustment()` avec delta = newStock - currentAvailable.
-// L'opération est inaltérable (log automatique dans stock_movements).
-class _AdjustStockDialog extends StatefulWidget {
-  final ProductVariant variant;
-  final String shopId;
-  final String productId;
-  const _AdjustStockDialog({
-    required this.variant, required this.shopId, required this.productId,
-  });
-
-  @override
-  State<_AdjustStockDialog> createState() => _AdjustStockDialogState();
-}
-
-class _AdjustStockDialogState extends State<_AdjustStockDialog> {
-  late final TextEditingController _stockCtrl;
-  late final TextEditingController _notesCtrl;
-  bool _submitting = false;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _stockCtrl = TextEditingController(
-        text: widget.variant.stockAvailable.toString());
-    _notesCtrl = TextEditingController(text: 'Correction d\'erreur de saisie');
-  }
-
-  @override
-  void dispose() {
-    _stockCtrl.dispose();
-    _notesCtrl.dispose();
-    super.dispose();
-  }
-
-  int? get _parsed => int.tryParse(_stockCtrl.text.trim());
-  int get _current => widget.variant.stockAvailable;
-  int? get _delta => _parsed == null ? null : _parsed! - _current;
-
-  Future<void> _submit() async {
-    final parsed = _parsed;
-    if (parsed == null || parsed < 0) {
-      setState(() => _error = 'Saisis un nombre valide (≥ 0)');
-      return;
-    }
-    if (parsed == _current) {
-      Navigator.of(context).pop(false);
-      return;
-    }
-    setState(() { _submitting = true; _error = null; });
-    final ok = await StockService.adjustment(
-      shopId:    widget.shopId,
-      productId: widget.productId,
-      variantId: widget.variant.id ?? '',
-      delta:     parsed - _current,
-      notes:     _notesCtrl.text.trim().isEmpty
-          ? 'Correction d\'erreur de saisie'
-          : _notesCtrl.text.trim(),
-    );
-    if (!mounted) return;
-    if (!ok) {
-      setState(() {
-        _submitting = false;
-        _error = 'Impossible d\'appliquer cette correction (stock négatif ?)';
-      });
-      return;
-    }
-    Navigator.of(context).pop(true);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final d = _delta;
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-      contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-      title: Row(children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.10),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(Icons.edit_note_rounded,
-              size: 18, color: AppColors.primary),
-        ),
-        const SizedBox(width: 10),
-        const Expanded(
-          child: Text('Corriger le stock',
-              style: TextStyle(fontSize: 15,
-                  fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-        ),
-      ]),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Variante : ${widget.variant.name}',
-              style: const TextStyle(fontSize: 12,
-                  fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-          const SizedBox(height: 2),
-          Text('Stock disponible actuel : $_current',
-              style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-          const SizedBox(height: 14),
-          const Text('Nouvelle valeur',
-              style: TextStyle(fontSize: 11,
-                  fontWeight: FontWeight.w500, color: AppColors.textSecondary)),
-          const SizedBox(height: 4),
-          TextField(
-            controller: _stockCtrl,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            autofocus: true,
-            onChanged: (_) => setState(() => _error = null),
-            style: const TextStyle(fontSize: 13, color: Color(0xFF1A1D2E)),
-            decoration: InputDecoration(
-              hintText: '0',
-              prefixIcon: const Icon(Icons.inventory_2_outlined,
-                  size: 15, color: Color(0xFFAAAAAA)),
-              filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 11),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: AppColors.divider)),
-              focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
-            ),
-          ),
-          if (d != null && d != 0) ...[
-            const SizedBox(height: 8),
-            Row(children: [
-              Icon(
-                  d > 0 ? Icons.arrow_upward_rounded
-                        : Icons.arrow_downward_rounded,
-                  size: 13,
-                  color: d > 0
-                      ? AppColors.secondary
-                      : AppColors.error),
-              const SizedBox(width: 4),
-              Text('${d > 0 ? '+' : ''}$d par rapport à l\'actuel',
-                  style: TextStyle(fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: d > 0
-                          ? AppColors.secondary
-                          : AppColors.error)),
-            ]),
-          ],
-          const SizedBox(height: 12),
-          const Text('Raison (optionnel)',
-              style: TextStyle(fontSize: 11,
-                  fontWeight: FontWeight.w500, color: AppColors.textSecondary)),
-          const SizedBox(height: 4),
-          TextField(
-            controller: _notesCtrl,
-            maxLines: 2,
-            style: const TextStyle(fontSize: 12, color: Color(0xFF1A1D2E)),
-            decoration: InputDecoration(
-              hintText: 'Ex: correction après inventaire',
-              hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 11),
-              filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 10),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: AppColors.divider)),
-              focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
-            ),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(_error!,
-                style: const TextStyle(
-                    fontSize: 11, color: AppColors.error)),
-          ],
-          const SizedBox(height: 6),
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFFBEB),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: const Color(0xFFFEF3C7)),
-            ),
-            child: Row(children: [
-              const Icon(Icons.info_outline_rounded,
-                  size: 12, color: Color(0xFFB45309)),
-              const SizedBox(width: 6),
-              const Expanded(
-                child: Text(
-                    'Cette correction sera enregistrée dans l\'historique du stock.',
-                    style: TextStyle(fontSize: 10, color: Color(0xFF92400E))),
-              ),
-            ]),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: _submitting ? null : () => Navigator.of(context).pop(false),
-          child: const Text('Annuler'),
-        ),
-        ElevatedButton(
-          onPressed: _submitting ? null : _submit,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8)),
-          ),
-          child: _submitting
-              ? const SizedBox(
-                  width: 14, height: 14,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
-              : const Text('Corriger'),
-        ),
-      ],
-    );
-  }
-}
+// Le `_AdjustStockDialog` a été déplacé dans
+// `widgets/adjust_stock_dialog.dart` pour pouvoir être appelé depuis la
+// fiche produit ET depuis le crayon de la liste inventaire (cf.
+// `showAdjustStockSheet`). Le bouton "Corriger" du `_StockIndicators`
+// ci-dessus utilise cette nouvelle voie.
 
 class _StockCell extends StatelessWidget {
   final String label;
@@ -2523,7 +2363,7 @@ class _StatusChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: active ? color.withOpacity(0.1) : const Color(0xFFF9FAFB),
+          color: active ? color.withValues(alpha:0.1) : const Color(0xFFF9FAFB),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: active ? color : AppColors.divider,
               width: active ? 1.5 : 1)),
@@ -2603,12 +2443,12 @@ class _ExpandSectionState extends State<_ExpandSection> {
 // ─── Images secondaires ───────────────────────────────────────────────────────
 
 class _SecondaryImagesRow extends StatelessWidget {
-  final List<File>   files;   // nouvelles images choisies (session en cours)
-  final List<String> urls;    // images sauvegardées (chemins locaux ou http)
-  final VoidCallback onAdd;
+  final List<Uint8List> bytesList; // nouvelles images choisies (session en cours)
+  final List<String>    urls;      // images sauvegardées (chemins locaux ou http)
+  final VoidCallback    onAdd;
   final void Function(int index, bool isUrl) onRemoveItem;
   const _SecondaryImagesRow({
-    required this.files, required this.urls,
+    required this.bytesList, required this.urls,
     required this.onAdd, required this.onRemoveItem,
   });
 
@@ -2619,6 +2459,7 @@ class _SecondaryImagesRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const brokenIcon = Icon(Icons.broken_image, color: Color(0xFFD1D5DB));
     return SizedBox(
       height: 52,
       child: ListView(
@@ -2629,16 +2470,19 @@ class _SecondaryImagesRow extends StatelessWidget {
             final url = urls[i];
             final Widget img = url.startsWith('http')
                 ? Image.network(url, fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) =>
-                const Icon(Icons.broken_image, color: Color(0xFFD1D5DB)))
-                : Image.file(File(url), fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) =>
-                const Icon(Icons.broken_image, color: Color(0xFFD1D5DB)));
+                    filterQuality: FilterQuality.high,
+                    errorBuilder: (_, __, ___) => brokenIcon)
+                : (kIsWeb
+                    ? brokenIcon
+                    : Image.file(File(url), fit: BoxFit.cover,
+                        filterQuality: FilterQuality.high,
+                        errorBuilder: (_, __, ___) => brokenIcon));
             return _buildImg(img, () => onRemoveItem(i, true));
           }),
-          // Nouvelles images choisies (File)
-          ...List.generate(files.length, (i) => _buildImg(
-            Image.file(files[i], fit: BoxFit.cover),
+          // Nouvelles images choisies (bytes en mémoire)
+          ...List.generate(bytesList.length, (i) => _buildImg(
+            Image.memory(bytesList[i], fit: BoxFit.cover,
+                filterQuality: FilterQuality.high),
                 () => onRemoveItem(i, false),
           )),
           // Bouton ajouter
@@ -2649,7 +2493,7 @@ class _SecondaryImagesRow extends StatelessWidget {
               decoration: BoxDecoration(
                 color: AppColors.primarySurface,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                border: Border.all(color: AppColors.primary.withValues(alpha:0.3)),
               ),
               child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                 Icon(Icons.add_rounded, size: 16, color: AppColors.primary),
@@ -2753,7 +2597,7 @@ class _StepBar extends StatelessWidget {
               width: 26, height: 26,
               decoration: BoxDecoration(
                 color: active ? AppColors.primary
-                    : done ? AppColors.secondary.withOpacity(0.12)
+                    : done ? AppColors.secondary.withValues(alpha:0.12)
                     : AppColors.inputFill,
                 shape: BoxShape.circle,
                 border: Border.all(color: col, width: 1.5),
@@ -2839,6 +2683,38 @@ class _BottomNav extends StatelessWidget {
       ]),
     );
   }
+}
+
+// ─── Helpers de rendu d'images ────────────────────────────────────────────────
+
+/// Affiche une image de variante en gérant les 3 cas (priorité décroissante) :
+///  - `bytes` en mémoire (image fraîchement choisie, compatible web)
+///  - `url` http(s) (image distante uploadée vers Supabase)
+///  - `url` chemin local (sur mobile uniquement, web tombe sur placeholder)
+Widget _buildVariantImage({
+  required Uint8List? bytes,
+  required String?    url,
+  required Widget     placeholder,
+  BoxFit              fit = BoxFit.cover,
+}) {
+  // FilterQuality.high : meilleur rendu lors du downscale (par défaut
+  // FilterQuality.low donne un aspect pixelisé sur les vignettes).
+  const fq = FilterQuality.high;
+  if (bytes != null) {
+    return Image.memory(bytes, fit: fit, filterQuality: fq,
+        errorBuilder: (_, __, ___) => placeholder);
+  }
+  if (url != null && url.isNotEmpty) {
+    if (url.startsWith('http')) {
+      return Image.network(url, fit: fit, filterQuality: fq,
+          errorBuilder: (_, __, ___) => placeholder);
+    }
+    if (!kIsWeb) {
+      return Image.file(File(url), fit: fit, filterQuality: fq,
+          errorBuilder: (_, __, ___) => placeholder);
+    }
+  }
+  return placeholder;
 }
 
 // ─── Image placeholder ────────────────────────────────────────────────────────
@@ -3038,7 +2914,7 @@ class _BenefitBanner extends StatelessWidget {
               children: [
                 Text(l.prodEffectiveCost,
                     style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
-                Text('${effectiveCost.toStringAsFixed(0)} XAF',
+                Text(CurrencyFormatter.format(effectiveCost),
                     style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
                         color: Color(0xFF374151))),
               ])),
@@ -3049,7 +2925,7 @@ class _BenefitBanner extends StatelessWidget {
               children: [
                 Text(l.prodBenefit,
                     style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
-                Text('${benefit.toStringAsFixed(0)} XAF',
+                Text(CurrencyFormatter.format(benefit),
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
                         color: benefitColor)),
               ])),
@@ -3068,7 +2944,7 @@ class _BenefitBanner extends StatelessWidget {
         if (expensePerUnit > 0) ...[
           const SizedBox(height: 6),
           Text(
-              '${l.prodExpensePerUnit}: +${expensePerUnit.ceilToDouble().toStringAsFixed(0)} XAF/u inclus dans le prix de revient',
+              '${l.prodExpensePerUnit}: +${CurrencyFormatter.format(expensePerUnit.ceilToDouble())}/u inclus dans le prix de revient',
               style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
         ],
       ]),
@@ -3087,9 +2963,9 @@ class _CalcBanner extends StatelessWidget {
         : positive! ? AppColors.secondary : AppColors.error;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(color: c.withOpacity(0.06),
+      decoration: BoxDecoration(color: c.withValues(alpha:0.06),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: c.withOpacity(0.25))),
+          border: Border.all(color: c.withValues(alpha:0.25))),
       child: Row(children: [
         Icon(Icons.auto_fix_high_rounded, size: 13, color: c),
         const SizedBox(width: 8),
@@ -3317,7 +3193,7 @@ class _SupplierPickerSheetState extends State<_SupplierPickerSheet> {
                                 Container(
                                   width: 34, height: 34,
                                   decoration: BoxDecoration(
-                                    color: AppColors.primary.withOpacity(0.10),
+                                    color: AppColors.primary.withValues(alpha:0.10),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Icon(Icons.local_shipping_rounded,
@@ -3390,9 +3266,9 @@ class _SupplierInfoCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.06),
+        color: AppColors.primary.withValues(alpha:0.06),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.primary.withOpacity(0.20)),
+        border: Border.all(color: AppColors.primary.withValues(alpha:0.20)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

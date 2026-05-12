@@ -20,6 +20,7 @@ import '../../features/expenses/domain/entities/expense.dart';
 import '../../features/caisse/domain/entities/sale.dart' show PaymentMethod;
 import '../../features/auth/data/models/user_model.dart';
 import '../services/activity_log_service.dart';
+import '../services/pending_image_upload_service.dart';
 
 typedef OnDataChanged = void Function(String table, String shopId);
 
@@ -250,6 +251,10 @@ class AppDatabase {
         await clearSyncErrors();
       }
     } catch (_) {/* best effort */}
+    // Reprend les uploads d'images PNG en attente (sprint B). Cas typique :
+    // l'utilisateur a save un produit en 3G, fermé l'onglet avant la fin
+    // de l'upload Supabase. Au prochain boot, on retente automatiquement.
+    unawaited(PendingImageUploadService.flush());
     debugPrint('[DB] Init — online: ${_i._isOnline}');
   }
 
@@ -368,6 +373,10 @@ class AppDatabase {
   Future<void> _onNetworkRestored() async {
     // 1. Flush les ops en attente
     await flushOfflineQueue();
+    // 1bis. Reprend aussi les uploads d'images PNG en attente — si
+    // l'utilisateur a save offline avec une image, on l'upload mainte-
+    // nant que la connexion est revenue.
+    unawaited(PendingImageUploadService.flush());
 
     // 2. Re-sync toutes les boutiques actuellement abonnées
     // pour récupérer les changements faits sur d'autres appareils pendant l'offline
