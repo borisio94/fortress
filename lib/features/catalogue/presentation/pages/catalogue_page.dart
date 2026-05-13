@@ -28,11 +28,21 @@ class CataloguePage extends StatefulWidget {
   final String?       initialCategory;
   final List<String>? productIds;
 
+  /// Snapshot de stock filtré au moment du partage. Clé = `productId`
+  /// (produit sans variante) ou `productId|variantId` (variante). Quand
+  /// fourni, on l'utilise au lieu du `stock_qty`/`stock_available` global
+  /// retourné par Supabase — permet d'afficher au client le stock du
+  /// périmètre actuellement visualisé par le marchand au moment du
+  /// partage (Boutique seule, Partenaire X, Globale). Snapshot figé,
+  /// pas refresh temps réel. Null = comportement historique (cumul).
+  final Map<String, int>? stockOverride;
+
   const CataloguePage({
     super.key,
     required this.shopId,
     this.initialCategory,
     this.productIds,
+    this.stockOverride,
   });
 
   @override
@@ -105,33 +115,45 @@ class _CataloguePageState extends State<CataloguePage> {
           return n != null && n.isNotEmpty;
         }).toList();
 
+        final override = widget.stockOverride;
         if (realVariants.length <= 1) {
+          final pid = p['id'] as String;
+          // Si snapshot fourni → priorité au stock du périmètre choisi
+          // par le marchand au moment du partage. Sinon → stock_qty
+          // global Supabase (cumul historique toutes locations).
+          final snapStock = override?[pid];
           items.add(_CatalogueItem(
-            productId:       p['id'] as String,
+            productId:       pid,
             variantId:       null,
             name:            base,
             baseProductName: base,
             variantName:     null,
             sku:             p['sku'] as String?,
             price:           (p['price_sell_pos'] as num?)?.toDouble() ?? 0,
-            stock:           (p['stock_qty'] as num?)?.toInt() ?? 0,
+            stock:           snapStock
+                ?? (p['stock_qty'] as num?)?.toInt() ?? 0,
             imageUrl:        p['image_url'] as String?,
             categoryId:      p['category_id'] as String?,
           ));
         } else {
+          final pid = p['id'] as String;
           for (final raw in realVariants) {
             final v = Map<String, dynamic>.from(raw as Map);
             final variantName = (v['name'] as String).trim();
+            final vid = v['id']?.toString() ?? variantName;
+            // Clé snapshot = `productId|variantId` quand variante.
+            final snapStock = override?['$pid|$vid'];
             items.add(_CatalogueItem(
-              productId:       p['id'] as String,
-              variantId:       v['id']?.toString() ?? variantName,
+              productId:       pid,
+              variantId:       vid,
               name:            '$base — $variantName',
               baseProductName: base,
               variantName:     variantName,
               sku:             (v['sku'] as String?) ?? (p['sku'] as String?),
               price: (v['price_sell_pos'] as num?)?.toDouble()
                   ?? (p['price_sell_pos'] as num?)?.toDouble() ?? 0,
-              stock: ((v['stock_available'] ?? v['stock_qty']) as num?)
+              stock: snapStock
+                  ?? ((v['stock_available'] ?? v['stock_qty']) as num?)
                       ?.toInt()
                   ?? 0,
               imageUrl: (v['image_url'] as String?) ??

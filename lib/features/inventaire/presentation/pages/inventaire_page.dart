@@ -1,45 +1,116 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:printing/printing.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../core/permisions/permission_guard.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/services/danger_action_service.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/app_switch.dart';
-import '../../../../shared/widgets/app_product_image.dart';
+import '../../../../shared/widgets/product_image_card.dart';
+import '../../../../shared/widgets/view_filter_chip_bar.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
-import '../../../../core/theme/theme_palette.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/storage/local_storage_service.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/database/app_database.dart';
+import '../../../../features/dashboard/data/dashboard_providers.dart';
+import '../../domain/entities/stock_location.dart';
+import '../../domain/stock_at_location.dart' as stock_loc;
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../features/inventaire/domain/entities/product.dart';
 import 'product_form_page.dart' show ProductFormExtra;
-import '../../../../core/services/catalogue_pdf_builder.dart';
-import '../../../../core/services/catalogue_storage_service.dart';
 import '../../../../core/services/document_service.dart';
-import '../../../../core/services/url_shortener_service.dart';
+import '../../../../core/services/external_launcher.dart';
 import '../../../../core/services/whatsapp/message_templates.dart';
 import '../../../../core/services/whatsapp_service.dart';
 import '../widgets/recipient_picker_sheet.dart';
 import '../widgets/share_catalog_dialog.dart';
+import '../widgets/adjust_stock_dialog.dart';
 import '../../../../shared/widgets/blocked_delete_dialog.dart';
 import '../../../parametres/presentation/widgets/transfer_form_sheet.dart';
+import '../../../../shared/widgets/form_sheet.dart';
 import '../../../subscription/presentation/widgets/subscription_guard.dart';
 
-class InventairePage extends StatefulWidget {
-  final String shopId;
-  const InventairePage({super.key, required this.shopId});
-  @override State<InventairePage> createState() => _InventairePageState();
+// ─── Helpers stock par location (filtre dashboard) ──────────────────────────
+//
+// Résolvent le `dashViewFilterProvider` (`null` / `'_base'` / `<loc_id>`)
+// vers une liste d'`location_id` à considérer pour le calcul de stock /
+// filtrage. Utilisé pour aligner l'affichage de la page Inventaire sur la
+// vue choisie au dashboard, comme on le fait déjà pour la caisse.
+List<String>? _resolveLocationIds(String? viewFilter, String shopId) {
+  if (viewFilter == null) {
+    // Globale : tous les emplacements de l'owner — boutique(s) type='shop'
+    // rattachée(s) au shop courant + partenaires actifs du même owner.
+    // Permet à `_stockAtLocations` de SOMMER boutique + partenaires plutôt
+    // que retomber sur `p.totalStock` qui ne lit que la boutique.
+    final shop = LocalStorageService.getShop(shopId);
+    final ownerId = shop?.ownerId;
+    final ids = <String>[];
+    for (final raw in HiveBoxes.stockLocationsBox.values) {
+      try {
+        final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+        if (!loc.isActive) continue;
+        final isShopLoc = loc.shopId == shopId
+            && loc.type == StockLocationType.shop;
+        final isOwnerPartner = ownerId != null
+            && loc.ownerId == ownerId
+            && loc.type == StockLocationType.partner;
+        if (isShopLoc || isOwnerPartner) ids.add(loc.id);
+      } catch (_) {/* skip */}
+    }
+    return ids.isEmpty ? null : ids;
+  }
+  if (viewFilter == '_base') {
+    final ids = <String>[];
+    for (final raw in HiveBoxes.stockLocationsBox.values) {
+      try {
+        final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+        if (loc.shopId == shopId
+            && loc.type == StockLocationType.shop
+            && loc.isActive) {
+          ids.add(loc.id);
+        }
+      } catch (_) {/* skip */}
+    }
+    return ids;
+  }
+  return [viewFilter];
 }
 
-class _InventairePageState extends State<InventairePage>
+/// Stock total d'un produit calculé sur les `location_ids` fournis.
+/// Si la liste est vide ou null → on retombe sur `product.totalStock`.
+int _stockAtLocations(Product p, List<String>? locationIds) {
+  if (locationIds == null || locationIds.isEmpty) return p.totalStock;
+  if (p.variants.isEmpty) return 0;
+  var total = 0;
+  for (final v in p.variants) {
+    final id = v.id;
+    if (id == null) continue;
+    for (final locId in locationIds) {
+      total += AppDatabase.getStockLevel(id, locId)?.stockAvailable ?? 0;
+    }
+  }
+  return total;
+}
+
+/// Reproduit la règle `Product.isLowStock` mais sur le stock filtré par
+/// location. Renvoie `true` si stock filtré ∈ ]0, stockMinAlert].
+bool _isLowStockAt(Product p, List<String>? locationIds) {
+  if (locationIds == null) return p.isLowStock;
+  final s = _stockAtLocations(p, locationIds);
+  return s > 0 && s <= p.stockMinAlert;
+}
+
+class InventairePage extends ConsumerStatefulWidget {
+  final String shopId;
+  const InventairePage({super.key, required this.shopId});
+  @override ConsumerState<InventairePage> createState() => _InventairePageState();
+}
+
+class _InventairePageState extends ConsumerState<InventairePage>
     with WidgetsBindingObserver {
   List<Product> _products = [];
   bool _isSyncing = false;
@@ -180,6 +251,13 @@ class _InventairePageState extends State<InventairePage>
     }
   }
 
+  /// Pull-to-refresh : re-fetch toutes les tables métier depuis Supabase,
+  /// puis recharge la vue depuis Hive.
+  Future<void> _pullAndReload() async {
+    await AppDatabase.pullAllForShop(widget.shopId);
+    if (mounted) _load();
+  }
+
   void _load() => setState(() {
     _products = LocalStorageService.getProductsForShop(widget.shopId);
     final savedCats   = LocalStorageService.getCategories(widget.shopId);
@@ -194,9 +272,34 @@ class _InventairePageState extends State<InventairePage>
   // (Compteurs supprimés round 12 — les filtres status sont désormais
   // accessibles via le popup _StatusFilterPopupBtn, plus de cards KPI.)
 
+  /// Locations résolues par le `dashViewFilterProvider` au build courant.
+  /// `null` = vue Globale (cumul). Liste vide = '_base' sans match (rare).
+  /// Toutes les méthodes qui calculent stock/lowStock/tri lisent ce champ —
+  /// il est rafraîchi en tête de chaque `build`.
+  List<String>? _locIds;
+
+  /// `true` si la vue active est un partenaire spécifique (pas Globale ni
+  /// Boutique seule). Utilisé par `_filtered` pour masquer les produits
+  /// qui n'existent pas chez ce partenaire (stock 0).
+  bool _isPartnerView = false;
+
   // ── Liste filtrée ──────────────────────────────────────────────────────────
+  // Le filtre `dashViewFilterProvider` (vue Globale / boutique seule /
+  // partenaire) est résolu en `_locIds` qui pilote :
+  //   * la chip "low_stock" → recalcule le seuil au périmètre choisi.
+  //   * le tri/affichage stock → utilise `_stockAtLocations` au lieu de
+  //     `totalStock` quand `_locIds` est non-null.
   List<Product> get _filtered {
+    final locIds = _locIds;
     var list = List<Product>.from(_products);
+    // Vue Partenaire : on n'affiche que les produits qui existent réellement
+    // chez ce partenaire (stock > 0). En vue Globale (`null`) ou Boutique
+    // seule (`'_base'`), on affiche tout — utile pour identifier les
+    // ruptures à réapprovisionner. Lit le filter via `_isPartnerView`
+    // (calculé dans build) pour éviter un read direct du provider ici.
+    if (_isPartnerView) {
+      list = list.where((p) => _stockAtLocations(p, locIds) > 0).toList();
+    }
     if (_query.isNotEmpty) {
       final q = _query.toLowerCase();
       list = list.where((p) =>
@@ -204,12 +307,15 @@ class _InventairePageState extends State<InventairePage>
           (p.sku ?? '').toLowerCase().contains(q) ||
           (p.categoryId ?? '').toLowerCase().contains(q)).toList();
     }
+    int stockOf(Product p) => _stockAtLocations(p, locIds);
     switch (_activeChip) {
       case 'active':    list = list.where((p) => p.isActive).toList();
       case 'inactive':  list = list.where((p) => !p.isActive).toList();
-      case 'low_stock': list = list.where((p) => p.isLowStock).toList();
+      case 'low_stock': list = list.where((p) => _isLowStockAt(p, locIds)).toList();
       case 'no_price':  list = list.where((p) => p.priceSellPos == 0).toList();
-      case 'stock':     list.sort((a, b) => b.totalStock.compareTo(a.totalStock));
+      // Chip "Disponible" — filtre les produits avec stock > 0 dans le
+      // périmètre courant. (Le tri par stock reste accessible via _sort.)
+      case 'stock':     list = list.where((p) => stockOf(p) > 0).toList();
     }
     if (_filterCategories.isNotEmpty) {
       list = list.where((p) =>
@@ -220,7 +326,7 @@ class _InventairePageState extends State<InventairePage>
       p.brand != null && _filterBrands.contains(p.brand)).toList();
     }
     list.sort((a, b) => switch (_sort) {
-      'stock' => b.totalStock.compareTo(a.totalStock),
+      'stock' => stockOf(b).compareTo(stockOf(a)),
       'price' => b.priceSellPos.compareTo(a.priceSellPos),
       _       => a.name.compareTo(b.name),
     });
@@ -234,6 +340,41 @@ class _InventairePageState extends State<InventairePage>
     return s >= f.length ? [] : f.sublist(s, e);
   }
   int get _totalPages => (_filtered.length / _perPage).ceil().clamp(1, 999);
+
+  /// Stock disponible total des produits actuellement **filtrés** au
+  /// périmètre courant (boutique cumul / boutique seule / partenaire).
+  /// Se recalcule à chaque setState ou changement de
+  /// `dashViewFilterProvider`.
+  int _totalAvailableStock() {
+    var total = 0;
+    for (final p in _filtered) {
+      total += _stockAtLocations(p, _locIds);
+    }
+    return total;
+  }
+
+  /// Construit le snapshot `productId|variantId → stock` filtré par la
+  /// vue active (`_locIds`), à embarquer dans l'URL du catalogue partagé
+  /// pour que le client voie le stock du périmètre choisi par le
+  /// marchand (Globale / Boutique seule / Partenaire X), pas le cumul
+  /// brut Supabase. Cf. `stock_at_location.dart` pour la logique.
+  Map<String, int> _buildStockSnapshot(List<Product> products) {
+    final m = <String, int>{};
+    for (final p in products) {
+      final pid = p.id;
+      if (pid == null) continue;
+      if (p.variants.isEmpty) {
+        m[pid] = stock_loc.stockAtLocations(p, _locIds);
+      } else {
+        for (final v in p.variants) {
+          final vid = v.id;
+          if (vid == null) continue;
+          m['$pid|$vid'] = stock_loc.stockForVariantAtLocations(v, _locIds);
+        }
+      }
+    }
+    return m;
+  }
 
   /// Helper : check le quota produits avant de naviguer vers le formulaire
   /// de création. Si limite atteinte → UpgradeSheet avec plan recommandé.
@@ -264,9 +405,18 @@ class _InventairePageState extends State<InventairePage>
     _load();
   }
 
-  /// Ouvre le formulaire de transfert pré-rempli pour ce produit :
-  /// source = location de la boutique courante, picker filtré sur les
-  /// variantes du produit. Réservé au propriétaire de la boutique.
+  /// Ouvre le formulaire de transfert pré-rempli pour ce produit.
+  ///
+  /// La source est alignée sur l'onglet « Vue » actuellement actif :
+  ///   * Globale / Boutique seule → location type='shop' de la boutique.
+  ///   * Partenaire X → location_id de ce partenaire.
+  ///
+  /// Sans ça, l'utilisateur consultant le partenaire (où le stock est)
+  /// ouvrait un transfert hardcodé sur la boutique (souvent vide pour ce
+  /// produit après un transfert précédent) — la picker s'affichait vide
+  /// avec « Aucune variante à la source ».
+  ///
+  /// Réservé au propriétaire de la boutique.
   Future<void> _openTransferSheet(Product p) async {
     final shop  = LocalStorageService.getShop(widget.shopId);
     final user  = LocalStorageService.getCurrentUser();
@@ -282,15 +432,44 @@ class _InventairePageState extends State<InventairePage>
           'Emplacement de la boutique introuvable. Réessayez après synchronisation.');
       return;
     }
-    final done = await showModalBottomSheet<bool>(
+
+    // Résolution de la source selon l'onglet Vue actif.
+    final viewFilter = ref.read(dashViewFilterProvider);
+    String sourceId;
+    if (viewFilter == null || viewFilter == '_base') {
+      sourceId = shopLoc.id;
+    } else {
+      // Partenaire : on vérifie qu'il appartient bien au même owner et
+      // qu'il est actif avant de l'utiliser comme source (un id corrompu
+      // donnerait une sheet vide sans erreur).
+      final raw = HiveBoxes.stockLocationsBox.get(viewFilter);
+      StockLocation? partnerLoc;
+      if (raw != null) {
+        try {
+          partnerLoc = StockLocation.fromMap(
+              Map<String, dynamic>.from(raw));
+        } catch (_) {/* ignore */}
+      }
+      if (partnerLoc == null
+          || !partnerLoc.isActive
+          || partnerLoc.ownerId != user.id) {
+        // Fallback : si la résolution échoue, on retombe sur la boutique
+        // pour ne pas bloquer l'utilisateur (mais on log).
+        debugPrint('[Transfer] vue partenaire non résoluble '
+            '($viewFilter) — fallback sur la boutique');
+        sourceId = shopLoc.id;
+      } else {
+        sourceId = partnerLoc.id;
+      }
+    }
+
+    final done = await showFormSheet<bool>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (_) => TransferFormSheet(
         ownerId:         user.id,
-        presetSourceId:  shopLoc.id,
+        presetSourceId:  sourceId,
         presetProductId: p.id,
       ),
     );
@@ -318,8 +497,9 @@ class _InventairePageState extends State<InventairePage>
       variant = p.variants.first;
     }
     final msg = MessageTemplates.buildProductShareMessage(
-      product: p,
-      variant: variant,
+      product:  p,
+      variant:  variant,
+      currency: CurrencyFormatter.currentSymbol,
     );
     final svc = ProviderScope.containerOf(context, listen: false)
         .read(whatsappServiceProvider);
@@ -334,105 +514,91 @@ class _InventairePageState extends State<InventairePage>
   /// sur Supabase Storage (bucket `catalogues`, signed URL 48 h), raccourcit
   /// l'URL, puis ouvre WhatsApp avec un message pré-rempli (sans destinataire
   /// — l'utilisateur choisit le contact ou le groupe à qui envoyer).
+  /// Partage le **lien web** de la vitrine publique de la boutique :
+  /// `https://<host>/#/catalogue/<shopId>`. Plus besoin de générer / uploader
+  /// un PDF — la page publique est dynamique (toujours à jour) et ouvre
+  /// directement le catalogue dans le navigateur du client.
+  ///
+  /// Volontairement **synchrone jusqu'à `openExternal`** : sur web, un
+  /// `await` préalable rompt le user gesture et le navigateur bloque
+  /// la fenêtre wa.me.
   Future<void> _createWhatsappCatalogue() async {
-    if (_selected.isEmpty || _creatingCatalogue) return;
+    if (_creatingCatalogue) return;
 
-    // ─── Étape 1 — choix du destinataire AVANT toute génération ────────
-    // L'opérateur saisit un numéro libre OU pioche dans ses clients.
-    // Si annulation → on n'effectue ni génération PDF ni upload.
+    // 1) Demander quoi partager : tout / une catégorie / la sélection.
+    final selectedIds = _selected.toList();
+    final hasSelection = _selectMode && selectedIds.isNotEmpty;
+    final categories = _availableCategories;
+    final choice = await showDialog<_CatalogueShareChoice>(
+      context: context,
+      builder: (ctx) => _CatalogueShareDialog(
+        categories:    categories,
+        canUseSelection: hasSelection,
+        selectionCount:  selectedIds.length,
+      ),
+    );
+    if (choice == null) return;
+
+    // 2) Construire l'URL `/catalogue/<shopId>` avec query params optionnels.
+    if (!mounted) return;
+    final origin = Uri.base.origin.startsWith('http')
+        ? Uri.base.origin
+        : 'https://fortress-pos.web.app';
+    final qp = <String, String>{};
+    if (choice.kind == _CatalogueShareKind.category &&
+        choice.category != null && choice.category!.isNotEmpty) {
+      qp['cat'] = choice.category!;
+    } else if (choice.kind == _CatalogueShareKind.selection) {
+      qp['ids'] = selectedIds.join(',');
+    }
+    final qpString = qp.entries
+        .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+        .join('&');
+    final url = qpString.isEmpty
+        ? '$origin/#/catalogue/${widget.shopId}'
+        : '$origin/#/catalogue/${widget.shopId}?$qpString';
+
+    // 3) Choix du destinataire WhatsApp.
     final phone = await pickWhatsappRecipient(
         context, shopId: widget.shopId);
     if (phone == null || phone.isEmpty) return;
     if (!mounted) return;
 
-    setState(() => _creatingCatalogue = true);
-    try {
-      final shop = LocalStorageService.getShop(widget.shopId);
-      if (shop == null) {
-        if (mounted) {
-          AppSnack.error(context, 'Boutique introuvable.');
-        }
-        return;
-      }
-      final products = _products
-          .where((p) => p.id != null && _selected.contains(p.id))
-          .toList();
+    final shop = LocalStorageService.getShop(widget.shopId);
+    final shopName = shop?.name ?? '';
+    String label;
+    switch (choice.kind) {
+      case _CatalogueShareKind.category:
+        label = 'la sélection « ${choice.category} »';
+        break;
+      case _CatalogueShareKind.selection:
+        label = '${selectedIds.length} produit${selectedIds.length > 1 ? 's' : ''} sélectionné${selectedIds.length > 1 ? 's' : ''}';
+        break;
+      case _CatalogueShareKind.all:
+        label = 'notre catalogue';
+        break;
+    }
+    final msg = (shopName.isEmpty
+            ? 'Découvrez $label :\n$url'
+            : 'Bonjour, découvrez $label de $shopName :\n$url')
+        + '\n\nVous pouvez parcourir nos produits et passer commande directement.';
 
-      // 1. Génération PDF (catalogue A4 — header logo + grille produits +
-      //    footer contact). Les images des produits sont préchargées en
-      //    parallèle puis embarquées dans le PDF.
-      final pdfBytes = await CataloguePdfBuilder.build(
-        shop:    shop,
-        products: products,
-        whatsappContact: shop.phone,
-      );
-
-      // 2. Rasterise la 1ʳᵉ page du PDF en PNG → permettra à WhatsApp de
-      //    générer un aperçu visuel avant ouverture du lien. Échec
-      //    silencieux : si la rasterization échoue, on continue sans cover.
-      Uint8List? coverBytes;
-      try {
-        final firstPage = await Printing.raster(
-            pdfBytes, pages: [0], dpi: 144).first;
-        coverBytes = await firstPage.toPng();
-      } catch (e) {
-        debugPrint('[Catalogue] Rasterize cover échoué : $e');
-      }
-
-      // 3. Upload Supabase en parallèle : PDF + cover (si dispo).
-      final pdfFuture = CatalogueStorageService.uploadCatalogue(
-        shopId: widget.shopId, bytes: pdfBytes);
-      final coverFuture = coverBytes != null
-          ? CatalogueStorageService.uploadCover(
-              shopId: widget.shopId, pngBytes: coverBytes)
-          : Future<String?>.value(null);
-      final longPdfUrl   = await pdfFuture;
-      final longCoverUrl = await coverFuture;
-
-      if (longPdfUrl == null) {
-        if (mounted) {
-          AppSnack.error(context,
-              'Upload du catalogue échoué. Vérifie ta connexion.');
-        }
-        return;
-      }
-
-      // 4. Raccourcissement : UNIQUEMENT le PDF.
-      //    La cover reste en URL Supabase directe — elle se termine par
-      //    `.png` et renvoie `Content-Type: image/png`, ce qui permet au
-      //    crawler WhatsApp de générer l'aperçu inline. Si on la passe par
-      //    TinyURL, le crawler voit la redirection HTTP comme `text/html`
-      //    et n'extrait pas d'aperçu (il ne suit pas toujours les
-      //    redirections).
-      final pdfShortUrl = await UrlShortenerService.shorten(longPdfUrl);
-
-      // 5. Message + ouverture WhatsApp (picker de contact côté user).
-      //    L'URL cover est en première ligne → c'est elle qui génère
-      //    l'aperçu visuel dans la conversation WhatsApp.
-      final msg = MessageTemplates.buildCatalogueShareMessage(
-        pdfShortUrl:   pdfShortUrl,
-        coverShortUrl: longCoverUrl,
-      );
-      final svc = ProviderScope.containerOf(context, listen: false)
-          .read(whatsappServiceProvider);
-      // Avec un destinataire choisi, on ouvre la conversation directement
-      // (wa.me/<phone>?text=…) plutôt que le picker générique.
-      final ok = await svc.sendMessage(phone, msg);
-      if (!ok && mounted) {
-        AppSnack.error(context,
-            'Impossible d\'ouvrir WhatsApp. Catalogue uploadé : '
-            'tu peux copier-coller le lien manuellement.');
-      } else if (mounted) {
-        // Sortir du mode sélection une fois le catalogue partagé.
-        setState(() {
-          _selectMode = false;
-          _selected.clear();
-        });
-      }
-    } catch (e) {
-      if (mounted) AppSnack.error(context, 'Erreur catalogue : $e');
-    } finally {
-      if (mounted) setState(() => _creatingCatalogue = false);
+    // 4) Ouvrir wa.me.
+    final p = phone.replaceAll(RegExp(r'[^\d]'), '');
+    if (p.isEmpty) {
+      AppSnack.error(context, 'Numéro WhatsApp invalide.');
+      return;
+    }
+    final waUrl = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
+    final ok = await openExternal(waUrl);
+    if (!ok && mounted) {
+      AppSnack.error(context,
+          'Impossible d\'ouvrir WhatsApp. Autorisez les pop-ups.');
+    } else if (mounted) {
+      setState(() {
+        _selectMode = false;
+        _selected.clear();
+      });
     }
   }
 
@@ -583,11 +749,21 @@ class _InventairePageState extends State<InventairePage>
   @override
   Widget build(BuildContext context) {
     final l      = context.l10n;
+    // Filtre dashboard (Globale / boutique seule / partenaire). On résout
+    // au build pour que tous les `_filtered`, _stockAtLocations, etc.
+    // s'alignent automatiquement sur la vue choisie.
+    final viewFilter = ref.watch(dashViewFilterProvider);
+    _locIds = _resolveLocationIds(viewFilter, widget.shopId);
+    _isPartnerView = viewFilter != null && viewFilter != '_base';
     // Breakpoint mobile : utilisé plus bas pour switcher entre _MobileCard
     // et _DesktopRow dans la liste produits.
     final mobile = MediaQuery.of(context).size.width < 700;
 
     return Column(children: [
+
+        // ⓪ Onglets « Vue » — sélecteur Globale / Boutique / Partenaires.
+        // Partagé avec Vente et Commandes via dashViewFilterProvider.
+        ViewFilterChipBar(shopId: widget.shopId, useTabs: true),
 
         // ⓪ CHIPS Stock — rendus au niveau du shell (mobile ET desktop
         // depuis round 11) pour rester visibles sur les 5 sous-pages.
@@ -607,51 +783,75 @@ class _InventairePageState extends State<InventairePage>
         // Style identique : popup compact 32px (cohérence avec _MembersFilterPopupBtn).
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.start,
-            children: [
-              _StatusFilterPopupBtn(
-                active: _activeChip,
-                onChange: (chip) => setState(() {
-                  _activeChip = chip;
-                  _page = 1;
-                }),
+          child: Row(children: [
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(children: [
+                  _StatusFilterPopupBtn(
+                    active: _activeChip,
+                    onChange: (chip) => setState(() {
+                      _activeChip = chip;
+                      _page = 1;
+                    }),
+                  ),
+                  if (_availableCategories.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    _MultiChip(
+                      label:    l.invCategoryLabel,
+                      icon:     Icons.category_outlined,
+                      count:    _filterCategories.length,
+                      items:    _availableCategories,
+                      selected: _filterCategories,
+                      onChanged: (v) => setState(() {
+                        _filterCategories = v;
+                        _page = 1;
+                      }),
+                      context: context,
+                    ),
+                  ],
+                  if (_availableBrands.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    _MultiChip(
+                      label:    l.invBrandLabel,
+                      icon:     Icons.local_offer_outlined,
+                      count:    _filterBrands.length,
+                      items:    _availableBrands,
+                      selected: _filterBrands,
+                      onChanged: (v) => setState(() {
+                        _filterBrands = v;
+                        _page = 1;
+                      }),
+                      context: context,
+                    ),
+                  ],
+                  const SizedBox(width: 6),
+                  _SortBtn(key: _sortKey, active: _sort != 'name',
+                      onTap: () => _showSortMenu(context, _sortKey)),
+                ]),
               ),
-              if (_availableCategories.isNotEmpty) ...[
-                const SizedBox(width: 8),
-                _MultiChip(
-                  label:    l.invCategoryLabel,
-                  icon:     Icons.category_outlined,
-                  count:    _filterCategories.length,
-                  items:    _availableCategories,
-                  selected: _filterCategories,
-                  onChanged: (v) => setState(() {
-                    _filterCategories = v;
-                    _page = 1;
-                  }),
-                  context: context,
+            ),
+            const SizedBox(width: 8),
+            // Bouton "Ajouter produit" inline — extrême droite de la
+            // ligne des filtres. Remplace l'ancien FAB draggable + le
+            // bouton "+" de la topbar shell.
+            Tooltip(
+              message: l.inventaireAdd,
+              child: SizedBox(
+                width: 38, height: 38,
+                child: Material(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(10),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: _handleCreateProductTap,
+                    child: const Icon(Icons.add_rounded,
+                        size: 20, color: Colors.white),
+                  ),
                 ),
-              ],
-              if (_availableBrands.isNotEmpty) ...[
-                const SizedBox(width: 6),
-                _MultiChip(
-                  label:    l.invBrandLabel,
-                  icon:     Icons.local_offer_outlined,
-                  count:    _filterBrands.length,
-                  items:    _availableBrands,
-                  selected: _filterBrands,
-                  onChanged: (v) => setState(() {
-                    _filterBrands = v;
-                    _page = 1;
-                  }),
-                  context: context,
-                ),
-              ],
-              const SizedBox(width: 6),
-              _SortBtn(key: _sortKey, active: _sort != 'name',
-                  onTap: () => _showSortMenu(context, _sortKey)),
-            ],
-          ),
+              ),
+            ),
+          ]),
         ),
 
         // ③ RECHERCHE — bulk-select AVANT la barre de recherche, sur la
@@ -667,7 +867,7 @@ class _InventairePageState extends State<InventairePage>
                 width: 38, height: 38,
                 child: Material(
                   color: _selectMode
-                      ? AppColors.primary.withOpacity(0.10)
+                      ? AppColors.primary.withValues(alpha:0.10)
                       : Colors.white,
                   borderRadius: BorderRadius.circular(10),
                   child: InkWell(
@@ -680,7 +880,7 @@ class _InventairePageState extends State<InventairePage>
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: _selectMode
-                            ? AppColors.primary.withOpacity(0.45)
+                            ? AppColors.primary.withValues(alpha:0.45)
                             : AppColors.divider),
                       ),
                       child: Icon(
@@ -729,38 +929,71 @@ class _InventairePageState extends State<InventairePage>
           ]),
         ),
 
-        // ④ Compteur + per-page
+        // ④ Compteur articles + stock total filtré + per-page
+        // Stock total = somme des `stockAvailable` de toutes les variantes
+        // des produits filtrés. Se met à jour live à chaque filtre.
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
           child: Row(children: [
-            Text('${_filtered.length} ${l.invItems}',
-                style: const TextStyle(fontSize: 11,
-                    color: AppColors.textSecondary,
-                    fontWeight: FontWeight.w500)),
-            const Spacer(),
-            Text(l.invPerPage,
-                style: const TextStyle(fontSize: 11,
-                    color: AppColors.textSecondary)),
-            const SizedBox(width: 6),
-            Theme(
-              data: Theme.of(context).copyWith(
-                canvasColor: Colors.white,
-                colorScheme: Theme.of(context).colorScheme.copyWith(
-                    surface: Colors.white, onSurface: AppColors.textPrimary),
+            // ── Gauche : nombre d'articles filtrés ──
+            Expanded(
+              child: Text('${_filtered.length} ${l.invItems}',
+                  style: const TextStyle(fontSize: 11,
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w500)),
+            ),
+            // ── Centre : stock global ──
+            Expanded(
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                      '${_totalAvailableStock()} en stock',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.primary)),
+                ),
               ),
-              child: DropdownButton<int>(
-                value: _perPage, isDense: true,
-                underline: const SizedBox.shrink(),
-                dropdownColor: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                style: const TextStyle(fontSize: 12,
-                    color: AppColors.textPrimary),
-                items: [10, 25, 50].map((n) => DropdownMenuItem(
-                  value: n,
-                  child: Text('$n', style: const TextStyle(
-                      fontSize: 12, color: AppColors.textPrimary)),
-                )).toList(),
-                onChanged: (v) => setState(() { _perPage = v!; _page = 1; }),
+            ),
+            // ── Droite : dropdown per-page ──
+            Expanded(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text(l.invPerPage,
+                      style: const TextStyle(fontSize: 11,
+                          color: AppColors.textSecondary)),
+                  const SizedBox(width: 6),
+                  Theme(
+                    data: Theme.of(context).copyWith(
+                      canvasColor: Colors.white,
+                      colorScheme: Theme.of(context).colorScheme.copyWith(
+                          surface: Colors.white,
+                          onSurface: AppColors.textPrimary),
+                    ),
+                    child: DropdownButton<int>(
+                      value: _perPage, isDense: true,
+                      underline: const SizedBox.shrink(),
+                      dropdownColor: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      style: const TextStyle(fontSize: 12,
+                          color: AppColors.textPrimary),
+                      items: [10, 25, 50].map((n) => DropdownMenuItem(
+                        value: n,
+                        child: Text('$n', style: const TextStyle(
+                            fontSize: 12, color: AppColors.textPrimary)),
+                      )).toList(),
+                      onChanged: (v) =>
+                          setState(() { _perPage = v!; _page = 1; }),
+                    ),
+                  ),
+                ],
               ),
             ),
           ]),
@@ -768,17 +1001,19 @@ class _InventairePageState extends State<InventairePage>
 
         // ⑤ LISTE
         Expanded(
-          child: _filtered.isEmpty
+          child: RefreshIndicator(
+            onRefresh: _pullAndReload,
+            child: _filtered.isEmpty
               ? (_products.isEmpty
           // Vrais aucun produit → état vide avec bouton ajout
-              ? EmptyStateWidget(
+              ? ListView(children: [EmptyStateWidget(
             icon: Icons.inventory_2_outlined,
             title: context.l10n.inventaireEmpty,
             subtitle: context.l10n.inventaireEmptyHint,
             ctaLabel: context.l10n.inventaireAdd,
             onCta: _handleCreateProductTap,
-          )
-              : _NoResultState())
+          )])
+              : ListView(children: const [_NoResultState()]))
               : ListView.builder(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
             itemCount: _pageItems.length,
@@ -827,6 +1062,7 @@ class _InventairePageState extends State<InventairePage>
                 Expanded(child: card),
               ]);
             },
+          ),
           ),
         ),
 
@@ -889,9 +1125,17 @@ class _InventairePageState extends State<InventairePage>
                             .where((p) => p.id != null
                                 && _selected.contains(p.id))
                             .toList();
+                        // Snapshot du stock filtré sur la vue active
+                        // (Globale / Boutique seule / Partenaire X).
+                        // Embarqué dans l'URL côté share_catalog_dialog
+                        // → le client voit le stock du périmètre que
+                        // le marchand visualise au moment du partage,
+                        // pas le cumul global Supabase.
+                        final snapshot = _buildStockSnapshot(products);
                         ShareCatalogDialog.show(context,
                             products: _products, shopId: widget.shopId,
-                            preSelected: products);
+                            preSelected: products,
+                            stockSnapshot: snapshot);
                       },
                       icon: const Icon(Icons.share_rounded, size: 16),
                       label: const Text('Partager',
@@ -900,7 +1144,7 @@ class _InventairePageState extends State<InventairePage>
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.primary,
                         side: BorderSide(
-                            color: AppColors.primary.withOpacity(0.4)),
+                            color: AppColors.primary.withValues(alpha:0.4)),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
                       ),
@@ -1365,7 +1609,7 @@ class _SortBtn extends StatelessWidget {
 
 // ─── Desktop row ──────────────────────────────────────────────────────────────
 
-class _DesktopRow extends StatefulWidget {
+class _DesktopRow extends ConsumerStatefulWidget {
   final Product product;
   final String shopId;
   final ValueChanged<bool> onToggleActive, onToggleWeb;
@@ -1377,16 +1621,28 @@ class _DesktopRow extends StatefulWidget {
     required this.onProductChanged, required this.onTransfer,
     required this.onShare,
     required this.onShareWhatsApp});
-  @override State<_DesktopRow> createState() => _DesktopRowState();
+  @override ConsumerState<_DesktopRow> createState() => _DesktopRowState();
 }
 
-class _DesktopRowState extends State<_DesktopRow> {
+class _DesktopRowState extends ConsumerState<_DesktopRow> {
   bool _showVariants = false;
 
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
     final p = widget.product;
+    // Stock conditionné au filtre dashboard (Globale / boutique seule /
+    // partenaire) pour rester cohérent avec la caisse.
+    final viewFilter = ref.watch(dashViewFilterProvider);
+    final locIds     = _resolveLocationIds(viewFilter, widget.shopId);
+    final stock      = _stockAtLocations(p, locIds);
+    final isLow      = _isLowStockAt(p, locIds);
+    // Vue partenaire = un id de stock_location dans le filtre (ni null=Globale
+    // ni '_base'=Boutique seule). Dans cette vue le produit est read-only :
+    // pas de toggles, pas de Modifier/Supprimer, variantes filtrées sur ce
+    // qui a été effectivement transféré chez ce partenaire.
+    final isPartnerView = viewFilter != null && viewFilter != '_base';
+    final partnerLocId  = isPartnerView ? viewFilter : null;
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
@@ -1398,7 +1654,12 @@ class _DesktopRowState extends State<_DesktopRow> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           child: Row(children: [
-            _ProductImage(imageUrl: p.mainImageUrl, size: 42, name: p.name),
+            ProductImageCard(
+              imageUrl: p.mainImageUrl,
+              width:  64,
+              height: 64,
+              borderRadius: BorderRadius.circular(8),
+            ),
             const SizedBox(width: 10),
             Expanded(flex: 3, child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1424,9 +1685,9 @@ class _DesktopRowState extends State<_DesktopRow> {
             Expanded(flex: 1, child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(l.invStock, style: const TextStyle(fontSize: 9, color: AppColors.textHint)),
-              Text('${p.totalStock}', style: TextStyle(fontSize: 12,
+              Text('$stock', style: TextStyle(fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: p.isLowStock ? AppColors.error : AppColors.textPrimary)),
+                  color: isLow ? AppColors.error : AppColors.textPrimary)),
             ])),
             Expanded(flex: 2, child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1436,9 +1697,13 @@ class _DesktopRowState extends State<_DesktopRow> {
             Expanded(flex: 2, child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(l.invVisibility, style: const TextStyle(fontSize: 9, color: AppColors.textHint)),
-              Transform.scale(scale: 0.7, alignment: Alignment.centerLeft,
-                  child: AppSwitch(value: p.isActive,
-                      onChanged: widget.onToggleActive)),
+              if (isPartnerView)
+                const Text('—', style: TextStyle(fontSize: 11,
+                    color: AppColors.textHint))
+              else
+                Transform.scale(scale: 0.7, alignment: Alignment.centerLeft,
+                    child: AppSwitch(value: p.isActive,
+                        onChanged: widget.onToggleActive)),
             ])),
             Row(mainAxisSize: MainAxisSize.min, children: [
               if (p.variants.isNotEmpty)
@@ -1459,6 +1724,7 @@ class _DesktopRowState extends State<_DesktopRow> {
                 onEdit: widget.onEdit,
                 onDelete: widget.onDelete,
                 iconSize: 16,
+                isPartnerView: isPartnerView,
               ),
             ]),
           ]),
@@ -1467,6 +1733,8 @@ class _DesktopRowState extends State<_DesktopRow> {
           _VariantsSection(
             product: p,
             onChanged: widget.onProductChanged,
+            isPartnerView: isPartnerView,
+            partnerLocId:  partnerLocId,
           ),
       ]),
     );
@@ -1475,7 +1743,7 @@ class _DesktopRowState extends State<_DesktopRow> {
 
 // ─── Mobile card ──────────────────────────────────────────────────────────────
 
-class _MobileCard extends StatefulWidget {
+class _MobileCard extends ConsumerStatefulWidget {
   final Product product;
   final String shopId;
   final ValueChanged<bool> onToggleActive, onToggleWeb;
@@ -1487,27 +1755,33 @@ class _MobileCard extends StatefulWidget {
     required this.onProductChanged, required this.onTransfer,
     required this.onShare,
     required this.onShareWhatsApp});
-  @override State<_MobileCard> createState() => _MobileCardState();
+  @override ConsumerState<_MobileCard> createState() => _MobileCardState();
 }
 
-class _MobileCardState extends State<_MobileCard> {
+class _MobileCardState extends ConsumerState<_MobileCard> {
   bool _expanded     = false;
   bool _showVariants = false;
 
-  /// Couleur du liseré gauche selon l'état du produit.
+  /// Couleur du liseré gauche selon l'état du produit. La règle low-stock
+  /// est calculée au périmètre courant (cf. `_isLowStockAt`).
   /// null → pas de liseré.
-  Color? _leftIndicator(Product p) {
+  Color? _leftIndicator(Product p, List<String>? locIds) {
     final noPrice = p.priceSellPos <= 0 &&
         !p.variants.any((v) => v.priceSellPos > 0);
     if (noPrice) return AppColors.error;
-    if (p.isLowStock) return AppColors.warning;
+    if (_isLowStockAt(p, locIds)) return AppColors.warning;
     return null;
   }
 
   @override
   Widget build(BuildContext context) {
     final p = widget.product;
-    final indicator = _leftIndicator(p);
+    final viewFilter = ref.watch(dashViewFilterProvider);
+    final locIds     = _resolveLocationIds(viewFilter, widget.shopId);
+    final stockAt    = _stockAtLocations(p, locIds);
+    final indicator  = _leftIndicator(p, locIds);
+    final isPartnerView = viewFilter != null && viewFilter != '_base';
+    final partnerLocId  = isPartnerView ? viewFilter : null;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       margin: const EdgeInsets.only(bottom: 8),
@@ -1531,7 +1805,12 @@ class _MobileCardState extends State<_MobileCard> {
               child: Padding(
                 padding: const EdgeInsets.all(10),
                 child: Row(children: [
-                  _ProductImage(imageUrl: p.mainImageUrl, size: 34, name: p.name),
+                  ProductImageCard(
+                    imageUrl: p.mainImageUrl,
+                    width:  34,
+                    height: 34,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   const SizedBox(width: 10),
                   Expanded(child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1561,31 +1840,34 @@ class _MobileCardState extends State<_MobileCard> {
                             style: const TextStyle(fontSize: 10,
                                 color: AppColors.textSecondary,
                                 fontWeight: FontWeight.w500)),
-                      _StockBadge(stock: p.totalStock, min: p.stockMinAlert),
+                      _StockBadge(stock: stockAt, min: p.stockMinAlert),
                       _PriceDisplay(product: p),
                       _MarginPill(product: p),
                     ]),
                   ])),
                   // Actions à droite — taille compacte
                   Row(mainAxisSize: MainAxisSize.min, children: [
-                    // Toggle visibilité (œil) — actif ↔ inactif
-                    IconButton(
-                      icon: Icon(
-                          p.isActive
-                              ? Icons.visibility_outlined
-                              : Icons.visibility_off_outlined,
-                          size: 17),
-                      onPressed: () => widget.onToggleActive(!p.isActive),
-                      color: p.isActive
-                          ? AppColors.primary
-                          : AppColors.textHint,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(
-                          minWidth: 28, minHeight: 28),
-                      tooltip: p.isActive
-                          ? context.l10n.invActiveInCaisse
-                          : context.l10n.invActiveInCaisse,
-                    ),
+                    // Toggle visibilité (œil) — actif ↔ inactif. Caché en
+                    // vue partenaire (le statut actif/inactif appartient à
+                    // la boutique, pas au partenaire).
+                    if (!isPartnerView)
+                      IconButton(
+                        icon: Icon(
+                            p.isActive
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                            size: 17),
+                        onPressed: () => widget.onToggleActive(!p.isActive),
+                        color: p.isActive
+                            ? AppColors.primary
+                            : AppColors.textHint,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                            minWidth: 28, minHeight: 28),
+                        tooltip: p.isActive
+                            ? context.l10n.invActiveInCaisse
+                            : context.l10n.invActiveInCaisse,
+                      ),
                     _ProductActionsMenu(
                       shopId: widget.shopId,
                       product: p,
@@ -1595,6 +1877,7 @@ class _MobileCardState extends State<_MobileCard> {
                       onEdit: widget.onEdit,
                       onDelete: widget.onDelete,
                       iconSize: 17,
+                      isPartnerView: isPartnerView,
                     ),
                     // Flèche expand/collapse avec rotation 180°
                     AnimatedRotation(
@@ -1628,7 +1911,7 @@ class _MobileCardState extends State<_MobileCard> {
                     border: Border.all(color: AppColors.divider)),
                 child: Column(children: [
                   _DetailRow('Prix achat',
-                      p.priceBuy > 0 ? '${p.priceBuy.toStringAsFixed(0)} XAF' : '—'),
+                      p.priceBuy > 0 ? CurrencyFormatter.format(p.priceBuy) : '—'),
                   _DetailRowWidget(
                     label: context.l10n.invPriceLabel,
                     child: _PriceDisplay(product: p, compact: true),
@@ -1645,25 +1928,29 @@ class _MobileCardState extends State<_MobileCard> {
                 ]),
               ),
               const SizedBox(height: 8),
-              // Switches
-              Row(children: [
-                Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(context.l10n.invActiveInCaisse,
-                      style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                  Transform.scale(scale: 0.85, alignment: Alignment.centerLeft,
-                      child: AppSwitch(value: p.isActive,
-                          onChanged: widget.onToggleActive)),
-                ])),
-                Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(context.l10n.invVisibleWeb,
-                      style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                  Transform.scale(scale: 0.85, alignment: Alignment.centerLeft,
-                      child: AppSwitch(value: p.isVisibleWeb,
-                          onChanged: widget.onToggleWeb)),
-                ])),
-              ]),
+              // Switches — masqués en vue Partenaire : ces propriétés
+              // (actif en caisse, visible web) appartiennent au produit
+              // côté boutique, pas au partenaire qui en détient seulement
+              // une partie de stock via transfert.
+              if (!isPartnerView)
+                Row(children: [
+                  Expanded(child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(context.l10n.invActiveInCaisse,
+                        style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                    Transform.scale(scale: 0.85, alignment: Alignment.centerLeft,
+                        child: AppSwitch(value: p.isActive,
+                            onChanged: widget.onToggleActive)),
+                  ])),
+                  Expanded(child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(context.l10n.invVisibleWeb,
+                        style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                    Transform.scale(scale: 0.85, alignment: Alignment.centerLeft,
+                        child: AppSwitch(value: p.isVisibleWeb,
+                            onChanged: widget.onToggleWeb)),
+                  ])),
+                ]),
               // Bouton variantes si existantes
               if (p.variants.isNotEmpty) ...[
                 const SizedBox(height: 6),
@@ -1676,7 +1963,7 @@ class _MobileCardState extends State<_MobileCard> {
                       color: AppColors.primarySurface,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color: AppColors.primary.withOpacity(0.3)),
+                          color: AppColors.primary.withValues(alpha:0.3)),
                     ),
                     child: Row(children: [
                       Icon(Icons.layers_outlined, size: 14,
@@ -1697,6 +1984,8 @@ class _MobileCardState extends State<_MobileCard> {
                   _VariantsSection(
                     product: p,
                     onChanged: widget.onProductChanged,
+                    isPartnerView: isPartnerView,
+                    partnerLocId:  partnerLocId,
                   ),
               ],
             ]),
@@ -1729,7 +2018,7 @@ class _StockBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha:0.12),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text('${context.l10n.invStock}: $stock',
@@ -1764,7 +2053,7 @@ class _MarginPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha:0.12),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
@@ -1843,7 +2132,7 @@ class _VariantsSummary extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
               color: (hasOut ? AppColors.error : AppColors.warning)
-                  .withOpacity(0.12),
+                  .withValues(alpha:0.12),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -1904,7 +2193,14 @@ class _VariantPill extends StatelessWidget {
 class _VariantsSection extends StatefulWidget {
   final Product product;
   final VoidCallback? onChanged;
-  const _VariantsSection({required this.product, this.onChanged});
+  /// En vue Partenaire on ne montre QUE les variantes effectivement présentes
+  /// chez ce partenaire (StockLevel > 0) et chaque ligne affiche le stock
+  /// local. Hors vue partenaire, toutes les variantes sont visibles avec
+  /// leur stockAvailable (= boutique).
+  final bool isPartnerView;
+  final String? partnerLocId;
+  const _VariantsSection({required this.product, this.onChanged,
+    this.isPartnerView = false, this.partnerLocId});
   @override
   State<_VariantsSection> createState() => _VariantsSectionState();
 }
@@ -1922,18 +2218,15 @@ class _VariantsSectionState extends State<_VariantsSection> {
   @override
   void didUpdateWidget(_VariantsSection old) {
     super.didUpdateWidget(old);
-    // Synchroniser si le produit, ses variantes (ajout/suppression/ordre)
-    // ou la variante principale ont changé.
-    final oldMainId = old.product.variants
-        .where((v) => v.isMain).map((v) => v.id).firstOrNull;
-    final newMainId = widget.product.variants
-        .where((v) => v.isMain).map((v) => v.id).firstOrNull;
-    final oldIds = old.product.variants.map((v) => v.id).join('|');
-    final newIds = widget.product.variants.map((v) => v.id).join('|');
-    if (old.product.id != widget.product.id
-        || oldMainId != newMainId
-        || oldIds   != newIds) {
-      setState(() => _variants = List.from(widget.product.variants));
+    // Resync la copie locale dès que le Product change. On compare via
+    // Equatable (Product.props inclut `variants`, et ProductVariant.props
+    // inclut stockAvailable, prix, isMain, promo…) — donc toute édition
+    // depuis la fiche produit (stock, prix, ordre, ajout/suppression) est
+    // détectée. La condition restreinte précédente (id + mainId + listIds)
+    // ratait les modifs de stock/prix : la copie locale figeait l'ancienne
+    // valeur et l'utilisateur devait actualiser pour voir le résultat.
+    if (old.product != widget.product) {
+      _variants = List.from(widget.product.variants);
     }
   }
 
@@ -1959,45 +2252,72 @@ class _VariantsSectionState extends State<_VariantsSection> {
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
+    // En vue partenaire on filtre les variantes : seules celles qui ont un
+    // StockLevel > 0 chez ce partenaire sont visibles. Les variantes jamais
+    // transférées ne doivent pas apparaître (sinon l'utilisateur croit que
+    // le partenaire détient du stock alors qu'il n'a rien reçu).
+    final shown = (widget.isPartnerView && widget.partnerLocId != null)
+        ? _variants.where((v) {
+            final vid = v.id;
+            if (vid == null) return false;
+            final lvl = AppDatabase.getStockLevel(vid, widget.partnerLocId!);
+            return (lvl?.stockAvailable ?? 0) > 0;
+          }).toList()
+        : _variants;
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: AppColors.primarySurface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+        border: Border.all(color: AppColors.primary.withValues(alpha:0.2)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Icon(Icons.layers_outlined, size: 13, color: AppColors.primary),
           const SizedBox(width: 5),
-          Text('${l.invVariantsLabel} (${_variants.length})',
+          Text('${l.invVariantsLabel} (${shown.length})',
               style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
                   color: AppColors.primary)),
         ]),
         const SizedBox(height: 8),
-        // ── Tableau : header + rows ─────────────────────────────────
-        // Scrollable horizontal si l'écran est trop étroit pour toutes
-        // les colonnes (prix achat / marge peuvent pousser le total > 360px).
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 548),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min, children: [
-              const _VariantTableHeader(),
-              ..._variants.map((v) => _VariantRow(
-                variant: v,
-                product: widget.product,
-                onSetMain: v.isMain ? null : () => _setMain(v),
-                onChanged: widget.onChanged,
-              )),
-              const SizedBox(height: 6),
-              _AddVariantButton(product: widget.product,
-                  onChanged: widget.onChanged),
-            ]),
+        if (shown.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              widget.isPartnerView
+                  ? 'Aucune variante transférée chez ce partenaire.'
+                  : 'Aucune variante.',
+              style: const TextStyle(fontSize: 11,
+                  color: AppColors.textSecondary)),
+          )
+        else
+          // Scrollable horizontal si l'écran est trop étroit pour toutes
+          // les colonnes (prix achat / marge peuvent pousser le total > 360px).
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 548),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min, children: [
+                const _VariantTableHeader(),
+                ...shown.map((v) => _VariantRow(
+                  variant: v,
+                  product: widget.product,
+                  onSetMain: v.isMain ? null : () => _setMain(v),
+                  onChanged: widget.onChanged,
+                  isPartnerView: widget.isPartnerView,
+                  partnerLocId:  widget.partnerLocId,
+                )),
+                const SizedBox(height: 6),
+                // Pas d'ajout de variante en vue partenaire — la création
+                // se fait depuis la fiche produit (boutique uniquement).
+                if (!widget.isPartnerView)
+                  _AddVariantButton(product: widget.product,
+                      onChanged: widget.onChanged),
+              ]),
+            ),
           ),
-        ),
       ]),
     );
   }
@@ -2047,18 +2367,17 @@ class _VariantRow extends StatelessWidget {
   final Product        product;
   final VoidCallback?  onSetMain;
   final VoidCallback?  onChanged;
+  /// Si vrai, on est en vue Partenaire : on affiche le stock local du
+  /// partenaire (StockLevel) au lieu du stock global de la variante, et on
+  /// masque les actions Modifier/Corriger/Marquer-principale (ces actions
+  /// ne s'appliquent qu'à la boutique propriétaire du produit).
+  final bool           isPartnerView;
+  final String?        partnerLocId;
   const _VariantRow({
     required this.variant, required this.product,
     this.onSetMain, this.onChanged,
+    this.isPartnerView = false, this.partnerLocId,
   });
-
-  Color _stockColor() {
-    if (variant.stockAvailable <= 0) return AppColors.error;
-    if (variant.stockAvailable <= variant.stockMinAlert) {
-      return AppColors.warning;
-    }
-    return AppColors.secondary;
-  }
 
   double? _margin() {
     if (variant.priceSellPos <= 0) return null;
@@ -2082,10 +2401,19 @@ class _VariantRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l      = context.l10n;
-    final isLow  = variant.stockAvailable > 0 &&
-        variant.stockAvailable <= variant.stockMinAlert;
+    // En vue partenaire, on lit le StockLevel local du partenaire — c'est
+    // ce stock qui a été effectivement transféré chez ce partenaire. Sinon
+    // on lit le stockAvailable de la variante (= stock boutique).
+    final stockShown = (isPartnerView && partnerLocId != null && variant.id != null)
+        ? (AppDatabase.getStockLevel(variant.id!, partnerLocId!)?.stockAvailable ?? 0)
+        : variant.stockAvailable;
+    final isLow  = stockShown > 0 && stockShown <= variant.stockMinAlert;
     final margin = _margin();
-    final stockC = _stockColor();
+    final stockC = stockShown <= 0
+        ? AppColors.error
+        : (stockShown <= variant.stockMinAlert
+            ? AppColors.warning
+            : AppColors.secondary);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
@@ -2094,7 +2422,7 @@ class _VariantRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
             color: variant.isMain
-                ? AppColors.primary.withOpacity(0.5)
+                ? AppColors.primary.withValues(alpha:0.5)
                 : AppColors.divider,
             width: variant.isMain ? 1.2 : 1),
       ),
@@ -2133,11 +2461,11 @@ class _VariantRow extends StatelessWidget {
               ])),
             ]),
           )),
-          // ── Col 2 : Stock coloré ──────────────────────────────────
+          // ── Col 2 : Stock coloré (local au filtre courant) ───────
           SizedBox(width: 60, child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Align(alignment: Alignment.centerRight,
-              child: Text('${variant.stockAvailable}',
+              child: Text('$stockShown',
                   style: TextStyle(fontSize: 12,
                       fontWeight: FontWeight.w800, color: stockC)))),
           ),
@@ -2153,7 +2481,7 @@ class _VariantRow extends StatelessWidget {
             child: Align(alignment: Alignment.centerRight,
               child: Text(
                   variant.priceBuy > 0
-                      ? '${variant.priceBuy.toStringAsFixed(0)} XAF'
+                      ? CurrencyFormatter.format(variant.priceBuy)
                       : '—',
                   style: const TextStyle(fontSize: 11,
                       color: AppColors.textSecondary,
@@ -2171,7 +2499,7 @@ class _VariantRow extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 5, vertical: 1),
                       decoration: BoxDecoration(
-                        color: AppColors.secondary.withOpacity(0.12),
+                        color: AppColors.secondary.withValues(alpha:0.12),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text('${margin.toStringAsFixed(0)}%',
@@ -2180,38 +2508,61 @@ class _VariantRow extends StatelessWidget {
                               color: AppColors.secondary)),
                     ))),
           ),
-          // ── Col 6 : Actions (variante) ───────────────────────────
-          SizedBox(width: 70, child: Row(
-              mainAxisAlignment: MainAxisAlignment.end, children: [
-            // Mettre en avant — ⭐ tappable si pas déjà principale
-            IconButton(
-              tooltip: variant.isMain
-                  ? l.invActionMainActive
-                  : l.invActionSetMain,
-              icon: Icon(
-                  variant.isMain
-                      ? Icons.star_rounded
-                      : Icons.star_outline_rounded,
-                  size: 15),
-              onPressed: variant.isMain ? null : onSetMain,
-              color: variant.isMain
-                  ? AppColors.primary
-                  : AppColors.textHint,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(
-                  minWidth: 26, minHeight: 26),
-            ),
-            IconButton(
-              tooltip: l.invEdit,
-              icon: const Icon(Icons.edit_outlined, size: 14),
-              onPressed: () =>
-                  _openProductForm(context, focusVariantId: variant.id),
-              color: AppColors.textSecondary,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(
-                  minWidth: 26, minHeight: 26),
-            ),
-          ])),
+          // ── Col 6 : Actions (variante) — masquées en vue Partenaire,
+          //          le stock partenaire ne peut être modifié qu'au moyen
+          //          de transferts (cf. menu "…" → Transférer).
+          if (isPartnerView)
+            const SizedBox(width: 70)
+          else
+            SizedBox(width: 70, child: Row(
+                mainAxisAlignment: MainAxisAlignment.end, children: [
+              IconButton(
+                tooltip: variant.isMain
+                    ? l.invActionMainActive
+                    : l.invActionSetMain,
+                icon: Icon(
+                    variant.isMain
+                        ? Icons.star_rounded
+                        : Icons.star_outline_rounded,
+                    size: 15),
+                onPressed: variant.isMain ? null : onSetMain,
+                color: variant.isMain
+                    ? AppColors.primary
+                    : AppColors.textHint,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(
+                    minWidth: 26, minHeight: 26),
+              ),
+              IconButton(
+                tooltip: 'Corriger le stock',
+                icon: const Icon(Icons.edit_outlined, size: 14),
+                onPressed: () async {
+                  final pid = product.id;
+                  final sid = product.storeId;
+                  final vid = variant.id;
+                  if (pid == null || sid == null || vid == null) {
+                    _openProductForm(context, focusVariantId: variant.id);
+                    return;
+                  }
+                  final ok = await showAdjustStockSheet(
+                    context:   context,
+                    variant:   variant,
+                    shopId:    sid,
+                    productId: pid,
+                  );
+                  if (ok) {
+                    if (context.mounted) {
+                      AppSnack.success(context, 'Stock corrigé avec succès');
+                    }
+                    onChanged?.call();
+                  }
+                },
+                color: AppColors.textSecondary,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(
+                    minWidth: 26, minHeight: 26),
+              ),
+            ])),
         ]),
       ),
     );
@@ -2236,8 +2587,10 @@ class _VariantSwatch extends StatelessWidget {
           width: 24, height: 24,
           child: url.startsWith('http')
               ? Image.network(url, fit: BoxFit.cover,
+                  filterQuality: FilterQuality.high,
                   errorBuilder: (_, __, ___) => _initials(context))
               : Image.file(File(url), fit: BoxFit.cover,
+                  filterQuality: FilterQuality.high,
                   errorBuilder: (_, __, ___) => _initials(context)),
         ),
       );
@@ -2364,128 +2717,21 @@ class _VariantPriceDisplay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!_isPromoActive) {
-      return Text('${variant.priceSellPos.toStringAsFixed(0)} XAF',
+      return Text(CurrencyFormatter.format(variant.priceSellPos),
           style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
               color: AppColors.primary));
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-      Text('${variant.promoPrice!.toStringAsFixed(0)} XAF',
+      Text(CurrencyFormatter.format(variant.promoPrice!),
           style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
               color: AppColors.error)),
-      Text('${variant.priceSellPos.toStringAsFixed(0)} XAF',
+      Text(CurrencyFormatter.format(variant.priceSellPos),
           style: const TextStyle(fontSize: 9, color: AppColors.textHint,
               decoration: TextDecoration.lineThrough,
               decorationColor: AppColors.textHint)),
       if (variant.promoEnd != null)
         _PromoCountdown(end: variant.promoEnd!),
     ]);
-  }
-}
-
-// ─── Image produit ────────────────────────────────────────────────────────────
-
-class _ProductImage extends StatelessWidget {
-  final String? imageUrl;
-  final double size;
-  final String? name;
-  const _ProductImage({required this.imageUrl, required this.size, this.name});
-
-  static const _gradients = <List<Color>>[
-    [Color(0xFF6C3FC7), Color(0xFF8B5CF6)],
-    [Color(0xFF0EA5E9), AppColors.info],
-    [AppColors.secondary, Color(0xFF22D3EE)],
-    [AppColors.warning, AppColors.error],
-    [Color(0xFFEC4899), Color(0xFF8B5CF6)],
-    [Color(0xFF14B8A6), AppColors.secondary],
-  ];
-
-  List<Color> _colorsFor(String s) {
-    final hash = s.codeUnits.fold<int>(0, (a, b) => a + b);
-    return _gradients[hash % _gradients.length];
-  }
-
-  String _initials(String s) {
-    final t = s.trim();
-    if (t.isEmpty) return '?';
-    final parts = t.split(RegExp(r'\s+'));
-    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
-    return (parts[0].substring(0, 1) + parts[1].substring(0, 1)).toUpperCase();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final url = imageUrl;
-    if (url == null || url.isEmpty) return _placeholder();
-
-    Widget img;
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      img = Image.network(url,
-          width: size, height: size, fit: BoxFit.cover,
-          loadingBuilder: (ctx, child, progress) {
-            if (progress == null) return child;
-            return _loadingSkeleton();
-          },
-          errorBuilder: (_, __, ___) => _placeholder());
-    } else {
-      img = Image.file(File(url),
-          width: size, height: size, fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _placeholder());
-    }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: img,
-    );
-  }
-
-  Widget _loadingSkeleton() => Container(
-        width: size, height: size,
-        decoration: BoxDecoration(
-          color: AppColors.inputFill,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Center(
-          child: SizedBox(
-            width: size * 0.3, height: size * 0.3,
-            child: const CircularProgressIndicator(
-                strokeWidth: 2, color: Color(0xFFD1D5DB)),
-          ),
-        ),
-      );
-
-  Widget _placeholder() {
-    final label = name ?? '';
-    if (label.isEmpty) {
-      return Container(
-        width: size, height: size,
-        decoration: BoxDecoration(
-            color: AppColors.inputFill,
-            borderRadius: BorderRadius.circular(8)),
-        child: Icon(Icons.inventory_2_rounded,
-            size: size * 0.45, color: const Color(0xFFD1D5DB)),
-      );
-    }
-    final colors = _colorsFor(label);
-    return Container(
-      width: size, height: size,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: colors,
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        _initials(label),
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: size * 0.38,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.2,
-        ),
-      ),
-    );
   }
 }
 
@@ -2578,7 +2824,7 @@ class _Pagination extends StatelessWidget {
         : const EdgeInsets.symmetric(horizontal: 10, vertical: 6);
     final btnFs   = isCompact ? 11.0 : 12.0;
     final countFs = isCompact ? 10.0 : 11.0;
-    final disabledColor = AppColors.textHint.withOpacity(0.6);
+    final disabledColor = AppColors.textHint.withValues(alpha:0.6);
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 12, vertical: vPad),
       decoration: BoxDecoration(
@@ -2657,13 +2903,13 @@ class _PriceDisplay extends StatelessWidget {
     if (promoV != null) {
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-          Text('${promoV.promoPrice!.toStringAsFixed(0)} XAF',
+          Text(CurrencyFormatter.format(promoV.promoPrice!),
               style: TextStyle(
                   fontSize: compact ? 11 : 10,
                   fontWeight: FontWeight.w700,
                   color: AppColors.error)),
           const SizedBox(width: 5),
-          Text('${promoV.priceSellPos.toStringAsFixed(0)} XAF',
+          Text(CurrencyFormatter.format(promoV.priceSellPos),
               style: const TextStyle(
                   fontSize: 9,
                   color: AppColors.textHint,
@@ -2675,7 +2921,7 @@ class _PriceDisplay extends StatelessWidget {
       ]);
     }
 
-    return Text('${basePrice.toStringAsFixed(0)} XAF',
+    return Text(CurrencyFormatter.format(basePrice),
         style: TextStyle(
             fontSize: compact ? 11 : 10,
             fontWeight: FontWeight.w700,
@@ -2729,7 +2975,7 @@ class _PromoCountdownState extends State<_PromoCountdown> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: BoxDecoration(
-        color: AppColors.error.withOpacity(0.1),
+        color: AppColors.error.withValues(alpha:0.1),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -2750,6 +2996,11 @@ class _ProductActionsMenu extends ConsumerWidget {
   final Product product;
   final VoidCallback onTransfer, onShare, onShareWhatsApp, onEdit, onDelete;
   final double iconSize;
+  /// Si vrai, on est en vue Partenaire : Modifier et Supprimer sont masqués
+  /// (le produit appartient à la boutique, pas au partenaire — toute édition
+  /// se fait depuis la vue Globale ou Boutique seule). Transférer reste
+  /// disponible pour permettre un retour de stock vers la boutique.
+  final bool isPartnerView;
   const _ProductActionsMenu({
     required this.shopId,
     required this.product,
@@ -2759,6 +3010,7 @@ class _ProductActionsMenu extends ConsumerWidget {
     required this.onEdit,
     required this.onDelete,
     this.iconSize = 16,
+    this.isPartnerView = false,
   });
 
   @override
@@ -2799,7 +3051,7 @@ class _ProductActionsMenu extends ConsumerWidget {
         const Text('Partager', style: TextStyle(fontSize: 13)),
       ]),
     ));
-    if (perms.canEditProduct) {
+    if (perms.canEditProduct && !isPartnerView) {
       items.add(const PopupMenuItem<String>(
         value: 'edit',
         child: Row(children: [
@@ -2809,7 +3061,7 @@ class _ProductActionsMenu extends ConsumerWidget {
         ]),
       ));
     }
-    if (perms.canDeleteProduct) {
+    if (perms.canDeleteProduct && !isPartnerView) {
       items.add(const PopupMenuItem<String>(
         value: 'delete',
         child: Row(children: [
@@ -2896,7 +3148,7 @@ class _ShareVariantsPickerDialogState
         Container(
           width: 32, height: 32,
           decoration: BoxDecoration(
-              color: AppColors.secondary.withOpacity(0.14),
+              color: AppColors.secondary.withValues(alpha:0.14),
               borderRadius: BorderRadius.circular(8)),
           child: const Icon(Icons.share_outlined,
               size: 16, color: AppColors.secondary),
@@ -2968,7 +3220,7 @@ class _ShareVariantsPickerDialogState
                               ? AppColors.primary
                               : AppColors.textHint),
                       const SizedBox(width: 8),
-                      AppProductImage(
+                      ProductImageCard(
                         imageUrl: v.imageUrl ?? widget.product.imageUrl,
                         width: 28, height: 28,
                         borderRadius: BorderRadius.circular(6),
@@ -3012,7 +3264,7 @@ class _ShareVariantsPickerDialogState
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.secondary,
             foregroundColor: Colors.white,
-            disabledBackgroundColor: AppColors.secondary.withOpacity(0.35),
+            disabledBackgroundColor: AppColors.secondary.withValues(alpha:0.35),
             elevation: 0,
             padding: const EdgeInsets.symmetric(
                 horizontal: 16, vertical: 10),
@@ -3081,7 +3333,7 @@ class _PickOneVariantDialogState extends State<_PickOneVariantDialog> {
                         fontWeight: FontWeight.w600)),
                 subtitle: Text('${v.stockAvailable} unité'
                     '${v.stockAvailable > 1 ? 's' : ''} · '
-                    '${v.priceSellPos.toStringAsFixed(0)} XAF',
+                    '${CurrencyFormatter.format(v.priceSellPos)}',
                     style: const TextStyle(fontSize: 11,
                         color: AppColors.textHint)),
               ),
@@ -3109,6 +3361,148 @@ class _PickOneVariantDialogState extends State<_PickOneVariantDialog> {
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8)),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Dialog "Que partager ?" ──────────────────────────────────────────────
+
+enum _CatalogueShareKind { all, category, selection }
+
+class _CatalogueShareChoice {
+  final _CatalogueShareKind kind;
+  final String?             category;
+  const _CatalogueShareChoice(this.kind, {this.category});
+}
+
+class _CatalogueShareDialog extends StatefulWidget {
+  final List<String> categories;
+  final bool         canUseSelection;
+  final int          selectionCount;
+  const _CatalogueShareDialog({
+    required this.categories,
+    required this.canUseSelection,
+    required this.selectionCount,
+  });
+
+  @override
+  State<_CatalogueShareDialog> createState() => _CatalogueShareDialogState();
+}
+
+class _CatalogueShareDialogState extends State<_CatalogueShareDialog> {
+  late _CatalogueShareKind _kind;
+  String? _category;
+
+  @override
+  void initState() {
+    super.initState();
+    _kind = widget.canUseSelection
+        ? _CatalogueShareKind.selection
+        : _CatalogueShareKind.all;
+    if (widget.categories.isNotEmpty) _category = widget.categories.first;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14)),
+      titlePadding:   const EdgeInsets.fromLTRB(20, 20, 20, 4),
+      contentPadding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+      title: const Text('Que partager ?',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            RadioListTile<_CatalogueShareKind>(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              value: _CatalogueShareKind.all,
+              groupValue: _kind,
+              onChanged: (v) => setState(() => _kind = v!),
+              title: const Text('Tout le catalogue'),
+              subtitle: const Text('Tous les produits visibles publiquement',
+                  style: TextStyle(fontSize: 11)),
+            ),
+            if (widget.categories.isNotEmpty) ...[
+              RadioListTile<_CatalogueShareKind>(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                value: _CatalogueShareKind.category,
+                groupValue: _kind,
+                onChanged: (v) => setState(() => _kind = v!),
+                title: const Text('Une catégorie'),
+                subtitle: const Text('Filtre par catégorie de produit',
+                    style: TextStyle(fontSize: 11)),
+              ),
+              if (_kind == _CatalogueShareKind.category)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(36, 4, 0, 8),
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _category,
+                    isDense: true,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 10),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                    items: widget.categories
+                        .map((c) => DropdownMenuItem(
+                            value: c,
+                            child: Text(c,
+                                style: const TextStyle(fontSize: 13))))
+                        .toList(),
+                    onChanged: (v) => setState(() => _category = v),
+                  ),
+                ),
+            ],
+            if (widget.canUseSelection)
+              RadioListTile<_CatalogueShareKind>(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                value: _CatalogueShareKind.selection,
+                groupValue: _kind,
+                onChanged: (v) => setState(() => _kind = v!),
+                title: Text(
+                    'Sélection actuelle (${widget.selectionCount} produit${widget.selectionCount > 1 ? 's' : ''})'),
+                subtitle: const Text('Uniquement les produits cochés',
+                    style: TextStyle(fontSize: 11)),
+              ),
+          ],
+        ),
+      ),
+      actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Annuler'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            Navigator.of(context).pop(_CatalogueShareChoice(
+              _kind,
+              category: _kind == _CatalogueShareKind.category
+                  ? _category
+                  : null,
+            ));
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: theme.colorScheme.primary,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8)),
+          ),
+          child: const Text('Continuer'),
         ),
       ],
     );

@@ -2,20 +2,16 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/i18n/app_localizations.dart';
-import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/kpi_card.dart' as shared_kpi;
-import '../../../../shared/providers/current_shop_provider.dart';
-import '../../../shop_selector/domain/entities/shop_summary.dart';
-import '../../../shop_selector/presentation/bloc/shop_selector_bloc.dart';
+import '../../../../shared/widgets/view_filter_chip_bar.dart';
 import '../../../inventaire/domain/entities/product.dart';
-import '../../../../core/router/route_names.dart';
+import '../../../inventaire/domain/stock_at_location.dart' as stock_loc;
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../data/dashboard_providers.dart';
@@ -23,28 +19,6 @@ import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/services/document_service.dart';
 import '../../../inventaire/presentation/widgets/share_catalog_dialog.dart';
 
-
-// ─── Modèles mock (legacy non-KPI) ───────────────────────────────────────────
-
-class _TxData {
-  final String method, name, time, amount, status;
-  final bool completed, cancelled;
-  const _TxData(this.method, this.name, this.time, this.amount,
-      this.status, this.completed, this.cancelled);
-}
-
-class _AlertData {
-  final String name, detail;
-  final bool critical;
-  const _AlertData(this.name, this.detail, this.critical);
-}
-
-class _TopProduct {
-  final String name, sales;
-  final double delta;
-  final bool positive;
-  const _TopProduct(this.name, this.sales, this.delta, this.positive);
-}
 
 // ─── Page principale ──────────────────────────────────────────────────────────
 
@@ -96,42 +70,6 @@ class _DashBodyState extends ConsumerState<_DashBody> {
     if (shopId != widget.shopId && shopId != '_all') return;
     ref.read(dashSignalProvider.notifier).state++;
   }
-
-  static const _topProducts = [
-    _TopProduct('Organic Latte',   '124 unités', 18, true),
-    _TopProduct('Chocolate Cake',  '84 unités',  12, true),
-    _TopProduct('Avocado Toast',   '57 unités',  -5, false),
-    _TopProduct('Fruit Smoothie',  '66 unités',  8,  true),
-  ];
-
-  static const _transactions = [
-    _TxData('Carte bancaire', 'Emma Thompson',    '14:22', '+42.50 XAF', 'Completed', true,  false),
-    _TxData('Espèces',        'Michael Rodriguez','14:05', '+18.75 XAF', 'Completed', true,  false),
-    _TxData('Carte bancaire', 'Sophia Chen',      '13:48', '+35.20 XAF', 'Completed', true,  false),
-  ];
-
-  static const _alerts = [
-    _AlertData('Organic Coffee Beans', '2 unités restantes', true),
-    _AlertData('Almond Milk',          '5 unités restantes', false),
-    _AlertData('Chocolate Syrup',      '6 unités restantes', false),
-  ];
-
-  // Données graphique par période
-  List<double> get _chartData => switch (_period) {
-    'yesterday' => [400, 480, 320, 560, 450, 620, 510],
-    'week'      => [2100, 3200, 2800, 4100, 3600, 5200, 4300],
-    'month'     => [18000, 22000, 19000, 25000, 21000, 28000, 24000],
-    'year'      => [65000, 72000, 80000, 68000, 90000, 85000, 95000],
-    _           => [380, 480, 340, 560, 430, 600, 510],
-  };
-
-  List<String> get _chartLabels => switch (_period) {
-    'yesterday' => ['0h','4h','8h','12h','16h','20h','23h'],
-    'week'      => ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'],
-    'month'     => ['S1','S2','S3','S4','S5','S6','S7'],
-    'year'      => ['Jan','Mar','Mai','Jul','Sep','Nov','Déc'],
-    _           => ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'],
-  };
 
   String _periodLabel(AppLocalizations l) => switch (_period) {
     'yesterday' => l.periodYesterday,
@@ -191,6 +129,16 @@ class _DashBodyState extends ConsumerState<_DashBody> {
 
   @override
   Widget build(BuildContext context) {
+    // Rebuild le dashboard quand la devise change (cf. CurrencyFormatter).
+    // Le ValueListenableBuilder regénère tout l'arbre dès que l'utilisateur
+    // sélectionne une nouvelle devise dans Paramètres.
+    return ValueListenableBuilder<String>(
+      valueListenable: CurrencyFormatter.notifier,
+      builder: (_, __, ___) => _buildContent(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     final l = context.l10n;
     final data = ref.watch(dashDataProvider(widget.shopId));
 
@@ -201,7 +149,7 @@ class _DashBodyState extends ConsumerState<_DashBody> {
     final priorityKpis = <shared_kpi.KpiData>[
       shared_kpi.KpiData(
         label: l.dashTotalSales,
-        value: _fmtNum(data.totalSales), unit: 'XAF',
+        value: _fmtNum(data.totalSales), unit: CurrencyFormatter.currentSymbol,
         icon: Icons.trending_up,
         color: AppColors.secondary,
         onTap: () => context.push('/shop/$shopId/finances'),
@@ -222,7 +170,7 @@ class _DashBodyState extends ConsumerState<_DashBody> {
       ),
       shared_kpi.KpiData(
         label: l.dashNetProfit,
-        value: _fmtNum(data.netProfit), unit: 'XAF',
+        value: _fmtNum(data.netProfit), unit: CurrencyFormatter.currentSymbol,
         icon: Icons.account_balance_wallet_rounded,
         color: data.netProfit >= 0
             ? AppColors.primary
@@ -257,7 +205,7 @@ class _DashBodyState extends ConsumerState<_DashBody> {
       if (data.scrappedLoss > 0)
         shared_kpi.KpiData(
           label: l.dashScrappedLoss,
-          value: _fmtNum(data.scrappedLoss), unit: 'XAF',
+          value: _fmtNum(data.scrappedLoss), unit: CurrencyFormatter.currentSymbol,
           icon: Icons.delete_forever_rounded,
           color: AppColors.error,
           errorIndicator: true,
@@ -266,14 +214,14 @@ class _DashBodyState extends ConsumerState<_DashBody> {
       if (data.repairCost > 0)
         shared_kpi.KpiData(
           label: l.dashRepairCost,
-          value: _fmtNum(data.repairCost), unit: 'XAF',
+          value: _fmtNum(data.repairCost), unit: CurrencyFormatter.currentSymbol,
           icon: Icons.build_rounded,
           color: AppColors.warning,
         ),
       if (data.totalLoss > 0)
         shared_kpi.KpiData(
           label: l.dashLoss,
-          value: _fmtNum(data.totalLoss), unit: 'XAF',
+          value: _fmtNum(data.totalLoss), unit: CurrencyFormatter.currentSymbol,
           icon: Icons.trending_down_rounded,
           color: AppColors.error,
           errorIndicator: true,
@@ -282,7 +230,7 @@ class _DashBodyState extends ConsumerState<_DashBody> {
       if (data.operatingExpenses > 0)
         shared_kpi.KpiData(
           label: l.dashExpenses,
-          value: _fmtNum(data.operatingExpenses), unit: 'XAF',
+          value: _fmtNum(data.operatingExpenses), unit: CurrencyFormatter.currentSymbol,
           icon: Icons.account_balance_wallet_rounded,
           color: AppColors.error,
           errorIndicator: true,
@@ -294,8 +242,11 @@ class _DashBodyState extends ConsumerState<_DashBody> {
       padding: const EdgeInsets.all(16),
       children: [
 
-        // ── Sélecteur boutique active ──────────────────────────────────────
-        _ShopSwitcherBanner(shopId: widget.shopId),
+        // ── Sélecteur de vue (Global / Boutique seule / Par partenaire) ───
+        // Le switch entre boutiques principales se fait désormais depuis le
+        // Hub central (drawer → Hub). Ici c'est uniquement le filtre de
+        // périmètre à l'intérieur de la boutique courante.
+        ViewFilterChipBar(shopId: widget.shopId, useTabs: true),
         const SizedBox(height: 12),
 
         // ── Header : titre + accès rapide + filtre période ────────────────
@@ -422,7 +373,7 @@ class _AlertsSection extends StatelessWidget {
           Container(
             width: 24, height: 24,
             decoration: BoxDecoration(
-              color: theme.semantic.warning.withOpacity(0.12),
+              color: theme.semantic.warning.withValues(alpha:0.12),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Icon(Icons.notifications_active_rounded,
@@ -497,7 +448,7 @@ class _DashboardHeader extends StatelessWidget {
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.divider),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 6, offset: const Offset(0, 2))],
       ),
       child: Column(
@@ -531,7 +482,7 @@ class _DashboardHeader extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: AppColors.primarySurface,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                  border: Border.all(color: AppColors.primary.withValues(alpha:0.3)),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   Icon(Icons.calendar_today_rounded, size: 12,
@@ -623,13 +574,13 @@ class _HeaderQuickBtnState extends State<_HeaderQuickBtn> {
           padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 8),
           decoration: BoxDecoration(
             color: _hover
-                ? widget.color.withOpacity(0.14)
-                : widget.color.withOpacity(0.07),
+                ? widget.color.withValues(alpha:0.14)
+                : widget.color.withValues(alpha:0.07),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: _hover
-                  ? widget.color.withOpacity(0.4)
-                  : widget.color.withOpacity(0.15),
+                  ? widget.color.withValues(alpha:0.4)
+                  : widget.color.withValues(alpha:0.15),
               width: 1,
             ),
           ),
@@ -838,7 +789,7 @@ class _FinancialSummaryCard extends StatelessWidget {
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.divider),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 4, offset: const Offset(0,2))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -846,7 +797,7 @@ class _FinancialSummaryCard extends StatelessWidget {
           Container(
             width: 28, height: 28,
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.10),
+              color: AppColors.primary.withValues(alpha:0.10),
               borderRadius: BorderRadius.circular(7),
             ),
             child: Icon(Icons.account_balance_rounded,
@@ -860,16 +811,16 @@ class _FinancialSummaryCard extends StatelessWidget {
                   color: AppColors.textPrimary))),
         ]),
         const SizedBox(height: 12),
-        _row(l.financesCA, '+${_fmt(data.totalSales)} XAF',
+        _row(l.financesCA, '+${_fmt(data.totalSales)} ${CurrencyFormatter.currentSymbol}',
             AppColors.textPrimary),
         const SizedBox(height: 4),
-        _row(l.dashProductCost, '−${_fmt(productCost)} XAF',
+        _row(l.dashProductCost, '−${_fmt(productCost)} ${CurrencyFormatter.currentSymbol}',
             AppColors.textSecondary),
         const SizedBox(height: 8),
         const Divider(height: 1, color: AppColors.divider),
         const SizedBox(height: 8),
         _row(l.dashNetProfit,
-            '${isPositive ? '+' : ''}${_fmt(net)} XAF',
+            '${isPositive ? '+' : ''}${_fmt(net)} ${CurrencyFormatter.currentSymbol}',
             isPositive ? AppColors.secondary : AppColors.error,
             bold: true),
       ]),
@@ -1193,7 +1144,7 @@ class _TopProductsCard extends StatelessWidget {
                 Container(
                   width: 24, height: 24,
                   decoration: BoxDecoration(
-                    color: medalColor.withOpacity(0.12),
+                    color: medalColor.withValues(alpha:0.12),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   alignment: Alignment.center,
@@ -1241,7 +1192,7 @@ class _TopProductsCard extends StatelessWidget {
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
                             color: AppColors.textPrimary)),
-                    Text('${p.revenue.toStringAsFixed(0)} XAF',
+                    Text('${p.revenue.toStringAsFixed(0)} ${CurrencyFormatter.currentSymbol}',
                         style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w600,
@@ -1269,7 +1220,7 @@ class _TopProductThumb extends StatelessWidget {
       borderRadius: BorderRadius.circular(6),
     ),
     child: Icon(Icons.inventory_2_rounded,
-        size: 14, color: AppColors.primary.withOpacity(0.6)),
+        size: 14, color: AppColors.primary.withValues(alpha:0.6)),
   );
 
   @override
@@ -1360,7 +1311,7 @@ class _RecentTxCard extends StatelessWidget {
                 Container(
                   width: 36, height: 36,
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.12),
+                    color: AppColors.primary.withValues(alpha:0.12),
                     borderRadius: BorderRadius.circular(18),
                   ),
                   alignment: Alignment.center,
@@ -1388,7 +1339,7 @@ class _RecentTxCard extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: s.color.withOpacity(0.12),
+                            color: s.color.withValues(alpha:0.12),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(s.label,
@@ -1415,7 +1366,7 @@ class _RecentTxCard extends StatelessWidget {
                   ),
                 ),
                 // Montant à droite
-                Text('${t.amount.toStringAsFixed(0)} XAF',
+                Text('${t.amount.toStringAsFixed(0)} ${CurrencyFormatter.currentSymbol}',
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -1465,9 +1416,9 @@ class _InventoryAlertsCard extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: color.withOpacity(0.08),
+                color: color.withValues(alpha:0.08),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: color.withOpacity(0.35)),
+                border: Border.all(color: color.withValues(alpha:0.35)),
               ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1526,7 +1477,7 @@ class _InventoryAlertsCard extends StatelessWidget {
                     child: LinearProgressIndicator(
                       value: ratio,
                       minHeight: 5,
-                      backgroundColor: color.withOpacity(0.15),
+                      backgroundColor: color.withValues(alpha:0.15),
                       valueColor: AlwaysStoppedAnimation(color),
                     ),
                   )),
@@ -1617,7 +1568,7 @@ class _DashCard extends StatelessWidget {
       color: Colors.white,
       borderRadius: BorderRadius.circular(14),
       border: Border.all(color: AppColors.divider),
-      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03),
+      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
           blurRadius: 5, offset: const Offset(0,2))],
     ),
     child: child,
@@ -1644,13 +1595,13 @@ class _CardHeader extends StatelessWidget {
 
 // ─── Nouveaux produits (< 72h) ───────────────────────────────────────────────
 
-class _NewProductsCard extends StatelessWidget {
+class _NewProductsCard extends ConsumerWidget {
   final List<Product> products;
   final String shopId;
   const _NewProductsCard({required this.products, required this.shopId});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     return _DashCard(
       child: Column(
@@ -1660,7 +1611,7 @@ class _NewProductsCard extends StatelessWidget {
             Container(
               width: 28, height: 28,
               decoration: BoxDecoration(
-                color: AppColors.secondary.withOpacity(0.12),
+                color: AppColors.secondary.withValues(alpha:0.12),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Icon(Icons.new_releases_rounded,
@@ -1684,19 +1635,43 @@ class _NewProductsCard extends StatelessWidget {
             ),
             if (products.isNotEmpty)
               // Bouton global "Partager (N)" — ouvre le dialog catalogue
-              // pré-rempli avec tous les nouveaux produits.
+              // pré-rempli avec tous les nouveaux produits. Le snapshot
+              // de stock filtré sur la vue active (dashViewFilterProvider)
+              // est embarqué dans l'URL pour que le client voie le stock
+              // du périmètre choisi par le marchand.
               GestureDetector(
-                onTap: () => ShareCatalogDialog.show(context,
-                    products: products, shopId: shopId,
-                    preSelected: products),
+                onTap: () {
+                  final viewFilter = ref.read(dashViewFilterProvider);
+                  final locIds = stock_loc.resolveLocationIds(
+                      viewFilter, shopId);
+                  final snapshot = <String, int>{};
+                  for (final p in products) {
+                    final pid = p.id;
+                    if (pid == null) continue;
+                    if (p.variants.isEmpty) {
+                      snapshot[pid] = stock_loc.stockAtLocations(p, locIds);
+                    } else {
+                      for (final v in p.variants) {
+                        final vid = v.id;
+                        if (vid == null) continue;
+                        snapshot['$pid|$vid'] =
+                            stock_loc.stockForVariantAtLocations(v, locIds);
+                      }
+                    }
+                  }
+                  ShareCatalogDialog.show(context,
+                      products: products, shopId: shopId,
+                      preSelected: products,
+                      stockSnapshot: snapshot);
+                },
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.1),
+                    color: AppColors.primary.withValues(alpha:0.1),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                        color: AppColors.primary.withOpacity(0.2)),
+                        color: AppColors.primary.withValues(alpha:0.2)),
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Icon(Icons.share_rounded, size: 12,
@@ -1812,12 +1787,12 @@ class _NewProductRow extends StatelessWidget {
                 // Nombre de variantes si > 1
                 if (hasVariants) ...[
                   Icon(Icons.layers_outlined, size: 10,
-                      color: AppColors.primary.withOpacity(0.7)),
+                      color: AppColors.primary.withValues(alpha:0.7)),
                   const SizedBox(width: 3),
                   Text(l.dashVariantCount(variantCount),
                       style: TextStyle(fontSize: 10,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.primary.withOpacity(0.8))),
+                          color: AppColors.primary.withValues(alpha:0.8))),
                   const SizedBox(width: 6),
                   Container(width: 2, height: 2,
                       decoration: const BoxDecoration(
@@ -1837,7 +1812,7 @@ class _NewProductRow extends StatelessWidget {
             ],
           ),
         ),
-        Text('${product.priceSellPos.toStringAsFixed(0)} XAF',
+        Text('${product.priceSellPos.toStringAsFixed(0)} ${CurrencyFormatter.currentSymbol}',
             style: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
@@ -1850,283 +1825,13 @@ class _NewProductRow extends StatelessWidget {
           child: Container(
             width: 28, height: 28,
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.08),
+              color: AppColors.primary.withValues(alpha:0.08),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Icon(Icons.share_outlined, size: 14,
                 color: AppColors.primary),
           ),
         ),
-      ]),
-    );
-  }
-}
-
-class _ShopSwitcherBanner extends ConsumerStatefulWidget {
-  final String shopId;
-  const _ShopSwitcherBanner({required this.shopId});
-  @override
-  ConsumerState<_ShopSwitcherBanner> createState() => _ShopSwitcherBannerState();
-}
-
-class _ShopSwitcherBannerState extends ConsumerState<_ShopSwitcherBanner> {
-
-  @override
-  void initState() {
-    super.initState();
-    // Différer la modification du provider APRÈS la construction du widget tree
-    Future(() => _syncOnMount());
-  }
-
-  Future<void> _syncOnMount() async {
-    if (!mounted) return;
-
-    final userId = LocalStorageService.getCurrentUser()?.id ?? '';
-
-    // Chercher la boutique dans l'ordre : provider → myShops → Hive → Supabase
-    ShopSummary? shop = ref.read(currentShopProvider)?.id == widget.shopId
-        ? ref.read(currentShopProvider)
-        : ref.read(myShopsProvider).where((s) => s.id == widget.shopId).firstOrNull
-        ?? LocalStorageService.getShop(widget.shopId);
-
-    // Toujours introuvable → charger depuis Supabase
-    if (shop == null) {
-      try {
-        final loaded = await AppDatabase.getMyShops();
-        if (!mounted) return;
-        if (loaded.isNotEmpty) {
-          ref.read(myShopsProvider.notifier)
-              .setFromSupabase(loaded, userId: userId);
-          shop = loaded.where((s) => s.id == widget.shopId).firstOrNull;
-        }
-      } catch (e) {
-        debugPrint('[Dashboard] getMyShops: $e');
-      }
-    }
-
-    // Toujours mettre à jour le provider (même si déjà chargé)
-    // pour s'assurer que currentShopProvider.state == boutique de l'URL
-    if (shop != null && mounted) {
-      ref.read(currentShopProvider.notifier).setShop(shop);
-      debugPrint('[Dashboard] boutique: ${shop.name}');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final currentShop = ref.watch(currentShopProvider);
-    final allShops    = ref.watch(myShopsProvider);
-    final l           = context.l10n;
-
-    // Boutique active = celle de l'URL (widget.shopId) en priorité absolue
-    final activeShop =
-        allShops.where((s) => s.id == widget.shopId).firstOrNull
-            ?? (currentShop?.id == widget.shopId ? currentShop : null)
-            ?? LocalStorageService.getShop(widget.shopId)
-            ?? currentShop;
-
-    final shopName   = activeShop?.name ?? widget.shopId;
-    final sectorIcon = _sectorIcon(activeShop?.sector ?? 'retail');
-    // S'assurer que la boutique courante est dans la liste
-    final allShopsWithCurrent = activeShop != null && !allShops.any((s) => s.id == activeShop.id)
-        ? [...allShops, activeShop]
-        : allShops;
-    final hasMany = allShopsWithCurrent.length > 1;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.03),
-              blurRadius: 6, offset: const Offset(0, 2)),
-        ],
-      ),
-      child: Row(children: [
-        Container(
-          width: 38, height: 38,
-          decoration: BoxDecoration(
-            color: AppColors.primarySurface,
-            borderRadius: BorderRadius.circular(9),
-          ),
-          child: Icon(sectorIcon, size: 18, color: AppColors.primary),
-        ),
-        const SizedBox(width: 12),
-        Expanded(child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(l.dashActiveShop,
-                style: const TextStyle(fontSize: 10, color: AppColors.textHint)),
-            Text(shopName,
-                style: const TextStyle(fontSize: 14,
-                    fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-                maxLines: 1, overflow: TextOverflow.ellipsis),
-          ],
-        )),
-        // Boutons — toujours visibles
-        Row(mainAxisSize: MainAxisSize.min, children: [
-          _ActionChip(
-            icon: hasMany ? Icons.swap_horiz_rounded : Icons.store_rounded,
-            label: hasMany ? l.dashChangeShop : l.dashManageShops,
-            onTap: hasMany
-                ? () => _showShopPicker(context, allShopsWithCurrent)
-                : () => context.go(RouteNames.shopSelector),
-          ),
-          const SizedBox(width: 8),
-          _ActionChip(
-            icon: Icons.add_rounded,
-            label: l.dashNewShop,
-            onTap: () => context.push(RouteNames.createShop),
-            primary: true,
-          ),
-        ]),
-      ]),
-    );
-  }
-
-  void _showShopPicker(BuildContext context, List<ShopSummary> shops) {
-    // Source de vérité : currentShopProvider, pas l'URL
-    final activeId = ref.read(currentShopProvider)?.id ?? widget.shopId;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => _ShopPickerSheet(
-        shops: shops,
-        activeShopId: activeId,
-        onSelect: (shop) {
-          ref.read(currentShopProvider.notifier).setShop(shop);
-          Navigator.of(ctx).pop();
-          context.go('/shop/${shop.id}/dashboard');
-        },
-      ),
-    );
-  }
-
-  IconData _sectorIcon(String sector) => switch (sector) {
-    'restaurant'  => Icons.restaurant_rounded,
-    'supermarche' => Icons.local_grocery_store_rounded,
-    'pharmacie'   => Icons.local_pharmacy_rounded,
-    _             => Icons.storefront_rounded,
-  };
-}
-
-// ─── Chip d'action ────────────────────────────────────────────────────────────
-
-class _ActionChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool primary;
-  const _ActionChip({
-    required this.icon, required this.label, required this.onTap,
-    this.primary = false,
-  });
-
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: primary ? AppColors.primary : AppColors.inputFill,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 13,
-            color: primary ? Colors.white : AppColors.textSecondary),
-        const SizedBox(width: 4),
-        Text(label,
-            style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w600,
-                color: primary ? Colors.white : AppColors.textSecondary)),
-      ]),
-    ),
-  );
-}
-
-// ─── Bottom sheet sélection boutique ─────────────────────────────────────────
-
-class _ShopPickerSheet extends StatelessWidget {
-  final List<ShopSummary> shops;
-  final String activeShopId;
-  final void Function(ShopSummary) onSelect;
-  const _ShopPickerSheet({
-    required this.shops, required this.activeShopId, required this.onSelect,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        // Poignée
-        Container(
-          width: 36, height: 4,
-          decoration: BoxDecoration(
-            color: AppColors.divider,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Text(context.l10n.dashChooseShop,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary)),
-        const SizedBox(height: 16),
-        ...shops.map((shop) {
-          final isActive = shop.id == activeShopId;
-          return GestureDetector(
-            onTap: isActive ? null : () => onSelect(shop),
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isActive
-                    ? AppColors.primarySurface
-                    : AppColors.inputFill,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: isActive
-                      ? AppColors.primary.withOpacity(0.4)
-                      : AppColors.divider,
-                  width: isActive ? 1.5 : 1,
-                ),
-              ),
-              child: Row(children: [
-                Icon(Icons.storefront_rounded,
-                    size: 18,
-                    color: isActive
-                        ? AppColors.primary
-                        : AppColors.textSecondary),
-                const SizedBox(width: 12),
-                Expanded(child: Text(shop.name,
-                    style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: isActive
-                            ? FontWeight.w700 : FontWeight.w500,
-                        color: isActive
-                            ? AppColors.primary
-                            : AppColors.textPrimary))),
-                if (isActive)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(context.l10n.dashShopActive,
-                        style: TextStyle(
-                            fontSize: 10, fontWeight: FontWeight.w600,
-                            color: AppColors.primary)),
-                  ),
-              ]),
-            ),
-          );
-        }),
       ]),
     );
   }

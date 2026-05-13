@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../shared/widgets/alerts/_alert_demo_page.dart';
 import '../../features/auth/presentation/bloc/auth_state.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
@@ -10,6 +12,9 @@ import '../../features/auth/presentation/pages/accept_invite_page.dart';
 import '../../features/dashboard/presentattion/pages/dashboard_page.dart';
 import '../../features/super_admin/presentation/pages/super_admin_page.dart';
 import '../../features/super_admin/presentation/pages/admin_subscriptions_page.dart';
+import '../../features/super_admin/presentation/pages/plans_page.dart';
+import '../../features/catalogue/presentation/pages/catalogue_page.dart';
+import '../../features/tracking/presentation/pages/order_tracking_page.dart';
 import '../../features/subscription/presentation/pages/subscription_page.dart';
 import '../../features/hr/presentation/pages/employees_page.dart';
 import '../../features/shop_selector/presentation/pages/shop_list_page.dart';
@@ -26,8 +31,9 @@ import '../../features/inventaire/presentation/pages/suppliers_page.dart';
 import '../../features/inventaire/presentation/pages/purchase_orders_page.dart';
 import '../../features/inventaire/presentation/pages/stock_movements_page.dart';
 import '../../features/inventaire/presentation/pages/client_returns_page.dart';
-import '../../features/crm/presentation/pages/clients_page.dart' show ClientsPage, ClientFormSheet;
+import '../../features/crm/presentation/pages/clients_page.dart' show ClientsPage;
 import '../../features/hr/presentation/pages/employee_form_sheet.dart';
+import '../../shared/widgets/form_sheet.dart';
 import '../../features/crm/presentation/pages/client_detail_page.dart';
 import '../../features/crm/presentation/pages/send_notification_page.dart';
 import '../../features/finances/presentation/pages/finances_page.dart';
@@ -39,6 +45,8 @@ import '../../features/parametres/presentation/pages/stock_locations_page.dart';
 import '../../features/parametres/presentation/pages/location_contents_page.dart';
 import '../../features/parametres/presentation/pages/transfers_list_page.dart';
 import '../../features/parametres/presentation/pages/activity_log_page.dart';
+import '../../features/tickets/presentation/pages/tickets_page.dart';
+import '../../features/tickets/presentation/pages/ticket_detail_page.dart';
 import '../../features/parametres/presentation/pages/security_history_page.dart';
 import '../../features/parametres/presentation/pages/user_profile_page.dart';
 import '../../features/parametres/presentation/pages/language_page.dart';
@@ -47,7 +55,10 @@ import '../../features/parametres/presentation/pages/theme_page.dart';
 import '../../features/parametres/presentation/pages/caisse_config_page.dart';
 import '../../features/parametres/presentation/pages/notifications_page.dart';
 import '../../features/parametres/presentation/pages/payments_page.dart';
+import '../../features/parametres/presentation/pages/delivery_templates_page.dart';
+import '../../features/parametres/presentation/pages/partner_accounts_page.dart';
 import '../../features/parametres/presentation/pages/pin_delete_page.dart';
+import '../../features/parametres/presentation/pages/sessions_page.dart';
 import '../permisions/admin_panel_page.dart';
 import '../permisions/subscription_provider.dart';
 import '../database/app_database.dart';
@@ -99,6 +110,13 @@ class AuthRouterNotifier extends ChangeNotifier {
   bool _isAuthenticated = false;
   bool get isAuthenticated => _isAuthenticated;
 
+  /// `false` tant qu'AuthBloc n'a pas encore évalué la session existante
+  /// (refresh navigateur). Pendant cette fenêtre le redirect doit retourner
+  /// `null` — sinon un utilisateur connecté est renvoyé sur /login parce
+  /// que `_isAuthenticated` est encore à sa valeur par défaut (false).
+  bool _initialized = false;
+  bool get initialized => _initialized;
+
   /// `true` tant que le `Future.wait([load(), _syncMemberships])` lancé au
   /// login n'est pas terminé. Pendant cette fenêtre, le redirect évite
   /// d'envoyer un employé sur la page paywall (car ses memberships ne sont
@@ -113,6 +131,13 @@ class AuthRouterNotifier extends ChangeNotifier {
   void refresh() => notifyListeners();
 
   void update(AuthState state) {
+    // Au tout 1er update reçu (Authenticated ou Unauthenticated), on
+    // considère le check initial terminé → autorise les redirects.
+    final justInitialized = !_initialized &&
+        (state is AuthAuthenticated || state is AuthUnauthenticated);
+    if (justInitialized) {
+      _initialized = true;
+    }
     final wasAuth = _isAuthenticated;
     _isAuthenticated = state is AuthAuthenticated;
     if (!wasAuth && _isAuthenticated) {
@@ -159,7 +184,7 @@ class AuthRouterNotifier extends ChangeNotifier {
       AppDatabase.notifyAllChanged();
       PresenceService.stop();
     }
-    if (wasAuth != _isAuthenticated) notifyListeners();
+    if (wasAuth != _isAuthenticated || justInitialized) notifyListeners();
   }
 
   /// Synchronise les memberships de l'utilisateur courant et met à jour
@@ -241,10 +266,23 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final isAuthRoute          = loc.startsWith('/auth');
       final isSubscriptionRoute  = loc.startsWith('/subscription');
       final isAcceptInviteRoute  = loc.startsWith('/accept-invite');
+      final isCatalogueRoute     = loc.startsWith('/catalogue/');
+      final isTrackRoute         = loc.startsWith('/track/');
 
       // ── /accept-invite : page publique, jamais rediriger ───────────
       // Gère elle-même l'état (invité/connecté/mauvais compte)
       if (isAcceptInviteRoute) return null;
+      // ── /catalogue/:shopId : vitrine publique sans auth ────────────
+      if (isCatalogueRoute) return null;
+      // ── /track/:orderId : suivi de commande public sans auth ───────
+      if (isTrackRoute) return null;
+
+      // ── Boot : check session pas encore terminé ────────────────────
+      // Au refresh navigateur, AuthBloc évalue la session Supabase de
+      // façon asynchrone. Tant que ce check n'a pas émis de résultat,
+      // on n'a pas le droit de rediriger : sinon l'utilisateur connecté
+      // est envoyé sur /login alors que sa session est valide.
+      if (!notifier.initialized) return null;
 
       // ── Non connecté ───────────────────────────────────────────────
       if (!isLoggedIn) {
@@ -342,12 +380,57 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
+      GoRoute(path: '/catalogue/:shopId',
+          builder: (c, s) {
+            final qp = s.uri.queryParameters;
+            final ids = qp['ids']
+                ?.split(',')
+                .map((e) => e.trim())
+                .where((e) => e.isNotEmpty)
+                .toList();
+            // Parse `stock=<key>:<qty>,<key>:<qty>,...` en Map. Clé =
+            // `productId` ou `productId|variantId`. Valeurs invalides
+            // ignorées silencieusement (pas de crash si lien malformé).
+            Map<String, int>? stockOverride;
+            final rawStock = qp['stock'];
+            if (rawStock != null && rawStock.isNotEmpty) {
+              final m = <String, int>{};
+              for (final tok in rawStock.split(',')) {
+                final i = tok.lastIndexOf(':');
+                if (i <= 0 || i >= tok.length - 1) continue;
+                final key = tok.substring(0, i);
+                final qty = int.tryParse(tok.substring(i + 1));
+                if (qty != null) m[key] = qty;
+              }
+              if (m.isNotEmpty) stockOverride = m;
+            }
+            return CataloguePage(
+              shopId: s.pathParameters['shopId']!,
+              initialCategory: qp['cat'],
+              productIds: (ids != null && ids.isNotEmpty) ? ids : null,
+              stockOverride: stockOverride,
+            );
+          }),
+      // Suivi de commande publique — lien envoyé par WhatsApp dans la
+      // relance. La page appelle la RPC `get_tracked_order` (anon) puis
+      // `validate_order_by_client` au tap sur « Valider ma commande ».
+      GoRoute(path: '/track/:orderId',
+          builder: (c, s) => OrderTrackingPage(
+              orderId: s.pathParameters['orderId']!)),
+      // Route dev — visualisation isolée des composants d'alerte commandes
+      // (modal + banner + favicon blinker). Gated `kDebugMode` : la route
+      // n'est PAS enregistrée en build release, donc inaccessible en prod.
+      if (kDebugMode)
+        GoRoute(path: '/dev/alerts-demo',
+            builder: (c, s) => const AlertDemoPage()),
       GoRoute(path: RouteNames.login,          builder: (c, s) => const LoginPage()),
       GoRoute(path: RouteNames.register,        builder: (c, s) => const RegisterPage()),
       GoRoute(path: RouteNames.adminPanel,      builder: (c, s) => const AdminPanelPage()),
       GoRoute(path: RouteNames.superAdminHome,  builder: (c, s) => const SuperAdminPage()),
       GoRoute(path: RouteNames.adminSubscriptions,
           builder: (c, s) => const AdminSubscriptionsPage()),
+      GoRoute(path: '/super-admin/plans',
+          builder: (c, s) => const PlansPage()),
       GoRoute(path: RouteNames.subscription,    builder: (c, s) => const SubscriptionPage()),
       GoRoute(path: RouteNames.forgotPassword,  builder: (c, s) => const ForgotPasswordPage()),
       GoRoute(path: RouteNames.acceptInvite,
@@ -379,7 +462,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
           final ownsAShop = HiveBoxes.shopsBox.values.any((raw) {
             try {
-              final m = Map<String, dynamic>.from(raw as Map);
+              final m = Map<String, dynamic>.from(raw);
               return m['owner_id'] == uid;
             } catch (_) { return false; }
           });
@@ -387,7 +470,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
           final hasAnyMembership = HiveBoxes.membershipsBox.values.any((raw) {
             try {
-              final m = Map<String, dynamic>.from(raw as Map);
+              final m = Map<String, dynamic>.from(raw);
               return m['user_id'] == uid;
             } catch (_) { return false; }
           });
@@ -465,6 +548,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   FinancesPage(shopId: s.pathParameters['shopId']!))),
           GoRoute(path: '/shop/:shopId/historique',
               builder: (c, s) => ActivityLogPage(shopId: s.pathParameters['shopId']!)),
+          GoRoute(path: '/shop/:shopId/tickets',
+              builder: (c, s) => TicketsPage(shopId: s.pathParameters['shopId']!)),
+          GoRoute(path: '/shop/:shopId/tickets/:ticketId',
+              builder: (c, s) => TicketDetailPage(
+                  shopId:   s.pathParameters['shopId']!,
+                  ticketId: s.pathParameters['ticketId']!)),
           GoRoute(path: '/shop/:shopId/parametres',
               pageBuilder: (c, s) => _shellPage(s,
                   ParametresPage(shopId: s.pathParameters['shopId']!))),
@@ -502,16 +591,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/parametres/transfers',
               builder: (c, s) => TransfersListPage(
                   shopId: s.pathParameters['shopId']!)),
+          // Route legacy — préservée pour les liens externes / deeplinks.
+          // Redirige systématiquement vers /parametres/shop?tab=members&with_overview=1
+          // pour que TOUTES les transitions internes restent sur le même
+          // path : GoRouter conserve alors la pageKey, la page n'est jamais
+          // démontée entre tabs, et le clignotement disparaît.
           GoRoute(path: '/shop/:shopId/parametres/users',
-              builder: (c, s) {
-                final showOverview =
-                    s.uri.queryParameters['with_overview'] == '1';
-                return ShopSettingsPage(
-                  shopId: s.pathParameters['shopId']!,
-                  initialTab: ShopSettingsTab.members,
-                  showOverviewTab: showOverview,
-                );
-              }),
+              redirect: (ctx, s) =>
+                  '/shop/${s.pathParameters['shopId']!}/parametres/shop'
+                  '?tab=members&with_overview=1'),
           GoRoute(path: '/shop/:shopId/parametres/security-history',
               builder: (c, s) => SecurityHistoryPage(
                   shopId: s.pathParameters['shopId']!)),
@@ -536,8 +624,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/parametres/payments',
               builder: (c, s) => PaymentsPage(
                   shopId: s.pathParameters['shopId']!)),
+          GoRoute(path: '/shop/:shopId/parametres/delivery-templates',
+              builder: (c, s) => DeliveryTemplatesPage(
+                  shopId: s.pathParameters['shopId']!)),
+          GoRoute(path: '/shop/:shopId/parametres/partner-accounts',
+              builder: (c, s) => PartnerAccountsPage(
+                  shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/pin/delete',
               builder: (c, s) => PinDeletePage(
+                  shopId: s.pathParameters['shopId']!)),
+          GoRoute(path: '/shop/:shopId/parametres/sessions',
+              builder: (c, s) => SessionsPage(
                   shopId: s.pathParameters['shopId']!)),
         ],
       ),
@@ -567,8 +664,10 @@ class ShopShell extends ConsumerWidget {
     // CTAs topbar : calculés en fonction de la route active (spec round 9).
     // Stock/Clients exposent un bouton « + » dans la topbar shell, déplaçant
     // les CTAs précédemment inline dans le body.
-    final loc = GoRouterState.of(context).matchedLocation;
-    final extraActions = _topbarActionsFor(context, loc, shopId);
+    final goState = GoRouterState.of(context);
+    final loc      = goState.matchedLocation;
+    final tabQuery = goState.uri.queryParameters['tab'];
+    final extraActions = _topbarActionsFor(context, loc, shopId, tabQuery);
     return AdaptiveScaffold(
       shopId: shopId,
       body: child,
@@ -579,50 +678,16 @@ class ShopShell extends ConsumerWidget {
   /// Bouton « + » conditionnel dans la topbar shell — basé sur la route
   /// active. Inventaire (`/inventaire` exact) → push form produit ;
   /// Clients (`/crm` exact) → ouvre ClientFormSheet en bottom sheet ;
-  /// Membres (`/parametres/users` exact) → ouvre EmployeeFormSheet.
+  /// Membres (`/parametres/shop?tab=members`) → ouvre EmployeeFormSheet.
   /// Sur les sub-pages (édition produit, détail client…), pas de CTA.
   static List<Widget>? _topbarActionsFor(
-      BuildContext context, String loc, String shopId) {
-    final inventaireRoot = loc == '/shop/$shopId/inventaire';
-    final crmRoot        = loc == '/shop/$shopId/crm';
-    final usersRoot      = loc == '/shop/$shopId/parametres/users';
-    if (!inventaireRoot && !crmRoot && !usersRoot) return null;
-    if (inventaireRoot) {
-      return [
-        IconButton(
-          icon: const Icon(Icons.add_rounded, size: 26),
-          tooltip: context.l10n.invActionNewProduct,
-          onPressed: () =>
-              context.push('/shop/$shopId/inventaire/product'),
-        ),
-      ];
-    }
-    if (crmRoot) {
-      return [
-        IconButton(
-          icon: const Icon(Icons.add_rounded, size: 26),
-          tooltip: context.l10n.crmAdd,
-          onPressed: () {
-            final theme = Theme.of(context);
-            showModalBottomSheet<void>(
-              context: context,
-              isScrollControlled: true,
-              backgroundColor: theme.colorScheme.surface,
-              shape: const RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.vertical(top: Radius.circular(20))),
-              builder: (ctx) => ClientFormSheet(
-                shopId:  shopId,
-                // onSaved : juste fermer le sheet — la ClientsPage
-                // écoute AppDatabase et se recharge automatiquement
-                // sur changement de la table 'clients'.
-                onSaved: () => Navigator.of(ctx).pop(),
-              ),
-            );
-          },
-        ),
-      ];
-    }
+      BuildContext context, String loc, String shopId, String? tabQuery) {
+    // Inventaire et CRM : leur "+" topbar a été retiré au profit d'un
+    // bouton inline sur la ligne des filtres / recherche (cf. lots UX).
+    // Membres = path /parametres/shop avec query tab=members.
+    final usersRoot      = loc == '/shop/$shopId/parametres/shop'
+        && tabQuery == 'members';
+    if (!usersRoot) return null;
     // usersRoot — Membres : ouvre EmployeeFormSheet. EmployeesPage écoute
     // employeesProvider via Riverpod, refresh auto sur invalidation.
     return [
@@ -630,14 +695,8 @@ class ShopShell extends ConsumerWidget {
         icon: const Icon(Icons.add_rounded, size: 26),
         tooltip: context.l10n.hrNewMember,
         onPressed: () {
-          final theme = Theme.of(context);
-          showModalBottomSheet<bool>(
+          showFormSheet<bool>(
             context: context,
-            isScrollControlled: true,
-            backgroundColor: theme.colorScheme.surface,
-            shape: const RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.vertical(top: Radius.circular(20))),
             builder: (_) => EmployeeFormSheet(shopId: shopId),
           );
         },
