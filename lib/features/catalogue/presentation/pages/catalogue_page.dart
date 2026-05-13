@@ -366,8 +366,8 @@ class _CataloguePageState extends State<CataloguePage> {
                               gridDelegate:
                                   SliverGridDelegateWithFixedCrossAxisCount(
                                 crossAxisCount: cols,
-                                mainAxisSpacing: 12,
-                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 16,
+                                crossAxisSpacing: 16,
                                 childAspectRatio: aspect,
                               ),
                               delegate: SliverChildBuilderDelegate(

@@ -76,6 +76,13 @@ class ProductGridCard extends StatelessWidget {
   /// Affiche la rangée pastilles variantes (bas, offset 60).
   final bool showVariantsRow;
 
+  /// Affiche le SKU sous le nom dans le bandeau bas. Défaut `false` :
+  /// les surfaces principales (caisse mode wide, catalogue public)
+  /// n'en ont pas besoin (caissiers reconnaissent par l'image, clients
+  /// finaux ne cherchent pas par SKU). Garde la card aérée — le SKU
+  /// occupe une ligne 10 px + un gap 2 px = ~25 % du bandeau total.
+  final bool showSku;
+
   /// Mode sélection (catalogue partage avec multi-sélection). Activé
   /// par le caller pendant un `selectMode`. Le tap principal change
   /// alors l'état au lieu d'appeler `onTap`. La pastille ×N est
@@ -100,6 +107,7 @@ class ProductGridCard extends StatelessWidget {
     this.imageUrlOverride,
     this.stockMinAlertOverride,
     this.showVariantsRow = false,
+    this.showSku = false,
     this.selectable = false,
     this.selected = false,
     this.onSelectionChanged,
@@ -203,8 +211,9 @@ class ProductGridCard extends StatelessWidget {
             child: IgnorePointer(
               child: Container(
                 color: Colors.black.withValues(alpha: 0.7),
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                child: _BottomTextBlock(product: product, l: l),
+                padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
+                child: _BottomTextBlock(
+                    product: product, l: l, showSku: showSku),
               ),
             ),
           ),
@@ -315,7 +324,12 @@ class _SelectionCheckbox extends StatelessWidget {
 class _BottomTextBlock extends StatelessWidget {
   final Product product;
   final AppLocalizations l;
-  const _BottomTextBlock({required this.product, required this.l});
+  final bool showSku;
+  const _BottomTextBlock({
+    required this.product,
+    required this.l,
+    required this.showSku,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -338,7 +352,7 @@ class _BottomTextBlock extends StatelessWidget {
               _DiscountBadge(label: discount),
             ],
           ]),
-          if (sku != null && sku.isNotEmpty) ...[
+          if (showSku && sku != null && sku.isNotEmpty) ...[
             const SizedBox(height: 2),
             Text(sku,
                 maxLines: 1, overflow: TextOverflow.ellipsis,

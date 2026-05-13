@@ -1179,8 +1179,8 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
                       padding: const EdgeInsets.fromLTRB(12, 12, 12, 80),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: cols,
-                        crossAxisSpacing: 12,
-                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 16,
+                        mainAxisSpacing: 16,
                         childAspectRatio: 0.75,
                       ),
                       itemCount: products.length,
