@@ -137,12 +137,16 @@ class _CataloguePageState extends State<CataloguePage> {
           ));
         } else {
           final pid = p['id'] as String;
-          for (final raw in realVariants) {
-            final v = Map<String, dynamic>.from(raw as Map);
+          // Clé snapshot = `productId|<idx>` où idx = position dans
+          // `realVariants` (= post-filtre name non vide). Aligné avec
+          // `_buildStockSnapshot` côté inventaire/dashboard pour que
+          // le matching survive aux divergences d'ID variants entre
+          // Hive local et JSONB Supabase.
+          for (int idx = 0; idx < realVariants.length; idx++) {
+            final v = Map<String, dynamic>.from(realVariants[idx] as Map);
             final variantName = (v['name'] as String).trim();
             final vid = v['id']?.toString() ?? variantName;
-            // Clé snapshot = `productId|variantId` quand variante.
-            final snapStock = override?['$pid|$vid'];
+            final snapStock = override?['$pid|$idx'];
             items.add(_CatalogueItem(
               productId:       pid,
               variantId:       vid,

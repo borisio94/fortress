@@ -1644,18 +1644,26 @@ class _NewProductsCard extends ConsumerWidget {
                   final viewFilter = ref.read(dashViewFilterProvider);
                   final locIds = stock_loc.resolveLocationIds(
                       viewFilter, shopId);
+                  // Clé `pid|<idx>` après filtrage `realVariants` —
+                  // alignée avec `catalogue_page._load()` pour
+                  // garantir le matching côté client (les IDs de
+                  // variantes peuvent diverger entre Hive local et
+                  // JSONB Supabase).
                   final snapshot = <String, int>{};
                   for (final p in products) {
                     final pid = p.id;
                     if (pid == null) continue;
-                    if (p.variants.isEmpty) {
-                      snapshot[pid] = stock_loc.stockAtLocations(p, locIds);
+                    final realVariants = p.variants
+                        .where((v) => v.name.trim().isNotEmpty)
+                        .toList();
+                    if (realVariants.length <= 1) {
+                      snapshot[pid] =
+                          stock_loc.stockAtLocations(p, locIds);
                     } else {
-                      for (final v in p.variants) {
-                        final vid = v.id;
-                        if (vid == null) continue;
-                        snapshot['$pid|$vid'] =
-                            stock_loc.stockForVariantAtLocations(v, locIds);
+                      for (int i = 0; i < realVariants.length; i++) {
+                        snapshot['$pid|$i'] = stock_loc
+                            .stockForVariantAtLocations(
+                                realVariants[i], locIds);
                       }
                     }
                   }

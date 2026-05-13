@@ -353,23 +353,31 @@ class _InventairePageState extends ConsumerState<InventairePage>
     return total;
   }
 
-  /// Construit le snapshot `productId|variantId → stock` filtré par la
-  /// vue active (`_locIds`), à embarquer dans l'URL du catalogue partagé
-  /// pour que le client voie le stock du périmètre choisi par le
-  /// marchand (Globale / Boutique seule / Partenaire X), pas le cumul
-  /// brut Supabase. Cf. `stock_at_location.dart` pour la logique.
+  /// Construit le snapshot `productId|<idx> → stock` (variantes) ou
+  /// `productId → stock` (produit sans variante réelle) filtré par la
+  /// vue active (`_locIds`).
+  ///
+  /// Choix de la clé `pid|<idx>` plutôt que `pid|<variantId>` : les IDs
+  /// de variantes peuvent diverger entre le Hive local et le JSONB
+  /// Supabase (cas de produits créés sur un autre device, ou variantes
+  /// sans id). L'index dans la liste **filtrée** (`realVariants` =
+  /// variantes avec nom non vide) est stable car JSONB preserve
+  /// l'ordre d'insertion ET on applique le même filtre côté
+  /// `catalogue_page._load()`.
   Map<String, int> _buildStockSnapshot(List<Product> products) {
     final m = <String, int>{};
     for (final p in products) {
       final pid = p.id;
       if (pid == null) continue;
-      if (p.variants.isEmpty) {
+      final realVariants = p.variants
+          .where((v) => v.name.trim().isNotEmpty)
+          .toList();
+      if (realVariants.length <= 1) {
         m[pid] = stock_loc.stockAtLocations(p, _locIds);
       } else {
-        for (final v in p.variants) {
-          final vid = v.id;
-          if (vid == null) continue;
-          m['$pid|$vid'] = stock_loc.stockForVariantAtLocations(v, _locIds);
+        for (int i = 0; i < realVariants.length; i++) {
+          m['$pid|$i'] =
+              stock_loc.stockForVariantAtLocations(realVariants[i], _locIds);
         }
       }
     }
