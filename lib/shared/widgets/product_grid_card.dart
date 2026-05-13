@@ -23,6 +23,11 @@ const Color _kStatusSuccessText = Color(0xFF065F46); // emerald-800
 /// maximale du texte produit quel que soit le rendu de l'image en
 /// dessous (claire / foncée / dorée / contraste fort indifférent).
 ///
+/// Fond de card : couleur brand du thème @ 70 % opacité — apparait
+/// derrière les zones transparentes des PNG produit (packshot mode/luxe
+/// à fond alpha). Sur photos opaques → invisible (l'image couvre tout).
+/// Garantit un rendu cohérent à la palette utilisateur.
+///
 /// Présentation pure, **zéro logique métier**. Cinq overlays sur l'image :
 ///   1. Pastille statut (haut-gauche) : disponible / stock bas / rupture.
 ///   2. Pastille quantité ×N (haut-droite) : brand@92 % si stock>0, noir@70 %
@@ -147,11 +152,17 @@ class ProductGridCard extends StatelessWidget {
     }
 
     // Border brand 2px quand sélectionné. Le radius reste 12.
+    // Fond de card teinté brand @ 70 % : visible UNIQUEMENT derrière les
+    // zones transparentes des PNG produit (image plein cadre couvre le
+    // reste). Sur les photos sans alpha → invisible. Sur les PNG packshot
+    // mode/luxe à fond transparent → fond uniforme à la couleur boutique,
+    // rendu "pro" cohérent avec la palette utilisateur.
     final borderRadius = BorderRadius.circular(12);
     final card = AspectRatio(
       aspectRatio: 3 / 4,
       child: Container(
         decoration: BoxDecoration(
+          color: sem.brand.withValues(alpha: 0.7),
           borderRadius: borderRadius,
           border: selected
               ? Border.all(color: sem.brand, width: 2)
