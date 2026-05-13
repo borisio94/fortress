@@ -32,8 +32,9 @@ const Color _kStatusSuccessText = Color(0xFF065F46); // emerald-800
 ///      quand `selected`.
 ///   4. Rangée pastilles variantes (bas avec offset 60) si `showVariantsRow`.
 ///   5. Bandeau texte produit (bas) : Container `Colors.black@0.7` avec
-///      nom 13 px blanc + SKU 10 px white@0.7 mono + prix 15 px blanc +
-///      symbole 9 px white@0.7. Hauteur AUTO calée sur le contenu.
+///      nom 13 px blanc + SKU 10 px white@0.7 mono (caché si
+///      `showSku=false`, défaut) + prix 14 px blanc + symbole 9 px
+///      white@0.7. Hauteur AUTO calée sur le contenu.
 ///
 /// Image en rupture : opacity 1.0 — c'est le statut + la pastille qty noire
 /// qui signalent, pas la désaturation. Le marchand doit pouvoir reconnaître
@@ -367,7 +368,7 @@ class _BottomTextBlock extends StatelessWidget {
   }
 }
 
-// ─── Prix : nombre w500 15px + symbole w400 9px white@0.7 ───────────────────
+// ─── Prix : nombre w500 14px + symbole w400 9px white@0.7 ───────────────────
 
 Widget _priceLine(Product p) {
   final feat = p.featuredVariant()
@@ -376,7 +377,7 @@ Widget _priceLine(Product p) {
   if (base <= 0) {
     return const Text('N/D',
         style: TextStyle(
-            fontSize: 15, fontWeight: FontWeight.w500,
+            fontSize: 14, fontWeight: FontWeight.w500,
             color: Colors.white));
   }
   final symbol = CurrencyFormatter.currentSymbol;
@@ -417,7 +418,7 @@ class _PriceText extends StatelessWidget {
       text: TextSpan(children: [
         TextSpan(text: numberPart,
             style: const TextStyle(
-                fontSize: 15, fontWeight: FontWeight.w500,
+                fontSize: 14, fontWeight: FontWeight.w500,
                 color: Colors.white)),
         const TextSpan(text: ' '),
         TextSpan(text: symbol,
