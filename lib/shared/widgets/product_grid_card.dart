@@ -152,17 +152,18 @@ class ProductGridCard extends StatelessWidget {
     }
 
     // Border brand 2px quand sélectionné. Le radius reste 12.
-    // Fond de card teinté brand @ 70 % : visible UNIQUEMENT derrière les
+    // Fond de card teinté brand @ 95 % : visible UNIQUEMENT derrière les
     // zones transparentes des PNG produit (image plein cadre couvre le
     // reste). Sur les photos sans alpha → invisible. Sur les PNG packshot
-    // mode/luxe à fond transparent → fond uniforme à la couleur boutique,
-    // rendu "pro" cohérent avec la palette utilisateur.
+    // mode/luxe à fond transparent → fond quasi-opaque à la couleur
+    // boutique, rendu "pro" cohérent avec la palette user. 5 % de
+    // transparence résiduelle adoucit la transition au bandeau bas.
     final borderRadius = BorderRadius.circular(12);
     final card = AspectRatio(
       aspectRatio: 3 / 4,
       child: Container(
         decoration: BoxDecoration(
-          color: sem.brand.withValues(alpha: 0.7),
+          color: sem.brand.withValues(alpha: 0.95),
           borderRadius: borderRadius,
           border: selected
               ? Border.all(color: sem.brand, width: 2)
