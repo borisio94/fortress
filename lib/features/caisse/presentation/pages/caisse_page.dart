@@ -704,6 +704,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                       : CollectedBy.boutique,
                   partnerName: partnerName,
                   partnerBalanceBefore: balanceBefore,
+                  // Si la commande est déjà entièrement payée à la
+                  // boutique, on désactive le radio "Partenaire a
+                  // encaissé" — impossible sémantiquement. Empêche un
+                  // faux saleCollected (bug rapporté).
+                  orderAlreadyFullyPaid: freshForSheet.isFullyPaid,
                 );
                 if (fres == null) return; // annulé
                 final fresh = _ds.getOrderById(order.id!) ?? order;
@@ -816,9 +821,22 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     // legacy pré-hotfix, amountPaid = 0 → comportement inchangé.
     final amountPaidBefore = order.amountPaid;
 
+    // Defense in depth : si la commande est déjà entièrement payée à la
+    // boutique (amount_paid >= total), il est IMPOSSIBLE que le partenaire
+    // ait encaissé quoi que ce soit. On force la branche Cas B (deliveryOwed
+    // pour les frais), même si l'opérateur a coché "Partenaire a encaissé"
+    // par erreur. Sans ce garde-fou, on créerait une fausse créance
+    // saleCollected (cf. bug rapporté quand amount_paid n'était pas
+    // correctement persistante après refresh).
+    final orderAlreadyFullyPaid = amountPaidBefore >= orderTotal
+        && orderTotal > 0;
+    final effectiveCollectedBy = orderAlreadyFullyPaid
+        ? CollectedBy.boutique
+        : collectedBy;
+
     // Cas A : encaissement par le partenaire — crédite le partenaire (le
     // partenaire NOUS DOIT cet argent jusqu'au versement).
-    if (collectedBy == CollectedBy.partnerNotRemitted && isPartnerLoc) {
+    if (effectiveCollectedBy == CollectedBy.partnerNotRemitted && isPartnerLoc) {
       // Si le partenaire a aussi assuré la livraison (mode partner), on
       // déduit directement les frais du montant qu'il nous doit (il a déjà
       // sa rémunération en main, on n'a plus qu'à recevoir le net).
@@ -850,6 +868,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 
     // Cas B : livraison par le partenaire mais encaissement boutique →
     // la boutique DOIT les frais de livraison au partenaire.
+    // Inclut le cas orderAlreadyFullyPaid (commande prépayée à la boutique).
     if (order.deliveryMode == DeliveryMode.partner
         && isPartnerLoc
         && feesTotal > 0) {

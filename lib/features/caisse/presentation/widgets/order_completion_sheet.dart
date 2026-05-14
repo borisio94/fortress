@@ -48,14 +48,22 @@ Future<OrderCompletionResult?> showOrderCompletionSheet(
   /// nous doit ; < 0 : on lui doit. Si non null, on affiche un récap
   /// "Solde avant / après" qui rend visible la compensation automatique.
   double? partnerBalanceBefore,
+  /// `true` si la commande est déjà entièrement payée à la boutique
+  /// (amountPaid >= total). Dans ce cas, le radio "Partenaire a encaissé"
+  /// est désactivé et le choix forcé sur `boutique` — impossible que le
+  /// partenaire ait encaissé quelque chose si tout a été versé en amont.
+  bool orderAlreadyFullyPaid = false,
 }) {
   return showFormSheet<OrderCompletionResult>(
     context: context,
     builder: (_) => _OrderCompletionSheet(
       initialFees:        initialFees,
-      defaultCollectedBy: defaultCollectedBy,
+      defaultCollectedBy: orderAlreadyFullyPaid
+          ? CollectedBy.boutique
+          : defaultCollectedBy,
       partnerName:        partnerName,
       partnerBalanceBefore: partnerBalanceBefore,
+      orderAlreadyFullyPaid: orderAlreadyFullyPaid,
     ),
   );
 }
@@ -65,11 +73,13 @@ class _OrderCompletionSheet extends StatefulWidget {
   final CollectedBy    defaultCollectedBy;
   final String?        partnerName;
   final double?        partnerBalanceBefore;
+  final bool           orderAlreadyFullyPaid;
   const _OrderCompletionSheet({
     required this.initialFees,
     required this.defaultCollectedBy,
     this.partnerName,
     this.partnerBalanceBefore,
+    this.orderAlreadyFullyPaid = false,
   });
   @override
   State<_OrderCompletionSheet> createState() => _OrderCompletionSheetState();
@@ -192,7 +202,38 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                   value: _collectedBy,
                   partnerName: widget.partnerName,
                   onChanged: (v) => setState(() => _collectedBy = v),
+                  lockToBoutique: widget.orderAlreadyFullyPaid,
                 ),
+                if (widget.orderAlreadyFullyPaid) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: const Color(0xFF10B981)
+                              .withValues(alpha: 0.3)),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.check_circle_rounded,
+                          size: 14, color: Color(0xFF10B981)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                            'Commande déjà encaissée par la boutique '
+                            'avant la livraison. Les frais de livraison '
+                            'seront enregistrés comme dette envers '
+                            'le partenaire.',
+                            style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF065F46))),
+                      ),
+                    ]),
+                  ),
+                ],
                 // Bandeau récap solde partenaire : visible si le caller a
                 // fourni `partnerBalanceBefore` ET que le partenaire a un
                 // solde non nul (dette croisée). Rend visible la
@@ -372,8 +413,13 @@ class _CollectedByRadio extends StatelessWidget {
   final CollectedBy value;
   final String? partnerName;
   final ValueChanged<CollectedBy> onChanged;
+  /// Si `true`, le radio "Partenaire a encaissé" est désactivé visuellement
+  /// — impossible que le partenaire ait encaissé si la boutique a déjà
+  /// reçu tout le paiement en amont. Empêche un faux saleCollected.
+  final bool                      lockToBoutique;
   const _CollectedByRadio({
     required this.value, required this.onChanged, this.partnerName,
+    this.lockToBoutique = false,
   });
   @override
   Widget build(BuildContext context) {
@@ -391,7 +437,10 @@ class _CollectedByRadio extends StatelessWidget {
         _RadioRow(
           label:    partnerLabel,
           selected: value == CollectedBy.partnerNotRemitted,
-          onTap:    () => onChanged(CollectedBy.partnerNotRemitted),
+          onTap:    lockToBoutique
+              ? null  // désactivé : la commande est déjà entièrement payée
+              : () => onChanged(CollectedBy.partnerNotRemitted),
+          disabled: lockToBoutique,
         ),
       ],
     );
@@ -401,15 +450,20 @@ class _CollectedByRadio extends StatelessWidget {
 class _RadioRow extends StatelessWidget {
   final String label;
   final bool selected;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final bool disabled;
   const _RadioRow({
     required this.label, required this.selected, required this.onTap,
+    this.disabled = false,
   });
   @override
   Widget build(BuildContext context) {
     final sem = Theme.of(context).semantic;
+    final textColor = disabled
+        ? const Color(0xFFBBBBBB)
+        : (selected ? sem.brandText : const Color(0xFF111827));
     return InkWell(
-      onTap: onTap,
+      onTap: disabled ? null : onTap,
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
@@ -418,7 +472,7 @@ class _RadioRow extends StatelessWidget {
             width: 18, height: 18,
             child: Radio<bool>(
               value: true, groupValue: selected,
-              onChanged: (_) => onTap(),
+              onChanged: disabled ? null : (_) => onTap?.call(),
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               activeColor: sem.brand,
               visualDensity: VisualDensity.compact,
@@ -429,8 +483,7 @@ class _RadioRow extends StatelessWidget {
               style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                  color: selected ? sem.brandText
-                                  : const Color(0xFF111827)))),
+                  color: textColor))),
         ]),
       ),
     );
