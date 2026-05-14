@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/stock_service.dart';
+import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../shared/widgets/app_product_image.dart';
+import '../../../../core/widgets/back_dated_picker.dart';
+import '../../../../shared/widgets/product_image_card.dart';
 import '../../../../shared/widgets/app_snack.dart';
+import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../features/inventaire/domain/entities/product.dart';
 import '../../../../features/inventaire/domain/entities/stock_location.dart';
 import '../../../../features/inventaire/domain/entities/stock_transfer.dart';
@@ -51,6 +55,10 @@ class _TransferFormSheetState extends State<TransferFormSheet> {
   final Map<String, String?> _imagesByVariantId = {};
   final _notesCtrl = TextEditingController();
   bool _submitting = false;
+  /// Date du transfert (antidatable). Défaut = maintenant. L'opérateur
+  /// peut sélectionner une date passée pour numériser un mouvement
+  /// historique.
+  DateTime _transferDate = DateTime.now();
 
   @override
   void initState() {
@@ -154,6 +162,7 @@ class _TransferFormSheetState extends State<TransferFormSheet> {
         lines:           _lines,
         notes:           _notesCtrl.text.trim().isEmpty
                          ? null : _notesCtrl.text.trim(),
+        createdAt:       _transferDate,
       );
       if (!mounted) return;
       if (transfer == null) {
@@ -184,31 +193,10 @@ class _TransferFormSheetState extends State<TransferFormSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Poignée
-              Center(child: Container(width: 36, height: 4,
-                  decoration: BoxDecoration(
-                      color: const Color(0xFFE5E7EB),
-                      borderRadius: BorderRadius.circular(2)))),
-              const SizedBox(height: 12),
-              Row(children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.10),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(Icons.swap_horiz_rounded,
-                      size: 18, color: AppColors.primary),
-                ),
-                const SizedBox(width: 10),
-                const Expanded(
-                  child: Text('Nouveau transfert',
-                      style: TextStyle(fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF0F172A))),
-                ),
-              ]),
-              const SizedBox(height: 16),
+              const FormSheetHeader(
+                title: 'Nouveau transfert',
+                icon: Icons.swap_horiz_rounded,
+              ),
 
               Expanded(
                 child: SingleChildScrollView(
@@ -278,11 +266,28 @@ class _TransferFormSheetState extends State<TransferFormSheet> {
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.primary,
                           side: BorderSide(
-                              color: AppColors.primary.withOpacity(0.5)),
+                              color: AppColors.primary.withValues(alpha:0.5)),
                           padding: const EdgeInsets.symmetric(vertical: 10),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8)),
                         ),
+                      ),
+                      const SizedBox(height: 14),
+
+                      const _Label('Date du transfert'),
+                      const SizedBox(height: 6),
+                      _DatePickerTile(
+                        value: _transferDate,
+                        onTap: () async {
+                          final d = await pickBackDate(
+                            context: context,
+                            initial: _transferDate,
+                            helpText: 'Date du transfert',
+                          );
+                          if (d != null && mounted) {
+                            setState(() => _transferDate = d);
+                          }
+                        },
                       ),
                       const SizedBox(height: 14),
 
@@ -454,7 +459,7 @@ class _LineTile extends StatelessWidget {
       border: Border.all(color: const Color(0xFFE5E7EB)),
     ),
     child: Row(children: [
-      AppProductImage(
+      ProductImageCard(
         imageUrl: imageUrl,
         width: 32, height: 32,
         borderRadius: BorderRadius.circular(6),
@@ -481,7 +486,7 @@ class _LineTile extends StatelessWidget {
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
-          color: AppColors.primary.withOpacity(0.10),
+          color: AppColors.primary.withValues(alpha:0.10),
           borderRadius: BorderRadius.circular(6),
         ),
         child: Text('× ${line.quantity}',
@@ -553,23 +558,33 @@ class _VariantPickerSheetState extends State<_VariantPickerSheet> {
         }
       }
     } else {
-      // Warehouse/partner : se baser sur les StockLevel
+      // Warehouse/partner : se baser sur les StockLevel.
       final levels = AppDatabase.getStockLevelsForLocation(widget.source.id)
           .where((l) => l.stockAvailable > 0
                      && !widget.excludedVariantIds.contains(l.variantId))
           .toList();
-      // Indexer les produits du owner pour lookup
-      final userId = LocalStorageService.getCurrentUser()?.id ?? '';
+      // Index variantId → (product, variant) construit en parcourant TOUS
+      // les produits Hive, sans passer par getShopsForUser. Cette dernière
+      // peut retourner vide si les memberships ne sont pas (encore) syncés
+      // localement, ce qui rendait la sheet vide alors même que les
+      // stock_levels existaient — symptôme « Aucune variante à la source »
+      // pour un partenaire qui a pourtant du stock visible ailleurs dans
+      // l'app.
+      //
+      // La RLS Supabase a déjà filtré les produits visibles côté pull, donc
+      // tout ce qui est dans productsBox est légitime à montrer ici.
       final byVid = <String, _VariantEntry>{};
-      for (final s in LocalStorageService.getShopsForUser(userId)) {
-        for (final p in AppDatabase.getProductsForShop(s.id)) {
+      for (final raw in HiveBoxes.productsBox.values) {
+        try {
+          final m = Map<String, dynamic>.from(raw);
+          final p = LocalStorageService.productFromMap(m);
           for (final v in p.variants) {
             if (v.id != null && v.id!.isNotEmpty) {
               byVid[v.id!] = _VariantEntry(
                   product: p, variant: v, available: 0);
             }
           }
-        }
+        } catch (_) {/* skip ligne corrompue */}
       }
       for (final lvl in levels) {
         final e = byVid[lvl.variantId];
@@ -682,7 +697,7 @@ class _VariantPickerSheetState extends State<_VariantPickerSheet> {
                                   horizontal: 4, vertical: 10),
                               decoration: BoxDecoration(
                                 color: selected
-                                    ? AppColors.primary.withOpacity(0.08)
+                                    ? AppColors.primary.withValues(alpha:0.08)
                                     : null,
                               ),
                               child: Row(children: [
@@ -695,7 +710,7 @@ class _VariantPickerSheetState extends State<_VariantPickerSheet> {
                                         ? AppColors.primary
                                         : const Color(0xFFBBBBBB)),
                                 const SizedBox(width: 10),
-                                AppProductImage(
+                                ProductImageCard(
                                   imageUrl: e.variant.imageUrl
                                       ?? e.product.imageUrl,
                                   width: 32, height: 32,
@@ -822,6 +837,52 @@ class _QtySelector extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+
+// ─── Tile de sélection date (réutilisable) ──────────────────────────────────
+//
+// Tuile cliquable qui affiche une date formatée + icône calendrier. Utilisée
+// pour les pickers d'antidatage (transfert, complétion vente, etc.). Le
+// caller fournit la valeur courante + un callback `onTap` qui ouvre
+// `pickBackDate` et persiste la sélection.
+class _DatePickerTile extends StatelessWidget {
+  final DateTime     value;
+  final VoidCallback onTap;
+  const _DatePickerTile({required this.value, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final sameDay = value.year == now.year
+        && value.month == now.month && value.day == now.day;
+    final label = sameDay
+        ? "Aujourd'hui"
+        : DateFormat("d MMMM yyyy", "fr_FR").format(value);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF9FAFB),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        child: Row(children: [
+          Icon(Icons.event_rounded, size: 16, color: AppColors.primary),
+          const SizedBox(width: 10),
+          Expanded(child: Text(label,
+              style: const TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600))),
+          Icon(Icons.edit_calendar_outlined,
+              size: 14,
+              color: Theme.of(context).colorScheme.onSurface
+                  .withValues(alpha: 0.4)),
+        ]),
+      ),
     );
   }
 }

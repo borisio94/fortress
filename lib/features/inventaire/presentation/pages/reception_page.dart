@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/storage/hive_boxes.dart';
+import '../../../../core/widgets/back_dated_picker.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
@@ -116,10 +118,18 @@ class _ReceptionPageState extends State<ReceptionPage> {
   }
 
   // ── Créer un bon de réception directe ──────────────────────────────────
+  bool _isToday(DateTime d) {
+    final now = DateTime.now();
+    return d.year == now.year && d.month == now.month && d.day == now.day;
+  }
+
   void _showCreateSheet(BuildContext context) {
     final products = AppDatabase.getProductsForShop(widget.shopId);
     final selected = <String, int>{}; // productId → quantité attendue
     final user = LocalStorageService.getCurrentUser();
+    // Date de réception (antidatable) — partagée entre les rebuilds du
+    // StatefulBuilder via une closure-level variable.
+    var receptionDate = DateTime.now();
 
     showModalBottomSheet(
       context: context,
@@ -151,6 +161,50 @@ class _ReceptionPageState extends State<ReceptionPage> {
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
               ]),
             ),
+            const SizedBox(height: 12),
+            // Tile date — antidatable (numériser une réception passée).
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: InkWell(
+                onTap: () async {
+                  final d = await pickBackDate(
+                    context: ctx,
+                    initial: receptionDate,
+                    helpText: 'Date de réception',
+                  );
+                  if (d != null) setSt(() => receptionDate = d);
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF9FAFB),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                  ),
+                  child: Row(children: [
+                    Icon(Icons.event_rounded,
+                        size: 14, color: AppColors.primary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                          _isToday(receptionDate)
+                              ? 'Aujourd\'hui'
+                              : DateFormat('d MMMM yyyy', 'fr_FR')
+                                  .format(receptionDate),
+                          style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                    Icon(Icons.edit_calendar_outlined,
+                        size: 12,
+                        color: Theme.of(ctx).colorScheme.onSurface
+                            .withValues(alpha: 0.4)),
+                  ]),
+                ),
+              ),
+            ),
             const Divider(height: 24),
             // Liste produits
             Expanded(child: ListView.builder(
@@ -167,7 +221,7 @@ class _ReceptionPageState extends State<ReceptionPage> {
                     color: qty > 0 ? AppColors.primarySurface : const Color(0xFFF9FAFB),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: qty > 0
-                        ? AppColors.primary.withOpacity(0.3) : const Color(0xFFE5E7EB))),
+                        ? AppColors.primary.withValues(alpha:0.3) : const Color(0xFFE5E7EB))),
                   child: Row(children: [
                     Expanded(child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -223,7 +277,7 @@ class _ReceptionPageState extends State<ReceptionPage> {
                       shopId: widget.shopId,
                       items: items,
                       createdBy: user?.name,
-                      createdAt: DateTime.now(),
+                      createdAt: receptionDate,
                     );
                     HiveBoxes.receptionsBox.put(reception.id, reception.toMap());
                     AppDatabase.notifyProductChange(widget.shopId);
@@ -498,14 +552,14 @@ class _ReceptionCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white, borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFFE5E7EB)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 4, offset: const Offset(0, 2))]),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-                color: statusColor.withOpacity(0.1),
+                color: statusColor.withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(6)),
             child: Text(reception.status.label,
                 style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
@@ -541,7 +595,7 @@ class _ReceptionCard extends StatelessWidget {
               label: const Text('Supprimer'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.error,
-                side: BorderSide(color: AppColors.error.withOpacity(0.3)),
+                side: BorderSide(color: AppColors.error.withValues(alpha:0.3)),
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
             )),
@@ -572,7 +626,7 @@ class _Chip extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
     decoration: BoxDecoration(
-        color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
+        color: color.withValues(alpha:0.1), borderRadius: BorderRadius.circular(4)),
     child: Text(label, style: TextStyle(fontSize: 10,
         fontWeight: FontWeight.w600, color: color)),
   );
@@ -597,11 +651,11 @@ class _QtyField extends StatelessWidget {
         decoration: InputDecoration(
           isDense: true,
           contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          filled: true, fillColor: color.withOpacity(0.06),
+          filled: true, fillColor: color.withValues(alpha:0.06),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: color.withOpacity(0.3))),
+              borderSide: BorderSide(color: color.withValues(alpha:0.3))),
           enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: color.withOpacity(0.3))),
+              borderSide: BorderSide(color: color.withValues(alpha:0.3))),
           focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide(color: color, width: 1.5)),
         ),

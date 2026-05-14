@@ -398,7 +398,14 @@ class SaleLocalDatasource {
     await updateOrderStatus(orderId, SaleStatus.scheduled);
   }
 
-  Future<void> updateOrderStatus(String orderId, SaleStatus status) async {
+  /// Bascule le statut d'une commande. Si `completedAt` est fourni ET que
+  /// `status == completed`, utilise cette date au lieu de `DateTime.now()`
+  /// — permet l'antidatage de l'encaissement (numérisation d'une vente
+  /// passée). Sans param, fallback comportement historique (now() au stamp
+  /// initial, conservation si déjà stampé).
+  Future<void> updateOrderStatus(String orderId, SaleStatus status, {
+    DateTime? completedAt,
+  }) async {
     final raw = _ordersBox.get(orderId);
     if (raw == null) return;
     final map = Map<String, dynamic>.from(raw);
@@ -410,9 +417,15 @@ class SaleLocalDatasource {
         (s) => s.name == oldStatusStr, orElse: () => SaleStatus.scheduled);
 
     map['status'] = status.name;
-    // Stamp completed_at à la transition → completed (garder si déjà stampé)
+    // Stamp completed_at à la transition → completed. Si l'opérateur a
+    // saisi une date custom (antidatage), on l'utilise même si déjà stampé.
+    // Sinon : préserver l'existant ou now() par défaut.
     if (status == SaleStatus.completed) {
-      map['completed_at'] ??= DateTime.now().toUtc().toIso8601String();
+      if (completedAt != null) {
+        map['completed_at'] = completedAt.toUtc().toIso8601String();
+      } else {
+        map['completed_at'] ??= DateTime.now().toUtc().toIso8601String();
+      }
     } else {
       map['completed_at'] = null;
     }

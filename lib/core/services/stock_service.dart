@@ -3,7 +3,6 @@ import '../storage/hive_boxes.dart';
 import '../storage/local_storage_service.dart';
 import '../database/app_database.dart';
 import '../../features/inventaire/domain/entities/product.dart';
-import '../../features/inventaire/domain/entities/stock_movement.dart';
 import '../../features/inventaire/domain/entities/incident.dart';
 import '../../features/inventaire/domain/entities/stock_location.dart';
 import '../../features/inventaire/domain/entities/stock_level.dart';
@@ -528,7 +527,8 @@ class StockService {
       stockPhysical:  newPhys,
     );
 
-    await _saveVariant(product, vIdx, updated, shopId);
+    await _saveVariant(product, vIdx, updated, shopId,
+        forceStockLevelSync: true);
     _log(shopId: shopId, productId: productId, variantId: variantId,
       type: 'adjustment', quantity: delta,
       beforeAvail: v.stockAvailable, afterAvail: updated.stockAvailable,
@@ -611,7 +611,7 @@ class StockService {
     final result = _findVariant(shopId, productId, variantId);
     if (result == null) return 'Variante introuvable';
     final (_, vIdx) = result;
-    final v = result!.$1.variants[vIdx];
+    final v = result.$1.variants[vIdx];
     if (v.stockAvailable < quantity) {
       return 'Stock insuffisant (${v.stockAvailable} disponible, '
           '$quantity à supprimer) — des unités ont déjà été vendues';
@@ -685,7 +685,7 @@ class StockService {
     bool hasArrivals = false;
     for (final raw in HiveBoxes.stockArrivalsBox.values) {
       try {
-        final m = Map<String, dynamic>.from(raw as Map);
+        final m = Map<String, dynamic>.from(raw);
         if (m['shop_id'] != shopId) continue;
         if (!matchesVariant(m)) continue;
         hasArrivals = true;
@@ -702,7 +702,7 @@ class StockService {
     int totalSales = 0;
     for (final raw in HiveBoxes.stockMovementsBox.values) {
       try {
-        final m = Map<String, dynamic>.from(raw as Map);
+        final m = Map<String, dynamic>.from(raw);
         if (m['shop_id'] != shopId) continue;
         if ((m['type'] as String? ?? '') != 'sale') continue;
         if (!matchesVariant(m)) continue;
@@ -716,7 +716,7 @@ class StockService {
     int resolvedRemoved = 0;
     for (final raw in HiveBoxes.incidentsBox.values) {
       try {
-        final m = Map<String, dynamic>.from(raw as Map);
+        final m = Map<String, dynamic>.from(raw);
         if (m['shop_id'] != shopId) continue;
         if (!matchesVariant(m)) continue;
         final qty = m['quantity'] as int? ?? 0;
@@ -772,12 +772,17 @@ class StockService {
   }
 
   /// Sauvegarde la variante mise à jour + propage le stock global + notifie.
+  /// `forceStockLevelSync` : si true, écrase le StockLevel boutique même si
+  /// l'anti-stale est actif (utile pour `adjustment` — correction explicite
+  /// par l'utilisateur, sa valeur prime sur tout transfert/écho récent).
   static Future<void> _saveVariant(
-      Product product, int vIdx, ProductVariant updated, String shopId) async {
+      Product product, int vIdx, ProductVariant updated, String shopId,
+      {bool forceStockLevelSync = false}) async {
     final variants = List<ProductVariant>.from(product.variants);
     variants[vIdx] = updated;
     await AppDatabase.saveProduct(product.copyWith(variants: variants),
-        skipValidation: true); // pas de revalidation SKU pour les mises à jour stock
+        skipValidation: true, // pas de revalidation SKU pour les mises à jour stock
+        forceStockLevelSync: forceStockLevelSync);
     AppDatabase.notifyProductChange(shopId);
   }
 
@@ -839,13 +844,22 @@ class StockService {
             '(disponible : $available, demandé : ${line.quantity})';
       }
     }
-    // Transfert shop → shop différent : chaque variante source doit avoir
-    // un SKU (identité métier transversale aux boutiques, voir auto-merge
-    // dans _applyTransferLine / _resolveOrCreateVariantInShop).
-    if (toLoc != null
+    // Transfert shop → shop DIFFÉRENT (deux boutiques distinctes) : chaque
+    // variante source doit avoir un SKU (identité métier transversale,
+    // utilisé par `_resolveOrCreateVariantInShop` pour mapper la variante
+    // entre les catalogues séparés des deux boutiques).
+    //
+    // Cette règle ne s'applique PAS aux partenaires/warehouses : ils
+    // partagent le catalogue de leur boutique tutelle (même `owner_id`),
+    // donc le `variantId` source est déjà valide à destination — aucun
+    // mapping par SKU n'est nécessaire.
+    final isCrossShop = fromLoc.type == StockLocationType.shop
+        && fromLoc.shopId != null
+        && toLoc != null
         && toLoc.type == StockLocationType.shop
         && toLoc.shopId != null
-        && toLoc.shopId != fromLoc.shopId) {
+        && toLoc.shopId != fromLoc.shopId;
+    if (isCrossShop) {
       for (final line in lines) {
         final found = _findVariantGlobally(line.variantId);
         if (found == null) continue;
@@ -867,12 +881,16 @@ class StockService {
   /// par le même `reference` = transferId.
   ///
   /// Retourne le StockTransfer créé (status=received) ou null si rejeté.
+  /// `createdAt` (optionnel) : permet d'antidater le transfert pour
+  /// numériser un mouvement de stock passé (cf. canvas "tout antidater").
+  /// Si null, fallback `DateTime.now()` (comportement historique).
   static Future<StockTransfer?> executeTransfer({
     required String ownerId,
     required String fromLocationId,
     required String toLocationId,
     required List<StockTransferLine> lines,
     String? notes,
+    DateTime? createdAt,
   }) async {
     if (fromLocationId == toLocationId) return null;
     if (lines.isEmpty) return null;
@@ -891,7 +909,31 @@ class StockService {
       throw Exception(err);
     }
 
+    // Pré-flight : re-lire le stock dispo de CHAQUE ligne juste avant la
+    // boucle. Si une ligne ne passe pas, on aborte AVANT d'avoir débité
+    // quoi que ce soit — un transfert partiel (lignes 1-2 OK, ligne 3
+    // échoue à mi-course) est bien pire qu'un échec complet propre.
+    for (final line in lines) {
+      final available = _availableAtLocation(fromLoc, line.variantId);
+      if (available < line.quantity) {
+        debugPrint('[StockService] preflight FAIL — '
+            'src=${fromLoc.name} variant=${line.variantId} '
+            'available=$available demande=${line.quantity}');
+        final label = (line.productName ?? '').trim().isNotEmpty
+            ? line.productName!
+            : 'variante ${line.variantId}';
+        throw Exception(
+            'Stock insuffisant à "${fromLoc.name}" pour la ligne '
+            '"$label" : $available dispo, ${line.quantity} '
+            'demandé. Actualise et réessaie.');
+      }
+    }
+
     final now = DateTime.now();
+    // `effectiveDate` = date métier du transfert (antidatable). Utilisée
+    // pour les timestamps StockTransfer + cohérence audit. `now` reste
+    // utilisée pour les microsecondsSinceEpoch (unicité de l'ID).
+    final effectiveDate = createdAt ?? now;
     final transferId = 'trf_${now.microsecondsSinceEpoch}';
 
     for (final line in lines) {
@@ -900,7 +942,7 @@ class StockService {
         fromLoc:    fromLoc,
         toLoc:      toLoc,
         line:       line,
-        now:        now,
+        now:        effectiveDate,
         notes:      notes,
       );
     }
@@ -915,9 +957,9 @@ class StockService {
       lines:          lines,
       notes:          notes,
       createdBy:      user?.name,
-      createdAt:      now,
-      shippedAt:      now,
-      receivedAt:     now,
+      createdAt:      effectiveDate,
+      shippedAt:      effectiveDate,
+      receivedAt:     effectiveDate,
     );
     await AppDatabase.saveStockTransfer(transfer);
 
@@ -983,7 +1025,13 @@ class StockService {
     // Résolution du variantId côté destination si besoin (auto-merge SKU).
     String dstVid = srcVid;
     String? dstProductId;
-    final crossShop = toLoc.type == StockLocationType.shop
+    // Cross-shop : déclenche l'auto-merge SKU UNIQUEMENT entre deux
+    // boutiques distinctes (catalogues séparés). Partenaire ↔ boutique
+    // ou partenaire ↔ partenaire partagent le catalogue tutelle, donc
+    // `srcVid` est déjà valide à destination — pas d'auto-merge.
+    final crossShop = fromLoc.type == StockLocationType.shop
+        && fromLoc.shopId != null
+        && toLoc.type == StockLocationType.shop
         && toLoc.shopId != null
         && toLoc.shopId != fromLoc.shopId;
     if (crossShop) {
@@ -999,6 +1047,19 @@ class StockService {
 
     // 1. Débit source (variantId source)
     final beforeSrc = _availableAtLocation(fromLoc, srcVid);
+    // Garde-fou « atomique » : si une lecture concurrente (vente parallèle,
+    // sync remote, autre transfert) a abaissé le stock entre `validateTransferLines`
+    // et ce point, on ABORTE plutôt que d'écrire un débit clampé à 0 qui
+    // décale silencieusement les comptes. L'utilisateur voit une erreur
+    // claire au lieu d'un transfert partiel inexpliqué.
+    if (beforeSrc < qty) {
+      debugPrint('[StockService] ABORT transfer line — '
+          'source=${fromLoc.name} variant=$srcVid available=$beforeSrc demande=$qty');
+      throw Exception(
+          'Stock insuffisant à "${fromLoc.name}" pour cette ligne '
+          '($beforeSrc dispo, $qty demandé). '
+          'Le stock a peut-être bougé pendant la saisie — actualise et réessaie.');
+    }
     await _debitLocation(fromLoc, srcVid, qty, now);
     final afterSrc = beforeSrc - qty;
 

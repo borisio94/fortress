@@ -631,6 +631,8 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 
               // Transition processing/scheduled → completed : sheet C
               // (frais de livraison/emballage inclus dans le montant payé).
+              // Date d'encaissement antidatable via le picker du sheet.
+              DateTime? completedAt;
               if (becomingCompleted) {
                 // Si on saute scheduled → completed direct (raccourci POS),
                 // collecter aussi paiement+mode AVANT les frais. Sinon
@@ -691,9 +693,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                 await _generatePartnerLedgerEntries(
                     order: updated, fees: fres.fees,
                     collectedBy: fres.collectedBy);
+                completedAt = fres.completedAt;
               }
 
-              await _ds.updateOrderStatus(order.id!, status);
+              await _ds.updateOrderStatus(order.id!, status,
+                  completedAt: completedAt);
               if (mounted) setState(() {});
             },
             onCancelWithReason: (reason) async {

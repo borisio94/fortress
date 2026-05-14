@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/widgets/back_dated_picker.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
@@ -308,7 +309,7 @@ class _IncidentCard extends StatelessWidget {
         Container(
           width: 38, height: 38,
           decoration: BoxDecoration(
-              color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(9)),
+              color: color.withValues(alpha:0.1), borderRadius: BorderRadius.circular(9)),
           child: Icon(icon, size: 18, color: color),
         ),
         const SizedBox(width: 12),
@@ -336,7 +337,7 @@ class _IncidentCard extends StatelessWidget {
             onTap: onDelete,
             child: Padding(padding: const EdgeInsets.all(6),
                 child: Icon(Icons.delete_outline_rounded, size: 16,
-                    color: AppColors.error.withOpacity(0.6))),
+                    color: AppColors.error.withValues(alpha:0.6))),
           ),
         if (onAction != null)
           GestureDetector(
@@ -344,7 +345,7 @@ class _IncidentCard extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.08),
+                  color: AppColors.primary.withValues(alpha:0.08),
                   borderRadius: BorderRadius.circular(8)),
               child: Text('Traiter', style: TextStyle(fontSize: 11,
                   fontWeight: FontWeight.w600, color: AppColors.primary)),
@@ -362,7 +363,7 @@ class _TypeBadge extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
     decoration: BoxDecoration(
-        color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
+        color: color.withValues(alpha:0.1), borderRadius: BorderRadius.circular(4)),
     child: Text(text, style: TextStyle(fontSize: 10,
         fontWeight: FontWeight.w600, color: color)),
   );
@@ -384,11 +385,14 @@ class _ResolveSheetState extends State<_ResolveSheet> {
   final _costCtrl  = TextEditingController();
   final _priceCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
+  /// Date de résolution effective (antidatable). Défaut = now().
+  late DateTime _resolvedAt;
 
   @override
   void initState() {
     super.initState();
     _resolution = widget.incident.type;
+    _resolvedAt = DateTime.now();
     _costCtrl.text = widget.incident.repairCost > 0
         ? widget.incident.repairCost.toStringAsFixed(0) : '';
     _priceCtrl.text = widget.incident.salePrice > 0
@@ -415,7 +419,7 @@ class _ResolveSheetState extends State<_ResolveSheet> {
           Row(children: [
             Container(width: 34, height: 34,
                 decoration: BoxDecoration(
-                    color: AppColors.error.withOpacity(0.1),
+                    color: AppColors.error.withValues(alpha:0.1),
                     borderRadius: BorderRadius.circular(9)),
                 child: Icon(Icons.warning_rounded, size: 17, color: AppColors.error)),
             const SizedBox(width: 10),
@@ -453,6 +457,44 @@ class _ResolveSheetState extends State<_ResolveSheet> {
           ],
           _Field(label: 'Notes', ctrl: _notesCtrl,
               hint: 'Observation...', icon: Icons.notes_rounded),
+          const SizedBox(height: 12),
+          // Date de résolution (antidatable — numérisation historique).
+          InkWell(
+            onTap: () async {
+              final d = await pickBackDate(
+                context: context,
+                initial: _resolvedAt,
+                helpText: 'Date de résolution',
+              );
+              if (d != null) setState(() => _resolvedAt = d);
+            },
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 11),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF9FAFB),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFE5E7EB)),
+              ),
+              child: Row(children: [
+                Icon(Icons.event_rounded,
+                    size: 14, color: AppColors.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('Résolu le : '
+                      '${DateFormat('d MMMM yyyy', 'fr_FR').format(_resolvedAt)}',
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600)),
+                ),
+                Icon(Icons.edit_calendar_outlined,
+                    size: 12,
+                    color: Theme.of(context).colorScheme.onSurface
+                        .withValues(alpha: 0.4)),
+              ]),
+            ),
+          ),
           const SizedBox(height: 20),
 
           // Boutons
@@ -483,7 +525,6 @@ class _ResolveSheetState extends State<_ResolveSheet> {
   }
 
   void _resolve() async {
-    final now   = DateTime.now();
     final cost  = double.tryParse(_costCtrl.text) ?? 0;
     final price = double.tryParse(_priceCtrl.text) ?? 0;
     final inc   = widget.incident;
@@ -499,7 +540,7 @@ class _ResolveSheetState extends State<_ResolveSheet> {
       repairCost: cost, salePrice: price,
       notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
       receptionId: inc.receptionId,
-      resolvedAt: now, createdBy: inc.createdBy,
+      resolvedAt: _resolvedAt, createdBy: inc.createdBy,
       createdAt: inc.createdAt,
     );
     HiveBoxes.incidentsBox.put(resolved.id, resolved.toMap());
@@ -588,7 +629,7 @@ class _ResolutionTile extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 6),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? color.withOpacity(0.08) : const Color(0xFFF9FAFB),
+          color: selected ? color.withValues(alpha:0.08) : const Color(0xFFF9FAFB),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: selected ? color : AppColors.divider,
               width: selected ? 1.5 : 1),
