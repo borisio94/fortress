@@ -8,6 +8,7 @@ import '../bloc/caisse_bloc.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
 import '../widgets/product_grid_widget.dart';
 import '../widgets/cart_widget.dart';
+import '../widgets/add_order_expense_dialog.dart';
 import '../widgets/order_processing_sheet.dart';
 import '../widgets/order_completion_sheet.dart';
 import '../widgets/record_acompte_dialog.dart';
@@ -680,6 +681,15 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                 final partnerName = isPartnerNow
                     ? _locationNameOf(freshForSheet)
                     : null;
+                // Solde courant du partenaire AVANT cette complétion :
+                // affiché dans le sheet pour rendre visible la compensation
+                // automatique (dette croisée). 0 si pas de partenaire.
+                final balanceBefore = isPartnerNow
+                        && (freshForSheet.deliveryLocationId ?? '').isNotEmpty
+                    ? PartnerLedgerService.balanceForPartner(
+                        freshForSheet.shopId,
+                        freshForSheet.deliveryLocationId!)
+                    : null;
                 final fres = await showOrderCompletionSheet(
                   context,
                   initialFees: freshForSheet.fees
@@ -693,6 +703,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                       ? CollectedBy.partnerNotRemitted
                       : CollectedBy.boutique,
                   partnerName: partnerName,
+                  partnerBalanceBefore: balanceBefore,
                 );
                 if (fres == null) return; // annulé
                 final fresh = _ds.getOrderById(order.id!) ?? order;
@@ -888,6 +899,29 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   bool _expanded = false;
   bool _sendingInvoice = false;
 
+  /// Somme absolue des dépenses enregistrées comme dette envers le
+  /// partenaire-livreur pour CETTE commande (entrées `deliveryOwed`
+  /// négatives liées via `orderId`). Lue depuis partner_ledger à chaque
+  /// build (Hive synchrone, coût négligeable pour <quelques milliers
+  /// d'entrées). Retourne 0 si pas de partenaire ou pas de dette.
+  double get _orderDebtToPartner {
+    final partnerId = widget.order.deliveryLocationId;
+    if (partnerId == null || partnerId.isEmpty) return 0;
+    final orderId = widget.order.id;
+    if (orderId == null) return 0;
+    final entries = PartnerLedgerService.entriesForShop(
+        widget.order.shopId, partnerLocationId: partnerId);
+    var sum = 0.0;
+    for (final e in entries) {
+      if (e.orderId != orderId) continue;
+      if (e.type != PartnerLedgerEntryType.deliveryOwed) continue;
+      // deliveryOwed est stockée en négatif (boutique doit). Pour le
+      // bandeau on veut le montant absolu de la dette.
+      if (e.amount < 0) sum += e.amount.abs();
+    }
+    return sum;
+  }
+
   @override
   Widget build(BuildContext context) {
     final s     = widget.order.status;
@@ -1030,6 +1064,43 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     color: _expanded ? color : const Color(0xFFBBBBBB)),
               ),
             ]),
+
+            // ── Bandeau dette enregistrée envers le partenaire ────
+            // Affiché si la commande a des dépenses supplémentaires
+            // enregistrées comme dette envers son partenaire-livreur.
+            // Compensée automatiquement au prochain encaissement
+            // (saleCollected) du partenaire via le solde signé du ledger.
+            if (_orderDebtToPartner > 0) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                      color: AppColors.error.withValues(alpha: 0.2),
+                      width: 0.5),
+                ),
+                child: Row(children: [
+                  Icon(Icons.attach_money_rounded,
+                      size: 12, color: AppColors.error),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                        'Dette partenaire : '
+                        '${CurrencyFormatter.format(_orderDebtToPartner)} '
+                        '— compensée au prochain versement',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.error),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                ]),
+              ),
+            ],
 
             // ── Bandeau « Reste à payer » (cf. hotfix_065) ─────
             // Toujours visible (hors zone expansion) si la commande a un
@@ -1321,6 +1392,22 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         onTap: () => _showFormatPicker(context),
                       ),
                       const SizedBox(width: 6),
+                      // Bouton "Ajouter dépense en dette" — visible
+                      // uniquement si livraison partenaire ET commande
+                      // déjà entièrement encaissée. Crée une entrée
+                      // deliveryOwed négative dans le partner_ledger.
+                      if (widget.order.deliveryMode == DeliveryMode.partner
+                          && (widget.order.deliveryLocationId ?? '').isNotEmpty
+                          && widget.order.isFullyPaid) ...[
+                        _ActionBtn(
+                          icon: Icons.attach_money_rounded,
+                          color: AppColors.warning,
+                          bgColor: const Color(0xFFFFF7ED),
+                          tooltip: 'Ajouter une dépense en dette partenaire',
+                          onTap: () => _addOrderExpense(context),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
                     ],
                     // Bouton "Enregistrer un acompte" — visible si commande
                     // en attente de paiement (pas annulée/refusée/refunded)
@@ -1470,6 +1557,32 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   /// Volontairement **synchrone** jusqu'à `launchUrl` : sur web, n'importe
   /// quel `await` avant l'ouverture rompt le user gesture et le navigateur
   /// bloque silencieusement la nouvelle fenêtre wa.me.
+  /// Enregistre une dépense additionnelle sur une commande complétée et
+  /// entièrement payée par le client. La dépense est inscrite comme dette
+  /// envers le partenaire-livreur (entrée `deliveryOwed` négative dans le
+  /// partner_ledger). Compensée automatiquement au prochain encaissement
+  /// du partenaire via le solde signé du ledger.
+  Future<void> _addOrderExpense(BuildContext context) async {
+    final res = await AddOrderExpenseDialog.show(context, widget.order);
+    if (res == null || !mounted) return;
+    final partnerId = widget.order.deliveryLocationId;
+    if (partnerId == null || partnerId.isEmpty) return;
+    await PartnerLedgerService.addEntry(
+      shopId:            widget.order.shopId,
+      partnerLocationId: partnerId,
+      type:              PartnerLedgerEntryType.deliveryOwed,
+      amount:            -res.amount, // négatif = boutique doit au partenaire
+      orderId:           widget.order.id,
+      note:              res.label,
+    );
+    if (mounted) setState(() {});
+    if (mounted) {
+      AppSnack.success(context,
+          'Dépense de ${CurrencyFormatter.format(res.amount)} '
+          'enregistrée en dette — compensée au prochain versement');
+    }
+  }
+
   /// Ouvre RecordAcompteDialog. À la confirmation, persiste le nouveau
   /// `amountPaid` cumulé via SaleLocalDatasource.recordPayment (qui dérive
   /// `payment_status` automatiquement : partial si < total, paid si =>).

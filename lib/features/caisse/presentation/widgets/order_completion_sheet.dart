@@ -44,6 +44,10 @@ Future<OrderCompletionResult?> showOrderCompletionSheet(
   /// Nom du partenaire pour clarifier le libellé du radio (ex:
   /// « Partenaire (Dépôt Flash Douala) — pas encore versé »).
   String? partnerName,
+  /// Solde courant du partenaire AVANT cette complétion (signé). > 0 : il
+  /// nous doit ; < 0 : on lui doit. Si non null, on affiche un récap
+  /// "Solde avant / après" qui rend visible la compensation automatique.
+  double? partnerBalanceBefore,
 }) {
   return showFormSheet<OrderCompletionResult>(
     context: context,
@@ -51,6 +55,7 @@ Future<OrderCompletionResult?> showOrderCompletionSheet(
       initialFees:        initialFees,
       defaultCollectedBy: defaultCollectedBy,
       partnerName:        partnerName,
+      partnerBalanceBefore: partnerBalanceBefore,
     ),
   );
 }
@@ -59,10 +64,12 @@ class _OrderCompletionSheet extends StatefulWidget {
   final List<OrderFee> initialFees;
   final CollectedBy    defaultCollectedBy;
   final String?        partnerName;
+  final double?        partnerBalanceBefore;
   const _OrderCompletionSheet({
     required this.initialFees,
     required this.defaultCollectedBy,
     this.partnerName,
+    this.partnerBalanceBefore,
   });
   @override
   State<_OrderCompletionSheet> createState() => _OrderCompletionSheetState();
@@ -186,6 +193,20 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                   partnerName: widget.partnerName,
                   onChanged: (v) => setState(() => _collectedBy = v),
                 ),
+                // Bandeau récap solde partenaire : visible si le caller a
+                // fourni `partnerBalanceBefore` ET que le partenaire a un
+                // solde non nul (dette croisée). Rend visible la
+                // compensation automatique du partner_ledger : par ex.
+                // si on doit 8 000 au partenaire et qu'il encaisse une
+                // vente de 30 000, le solde net devient 22 000.
+                if (widget.partnerBalanceBefore != null
+                    && widget.partnerBalanceBefore!.abs() > 0
+                    && _collectedBy == CollectedBy.partnerNotRemitted) ...[
+                  const SizedBox(height: 10),
+                  _PartnerBalanceHint(
+                    balanceBefore: widget.partnerBalanceBefore!,
+                  ),
+                ],
                 const SizedBox(height: 16),
                 // ── Picker date d'encaissement (antidatable) ─────────
                 // Permet à un marchand de finaliser une vente passée
@@ -412,6 +433,62 @@ class _RadioRow extends StatelessWidget {
                                   : const Color(0xFF111827)))),
         ]),
       ),
+    );
+  }
+}
+
+// ─── Bandeau récap solde partenaire ────────────────────────────────────────
+//
+// Affiché dans le Sheet C de complétion quand le partenaire a un solde
+// non nul AVANT cette vente. Rend visible la compensation automatique
+// du partner_ledger : l'opérateur voit que la dette/créance existante
+// va être absorbée par le nouveau saleCollected, sans avoir à faire
+// l'arithmétique mentalement.
+class _PartnerBalanceHint extends StatelessWidget {
+  /// Solde signé du partenaire AVANT cette complétion. > 0 = il nous doit
+  /// déjà. < 0 = on lui doit (dette créée par des dépenses additionnelles).
+  final double balanceBefore;
+  const _PartnerBalanceHint({required this.balanceBefore});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDebt = balanceBefore < 0; // on lui doit
+    final color = isDebt
+        ? AppColors.error
+        : AppColors.secondary;
+    final bg    = isDebt
+        ? const Color(0xFFFEF2F2)
+        : const Color(0xFFECFDF5);
+    final label = isDebt
+        ? 'Vous lui devez ${CurrencyFormatter.format(balanceBefore.abs())} '
+          '— sera déduit du montant qu\'il vous reversera'
+        : 'Il vous doit déjà '
+          '${CurrencyFormatter.format(balanceBefore)} '
+          '— s\'ajoute au montant de cette vente';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(children: [
+        Icon(
+            isDebt
+                ? Icons.account_balance_wallet_outlined
+                : Icons.savings_outlined,
+            size: 14, color: color),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSurface
+                      .withValues(alpha: 0.85))),
+        ),
+      ]),
     );
   }
 }
