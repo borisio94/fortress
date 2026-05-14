@@ -2689,6 +2689,12 @@ end \$\$;""",
             'created_by_user_id':   row['created_by_user_id'],
             'items':          row['items'] ?? [],
             'fees':           row['fees'] ?? [],
+            'source':         row['source'] ?? 'pos',
+            // Suivi paiement (hotfix_065) — cf. syncOrders pour le même
+            // raisonnement : sans ces 2 lignes, un push realtime
+            // écraserait localement amount_paid/payment_status.
+            'amount_paid':    row['amount_paid'] ?? 0,
+            'payment_status': row['payment_status'] ?? 'unpaid',
           };
           await HiveBoxes.ordersBox.put(id, hiveMap);
           _emitOrderNotification(p, shopId, id, row);
@@ -3117,6 +3123,11 @@ end \$\$;""",
           'items':          row['items'] ?? [],
           'fees':           row['fees'] ?? [],
           'source':         row['source'] ?? 'pos',
+          // Suivi paiement (hotfix_065). Sans ces 2 lignes, le pull
+          // Supabase écrasait la valeur Hive locale (acompte / paid
+          // → unpaid 0) à chaque refresh navigateur.
+          'amount_paid':    row['amount_paid'] ?? 0,
+          'payment_status': row['payment_status'] ?? 'unpaid',
         };
         await HiveBoxes.ordersBox.put(id, hiveMap);
       }
