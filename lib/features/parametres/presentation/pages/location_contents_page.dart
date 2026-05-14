@@ -3,13 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../shared/widgets/app_product_image.dart';
+import '../../../../shared/widgets/product_image_card.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
 import '../../../../features/inventaire/domain/entities/product.dart';
 import '../../../../features/inventaire/domain/entities/stock_location.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../widgets/transfer_form_sheet.dart';
+import '../../../../shared/widgets/form_sheet.dart';
 
 /// Page qui liste tous les produits/variantes présents à un emplacement.
 ///
@@ -53,19 +54,27 @@ class _LocationContentsPageState extends ConsumerState<LocationContentsPage> {
 
     final items = <_LocationItem>[];
     if (loc.type == StockLocationType.shop && loc.shopId != null) {
-      // Source = variantes des produits de la boutique (live).
+      // Source = table normalisée `stock_levels` (cohérent avec
+      // InventairePage._stockAtLocations). Les transferts et ajustements
+      // n'écrivent QUE dans stock_levels — lire directement `variant.stock*`
+      // ferait remonter une valeur figée et incohérente avec l'inventaire
+      // global. Fallback variant.* si stock_levels pas encore peuplé pour
+      // cette variante (produit fraîchement créé, jamais transféré).
       final products = AppDatabase.getProductsForShop(loc.shopId!);
       for (final p in products) {
         for (final v in p.variants) {
-          // On inclut tout, même 0, pour une vue complète.
+          final vid = v.id;
+          final lvl = vid != null
+              ? AppDatabase.getStockLevel(vid, loc.id)
+              : null;
           items.add(_LocationItem(
             productName: p.name,
             variantName: v.name,
             sku:         v.sku,
-            available:   v.stockAvailable,
-            physical:    v.stockPhysical,
-            blocked:     v.stockBlocked,
-            ordered:     v.stockOrdered,
+            available:   lvl?.stockAvailable ?? v.stockAvailable,
+            physical:    lvl?.stockPhysical  ?? v.stockPhysical,
+            blocked:     lvl?.stockBlocked   ?? v.stockBlocked,
+            ordered:     lvl?.stockOrdered   ?? v.stockOrdered,
             imageUrl:    v.imageUrl ?? p.imageUrl,
           ));
         }
@@ -128,10 +137,8 @@ class _LocationContentsPageState extends ConsumerState<LocationContentsPage> {
   Future<void> _openTransfer() async {
     final userId = LocalStorageService.getCurrentUser()?.id ?? '';
     if (userId.isEmpty) return;
-    final done = await showModalBottomSheet<bool>(
+    final done = await showFormSheet<bool>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (_) => TransferFormSheet(
@@ -273,15 +280,15 @@ class _Header extends StatelessWidget {
     margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
     padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(
-      color: _color.withOpacity(0.08),
+      color: _color.withValues(alpha:0.08),
       borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: _color.withOpacity(0.22)),
+      border: Border.all(color: _color.withValues(alpha:0.22)),
     ),
     child: Row(children: [
       Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: _color.withOpacity(0.15),
+          color: _color.withValues(alpha:0.15),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(_icon, size: 20, color: _color),
@@ -333,7 +340,7 @@ class _ItemTile extends StatelessWidget {
         border: Border.all(color: const Color(0xFFE5E7EB)),
       ),
       child: Row(children: [
-        AppProductImage(
+        ProductImageCard(
           imageUrl: item.imageUrl,
           width: 36, height: 36,
           borderRadius: BorderRadius.circular(8),
