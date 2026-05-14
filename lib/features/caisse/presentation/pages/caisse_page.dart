@@ -10,6 +10,7 @@ import '../widgets/product_grid_widget.dart';
 import '../widgets/cart_widget.dart';
 import '../widgets/order_processing_sheet.dart';
 import '../widgets/order_completion_sheet.dart';
+import '../widgets/record_acompte_dialog.dart';
 import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../domain/usecases/order_receipt_usecase.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
@@ -924,6 +925,14 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         ),
                     ]),
                   ),
+                  // Pastille statut paiement (cf. hotfix_065) — affichée
+                  // uniquement si la commande n'est pas annulée/refusée
+                  // (ces statuts rendent le paiement non pertinent).
+                  if (s != SaleStatus.cancelled
+                      && s != SaleStatus.refused) ...[
+                    const SizedBox(width: 4),
+                    _PaymentStatusPill(status: widget.order.paymentStatus),
+                  ],
                   // Badge "Web" / "WhatsApp" — ne s'affiche que si source != 'pos'.
                   if (widget.order.source != 'pos') ...[
                     const SizedBox(width: 5),
@@ -1246,6 +1255,25 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       ),
                       const SizedBox(width: 6),
                     ],
+                    // Bouton "Enregistrer un acompte" — visible si commande
+                    // en attente de paiement (pas annulée/refusée/refunded)
+                    // ET solde dû > 0. Permet à l'opérateur d'enregistrer
+                    // un encaissement boutique partiel avant la livraison ;
+                    // le partner_ledger calculera ensuite uniquement le
+                    // solde réellement encaissé par le partenaire.
+                    if (widget.order.amountDue > 0
+                        && widget.order.status != SaleStatus.cancelled
+                        && widget.order.status != SaleStatus.refused
+                        && widget.order.status != SaleStatus.refunded) ...[
+                      _ActionBtn(
+                        icon: Icons.payments_outlined,
+                        color: AppColors.warning,
+                        bgColor: const Color(0xFFFFF7ED),
+                        tooltip: 'Enregistrer un acompte',
+                        onTap: () => _recordAcompte(context),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
                     // Bouton "Relancer le client" — visible UNIQUEMENT pour
                     // les commandes en cours / programmées (pas après
                     // completed/cancelled/refused/refunded).
@@ -1375,6 +1403,23 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   /// Volontairement **synchrone** jusqu'à `launchUrl` : sur web, n'importe
   /// quel `await` avant l'ouverture rompt le user gesture et le navigateur
   /// bloque silencieusement la nouvelle fenêtre wa.me.
+  /// Ouvre RecordAcompteDialog. À la confirmation, persiste le nouveau
+  /// `amountPaid` cumulé via SaleLocalDatasource.recordPayment (qui dérive
+  /// `payment_status` automatiquement : partial si < total, paid si =>).
+  Future<void> _recordAcompte(BuildContext context) async {
+    final newAmount = await RecordAcompteDialog.show(context, widget.order);
+    if (newAmount == null || !mounted) return;
+    await SaleLocalDatasource()
+        .recordPayment(widget.order.id!, newAmount);
+    if (mounted) setState(() {});
+    if (mounted) {
+      AppSnack.success(context,
+          newAmount >= widget.order.total
+              ? 'Commande totalement encaissée'
+              : 'Acompte enregistré');
+    }
+  }
+
   void _relaunchClient(BuildContext context) {
     final order = widget.order;
     final phone = (order.clientPhone ?? '').trim();
@@ -2039,6 +2084,35 @@ class _PaperFormat {
       widthMm * mmPt,
       heightMm * mmPt,
       marginAll: isTicket ? 8 * mmPt : 20 * mmPt,
+    );
+  }
+}
+
+// ─── Pastille statut paiement (cf. hotfix_065) ──────────────────────────────
+//
+// Affichée à côté du status workflow sur chaque card commande. Couleur et
+// label dérivés de l'enum PaymentStatus (rouge = unpaid, orange = partial,
+// vert = paid, gris = refunded). Self-cohérent avec le partner_ledger qui
+// utilise les mêmes conventions.
+class _PaymentStatusPill extends StatelessWidget {
+  final PaymentStatus status;
+  const _PaymentStatusPill({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = status.color;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: color.withValues(alpha: 0.35), width: 0.5),
+      ),
+      child: Text(status.label,
+          style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              color: color)),
     );
   }
 }

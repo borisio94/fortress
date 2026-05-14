@@ -357,6 +357,32 @@ class SaleLocalDatasource {
     await updateOrderStatus(orderId, SaleStatus.cancelled);
   }
 
+  /// Enregistre un acompte (ou paiement total) sur une commande en cours.
+  /// `newAmountPaid` est la NOUVELLE somme cumulée (pas l'incrément). Calcule
+  /// automatiquement `payment_status` selon : 0 → unpaid, < total → partial,
+  /// >= total → paid. Ne touche pas au statut de commande (qui reste
+  /// scheduled/processing/completed selon le workflow).
+  Future<void> recordPayment(String orderId, double newAmountPaid) async {
+    final raw = _ordersBox.get(orderId);
+    if (raw == null) return;
+    final map = Map<String, dynamic>.from(raw);
+    final fresh = _mapToSaleWithStatus(map);
+    final total = fresh.total;
+    final capped = newAmountPaid.clamp(0, total);
+    map['amount_paid'] = capped;
+    map['payment_status'] = capped <= 0
+        ? PaymentStatus.unpaid.key
+        : (capped >= total
+            ? PaymentStatus.paid.key
+            : PaymentStatus.partial.key);
+    await _ordersBox.put(orderId, map);
+    final shopId = map['shop_id'] as String?;
+    if (shopId != null) AppDatabase.notifyOrderChange(shopId);
+    final supaMap = Map<String, dynamic>.from(map);
+    supaMap.remove('image_url');
+    AppDatabase.bgWriteOrder(supaMap);
+  }
+
   /// Reprogramme une commande "en cours" : statut → scheduled, met à jour
   /// la date de livraison, persiste la raison de la reprogrammation. La
   /// présence de `reschedule_reason` sert ensuite de marqueur visuel
