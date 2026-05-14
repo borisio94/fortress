@@ -61,6 +61,64 @@ class _PartnerLedgerDetailPageState
     } catch (_) { return 'Partenaire'; }
   }
 
+  /// Confirme + supprime une entrée du partner_ledger. Utile pour
+  /// corriger une saisie erronée (ex: faux saleCollected créé par le bug
+  /// sync amount_paid). Pas de cascade : si l'entrée est liée à une
+  /// commande (`orderId`), la commande reste intacte.
+  Future<void> _confirmDeleteEntry(PartnerLedgerEntry entry) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer ce mouvement ?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(entry.type.labelFr,
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Text('Montant : '
+                '${entry.amount >= 0 ? '+' : '−'}'
+                '${CurrencyFormatter.format(entry.amount.abs())}',
+                style: const TextStyle(fontSize: 12)),
+            if ((entry.note ?? '').isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(entry.note!,
+                  style: TextStyle(
+                      fontSize: 11, color: AppColors.textHint)),
+            ],
+            const SizedBox(height: 10),
+            Text(
+                'Cette suppression est irréversible et impactera '
+                'directement le solde du partenaire.',
+                style: TextStyle(
+                    fontSize: 11, color: AppColors.error)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Annuler'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await PartnerLedgerService.deleteEntry(entry.id, widget.shopId);
+    if (mounted) {
+      AppSnack.success(context, 'Mouvement supprimé');
+    }
+  }
+
   Future<void> _registerRemittance() async {
     final res = await showFormSheet<_RemittanceResult>(
       context: context,
@@ -163,7 +221,10 @@ class _PartnerLedgerDetailPageState
                   itemCount: entries.length,
                   separatorBuilder: (_, __) => const Divider(
                       height: 1, color: Color(0xFFF0F0F0)),
-                  itemBuilder: (_, i) => _MovementTile(entry: entries[i]),
+                  itemBuilder: (_, i) => _MovementTile(
+                    entry: entries[i],
+                    onDelete: () => _confirmDeleteEntry(entries[i]),
+                  ),
                 ),
         ),
       ]),
@@ -173,7 +234,8 @@ class _PartnerLedgerDetailPageState
 
 class _MovementTile extends StatelessWidget {
   final PartnerLedgerEntry entry;
-  const _MovementTile({required this.entry});
+  final VoidCallback?      onDelete;
+  const _MovementTile({required this.entry, this.onDelete});
   @override
   Widget build(BuildContext context) {
     final sem = Theme.of(context).semantic;
@@ -215,6 +277,33 @@ class _MovementTile extends StatelessWidget {
           style: TextStyle(
               fontSize: 13, fontWeight: FontWeight.w800, color: color),
         ),
+        // Menu suppression — discret (3 points). Visible si onDelete fourni.
+        if (onDelete != null) ...[
+          const SizedBox(width: 4),
+          PopupMenuButton<String>(
+            tooltip: 'Options',
+            icon: Icon(Icons.more_vert_rounded,
+                size: 18, color: AppColors.textHint),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            onSelected: (v) {
+              if (v == 'delete') onDelete!();
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'delete',
+                child: Row(children: [
+                  Icon(Icons.delete_outline_rounded,
+                      size: 16, color: AppColors.error),
+                  const SizedBox(width: 8),
+                  Text('Supprimer',
+                      style: TextStyle(
+                          fontSize: 13, color: AppColors.error)),
+                ]),
+              ),
+            ],
+          ),
+        ],
       ]),
     );
   }
