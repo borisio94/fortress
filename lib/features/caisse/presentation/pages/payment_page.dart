@@ -22,7 +22,7 @@ import '../../domain/entities/sale.dart';
 import '../../domain/usecases/order_receipt_usecase.dart';
 import '../bloc/caisse_bloc.dart';
 import '../widgets/post_sale_sheet.dart';
-import '../widgets/delivery_details_sheet.dart';
+import '../widgets/order_creation_sheet.dart';
 
 class PaymentPage extends StatelessWidget {
   final String shopId;
@@ -93,7 +93,7 @@ class _PaymentView extends StatelessWidget {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: const Color(0xFFE5E7EB)),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
+                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.04),
                     blurRadius: 8, offset: const Offset(0, 2))],
               ),
               child: Column(children: [
@@ -159,31 +159,57 @@ class _PaymentView extends StatelessWidget {
                               'boutique. Contactez le propriétaire.');
                           return;
                         }
+                        // Principe métier : toute commande doit être rattachée
+                        // à un lieu (boutique OU dépôt partenaire). En vue
+                        // Globale (aucun chip sélectionné), `deliveryLocationId`
+                        // est null → on bloque l'encaissement. L'opérateur
+                        // doit retourner sur la caisse et choisir un chip.
+                        if ((state.deliveryLocationId ?? '').isEmpty) {
+                          AppSnack.error(context,
+                              'Sélectionne une boutique ou un partenaire '
+                              'avant de valider la vente.');
+                          return;
+                        }
                         // Capturer mode de paiement + livraison/expédition
                         // AVANT de compléter la vente : le stock sera déduit
-                        // de la bonne source et la commande embarque tous
-                        // les champs (paiement, ville, adresse, agence…).
-                        final res = await showDeliveryDetailsSheet(
+                        // Refactor UX commande : on n'encaisse plus
+                        // directement ici. Le flow uniforme (POS + e-com)
+                        // est désormais Sheet A (client + date + lieu) →
+                        // SaveOrder (scheduled). L'opérateur termine
+                        // l'encaissement via la page Commandes (Sheet B
+                        // au passage processing, Sheet C au passage
+                        // completed). Cohérent avec le principe métier
+                        // "tout est rattaché à un lieu" et permet
+                        // d'ouvrir la collecte paiement/frais au bon
+                        // moment opérationnel.
+                        final res = await showOrderCreationSheet(
                           context,
-                          shopId: shopId,
-                          initialPaymentMethod: state.paymentMethod,
+                          shopId:         shopId,
+                          initialClient:  state.selectedClient,
+                          initialDate:    state.deliveryDate,
+                          initialCity:    state.deliveryCity,
+                          initialAddress: state.deliveryAddress,
+                          orderTotal:     state.total,
                         );
                         if (res == null) return; // annulé
                         if (!context.mounted) return;
                         context.read<CaisseBloc>()
-                          ..add(SelectPaymentMethod(res.paymentMethod))
+                          ..add(SetSelectedClient(res.client))
+                          ..add(SetDeliveryDate(res.scheduledAt))
                           ..add(SetDeliveryDetails(
-                            mode:            res.mode,
-                            locationId:      res.locationId,
-                            personName:      res.personName,
+                            // mode / locationId conservés (chips actifs)
                             deliveryCity:    res.deliveryCity,
                             deliveryAddress: res.deliveryAddress,
-                            shipmentCity:    res.shipmentCity,
-                            shipmentAgency:  res.shipmentAgency,
-                            shipmentHandler: res.shipmentHandler,
-                            date:            res.date,
                           ))
-                          ..add(CompleteSale(shopId));
+                          ..add(SaveOrder(shopId,
+                              createdAt:  res.createdAt,
+                              amountPaid: res.amountPaid));
+                        // Retour panier puis page commandes : l'opérateur
+                        // verra la commande en "Programmée" et pourra
+                        // l'avancer.
+                        if (context.mounted) {
+                          Navigator.of(context).maybePop();
+                        }
                       },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
@@ -358,7 +384,7 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
               child: Container(
                 width: 80, height: 80,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withOpacity(0.12),
+                  color: const Color(0xFF10B981).withValues(alpha:0.12),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.check_rounded,
@@ -395,7 +421,7 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
                 label: const Text('Imprimer le ticket',
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary.withOpacity(0.10),
+                  backgroundColor: AppColors.primary.withValues(alpha:0.10),
                   foregroundColor: AppColors.primary,
                   elevation: 0,
                   shape: RoundedRectangleBorder(
@@ -442,7 +468,7 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.primary,
-                  side: BorderSide(color: AppColors.primary.withOpacity(0.4)),
+                  side: BorderSide(color: AppColors.primary.withValues(alpha:0.4)),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
                 ),

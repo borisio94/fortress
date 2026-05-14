@@ -120,8 +120,12 @@ class SaveOrder extends CaisseEvent {
   /// (par défaut DateTime.now()). Permet de saisir des ventes oubliées /
   /// hors-ligne / clôtures comptables. Aucune limite passée.
   final DateTime? createdAt;
-  SaveOrder(this.shopId, {this.createdAt});
-  @override List<Object?> get props => [shopId, createdAt];
+  /// Montant déjà encaissé par la boutique au moment de la création
+  /// (acompte ou paiement total upfront). 0 par défaut → commande naît
+  /// `unpaid`. Si > 0 → `partial` ou `paid` selon montant vs total.
+  final double amountPaid;
+  SaveOrder(this.shopId, {this.createdAt, this.amountPaid = 0});
+  @override List<Object?> get props => [shopId, createdAt, amountPaid];
 }
 
 /// Mise à jour statut d'une commande existante
@@ -1045,6 +1049,16 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
         await DeliveryReminderService.scheduleFor(updated);
       } else {
         // ── Mode CRÉATION : nouvelle commande ──
+        // Suivi paiement (hotfix_065) : si le sheet a capturé un acompte
+        // ou paiement intégral, on le persiste directement. paymentStatus
+        // dérivé du ratio amountPaid vs total.
+        final totalUpfront = state.total;
+        final paidAtCreation = event.amountPaid.clamp(0, totalUpfront);
+        final paymentStatus = paidAtCreation <= 0
+            ? PaymentStatus.unpaid
+            : (paidAtCreation >= totalUpfront
+                ? PaymentStatus.paid
+                : PaymentStatus.partial);
         final order = Sale(
           id:             'order_${DateTime.now().millisecondsSinceEpoch}',
           shopId:         event.shopId,
@@ -1055,6 +1069,8 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
               {'id': f.id, 'label': f.label, 'amount': f.amount}).toList(),
           paymentMethod:  state.paymentMethod,
           status:         SaleStatus.scheduled,
+          amountPaid:     paidAtCreation.toDouble(),
+          paymentStatus:  paymentStatus,
           clientId:       state.selectedClient?.id,
           clientName:     state.selectedClient?.name,
           clientPhone:    state.selectedClient?.phone,

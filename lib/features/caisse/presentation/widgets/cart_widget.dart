@@ -7,18 +7,20 @@ import 'package:go_router/go_router.dart';
 import '../bloc/caisse_bloc.dart';
 import '../../domain/entities/sale_item.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/utils/country_phone_data.dart';
-import '../../../../shared/widgets/product_image_smart.dart';
+import '../../../../shared/widgets/product_image_card.dart';
 import '../../../crm/domain/entities/client.dart';
 import '../../../crm/presentation/pages/clients_page.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/autocomplete_text_field.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../parametres/data/shop_settings_store.dart';
+import 'order_creation_sheet.dart';
 
 class CartWidget extends ConsumerWidget {
   final String shopId;
@@ -30,9 +32,15 @@ class CartWidget extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l = context.l10n;
     final canApplyDiscount = ref.watch(permissionsProvider(shopId)).canApplyDiscount;
+    final cs = Theme.of(context).colorScheme;
+    // Fond panier = surface neutre cohérente avec les autres surfaces
+    // (cards dashboard, inventaire). Pas de dégradé pour éviter la
+    // dissonance visuelle inter-pages.
     return LayoutBuilder(
         builder: (context, constraints) => BlocBuilder<CaisseBloc, CaisseState>(
-          builder: (context, state) => SizedBox(
+          builder: (context, state) => ColoredBox(
+            color: cs.surface,
+            child: SizedBox(
             height: constraints.maxHeight.isFinite
                 ? constraints.maxHeight
                 : MediaQuery.of(context).size.height * 0.85,
@@ -45,6 +53,9 @@ class CartWidget extends ConsumerWidget {
                 _PriceAlertBanner(alerts: state.priceAlerts),
 
               // ── Liste articles ─────────────────────────────────────────
+              // Panier vide → empty state simple. Le mini-dashboard a été
+              // retiré (utilisateur préférait l'empty state pur sans KPIs
+              // qui parasitaient la concentration sur la vente en cours).
               Expanded(
                 child: state.items.isEmpty
                     ? _EmptyCart(l: l)
@@ -59,9 +70,13 @@ class CartWidget extends ConsumerWidget {
                     return _CartItemRow(
                       item:        item,
                       onDecrement: () => ctx.read<CaisseBloc>().add(
-                          UpdateItemQuantity(item.productId, item.quantity - 1)),
+                          UpdateItemQuantity(item.productId,
+                              item.quantity - 1,
+                              variantName: item.variantName)),
                       onIncrement: () => ctx.read<CaisseBloc>().add(
-                          UpdateItemQuantity(item.productId, item.quantity + 1)),
+                          UpdateItemQuantity(item.productId,
+                              item.quantity + 1,
+                              variantName: item.variantName)),
                       onEditPrice: () {
                         if (!canApplyDiscount) {
                           AppSnack.error(ctx,
@@ -76,17 +91,17 @@ class CartWidget extends ConsumerWidget {
                 ),
               ),
 
-              // ── Frais de commande ─────────────────────────────────────
-              if (state.fees.isNotEmpty || state.items.isNotEmpty)
-                _FeesSection(shopId: shopId, state: state),
-
-              // ── Client + TVA ──────────────────────────────────────────
+              // ── TVA seule (les frais sont désormais saisis dans le
+              // sheet "Finaliser" au passage processing → completed,
+              // le client + date dans le sheet "Enregistrer la commande"
+              // au clic sur le bouton du panier). Allège le panier.
               if (state.items.isNotEmpty)
                 _ClientTaxSection(shopId: shopId, state: state),
 
               // ── Récap + bouton ────────────────────────────────────────
               _CartFooter(shopId: shopId, state: state, l: l, isEcommerce: isEcommerce),
             ]),
+          ),
           ),
         ));
   }
@@ -116,7 +131,6 @@ class _CartHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l      = context.l10n;
-    final client = state.selectedClient;
     // Mobile : header dense pour libérer de l'espace pour la liste.
     // Desktop : valeurs Material standard.
     final isCompact = MediaQuery.of(context).size.width < 900;
@@ -172,107 +186,13 @@ class _CartHeader extends StatelessWidget {
           ]),
         ),
 
-        // ── Zone client ────────────────────────────────────────────
-        Padding(
-          padding: EdgeInsets.fromLTRB(12, 0, 12, isCompact ? 4 : 10),
-          child: GestureDetector(
-            onTap: () => _openClientPicker(context),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              padding: EdgeInsets.symmetric(
-                  horizontal: isCompact ? 8 : 10,
-                  vertical:   isCompact ? 4 : 7),
-              decoration: BoxDecoration(
-                color: client != null
-                    ? AppColors.primarySurface
-                    : AppColors.inputFill,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: client != null
-                      ? AppColors.primary.withOpacity(0.35)
-                      : AppColors.divider,
-                ),
-              ),
-              child: Row(children: [
-                Container(
-                  width:  isCompact ? 22 : 26,
-                  height: isCompact ? 22 : 26,
-                  decoration: BoxDecoration(
-                    color: client != null
-                        ? AppColors.primary.withOpacity(0.15)
-                        : AppColors.divider,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: client != null
-                        ? Text(client.name[0].toUpperCase(),
-                            style: TextStyle(
-                                fontSize: isCompact ? 11 : 12,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.primary))
-                        : Icon(Icons.person_add_outlined,
-                            size: isCompact ? 12 : 13,
-                            color: AppColors.textHint),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: client != null
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(client.name,
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppColors.primary),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis),
-                            if (client.phone != null)
-                              Text(client.phone!,
-                                  style: const TextStyle(
-                                      fontSize: 10,
-                                      color: AppColors.textSecondary)),
-                          ])
-                      : const Text('Associer un client',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: AppColors.textHint)),
-                ),
-                if (client != null)
-                  GestureDetector(
-                    onTap: () => context
-                        .read<CaisseBloc>()
-                        .add(SetSelectedClient(null)),
-                    child: const Icon(Icons.close_rounded,
-                        size: 14, color: AppColors.textHint),
-                  )
-                else
-                  Icon(Icons.chevron_right_rounded,
-                      size: 16,
-                      color: AppColors.primary.withOpacity(0.5)),
-              ]),
-            ),
-          ),
-        ),
+        // Zone client supprimée — le client est désormais sélectionné
+        // dans le sheet "Enregistrer la commande" qui s'ouvre au clic
+        // sur le bouton du panier (allège l'UI du panier, regroupe les
+        // saisies métadonnées commande au moment de la décision).
+        // `state.selectedClient` reste accessible côté bloc et est
+        // affiché dans le footer si déjà saisi (pour transparence).
       ]),
-    );
-  }
-
-  void _openClientPicker(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius:
-          BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => _ClientPickerSheet(
-        shopId:   shopId,
-        bloc:     context.read<CaisseBloc>(),
-        selected: state.selectedClient,
-      ),
     );
   }
 }
@@ -287,9 +207,9 @@ class _PriceAlertBanner extends StatelessWidget {
     margin: const EdgeInsets.fromLTRB(10, 6, 10, 0),
     padding: const EdgeInsets.all(10),
     decoration: BoxDecoration(
-      color: AppColors.warning.withOpacity(0.08),
+      color: AppColors.warning.withValues(alpha:0.08),
       borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: AppColors.warning.withOpacity(0.35)),
+      border: Border.all(color: AppColors.warning.withValues(alpha:0.35)),
     ),
     child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Icon(Icons.warning_amber_rounded,
@@ -342,18 +262,12 @@ class _CartItemRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-        // Image produit
-        Container(
-          width: imageSize, height: imageSize,
-          decoration: BoxDecoration(
-            color: AppColors.inputFill,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: ProductImageSmart(
-            url:      item.imageUrl,
-            fallback: const _ProductIcon(),
-          ),
+        // Image produit — ratio carré 1:1 unifié.
+        ProductImageCard(
+          imageUrl: item.imageUrl,
+          width:    imageSize,
+          height:   imageSize,
+          borderRadius: BorderRadius.circular(8),
         ),
         const SizedBox(width: 10),
         // Infos produit
@@ -372,12 +286,12 @@ class _CartItemRow extends StatelessWidget {
                           fontWeight: FontWeight.w500),
                       maxLines: 1, overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 2),
-                // Prix + crayon édition
+                // Prix + bouton édition prix (arrondi, fond teinté primary)
                 GestureDetector(
                   onTap: onEditPrice,
                   child: Wrap(
                     crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 4,
+                    spacing: 6,
                     runSpacing: 2,
                     children: [
                       if (priceModified) ...[
@@ -396,8 +310,23 @@ class _CartItemRow extends StatelessWidget {
                             style: TextStyle(fontSize: 11,
                                 color: AppColors.primary,
                                 fontWeight: FontWeight.w600)),
-                      Icon(Icons.edit_rounded, size: 10,
-                          color: AppColors.primary.withOpacity(0.5)),
+                      // Bouton arrondi avec fond teinté du primary actif —
+                      // visible (vs l'ancienne icône 10px à 50% opacity).
+                      // Tailles adaptées au breakpoint 900 (mobile/desktop).
+                      Container(
+                        width: isCompact ? 22 : 26,
+                        height: isCompact ? 22 : 26,
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary
+                              .withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(
+                              isCompact ? 6 : 7),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(Icons.edit_rounded,
+                            size: isCompact ? 12 : 14,
+                            color: Theme.of(context).colorScheme.primary),
+                      ),
                     ],
                   ),
                 ),
@@ -435,6 +364,7 @@ class _CartItemRow extends StatelessWidget {
 }
 
 // ─── Section frais de commande ────────────────────────────────────────────────
+// ignore: unused_element
 class _FeesSection extends StatelessWidget {
   final String shopId;
   final CaisseState state;
@@ -487,7 +417,7 @@ class _FeesSection extends StatelessWidget {
                       overflow: TextOverflow.ellipsis)),
                   const SizedBox(width: 4),
                   Icon(Icons.edit_rounded, size: 10,
-                      color: AppColors.primary.withOpacity(0.4)),
+                      color: AppColors.primary.withValues(alpha:0.4)),
                 ]),
               ),
             ),
@@ -540,7 +470,7 @@ class _FeesSection extends StatelessWidget {
             suggestions: suggestions,
           ),
           const SizedBox(height: 10),
-          _FeeField(ctrl: amountCtrl, hint: 'Montant (XAF)',
+          _FeeField(ctrl: amountCtrl, hint: 'Montant (${CurrencyFormatter.currentSymbol})',
               icon: Icons.payments_outlined, inputType: TextInputType.number),
         ]),
         actions: [
@@ -592,7 +522,7 @@ class _FeesSection extends StatelessWidget {
             suggestions: suggestions,
           ),
           const SizedBox(height: 10),
-          _FeeField(ctrl: amountCtrl, hint: 'Montant (XAF)',
+          _FeeField(ctrl: amountCtrl, hint: 'Montant (${CurrencyFormatter.currentSymbol})',
               icon: Icons.payments_outlined, inputType: TextInputType.number),
         ]),
         actions: [
@@ -654,11 +584,13 @@ class _ClientTaxSection extends StatelessWidget {
 
 
 // ─── Bottom sheet sélection client ───────────────────────────────────────────
+// ignore: unused_element
 class _ClientPickerSheet extends StatefulWidget {
   final String     shopId;
   final CaisseBloc bloc;
   final Client?    selected;
   const _ClientPickerSheet({
+    // ignore: unused_element_parameter
     required this.shopId, required this.bloc, this.selected});
   @override
   State<_ClientPickerSheet> createState() => _ClientPickerSheetState();
@@ -695,7 +627,7 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
               color: const Color(0xFFDDDDDD),
               borderRadius: BorderRadius.circular(2))),
 
-      // Titre
+      // Titre — restitué tel qu'avant (pas de X demandé sur cette page).
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         child: Row(children: [
@@ -800,7 +732,7 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
               leading: Container(
                 width: 36, height: 36,
                 decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.1),
+                    color: AppColors.primary.withValues(alpha:0.1),
                     shape: BoxShape.circle),
                 child: Center(child: Text(
                   c.name[0].toUpperCase(),
@@ -852,30 +784,23 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      showModalBottomSheet(
+      // Bascule en page pleine sur mobile (gestion clavier native par le
+      // Scaffold), reste un sheet sur desktop. Cf. AdaptiveFormFrame.
+      showAdaptiveFormSheet(
         context: this.context,
-        isScrollControlled: true,
-        backgroundColor: Colors.white,
-        shape: const RoundedRectangleBorder(
-            borderRadius:
-            BorderRadius.vertical(top: Radius.circular(20))),
-        builder: (ctx) => Padding(
-          padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom),
-          child: ClientFormSheet(
-            shopId: shopId,
-            onSaved: () {
-              Navigator.of(ctx).pop();
-              // Récupérer le dernier client créé depuis Hive
-              final all = AppDatabase.getClientsForShop(shopId);
-              if (all.isNotEmpty) {
-                final newest = all.reduce((a, b) =>
-                a.createdAt.isAfter(b.createdAt) ? a : b);
-                // Sélectionner via le bloc (stable, indépendant du widget tree)
-                bloc.add(SetSelectedClient(newest));
-              }
-            },
-          ),
+        builder: (ctx) => ClientFormSheet(
+          shopId: shopId,
+          onSaved: () {
+            Navigator.of(ctx).pop();
+            // Récupérer le dernier client créé depuis Hive
+            final all = AppDatabase.getClientsForShop(shopId);
+            if (all.isNotEmpty) {
+              final newest = all.reduce((a, b) =>
+              a.createdAt.isAfter(b.createdAt) ? a : b);
+              // Sélectionner via le bloc (stable, indépendant du widget tree)
+              bloc.add(SetSelectedClient(newest));
+            }
+          },
         ),
       );
     });
@@ -920,31 +845,9 @@ class _CartFooter extends StatelessWidget {
                 color: AppColors.primary)),
       ]),
       const SizedBox(height: 12),
-      // Date à laquelle la commande est censée être livrée (saisie par le
-      // client à la création). Persistée sur Sale.scheduledAt. La date
-      // RÉELLE de livraison sera capturée plus tard dans le sheet qui
-      // s'ouvre quand la commande passe à "complete".
-      if (state.items.isNotEmpty) ...[
-        _ScheduledDeliveryField(state: state),
-        const SizedBox(height: 12),
-      ],
-      // Le message "Sélectionne un client" est diffusé en tooltip sur le
-      // bouton désactivé (tap pour l'afficher) plutôt qu'en texte sous le
-      // bouton — moins encombrant dans un panier déjà chargé.
-      Tooltip(
-        message: state.items.isNotEmpty && state.selectedClient == null
-            ? 'Sélectionne un client avant de valider — règle obligatoire.'
-            : '',
-        triggerMode: TooltipTriggerMode.tap,
-        showDuration: const Duration(seconds: 3),
-        preferBelow: false,
-        decoration: BoxDecoration(
-          color: AppColors.warning,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        textStyle: const TextStyle(
-            fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600),
-        child: SizedBox(
+      // Date de livraison déplacée vers le sheet "Enregistrer la commande"
+      // qui s'ouvre au clic sur le bouton du panier (allège l'UI panier).
+      SizedBox(
           width: double.infinity,
           child: Builder(builder: (btnCtx) {
             final isCompact = MediaQuery.of(btnCtx).size.width < 900;
@@ -956,60 +859,123 @@ class _CartFooter extends StatelessWidget {
                 ? const Size.fromHeight(34)
                 : const Size.fromHeight(46);
             final btnRadius = isCompact ? 8.0 : 10.0;
-            return isEcommerce
-                ? ElevatedButton.icon(
-              icon: state.isProcessing
-                  ? SizedBox(width: iconSize, height: iconSize,
-                  child: const CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
-                  : Icon(Icons.save_outlined, size: iconSize),
-              label: Text(state.orderSaved == true
-                  ? (state.editingOrderId != null
-                  ? 'Modifications enregistrées ✓'
-                  : 'Commande enregistrée ✓')
-                  : (state.editingOrderId != null
-                  ? 'Mettre à jour la commande'
-                  : 'Enregistrer la commande')),
-              onPressed: state.items.isEmpty
-                      || state.isProcessing
-                      || state.orderSaved == true
-                      || state.selectedClient == null
-                  ? null
-                  : () {
-                try {
-                  context.read<CaisseBloc>().add(SaveOrder(shopId));
-                } catch (e) {
-                  debugPrint('SaveOrder error: $e');
+            // Raison du blocage (si présent) — utilisée pour snackbar.
+            // Le client est désormais demandé DANS le sheet "Enregistrer la
+            // commande" qui s'ouvre au clic — donc on ne le bloque plus ici.
+            String? missing;
+            if (state.items.isEmpty) {
+              missing = 'Ajoute au moins un article au panier.';
+            } else if ((state.deliveryLocationId ?? '').isEmpty) {
+              // Principe métier : toute commande doit être rattachée à un
+              // lieu (boutique principale OU dépôt partenaire). En vue
+              // Globale (aucun chip sélectionné), pas de vente possible.
+              missing = 'Sélectionne une boutique ou un partenaire avant de vendre.';
+            }
+            final blockedBecauseProcessing = state.isProcessing;
+            final blockedBecauseSaved      = state.orderSaved == true;
+            final isBlocked = missing != null
+                || blockedBecauseProcessing
+                || blockedBecauseSaved;
+
+            // Couleurs liées au thème actif — change automatiquement quand
+            // l'utilisateur bascule de palette dans Paramètres → Thème.
+            final theme   = Theme.of(context);
+            final cs      = theme.colorScheme;
+            final sem     = theme.semantic;
+            final bgColor = blockedBecauseSaved
+                ? sem.success
+                : isBlocked
+                    ? cs.primary.withValues(alpha: 0.45)
+                    : cs.primary;
+
+            VoidCallback? buildOnPressed() {
+              // Toujours tappable : si bloqué, on affiche un snackbar ;
+              // sinon on dispatche l'event.
+              return () async {
+                if (missing != null) {
+                  AppSnack.error(context, missing);
+                  return;
                 }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: state.orderSaved == true
-                    ? AppColors.secondary : AppColors.primary,
-                foregroundColor: Colors.white, elevation: 0,
-                minimumSize: btnMinH,
-                padding: btnPad,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(btnRadius)),
-              ),
-            )
+                if (blockedBecauseProcessing || blockedBecauseSaved) return;
+                if (isEcommerce) {
+                  // Sheet A : recueille client + date livraison + lieu
+                  // (ville + quartier pré-remplis depuis le client). Le
+                  // mode et locationId restent ceux déjà set par les chips
+                  // (boutique ou partenaire), pas demandés ici.
+                  final bloc = context.read<CaisseBloc>();
+                  final st   = bloc.state;
+                  final res  = await showOrderCreationSheet(
+                    context,
+                    shopId:         shopId,
+                    initialClient:  st.selectedClient,
+                    initialDate:    st.deliveryDate,
+                    initialCity:    st.deliveryCity,
+                    initialAddress: st.deliveryAddress,
+                    orderTotal:     st.total,
+                  );
+                  if (res == null) return; // annulé
+                  if (!context.mounted) return;
+                  bloc
+                    ..add(SetSelectedClient(res.client))
+                    ..add(SetDeliveryDate(res.scheduledAt))
+                    ..add(SetDeliveryDetails(
+                      // mode / locationId conservés (chips actifs)
+                      deliveryCity:    res.deliveryCity,
+                      deliveryAddress: res.deliveryAddress,
+                    ))
+                    ..add(SaveOrder(shopId,
+                        createdAt:  res.createdAt,
+                        amountPaid: res.amountPaid));
+                } else {
+                  context.push('/shop/$shopId/caisse/payment');
+                }
+              };
+            }
+
+            final buttonStyle = ElevatedButton.styleFrom(
+              backgroundColor: bgColor,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              minimumSize: btnMinH,
+              padding: btnPad,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(btnRadius)),
+            );
+
+            final btn = isEcommerce
+                ? ElevatedButton.icon(
+                    icon: state.isProcessing
+                        ? SizedBox(width: iconSize, height: iconSize,
+                            child: const CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : Icon(Icons.save_outlined, size: iconSize),
+                    label: Text(state.orderSaved == true
+                        ? (state.editingOrderId != null
+                            ? 'Modifications enregistrées ✓'
+                            : 'Commande enregistrée ✓')
+                        : (state.editingOrderId != null
+                            ? 'Mettre à jour la commande'
+                            : 'Enregistrer la commande')),
+                    onPressed: buildOnPressed(),
+                    style: buttonStyle,
+                  )
                 : ElevatedButton.icon(
-              icon: Icon(Icons.point_of_sale_rounded, size: iconSize),
-              label: Text(l.caissePay),
-              onPressed: state.items.isEmpty || state.selectedClient == null
-                  ? null
-                  : () => context.push('/shop/$shopId/caisse/payment'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white, elevation: 0,
-                minimumSize: btnMinH,
-                padding: btnPad,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(btnRadius)),
-              ),
+                    icon: Icon(Icons.point_of_sale_rounded, size: iconSize),
+                    label: Text(l.caissePay),
+                    onPressed: buildOnPressed(),
+                    style: buttonStyle,
+                  );
+            // Tooltip toujours présent quand bloqué — montre la raison
+            // au survol desktop et au long-press mobile.
+            return Tooltip(
+              message: missing ?? '',
+              triggerMode: missing == null
+                  ? TooltipTriggerMode.manual
+                  : TooltipTriggerMode.longPress,
+              child: btn,
             );
           }),
         ),
-      ),
     ]),
   );
 }
@@ -1043,7 +1009,7 @@ class _TvaLine extends StatelessWidget {
   }
 
   void _showTaxDialog(BuildContext context) {
-    final rate = state.taxRate ?? 0.0;
+    final rate = state.taxRate;
     final ctrl = TextEditingController(
         text: rate == 0 ? '' : rate.toStringAsFixed(
             rate % 1 == 0 ? 0 : 2));
@@ -1101,7 +1067,7 @@ class _TvaLine extends StatelessWidget {
               enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide(
-                      color: AppColors.primary.withOpacity(0.3),
+                      color: AppColors.primary.withValues(alpha:0.3),
                       width: 1)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
@@ -1141,7 +1107,7 @@ class _TvaLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final rate     = state.taxRate ?? 0.0;
+    final rate     = state.taxRate;
     final currency = _currency;
     final amount   = state.taxAmount;
     return Row(
@@ -1197,7 +1163,7 @@ class _TvaLine extends StatelessWidget {
                 color: AppColors.primarySurface,
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(
-                    color: AppColors.primary.withOpacity(0.3)),
+                    color: AppColors.primary.withValues(alpha:0.3)),
               ),
               child: Icon(Icons.edit_rounded,
                   size: 12, color: AppColors.primary),
@@ -1294,7 +1260,7 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
         title: Row(children: [
           Container(width: 32, height: 32,
               decoration: BoxDecoration(
-                  color: AppColors.warning.withOpacity(0.14),
+                  color: AppColors.warning.withValues(alpha:0.14),
                   borderRadius: BorderRadius.circular(8)),
               child: const Icon(Icons.warning_amber_rounded,
                   size: 17, color: AppColors.warning)),
@@ -1377,7 +1343,8 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
       final ok = await _confirmLowMargin(v, margin);
       if (!ok) return;
     }
-    widget.bloc.add(UpdateItemPrice(widget.item.productId, v));
+    widget.bloc.add(UpdateItemPrice(widget.item.productId, v,
+        variantName: widget.item.variantName));
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -1448,10 +1415,10 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
             textAlign: TextAlign.center,
             decoration: InputDecoration(
               hintText: '0',
-              suffixText: 'XAF',
+              suffixText: CurrencyFormatter.currentSymbol,
               suffixStyle: TextStyle(fontSize: 13, color: color),
               filled: true,
-              fillColor: color.withOpacity(0.06),
+              fillColor: color.withValues(alpha:0.06),
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(
                   horizontal: 16, vertical: 16),
@@ -1461,7 +1428,7 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
               enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide(
-                      color: color.withOpacity(0.5), width: 1.5)),
+                      color: color.withValues(alpha:0.5), width: 1.5)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide(color: color, width: 2)),
@@ -1513,9 +1480,9 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: color.withOpacity(0.10),
+                color: color.withValues(alpha:0.10),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: color.withOpacity(0.35)),
+                border: Border.all(color: color.withValues(alpha:0.35)),
               ),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1544,7 +1511,8 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
                 child: OutlinedButton(
                   onPressed: () {
                     widget.bloc.add(UpdateItemPrice(
-                        widget.item.productId, null));
+                        widget.item.productId, null,
+                        variantName: widget.item.variantName));
                     Navigator.of(context).pop();
                   },
                   style: OutlinedButton.styleFrom(
@@ -1568,7 +1536,7 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   disabledBackgroundColor:
-                      AppColors.primary.withOpacity(0.35),
+                      AppColors.primary.withValues(alpha:0.35),
                   elevation: 0,
                   padding: const EdgeInsets.symmetric(vertical: 13),
                   shape: RoundedRectangleBorder(
@@ -1593,11 +1561,12 @@ class _QtyBtn extends StatelessWidget {
   const _QtyBtn({required this.icon, required this.onTap});
   @override
   Widget build(BuildContext context) {
-    // Mobile : 24×24 (spec round 9 — densité maximale dans le bottom
-    // sheet). Desktop : 48×48 (a11y P0-8 — taille tactile correcte).
+    // Aligné sur la taille du bouton "modifier prix" du même panier
+    // (22 mobile / 26 desktop) pour cohérence visuelle. Plus discret
+    // qu'avant — la card produit reste lisible avec moins de bruit.
     final isCompact = MediaQuery.of(context).size.width < 900;
-    final boxSize  = isCompact ? 24.0 : 48.0;
-    final iconSize = isCompact ? 14.0 : 20.0;
+    final boxSize  = isCompact ? 22.0 : 26.0;
+    final iconSize = isCompact ? 12.0 : 14.0;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
@@ -1659,20 +1628,12 @@ class _EmptyCart extends StatelessWidget {
   );
 }
 
-class _ProductIcon extends StatelessWidget {
-  const _ProductIcon();
-  @override
-  Widget build(BuildContext context) => const Center(
-    child: Icon(Icons.inventory_2_outlined,
-        size: 20, color: AppColors.textHint),
-  );
-}
-
 // ─── Date de livraison prévue (cliquable, optionnel) ───────────────────────
 // Représente la date que le client a demandée pour être livré.
 // Persistée sur Sale.scheduledAt. La date RÉELLE de livraison (constatée
 // au moment où la commande passe à `completed`) est saisie séparément dans
 // le DeliveryDetailsSheet.
+// ignore: unused_element
 class _ScheduledDeliveryField extends StatelessWidget {
   final CaisseState state;
   const _ScheduledDeliveryField({required this.state});
@@ -1717,12 +1678,12 @@ class _ScheduledDeliveryField extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(
           color: has
-              ? AppColors.primary.withOpacity(0.06)
+              ? AppColors.primary.withValues(alpha:0.06)
               : const Color(0xFFF9FAFB),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: has
-                ? AppColors.primary.withOpacity(0.30)
+                ? AppColors.primary.withValues(alpha:0.30)
                 : AppColors.divider,
           ),
         ),

@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../core/database/app_database.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../crm/domain/entities/client.dart';
@@ -27,16 +30,25 @@ class OrderCreationResult {
   /// saisie de ventes effectuées hors-ligne / oubliées / en retard.
   /// Maps sur `Sale.createdAt` côté bloc.
   final DateTime  createdAt;
+  /// Montant déjà encaissé par la boutique au moment de la création.
+  /// Permet de capturer un acompte client (paiement partiel) OU un
+  /// paiement total upfront sans devoir ouvrir un dialog supplémentaire
+  /// après création. `0` = aucun versement (la commande naît `unpaid`).
+  final double    amountPaid;
   const OrderCreationResult({
     required this.client,
     required this.scheduledAt,
     required this.deliveryCity,
     required this.deliveryAddress,
     required this.createdAt,
+    this.amountPaid = 0,
   });
 }
 
 /// Helper d'ouverture standardisé.
+/// `orderTotal` (optionnel) : si fourni, débloque le champ "Acompte versé"
+/// qui permet de saisir un paiement partiel ou total à la création (sans
+/// passer par un dialog acompte ultérieur). Cap au total.
 Future<OrderCreationResult?> showOrderCreationSheet(
   BuildContext context, {
   required String shopId,
@@ -45,6 +57,7 @@ Future<OrderCreationResult?> showOrderCreationSheet(
   String?   initialCity,
   String?   initialAddress,
   DateTime? initialCreatedAt,
+  double?   orderTotal,
 }) {
   return showFormSheet<OrderCreationResult>(
     context: context,
@@ -55,6 +68,7 @@ Future<OrderCreationResult?> showOrderCreationSheet(
       initialCity:      initialCity,
       initialAddress:   initialAddress,
       initialCreatedAt: initialCreatedAt,
+      orderTotal:       orderTotal,
     ),
   );
 }
@@ -66,6 +80,7 @@ class _OrderCreationSheet extends StatefulWidget {
   final String?   initialCity;
   final String?   initialAddress;
   final DateTime? initialCreatedAt;
+  final double?   orderTotal;
   const _OrderCreationSheet({
     required this.shopId,
     this.initialClient,
@@ -73,6 +88,7 @@ class _OrderCreationSheet extends StatefulWidget {
     this.initialCity,
     this.initialAddress,
     this.initialCreatedAt,
+    this.orderTotal,
   });
   @override
   State<_OrderCreationSheet> createState() => _OrderCreationSheetState();
@@ -88,6 +104,12 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
   late DateTime _createdAt;
   late final TextEditingController _cityCtrl;
   late final TextEditingController _addressCtrl;
+  // Suivi paiement à la création (hotfix_065). 3 modes mutually exclusifs :
+  //   • none    : `_amountPaid = 0` (commande naît `unpaid`)
+  //   • full    : `_amountPaid = orderTotal` (commande naît `paid`)
+  //   • partial : `_amountPaid = saisi par l'utilisateur`
+  _PaymentChoice _paymentChoice = _PaymentChoice.none;
+  late final TextEditingController _amountPaidCtrl;
   String? _error;
 
   @override
@@ -100,13 +122,32 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
         text: widget.initialCity ?? widget.initialClient?.city ?? '');
     _addressCtrl = TextEditingController(
         text: widget.initialAddress ?? widget.initialClient?.district ?? '');
+    _amountPaidCtrl = TextEditingController();
   }
 
   @override
   void dispose() {
     _cityCtrl.dispose();
     _addressCtrl.dispose();
+    _amountPaidCtrl.dispose();
     super.dispose();
+  }
+
+  /// Calcule le montant déjà encaissé selon le choix utilisateur.
+  /// Capé au total pour éviter une incohérence en cas de saisie > total.
+  double _resolveAmountPaid() {
+    final total = widget.orderTotal ?? 0;
+    switch (_paymentChoice) {
+      case _PaymentChoice.none:
+        return 0;
+      case _PaymentChoice.full:
+        return total;
+      case _PaymentChoice.partial:
+        final v = double.tryParse(
+            _amountPaidCtrl.text.trim().replaceAll(',', '.'));
+        if (v == null || v <= 0) return 0;
+        return v.clamp(0, total).toDouble();
+    }
   }
 
   Future<void> _pickClient() async {
@@ -214,6 +255,7 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
       deliveryCity:    city,
       deliveryAddress: address,
       createdAt:       _createdAt,
+      amountPaid:      _resolveAmountPaid(),
     ));
   }
 
@@ -302,6 +344,46 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
                       color: Theme.of(context).colorScheme.onSurface
                           .withValues(alpha: 0.55)),
                 ),
+                // ── Section paiement (cf. hotfix_065) ────────────────
+                // Affiché seulement si orderTotal connu (l'appelant l'a
+                // passé). Permet de saisir directement un acompte ou un
+                // paiement total dès la création — sans devoir ouvrir
+                // un dialog acompte après coup.
+                if ((widget.orderTotal ?? 0) > 0) ...[
+                  const SizedBox(height: 16),
+                  _SectionLabel(
+                      'Paiement reçu — Total ${_fmtMoney(widget.orderTotal!)}'),
+                  _PaymentChoiceRow(
+                    selected: _paymentChoice,
+                    onChanged: (v) => setState(() => _paymentChoice = v),
+                  ),
+                  if (_paymentChoice == _PaymentChoice.partial) ...[
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _amountPaidCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                            RegExp(r'[0-9.,]')),
+                      ],
+                      style: const TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w700),
+                      decoration: InputDecoration(
+                        hintText: 'Montant de l\'acompte',
+                        suffixText: CurrencyFormatter.currentSymbol,
+                        isDense: true,
+                        filled: true,
+                        fillColor: const Color(0xFFF9FAFB),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(
+                                color: Color(0xFFE5E7EB))),
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ],
+                ],
                 if (_error != null) ...[
                   const SizedBox(height: 8),
                   Text(_error!,
@@ -604,3 +686,97 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
   }
 }
 
+
+// ─── Suivi paiement à la création (hotfix_065) ─────────────────────────────
+//
+// 3 modes mutuellement exclusifs :
+//   • none    : commande naît `unpaid`, l'opérateur encaissera plus tard
+//                via le bouton Acompte ou Sheet C de complétion.
+//   • full    : `amount_paid = total`, statut `paid` immédiat.
+//   • partial : montant saisi, statut `partial`.
+enum _PaymentChoice { none, full, partial }
+
+class _PaymentChoiceRow extends StatelessWidget {
+  final _PaymentChoice selected;
+  final ValueChanged<_PaymentChoice> onChanged;
+  const _PaymentChoiceRow({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 6, runSpacing: 6,
+      children: [
+        _PaymentChip(
+          label: 'Aucun',
+          icon:  Icons.money_off_rounded,
+          active: selected == _PaymentChoice.none,
+          onTap: () => onChanged(_PaymentChoice.none),
+        ),
+        _PaymentChip(
+          label: 'Acompte',
+          icon:  Icons.payments_outlined,
+          active: selected == _PaymentChoice.partial,
+          onTap: () => onChanged(_PaymentChoice.partial),
+        ),
+        _PaymentChip(
+          label: 'Payé en intégralité',
+          icon:  Icons.check_circle_rounded,
+          active: selected == _PaymentChoice.full,
+          onTap: () => onChanged(_PaymentChoice.full),
+        ),
+      ],
+    );
+  }
+}
+
+class _PaymentChip extends StatelessWidget {
+  final String       label;
+  final IconData     icon;
+  final bool         active;
+  final VoidCallback onTap;
+  const _PaymentChip({
+    required this.label,
+    required this.icon,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: active ? sem.brandSurface : const Color(0xFFF9FAFB),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+              color: active
+                  ? sem.brand.withValues(alpha: 0.4)
+                  : sem.borderSubtle),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon,
+              size: 14,
+              color: active ? sem.brandText : const Color(0xFF6B7280)),
+          const SizedBox(width: 6),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                  color: active ? sem.brandText : const Color(0xFF111827))),
+        ]),
+      ),
+    );
+  }
+}
+
+String _fmtMoney(double amount) {
+  final fmt = NumberFormat('#,###', 'fr_FR');
+  return '${fmt.format(amount)} ${CurrencyFormatter.currentSymbol}';
+}

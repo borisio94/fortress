@@ -617,6 +617,8 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                   initialPaymentMethod: order.paymentMethod,
                   initialPersonName:    order.deliveryPersonName,
                   originLocationName:   _locationNameOf(order),
+                  orderTotal:           order.total,
+                  amountAlreadyPaid:    order.amountPaid,
                 );
                 if (res == null) return; // annulé → pas de changement
                 await _ds.updateOrderDelivery(
@@ -627,6 +629,13 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                   locationId:    order.deliveryLocationId,
                   personName:    res.personName,
                 );
+                // Si l'opérateur a saisi un nouvel encaissement dans le
+                // sheet, propager via recordPayment (qui dérive auto
+                // payment_status : partial / paid selon ratio total).
+                if (res.amountPaidTotal != null) {
+                  await _ds.recordPayment(
+                      order.id!, res.amountPaidTotal!);
+                }
               }
 
               // Transition processing/scheduled → completed : sheet C
@@ -645,6 +654,8 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                     initialPaymentMethod: order.paymentMethod,
                     initialPersonName:    order.deliveryPersonName,
                     originLocationName:   _locationNameOf(order),
+                    orderTotal:           order.total,
+                    amountAlreadyPaid:    order.amountPaid,
                   );
                   if (pres == null) return;
                   await _ds.updateOrderDelivery(
@@ -654,6 +665,10 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                     locationId:    order.deliveryLocationId,
                     personName:    pres.personName,
                   );
+                  if (pres.amountPaidTotal != null) {
+                    await _ds.recordPayment(
+                        order.id!, pres.amountPaidTotal!);
+                  }
                 }
                 if (!context.mounted) return;
                 // Re-lire l'ordre AVANT le sheet C : si Sheet B vient de
@@ -1015,6 +1030,54 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     color: _expanded ? color : const Color(0xFFBBBBBB)),
               ),
             ]),
+
+            // ── Bandeau « Reste à payer » (cf. hotfix_065) ─────
+            // Toujours visible (hors zone expansion) si la commande a un
+            // solde non encaissé et un statut pertinent. Tap → ouvre
+            // directement RecordAcompteDialog (raccourci sans déplier).
+            if (widget.order.amountDue > 0
+                && s != SaleStatus.cancelled
+                && s != SaleStatus.refused
+                && s != SaleStatus.refunded) ...[
+              const SizedBox(height: 6),
+              InkWell(
+                onTap: () => _recordAcompte(context),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppColors.warning.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                        color: AppColors.warning.withValues(alpha: 0.25),
+                        width: 0.5),
+                  ),
+                  child: Row(children: [
+                    Icon(Icons.payments_outlined,
+                        size: 12, color: AppColors.warning),
+                    const SizedBox(width: 6),
+                    Text(
+                        widget.order.amountPaid > 0
+                            ? 'Reste ${CurrencyFormatter.format(
+                                widget.order.amountDue)} à encaisser'
+                            : 'Encaisser ${CurrencyFormatter.format(
+                                widget.order.amountDue)}',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.warning)),
+                    const Spacer(),
+                    Text('Enregistrer →',
+                        style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.warning
+                                .withValues(alpha: 0.85))),
+                  ]),
+                ),
+              ),
+            ],
 
             // ── Détails expandés ───────────────────────────────
             AnimatedCrossFade(
