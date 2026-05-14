@@ -14,6 +14,8 @@ import '../../features/super_admin/presentation/pages/super_admin_page.dart';
 import '../../features/super_admin/presentation/pages/admin_subscriptions_page.dart';
 import '../../features/super_admin/presentation/pages/plans_page.dart';
 import '../../features/catalogue/presentation/pages/catalogue_page.dart';
+import '../../features/marketing/presentation/pages/landing_page.dart';
+import '../../features/marketing/presentation/pages/pricing_page.dart';
 import '../../features/tracking/presentation/pages/order_tracking_page.dart';
 import '../../features/subscription/presentation/pages/subscription_page.dart';
 import '../../features/hr/presentation/pages/employees_page.dart';
@@ -237,7 +239,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   final notifier = ref.watch(authRouterNotifierProvider);
 
   return GoRouter(
-    initialLocation: RouteNames.login,
+    initialLocation: RouteNames.landing,
     refreshListenable: notifier, // ← le router se rafraîchit quand notifier change
     redirect: (context, state) {
       // Helper : destination après login. Si l'utilisateur a EXACTEMENT
@@ -268,6 +270,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final isAcceptInviteRoute  = loc.startsWith('/accept-invite');
       final isCatalogueRoute     = loc.startsWith('/catalogue/');
       final isTrackRoute         = loc.startsWith('/track/');
+      // Routes marketing publiques (`/` landing + `/pricing`). Toujours
+      // accessibles sans auth ; un utilisateur loggé qui les visite est
+      // redirigé vers sa destination habituelle (dashboard / shop-selector).
+      final isLandingRoute       = loc == RouteNames.landing;
+      final isPricingRoute       = loc == RouteNames.pricing;
+      final isPublicMarketing    = isLandingRoute || isPricingRoute;
 
       // ── /accept-invite : page publique, jamais rediriger ───────────
       // Gère elle-même l'état (invité/connecté/mauvais compte)
@@ -276,6 +284,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (isCatalogueRoute) return null;
       // ── /track/:orderId : suivi de commande public sans auth ───────
       if (isTrackRoute) return null;
+      // ── / et /pricing : pages marketing publiques sans auth.
+      // Pour les visiteurs anonymes → on laisse passer. Pour les utilisateurs
+      // déjà loggés, le bloc plus bas (`CAS 3 — Abonnement actif : isAuthRoute
+      // → dashboard direct`) ne s'applique pas (ils ne sont pas sur /auth).
+      // On gère donc explicitement ici : loggé + plan chargé → postAuthDest.
+      if (isPublicMarketing && !isLoggedIn) return null;
 
       // ── Boot : check session pas encore terminé ────────────────────
       // Au refresh navigateur, AuthBloc évalue la session Supabase de
@@ -298,9 +312,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // ── CAS 1 — Super Admin ────────────────────────────────────────
       if (plan.isSuperAdmin) {
         if (isAuthRoute) return RouteNames.superAdminHome;
+        // Le super admin peut prévisualiser les pages marketing publiques
+        // (utile pour vérifier le rendu live avant communication externe).
         final allowed = loc.startsWith('/super-admin') ||
             loc.startsWith('/admin') ||
-            loc.startsWith('/subscription');
+            loc.startsWith('/subscription') ||
+            isPublicMarketing;
         if (!allowed) return RouteNames.superAdminHome;
         return null;
       }
@@ -373,13 +390,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         return null;
       }
 
-      // ── CAS 3 — Abonnement actif : auth route → dashboard direct si
-      // 1 boutique, sinon shop-selector (cf. postAuthDestination).
-      if (isAuthRoute) return postAuthDestination();
+      // ── CAS 3 — Abonnement actif : auth route OU landing → dashboard
+      // direct si 1 boutique, sinon shop-selector (cf. postAuthDestination).
+      // Pour `/pricing` on laisse le user loggé y rester librement —
+      // utile pour comparer les plans avant upgrade.
+      if (isAuthRoute || isLandingRoute) return postAuthDestination();
 
       return null;
     },
     routes: [
+      // ── Pages marketing publiques (sans auth, sans shell) ─────────
+      GoRoute(path: RouteNames.landing,
+          builder: (c, s) => const LandingPage()),
+      GoRoute(path: RouteNames.pricing,
+          builder: (c, s) => const PricingPage()),
+
       GoRoute(path: '/catalogue/:shopId',
           builder: (c, s) {
             final qp = s.uri.queryParameters;

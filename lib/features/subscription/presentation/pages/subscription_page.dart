@@ -38,13 +38,14 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
   /// Cycle affiché. Mensuel ou annuel uniquement (spec : -20% sur l'annuel).
   String _cycle = 'monthly';
 
-  // Prix par tier × cycle. Source de vérité : table SQL `plans`. Ces valeurs
-  // sont dupliquées ici pour le rendu offline-first ; à terme on lira la
-  // table `plans` depuis Hive cache.
+  // Prix par tier × cycle. Source de vérité : table SQL `plans` (alignée
+  // sur hotfix_063_pricing_canvas_v2). Ces valeurs sont dupliquées ici
+  // pour le rendu offline-first ; à terme on lira la table `plans` depuis
+  // Hive cache. Annuel = mensuel × 9 (≈ -25 % vs 12 mois).
   static const _prices = <PlanType, Map<String, double>>{
-    PlanType.starter:  {'monthly':  5000, 'yearly':  50000},
-    PlanType.pro:      {'monthly': 10000, 'yearly': 100000},
-    PlanType.business: {'monthly': 25000, 'yearly': 250000},
+    PlanType.starter:  {'monthly':  3500, 'yearly':  31500},
+    PlanType.pro:      {'monthly':  8500, 'yearly':  76500},
+    PlanType.business: {'monthly': 18000, 'yearly': 162000},
   };
 
   double _priceFor(PlanType p) => _prices[p]?[_cycle] ?? 0;
@@ -273,7 +274,7 @@ class _CurrentStatusCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: sem.elevatedSurface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: accent.withOpacity(0.30), width: 1.2),
+        border: Border.all(color: accent.withValues(alpha:0.30), width: 1.2),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         // Header : icône + badge plan + jours restants à droite
@@ -281,7 +282,7 @@ class _CurrentStatusCard extends StatelessWidget {
           Container(
             width: 40, height: 40,
             decoration: BoxDecoration(
-              color: accent.withOpacity(0.14),
+              color: accent.withValues(alpha:0.14),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, size: 20, color: accent),
@@ -291,14 +292,14 @@ class _CurrentStatusCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(l.subCurrentStatus,
                 style: TextStyle(fontSize: 11,
-                    color: cs.onSurface.withOpacity(0.55),
+                    color: cs.onSurface.withValues(alpha:0.55),
                     fontWeight: FontWeight.w500)),
             const SizedBox(height: 2),
             Container(
               padding: const EdgeInsets.symmetric(
                   horizontal: 10, vertical: 3),
               decoration: BoxDecoration(
-                color: accent.withOpacity(0.14),
+                color: accent.withValues(alpha:0.14),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(label,
@@ -313,14 +314,14 @@ class _CurrentStatusCard extends StatelessWidget {
                       fontWeight: FontWeight.w800, color: accent)),
               Text(daysText,
                   style: TextStyle(fontSize: 10,
-                      color: cs.onSurface.withOpacity(0.55))),
+                      color: cs.onSurface.withValues(alpha:0.55))),
             ]),
         ]),
         if (dateLine.isNotEmpty) ...[
           const SizedBox(height: 12),
           Text(dateLine,
               style: TextStyle(fontSize: 12,
-                  color: cs.onSurface.withOpacity(0.7),
+                  color: cs.onSurface.withValues(alpha:0.7),
                   fontWeight: FontWeight.w500)),
         ],
         const SizedBox(height: 12),
@@ -330,7 +331,7 @@ class _CurrentStatusCard extends StatelessWidget {
           child: LinearProgressIndicator(
             value: progress,
             minHeight: 6,
-            backgroundColor: accent.withOpacity(0.14),
+            backgroundColor: accent.withValues(alpha:0.14),
             valueColor: AlwaysStoppedAnimation<Color>(accent),
           ),
         ),
@@ -338,7 +339,7 @@ class _CurrentStatusCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(l.subDaysOverTotal(daysLeft, totalDays),
               style: TextStyle(fontSize: 10,
-                  color: cs.onSurface.withOpacity(0.5))),
+                  color: cs.onSurface.withValues(alpha:0.5))),
         ],
       ]),
     );
@@ -395,14 +396,14 @@ class _CycleSelector extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         color: current == c
                             ? cs.onPrimary
-                            : cs.onSurface.withOpacity(0.7))),
+                            : cs.onSurface.withValues(alpha:0.7))),
                 if (c == 'yearly' && annualSavingsPct > 0) ...[
                   const SizedBox(height: 1),
                   Text(l.subSavingsAnnual(annualSavingsPct),
                       style: TextStyle(fontSize: 9,
                           fontWeight: FontWeight.w700,
                           color: current == c
-                              ? cs.onPrimary.withOpacity(0.85)
+                              ? cs.onPrimary.withValues(alpha:0.85)
                               : sem.success)),
                 ],
               ]),
@@ -471,7 +472,7 @@ class _PlanCard extends StatelessWidget {
           // Card du plan actuel : ombrage léger pour la mettre en avant.
           boxShadow: isCurrent
               ? [BoxShadow(
-                  color: accent.withOpacity(0.12),
+                  color: accent.withValues(alpha:0.12),
                   blurRadius: 12, offset: const Offset(0, 4))]
               : null,
         ),
@@ -492,7 +493,7 @@ class _PlanCard extends StatelessWidget {
               child: Text(priceSuffix,
                   style: TextStyle(fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      color: cs.onSurface.withOpacity(0.55))),
+                      color: cs.onSurface.withValues(alpha:0.55))),
             ),
           ]),
           if (savingsPct != null && savingsPct! > 0) ...[
@@ -525,8 +526,8 @@ class _PlanCard extends StatelessWidget {
                     style: OutlinedButton.styleFrom(
                       foregroundColor: accent,
                       disabledForegroundColor: accent,
-                      side: BorderSide(color: accent.withOpacity(0.45)),
-                      backgroundColor: accent.withOpacity(0.08),
+                      side: BorderSide(color: accent.withValues(alpha:0.45)),
+                      backgroundColor: accent.withValues(alpha:0.08),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10)),
                     ),
@@ -565,7 +566,7 @@ class _PlanCard extends StatelessWidget {
               color: cs.primary,
               borderRadius: BorderRadius.circular(20),
               boxShadow: [BoxShadow(
-                  color: cs.primary.withOpacity(0.35),
+                  color: cs.primary.withValues(alpha:0.35),
                   blurRadius: 8, offset: const Offset(0, 2))],
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -631,15 +632,15 @@ class _ContactAdminCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: cs.primary.withOpacity(0.06),
+        color: cs.primary.withValues(alpha:0.06),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.primary.withOpacity(0.18)),
+        border: Border.all(color: cs.primary.withValues(alpha:0.18)),
       ),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
           width: 36, height: 36,
           decoration: BoxDecoration(
-            color: cs.primary.withOpacity(0.14),
+            color: cs.primary.withValues(alpha:0.14),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Icon(Icons.support_agent_rounded,
@@ -654,7 +655,7 @@ class _ContactAdminCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text(l.subContactAdminBody,
               style: TextStyle(fontSize: 12, height: 1.5,
-                  color: cs.onSurface.withOpacity(0.7))),
+                  color: cs.onSurface.withValues(alpha:0.7))),
         ])),
       ]),
     );

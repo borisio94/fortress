@@ -113,7 +113,7 @@ class PlanLimits {
       maxProducts:     50,
       offlineEnabled:  false,
       features:        [],
-      trialDays:       7,
+      trialDays:       14,
     ),
     PlanType.starter: PlanLimits(
       maxShops:        1,

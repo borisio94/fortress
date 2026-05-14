@@ -1,4 +1,8 @@
 class RouteNames {
+  // Pages marketing publiques (sans auth)
+  static const landing = '/';
+  static const pricing = '/pricing';
+
   // Auth
   static const login = '/auth/login';
   static const register = '/auth/register';
@@ -29,6 +33,8 @@ class RouteNames {
   static const stockTransfers = '/shop/:shopId/parametres/transfers';
   static const userProfile = '/shop/:shopId/parametres/profile';
   static const employees   = '/shop/:shopId/employees';
+  static const tickets     = '/shop/:shopId/tickets';
+  static const ticketDetail = '/shop/:shopId/tickets/:ticketId';
   static const languagePage = '/shop/:shopId/parametres/language';
   static const currencyPage  = '/shop/:shopId/parametres/currency';
   static const themePage     = '/shop/:shopId/parametres/theme';
