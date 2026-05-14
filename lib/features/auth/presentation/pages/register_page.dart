@@ -1,22 +1,82 @@
-import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/router/route_names.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/country_phone_data.dart';
+import '../../../../core/validators/input_validators.dart';
+import '../../../../core/validators/password_policy.dart';
+import '../../../../core/widgets/fortress_logo.dart';
+import '../../../../shared/widgets/app_field.dart';
+import '../../../../shared/widgets/app_primary_button.dart';
+import '../../../../shared/widgets/app_snack.dart';
+import '../../../../shared/widgets/auth_fields.dart';
+import '../../../../shared/widgets/language_switcher.dart';
+import '../../../../shared/widgets/phone_field.dart';
+import '../../../shop_selector/domain/usecases/create_shop_usecase.dart';
+import '../../../shop_selector/presentation/bloc/shop_selector_bloc.dart';
+import '../../../../shared/providers/current_shop_provider.dart';
 import '../bloc/auth_bloc.dart';
 import '../bloc/auth_event.dart';
 import '../bloc/auth_state.dart';
-import '../../../../core/theme/app_colors.dart';
-import '../../../../core/i18n/app_localizations.dart';
-import '../../../../core/widgets/fortress_logo.dart';
-import '../../../../shared/widgets/app_primary_button.dart';
-import '../../../../shared/widgets/app_field.dart';
-import '../../../../shared/widgets/auth_fields.dart';
-import '../../../../shared/widgets/phone_field.dart';
-import '../../../../shared/widgets/app_snack.dart';
-import '../../../../shared/widgets/language_switcher.dart';
-import '../../../../core/validators/input_validators.dart';
-import '../../../../core/validators/password_policy.dart';
+
+// Steps découpés en `part of` pour respecter le cap 400 lignes/fichier
+// (CLAUDE.md). Le state `_RegisterPageState` reste privé mais accessible
+// aux 3 step widgets via la library implicite. Voir register_step_*.dart.
+part '../widgets/register_step_account.dart';
+part '../widgets/register_step_shop.dart';
+part '../widgets/register_step_recap.dart';
+
+// ═════════════════════════════════════════════════════════════════════════════
+// RegisterPage — tunnel self-service en 3 étapes :
+//   ① Compte    : nom, email, téléphone E.164, password + confirmation
+//   ② Boutique  : nom, secteur (6 valeurs), adresse / ville
+//   ③ Récap     : résumé + CTA « Démarrer mon essai 14 jours »
+//
+// Submit étape 3 :
+//   1. Dispatch `AuthSignUpAutoLoginRequested` (cf. auth_bloc — variante
+//      qui n'appelle PAS `logoutUseCase`, donc session active après signup).
+//   2. BlocListener AuthAuthenticated → dispatch `CreateShopRequested`.
+//   3. BlocListener ShopCreated → `context.go('/shop/{id}/dashboard')`.
+//   4. Fallback ShopSelectorError → `context.go('/shop-selector/create')`
+//      pour que l'utilisateur retente manuellement (compte est créé OK,
+//      pas de rollback).
+//
+// Mapping pays/devise : auto-déduit du téléphone E.164 saisi (cohérent
+// avec `_countryFromPhone` de CreateShopPage). Pas de champ explicite.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const _kSectors = <_SectorOption>[
+  _SectorOption('retail',      'Commerce'),
+  _SectorOption('restaurant',  'Restaurant'),
+  _SectorOption('supermarche', 'Supermarché'),
+  _SectorOption('pharmacie',   'Pharmacie'),
+  _SectorOption('ecommerce',   'E-commerce'),
+  _SectorOption('autre',       'Autre'),
+];
+
+const _countryCurrency = <String, String>{
+  'CM': 'XAF', 'TD': 'XAF', 'CF': 'XAF', 'CG': 'XAF', 'GA': 'XAF', 'GQ': 'XAF',
+  'SN': 'XOF', 'CI': 'XOF', 'BF': 'XOF', 'ML': 'XOF', 'NE': 'XOF', 'TG': 'XOF',
+  'BJ': 'XOF', 'GW': 'XOF',
+  'NG': 'NGN', 'GH': 'GHS', 'MA': 'MAD', 'TN': 'TND',
+  'FR': 'EUR', 'BE': 'EUR', 'DE': 'EUR', 'IT': 'EUR', 'ES': 'EUR',
+  'US': 'USD', 'CA': 'CAD', 'GB': 'GBP',
+};
+
+String _countryFromPhone(String? phone) {
+  if (phone == null || phone.isEmpty) return 'CM';
+  final sorted = kCountries.toList()
+    ..sort((a, b) => b.dialCode.length.compareTo(a.dialCode.length));
+  for (final c in sorted) {
+    if (phone.startsWith(c.dialCode)) return c.isoCode;
+  }
+  return 'CM';
+}
 
 class RegisterPage extends ConsumerStatefulWidget {
   const RegisterPage({super.key});
@@ -25,49 +85,37 @@ class RegisterPage extends ConsumerStatefulWidget {
 }
 
 class _RegisterPageState extends ConsumerState<RegisterPage> {
-  final _formKey  = GlobalKey<FormState>();
+  final _pageCtrl = PageController();
+  int _step = 0; // 0 / 1 / 2
+
+  // ── Step 1 — Compte ───────────────────────────────────────────────────
   final _namCtrl  = TextEditingController();
   final _mailCtrl = TextEditingController();
   final _telCtrl  = TextEditingController();
   final _passCtrl = TextEditingController();
   final _confCtrl = TextEditingController();
+  String  _phoneFull  = '';
+  bool    _phoneValid = false;
+  String? _nameError, _emailError, _passError, _confError;
 
-  bool   _isOnline     = true;
-  String _phoneFull    = '';
-  bool   _phoneValid   = false;
+  // ── Step 2 — Boutique ─────────────────────────────────────────────────
+  final _shopNameCtrl    = TextEditingController();
+  final _shopAddressCtrl = TextEditingController();
+  String  _sector        = 'retail';
+  String? _shopNameError;
 
-  // ── Erreurs temps réel ───────────────────────────────────────────────────
-  String? _nameError;
-  String? _emailError;
-  String? _passError;
-  String? _confError;
+  bool   _isOnline = true;
 
-  bool get _btnEnabled =>
-      _isOnline &&
-          _nameError == null &&
-          _emailError == null &&
-          _passError == null &&
-          _confError == null &&
-          _namCtrl.text.trim().length >= 2 &&
-          _mailCtrl.text.trim().isNotEmpty &&
-          _passCtrl.text.length >= PasswordPolicy.minLength &&
-          _confCtrl.text == _passCtrl.text &&
-          _phoneFull.isNotEmpty && _phoneValid;
-
-  String? _validateConfirm(String v) {
-    if (v != _passCtrl.text) return 'Mots de passe différents';
-    return null;
-  }
+  // True le temps que le bloc enchaîne signup → create-shop. Bloque les
+  // taps répétés du bouton « Démarrer ».
+  bool _submitting = false;
 
   @override
   void initState() {
     super.initState();
     _checkConnectivity();
     Connectivity().onConnectivityChanged.listen((results) {
-      if (mounted) setState(() => _isOnline = results.any((x) =>
-      x == ConnectivityResult.wifi ||
-          x == ConnectivityResult.mobile ||
-          x == ConnectivityResult.ethernet));
+      if (mounted) setState(() => _isOnline = results.any(_isReal));
     });
     _namCtrl.addListener(() => setState(() =>
         _nameError = InputValidators.name(_namCtrl.text)));
@@ -75,43 +123,99 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
         _emailError = InputValidators.email(_mailCtrl.text)));
     _passCtrl.addListener(() => setState(() {
       _passError = InputValidators.password(_passCtrl.text);
-      if (_confCtrl.text.isNotEmpty)
-        _confError = _validateConfirm(_confCtrl.text);
+      if (_confCtrl.text.isNotEmpty) {
+        _confError = _confCtrl.text != _passCtrl.text
+            ? 'Mots de passe différents' : null;
+      }
     }));
     _confCtrl.addListener(() => setState(() =>
-        _confError = _validateConfirm(_confCtrl.text)));
+        _confError = _confCtrl.text != _passCtrl.text
+            ? 'Mots de passe différents' : null));
+    _shopNameCtrl.addListener(() => setState(() {
+      final v = _shopNameCtrl.text.trim();
+      _shopNameError = v.isEmpty
+          ? null
+          : v.length < 2
+              ? 'Minimum 2 caractères'
+              : v.length > 60 ? 'Maximum 60 caractères' : null;
+    }));
   }
 
   Future<void> _checkConnectivity() async {
     final r = await Connectivity().checkConnectivity();
-    if (mounted) setState(() => _isOnline = r.any((x) =>
-    x == ConnectivityResult.wifi ||
-        x == ConnectivityResult.mobile ||
-        x == ConnectivityResult.ethernet));
+    if (mounted) setState(() => _isOnline = r.any(_isReal));
   }
+
+  static bool _isReal(ConnectivityResult x) =>
+      x == ConnectivityResult.wifi
+      || x == ConnectivityResult.mobile
+      || x == ConnectivityResult.ethernet;
 
   @override
   void dispose() {
-    for (final c in [_namCtrl, _mailCtrl, _telCtrl, _passCtrl, _confCtrl])
+    for (final c in [_namCtrl, _mailCtrl, _telCtrl, _passCtrl, _confCtrl,
+                     _shopNameCtrl, _shopAddressCtrl]) {
       c.dispose();
+    }
+    _pageCtrl.dispose();
     super.dispose();
   }
 
-  void _submit() {
-    // Déclencher toutes les validations
-    setState(() {
-      _nameError  = InputValidators.name(_namCtrl.text);
-      _emailError = InputValidators.email(_mailCtrl.text);
-      _passError  = InputValidators.password(_passCtrl.text);
-      _confError  = _validateConfirm(_confCtrl.text);
-    });
-    if (_nameError != null || _emailError != null ||
-        _passError != null || _confError != null) return;
-    if (_phoneFull.isNotEmpty && !_phoneValid) {
-      AppSnack.error(context, 'Numéro de téléphone invalide');
+  // ── Validation par étape ──────────────────────────────────────────────
+  bool get _step1Valid =>
+      _nameError == null &&
+      _emailError == null &&
+      _passError == null &&
+      _confError == null &&
+      _namCtrl.text.trim().length >= 2 &&
+      _mailCtrl.text.trim().isNotEmpty &&
+      _passCtrl.text.length >= PasswordPolicy.minLength &&
+      _confCtrl.text == _passCtrl.text &&
+      _phoneFull.isNotEmpty && _phoneValid;
+
+  bool get _step2Valid =>
+      _shopNameError == null &&
+      _shopNameCtrl.text.trim().length >= 2;
+
+  void _next() {
+    if (_step == 0) {
+      setState(() {
+        _nameError  = InputValidators.name(_namCtrl.text);
+        _emailError = InputValidators.email(_mailCtrl.text);
+        _passError  = InputValidators.password(_passCtrl.text);
+        _confError  = _confCtrl.text != _passCtrl.text
+            ? 'Mots de passe différents' : null;
+      });
+      if (!_step1Valid) return;
+    } else if (_step == 1) {
+      if (!_step2Valid) {
+        setState(() => _shopNameError =
+            _shopNameCtrl.text.trim().isEmpty
+                ? 'Nom de boutique requis' : _shopNameError);
+        return;
+      }
+    }
+    setState(() => _step = (_step + 1).clamp(0, 2));
+    _pageCtrl.animateToPage(_step,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOut);
+  }
+
+  void _back() {
+    if (_step == 0) {
+      context.pop();
       return;
     }
-    context.read<AuthBloc>().add(AuthRegisterRequested(
+    setState(() => _step = _step - 1);
+    _pageCtrl.animateToPage(_step,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOut);
+  }
+
+  void _submit() {
+    if (_submitting) return;
+    setState(() => _submitting = true);
+    context.read<AuthBloc>().add(AuthSignUpAutoLoginRequested(
       name:     _namCtrl.text.trim(),
       email:    _mailCtrl.text.trim(),
       password: _passCtrl.text,
@@ -119,207 +223,193 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
     ));
   }
 
+  void _createShopAfterSignUp() {
+    final country  = _countryFromPhone(_phoneFull);
+    final currency = _countryCurrency[country] ?? 'XAF';
+    context.read<ShopSelectorBloc>().add(CreateShopRequested(
+      CreateShopParams(
+        name:     _shopNameCtrl.text.trim(),
+        sector:   _sector,
+        currency: currency,
+        country:  country,
+        phone:    null,
+        email:    null,
+        address:  _shopAddressCtrl.text.trim().isNotEmpty
+            ? _shopAddressCtrl.text.trim() : null,
+      ),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
-    final l = context.l10n;
     return Scaffold(
       backgroundColor: AppColors.primarySurface,
-      body: BlocConsumer<AuthBloc, AuthState>(
-        listener: (context, state) {
-          if (state is AuthError) AppSnack.error(context, state.message);
-          if (state is AuthRegisterSuccess) {
-            AppSnack.success(context,
-                'Compte créé. Connectez-vous avec vos identifiants.');
-            context.go('/auth/login');
-          }
-        },
-        builder: (context, state) {
-          final isLoading = state is AuthLoading;
-          return Stack(children: [
-            Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(vertical: 32),
-                child: LayoutBuilder(builder: (context, box) {
-                  final isDesktop = box.maxWidth >= 600;
-                  return Center(
-                    child: Container(
-                      width: isDesktop ? 480 : box.maxWidth * 0.88,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 36, vertical: 36),
-                      child: Form(
-                        key: _formKey,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const FortressLogo.light(size: 30),
-                            const SizedBox(height: 24),
-                            Text(l.registerTitle,
-                                style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w800,
-                                    color: Color(0xFF0F172A))),
-                            const SizedBox(height: 4),
-                            Text(l.loginSubtitle,
-                                style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xFF6B7280))),
-                            const SizedBox(height: 24),
-
-                            // ── Nom ────────────────────────────────────
-                            NameField(
-                              controller: _namCtrl,
-                              hint: l.registerNameHint,
-                              label: l.registerName,
-                              required: true,
-                              validator: (_) => _nameError,
-                            ),
-                            if (_nameError != null)
-                              _ErrText(_nameError!),
-                            const SizedBox(height: 14),
-
-                            // ── Email ──────────────────────────────────
-                            EmailField(
-                              controller: _mailCtrl,
-                              hint: l.loginEmailHint,
-                              label: l.loginEmail,
-                              required: true,
-                              validator: (_) => _emailError,
-                            ),
-                            if (_emailError != null)
-                              _ErrText(_emailError!),
-                            const SizedBox(height: 14),
-
-                            // ── Téléphone ──────────────────────────────
-                            PhoneField(
-                              controller: _telCtrl,
-                              label: l.registerPhone,
-                              required: true,
-                              onChanged: (full, valid) {
-                                setState(() {
-                                  _phoneFull  = full;
-                                  _phoneValid = valid;
-                                });
-                              },
-                            ),
-                            const SizedBox(height: 14),
-
-                            // ── Mot de passe ───────────────────────────
-                            PasswordStrengthField(
-                              controller: _passCtrl,
-                              hint: l.loginPasswordHint,
-                              label: l.loginPassword,
-                              required: true,
-                              validator: (_) => _passError,
-                            ),
-                            if (_passError != null)
-                              _ErrText(_passError!),
-                            const SizedBox(height: 14),
-
-                            // ── Confirmation ───────────────────────────
-                            ConfirmPasswordField(
-                              controller: _confCtrl,
-                              originalController: _passCtrl,
-                              hint: l.loginPasswordHint,
-                              label: l.registerConfirmPass,
-                              required: true,
-                            ),
-                            if (_confError != null)
-                              _ErrText(_confError!),
-                            const SizedBox(height: 28),
-
-                            // ── Alerte hors ligne ──────────────────────
-                            if (!_isOnline)
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                margin: const EdgeInsets.only(bottom: 12),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFFFF7ED),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                      color: const Color(0xFFFBBF24)),
-                                ),
-                                child: Row(children: [
-                                  const Icon(Icons.wifi_off_rounded,
-                                      size: 14,
-                                      color: Color(0xFFF59E0B)),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      l.onlineRequiredForRegister,
-                                      style: const TextStyle(
-                                          fontSize: 11,
-                                          color: Color(0xFF92400E)),
-                                    ),
-                                  ),
-                                ]),
-                              ),
-
-                            // ── Bouton ─────────────────────────────────
-                            AppPrimaryButton(
-                              isLoading: isLoading,
-                              enabled: _btnEnabled && !isLoading,
-                              onTap: _submit,
-                              label: l.registerButton,
-                            ),
-                            const SizedBox(height: 20),
-
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(l.registerAlreadyAccount,
-                                    style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Color(0xFF6B7280))),
-                                GestureDetector(
-                                  onTap: () => context.pop(),
-                                  child: Text(l.registerSignIn,
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: AppColors.primary)),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                }),
+      body: MultiBlocListener(
+        listeners: [
+          BlocListener<AuthBloc, AuthState>(
+            listener: (ctx, state) {
+              if (state is AuthError && _submitting) {
+                setState(() => _submitting = false);
+                AppSnack.error(ctx, state.message);
+              } else if (state is AuthAuthenticated && _submitting) {
+                // Sign-up OK → enchaîne sur la création de boutique. Le
+                // user est déjà authentifié côté Supabase + cache local.
+                _createShopAfterSignUp();
+              }
+            },
+          ),
+          BlocListener<ShopSelectorBloc, ShopSelectorState>(
+            listener: (ctx, state) {
+              if (state is ShopCreated && _submitting) {
+                ref.read(currentShopProvider.notifier).setShop(state.shop);
+                ref.read(myShopsProvider.notifier).addShop(state.shop);
+                AppSnack.success(ctx,
+                    'Bienvenue ! Votre essai 14 jours commence maintenant.');
+                ctx.go('/shop/${state.shop.id}/dashboard');
+              } else if (state is ShopSelectorError && _submitting) {
+                // Compte créé OK mais shop KO → on envoie l'utilisateur sur
+                // le formulaire create-shop classique pour qu'il retente
+                // manuellement. Pas de rollback du compte (impossible
+                // sans RPC dédié côté Supabase Auth).
+                setState(() => _submitting = false);
+                AppSnack.error(ctx,
+                    'Compte créé, mais la boutique n\'a pas pu être créée : '
+                    '${state.message}. Réessayez ci-dessous.');
+                ctx.go(RouteNames.createShop);
+              }
+            },
+          ),
+        ],
+        child: SafeArea(
+          child: Stack(children: [
+            Column(children: [
+              _ProgressHeader(step: _step),
+              Expanded(
+                child: PageView(
+                  controller: _pageCtrl,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    _StepAccount(state: this),
+                    _StepShop(state: this),
+                    _StepRecap(state: this),
+                  ],
+                ),
               ),
-            ),
+              _BottomBar(state: this),
+            ]),
             Positioned(
-              top: 12, right: 16,
-              child: SafeArea(
-                child: LanguageSwitcher(
-                    backgroundColor: Colors.white.withOpacity(0.92)),
-              ),
+              top: 8, right: 16,
+              child: LanguageSwitcher(
+                  backgroundColor: Colors.white.withValues(alpha: 0.92)),
             ),
-          ]);
-        },
+          ]),
+        ),
       ),
     );
   }
 }
 
-// ── Message d'erreur ──────────────────────────────────────────────────────────
-class _ErrText extends StatelessWidget {
-  final String message;
-  const _ErrText(this.message);
-  @override
-  Widget build(BuildContext context) => Align(
-    alignment: Alignment.centerLeft,
-    child: Padding(
-      padding: const EdgeInsets.only(top: 4, left: 2),
-      child: Text(message,
-          style: const TextStyle(
-              fontSize: 10, color: Color(0xFFEF4444))),
-    ),
-  );
+class _SectorOption {
+  final String value;
+  final String label;
+  const _SectorOption(this.value, this.label);
 }
 
+// ─── Progress header ───────────────────────────────────────────────────────
+
+class _ProgressHeader extends StatelessWidget {
+  final int step;
+  const _ProgressHeader({required this.step});
+
+  @override
+  Widget build(BuildContext context) {
+    const titles = ['Vos infos', 'Votre boutique', 'C\'est parti !'];
+    return Container(
+      padding: const EdgeInsets.fromLTRB(24, 18, 24, 16),
+      child: Column(children: [
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const FortressLogo.light(size: 26),
+          const SizedBox(width: 8),
+          Text('Fortress',
+              style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary)),
+        ]),
+        const SizedBox(height: 16),
+        Row(children: List.generate(3, (i) => Expanded(
+          child: Container(
+            height: 4,
+            margin: EdgeInsets.only(right: i < 2 ? 6 : 0),
+            decoration: BoxDecoration(
+                color: i <= step
+                    ? AppColors.primary
+                    : AppColors.primary.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(2)),
+          ),
+        ))),
+        const SizedBox(height: 10),
+        Text('Étape ${step + 1}/3 — ${titles[step]}',
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary)),
+      ]),
+    );
+  }
+}
+
+// ─── Bottom navigation bar (Précédent / Continuer / Démarrer) ──────────────
+
+class _BottomBar extends StatelessWidget {
+  final _RegisterPageState state;
+  const _BottomBar({required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final isLast = state._step == 2;
+    final canForward = state._step == 0
+        ? state._step1Valid
+        : state._step == 1
+            ? state._step2Valid
+            : state._isOnline;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+      decoration: BoxDecoration(
+        color: AppColors.primarySurface,
+        border: Border(
+          top: BorderSide(
+              color: AppColors.primary.withValues(alpha: 0.08)),
+        ),
+      ),
+      child: Row(children: [
+        TextButton(
+          onPressed: state._submitting ? null : state._back,
+          child: Text(state._step == 0 ? 'Annuler' : 'Précédent',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textSecondary)),
+        ),
+        const Spacer(),
+        SizedBox(
+          width: 200,
+          child: AppPrimaryButton(
+            isLoading: state._submitting,
+            enabled: canForward && !state._submitting,
+            onTap: isLast ? state._submit : state._next,
+            label: isLast
+                ? 'Démarrer mon essai 14 jours'
+                : 'Continuer',
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+// Step widgets définis dans les fichiers `part of` en haut de ce fichier.
+// _StepAccount      → widgets/register_step_account.dart
+// _StepShop         → widgets/register_step_shop.dart
+// _StepRecap + _RecapRow + _RecapBullet + _ErrText
+//                   → widgets/register_step_recap.dart
