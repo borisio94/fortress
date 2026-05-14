@@ -13,6 +13,46 @@ enum SaleStatus {
   refunded,    // Remboursée
 }
 
+/// Workflow de paiement orthogonal au `SaleStatus`. Permet de distinguer
+/// les commandes avec acompte partiel (versement boutique avant livraison)
+/// des commandes entièrement payées. Le partenaire-livreur ne doit
+/// rapporter à la boutique que le SOLDE (= total − amountPaid), pas le
+/// total brut. Voir `hotfix_065_orders_payment_tracking.sql`.
+enum PaymentStatus {
+  unpaid,    // Rien d'encaissé
+  partial,   // Acompte versé, solde restant
+  paid,      // Totalement encaissée
+  refunded,  // Remboursée
+}
+
+extension PaymentStatusX on PaymentStatus {
+  /// Clé canonique côté SQL et JSON.
+  String get key => switch (this) {
+    PaymentStatus.unpaid   => 'unpaid',
+    PaymentStatus.partial  => 'partial',
+    PaymentStatus.paid     => 'paid',
+    PaymentStatus.refunded => 'refunded',
+  };
+  String get label => switch (this) {
+    PaymentStatus.unpaid   => 'Non payé',
+    PaymentStatus.partial  => 'Acompte',
+    PaymentStatus.paid     => 'Payé',
+    PaymentStatus.refunded => 'Remboursé',
+  };
+  Color get color => switch (this) {
+    PaymentStatus.unpaid   => const Color(0xFFEF4444),
+    PaymentStatus.partial  => const Color(0xFFF59E0B),
+    PaymentStatus.paid     => const Color(0xFF10B981),
+    PaymentStatus.refunded => const Color(0xFF9CA3AF),
+  };
+  static PaymentStatus fromKey(String? s) => switch ((s ?? '').toLowerCase()) {
+    'partial'  => PaymentStatus.partial,
+    'paid'     => PaymentStatus.paid,
+    'refunded' => PaymentStatus.refunded,
+    _          => PaymentStatus.unpaid,
+  };
+}
+
 /// Mode de livraison d'une vente.
 /// - `pickup`   : retrait en boutique (aucune livraison).
 /// - `inHouse`  : livraison par un membre/coursier de la boutique.
@@ -130,6 +170,21 @@ class Sale extends Equatable {
   /// l'affichage dans la liste.
   final String? rescheduleReason;
 
+  /// Origine de la commande (canal). `'pos'` (par défaut) pour les ventes
+  /// saisies en boutique, `'web'` pour celles passées via le catalogue
+  /// public, `'whatsapp'` pour les futures intégrations conversationnelles.
+  /// Orthogonal au [status] (workflow). Cf. hotfix_047.
+  final String source;
+
+  /// Somme effectivement encaissée à ce jour (par la boutique en acompte
+  /// ou par le partenaire-livreur à la livraison). Orthogonal à [total]
+  /// qui est le montant facturé.
+  final double amountPaid;
+
+  /// Statut de paiement orthogonal au [status] (workflow commande).
+  /// Cf. [PaymentStatus] et hotfix_065_orders_payment_tracking.sql.
+  final PaymentStatus paymentStatus;
+
   const Sale({
     this.id,
     required this.shopId,
@@ -157,6 +212,9 @@ class Sale extends Equatable {
     this.shipmentHandler,
     this.cancellationReason,
     this.rescheduleReason,
+    this.source = 'pos',
+    this.amountPaid = 0,
+    this.paymentStatus = PaymentStatus.unpaid,
   });
 
   double get subtotal  => items.fold(0, (s, i) => s + i.subtotal);
@@ -171,6 +229,18 @@ class Sale extends Equatable {
   /// sont répartis proportionnellement comme dépenses sur le prix de revient
   /// des articles côté dashboard/rapports.
   double get total     => subtotal - discountAmount + taxAmount;
+
+  /// Reste à payer = total − amountPaid, jamais négatif. Pour les commandes
+  /// dont `paymentStatus = paid`, retourne 0 (couvre les commandes legacy
+  /// pré-hotfix_065 où amountPaid n'est pas peuplé).
+  double get amountDue =>
+      paymentStatus == PaymentStatus.paid
+          ? 0
+          : (total - amountPaid).clamp(0, double.infinity);
+
+  /// `true` si la commande est totalement encaissée (que ce soit en une
+  /// fois ou via acompte + solde).
+  bool get isFullyPaid => paymentStatus == PaymentStatus.paid;
 
   Sale copyWith({
     String? id, String? shopId, List<SaleItem>? items,
@@ -191,6 +261,9 @@ class Sale extends Equatable {
     String? shipmentHandler,
     String? cancellationReason,
     String? rescheduleReason,
+    String? source,
+    double? amountPaid,
+    PaymentStatus? paymentStatus,
   }) => Sale(
     id:                 id             ?? this.id,
     shopId:             shopId         ?? this.shopId,
@@ -218,6 +291,9 @@ class Sale extends Equatable {
     shipmentHandler:    shipmentHandler    ?? this.shipmentHandler,
     cancellationReason: cancellationReason ?? this.cancellationReason,
     rescheduleReason:   rescheduleReason   ?? this.rescheduleReason,
+    source:             source             ?? this.source,
+    amountPaid:         amountPaid         ?? this.amountPaid,
+    paymentStatus:      paymentStatus      ?? this.paymentStatus,
   );
 
   @override

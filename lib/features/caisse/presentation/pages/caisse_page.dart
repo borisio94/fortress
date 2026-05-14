@@ -779,6 +779,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 
     final feesTotal  = fees.fold<double>(0, (s, f) => s + f.amount);
     final orderTotal = order.total;
+    // Acompte boutique déjà versé avant la livraison (hotfix_065). Le
+    // partenaire n'encaisse que le SOLDE (total − acompte), donc il ne
+    // nous doit que ce solde, pas le total brut. Pour les commandes
+    // legacy pré-hotfix, amountPaid = 0 → comportement inchangé.
+    final amountPaidBefore = order.amountPaid;
 
     // Cas A : encaissement par le partenaire — crédite le partenaire (le
     // partenaire NOUS DOIT cet argent jusqu'au versement).
@@ -787,19 +792,28 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
       // déduit directement les frais du montant qu'il nous doit (il a déjà
       // sa rémunération en main, on n'a plus qu'à recevoir le net).
       final livreurAussi = order.deliveryMode == DeliveryMode.partner;
+      final soldeEncaisseParPartenaire =
+          (orderTotal - amountPaidBefore).clamp(0, double.infinity);
       final netDu = livreurAussi
-          ? (orderTotal - feesTotal)
-          : orderTotal;
-      await PartnerLedgerService.addEntry(
-        shopId:            order.shopId,
-        partnerLocationId: partnerId,
-        type:              PartnerLedgerEntryType.saleCollected,
-        amount:            netDu,
-        orderId:           order.id,
-        note:              livreurAussi
-            ? 'Vente encaissée (frais livraison déjà retenus)'
-            : 'Vente encaissée par le partenaire',
-      );
+          ? (soldeEncaisseParPartenaire - feesTotal)
+              .clamp(0, double.infinity)
+          : soldeEncaisseParPartenaire;
+      if (netDu > 0) {
+        await PartnerLedgerService.addEntry(
+          shopId:            order.shopId,
+          partnerLocationId: partnerId,
+          type:              PartnerLedgerEntryType.saleCollected,
+          amount:            netDu.toDouble(),
+          orderId:           order.id,
+          note: amountPaidBefore > 0
+              ? 'Solde encaissé par le partenaire '
+                '(acompte de ${amountPaidBefore.toStringAsFixed(0)} '
+                'déjà versé à la boutique)'
+              : (livreurAussi
+                  ? 'Vente encaissée (frais livraison déjà retenus)'
+                  : 'Vente encaissée par le partenaire'),
+        );
+      }
       return;
     }
 

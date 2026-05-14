@@ -34,23 +34,32 @@ class AddItemToCart extends CaisseEvent {
 
 class RemoveItemFromCart extends CaisseEvent {
   final String productId;
-  RemoveItemFromCart(this.productId);
-  @override List<Object> get props => [productId];
+  /// Si fourni, cible UNIQUEMENT la ligne du panier qui a cette variante
+  /// (sinon, comportement legacy : retire toutes les lignes avec ce
+  /// productId). Évite de vider 2 variantes du même produit lors d'un
+  /// retrait (cf. bug commande web multi-variantes).
+  final String? variantName;
+  RemoveItemFromCart(this.productId, {this.variantName});
+  @override List<Object?> get props => [productId, variantName];
 }
 
 class UpdateItemQuantity extends CaisseEvent {
   final String productId;
   final int quantity;
-  UpdateItemQuantity(this.productId, this.quantity);
-  @override List<Object> get props => [productId, quantity];
+  /// Cf. RemoveItemFromCart.variantName.
+  final String? variantName;
+  UpdateItemQuantity(this.productId, this.quantity, {this.variantName});
+  @override List<Object?> get props => [productId, quantity, variantName];
 }
 
 /// Modifier le prix de vente d'un article (sans impact sur le produit en boutique)
 class UpdateItemPrice extends CaisseEvent {
   final String productId;
   final double? customPrice; // null = réinitialiser au prix original
-  UpdateItemPrice(this.productId, this.customPrice);
-  @override List<Object?> get props => [productId, customPrice];
+  /// Cf. RemoveItemFromCart.variantName.
+  final String? variantName;
+  UpdateItemPrice(this.productId, this.customPrice, {this.variantName});
+  @override List<Object?> get props => [productId, customPrice, variantName];
 }
 
 class ApplyCartDiscount extends CaisseEvent {
@@ -107,8 +116,12 @@ class LoadOrderForEdit extends CaisseEvent {
 /// Enregistrer en tant que commande e-commerce (statut: scheduled)
 class SaveOrder extends CaisseEvent {
   final String shopId;
-  SaveOrder(this.shopId);
-  @override List<Object> get props => [shopId];
+  /// Antidatage : si fourni, override le `createdAt` de la commande
+  /// (par défaut DateTime.now()). Permet de saisir des ventes oubliées /
+  /// hors-ligne / clôtures comptables. Aucune limite passée.
+  final DateTime? createdAt;
+  SaveOrder(this.shopId, {this.createdAt});
+  @override List<Object?> get props => [shopId, createdAt];
 }
 
 /// Mise à jour statut d'une commande existante
@@ -255,7 +268,7 @@ class CaisseState extends Equatable {
   /// Somme des frais (livraison, emballage…). Absorbés par la boutique :
   /// ne sont PAS ajoutés au total facturé au client.
   double get totalFees   => fees.fold(0.0, (s, f) => s + f.amount);
-  double get taxAmount   => (subtotal - discountAmount) * (taxRate ?? 0.0) / 100;
+  double get taxAmount   => (subtotal - discountAmount) * taxRate / 100;
   /// Total facturé au client = articles (après remise) + TVA.
   /// Les frais sont des dépenses internes (répartis sur le prix de revient
   /// dans le dashboard), pas une ligne ajoutée à la facture.
@@ -300,7 +313,7 @@ class CaisseState extends Equatable {
     isProcessing:   isProcessing   ?? this.isProcessing,
     error:          error,
     saleCompleted:  saleCompleted  ?? this.saleCompleted,
-    taxRate:        taxRate        ?? this.taxRate ?? 0.0,
+    taxRate:        taxRate        ?? this.taxRate,
     selectedClient: clearClient ? null : selectedClient ?? this.selectedClient,
     orderSaved:     orderSaved ?? false,
     // Préserver l'id d'édition à travers les copyWith — sans ce champ,
@@ -361,13 +374,44 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
     on<SetDeliveryMode>((event, emit) {
       if (event.mode == null) {
         emit(state.copyWith(clearDelivery: true));
-      } else {
-        emit(state.copyWith(
-          deliveryMode:       event.mode,
-          deliveryLocationId: event.locationId,
-          deliveryPersonName: event.personName,
-        ));
+        return;
       }
+      // `deliveryLocationId` représente désormais le LIEU OPÉRATIONNEL
+      // de la vente (boutique principale OU partenaire), peu importe le
+      // mode. Une vente pickup depuis la boutique a aussi un location_id
+      // (= shopLocation.id) — sans ça, la page Commandes ne pourrait pas
+      // router correctement les commandes par lieu d'émission.
+      // → on préserve / met à jour locationId quel que soit le mode.
+      // `deliveryPersonName` reste lié à partner / inHouse (livreur).
+      final isPartner = event.mode == DeliveryMode.partner;
+      final isInHouse = event.mode == DeliveryMode.inHouse;
+      emit(CaisseState(
+        items:              state.items,
+        discountAmount:     state.discountAmount,
+        fees:               state.fees,
+        paymentMethod:      state.paymentMethod,
+        isProcessing:       state.isProcessing,
+        error:              null,
+        saleCompleted:      state.saleCompleted,
+        taxRate:            state.taxRate,
+        selectedClient:     state.selectedClient,
+        orderSaved:         state.orderSaved,
+        editingOrderId:     state.editingOrderId,
+        lastCompletedSale:  state.lastCompletedSale,
+        deliveryMode:       event.mode,
+        deliveryLocationId: event.locationId ?? state.deliveryLocationId,
+        deliveryPersonName: (isPartner || isInHouse)
+            ? (event.personName ?? state.deliveryPersonName)
+            : null,
+        // Les autres champs livraison/expédition restent inchangés ici —
+        // le flux dédié `SetDeliveryDetails` les gère séparément.
+        deliveryCity:       state.deliveryCity,
+        deliveryAddress:    state.deliveryAddress,
+        shipmentCity:       state.shipmentCity,
+        shipmentAgency:     state.shipmentAgency,
+        shipmentHandler:    state.shipmentHandler,
+        deliveryDate:       state.deliveryDate,
+      ));
     });
     on<SetDeliveryDate>((event, emit) {
       if (event.date == null) {
@@ -445,19 +489,30 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
     emit(state.copyWith(items: items));
   }
 
+  /// Match strict : si l'event précise une `variantName`, on ne touche
+  /// QUE la ligne qui partage exactement cette variante. Sinon
+  /// (variantName == null), comportement legacy par productId seul.
+  bool _matchesItem(SaleItem i, String productId, String? variantName) {
+    if (i.productId != productId) return false;
+    if (variantName == null) return true;
+    return i.variantName == variantName;
+  }
+
   void _onRemove(RemoveItemFromCart event, Emitter<CaisseState> emit) =>
       emit(state.copyWith(
           items: state.items
-              .where((i) => i.productId != event.productId)
+              .where((i) =>
+                  !_matchesItem(i, event.productId, event.variantName))
               .toList()));
 
   void _onUpdate(UpdateItemQuantity event, Emitter<CaisseState> emit) {
     if (event.quantity <= 0) {
-      add(RemoveItemFromCart(event.productId));
+      add(RemoveItemFromCart(event.productId,
+          variantName: event.variantName));
       return;
     }
     final items = state.items
-        .map((i) => i.productId == event.productId
+        .map((i) => _matchesItem(i, event.productId, event.variantName)
         ? i.copyWith(quantity: event.quantity)
         : i)
         .toList();
@@ -466,7 +521,7 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
 
   void _onUpdatePrice(UpdateItemPrice event, Emitter<CaisseState> emit) {
     final items = state.items
-        .map((i) => i.productId == event.productId
+        .map((i) => _matchesItem(i, event.productId, event.variantName)
         ? i.copyWith(
       customPrice: event.customPrice,
       clearCustomPrice: event.customPrice == null,
@@ -539,6 +594,8 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
       }
 
       final ds = SaleLocalDatasource();
+      // Vente directe à la caisse → encaissement complet à la création.
+      // amountPaid = total + paymentStatus = paid (cf. hotfix_065).
       final sale = Sale(
         id:             'sale_${DateTime.now().millisecondsSinceEpoch}',
         shopId:         event.shopId,
@@ -549,6 +606,8 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
             {'id': f.id, 'label': f.label, 'amount': f.amount}).toList(),
         paymentMethod:  state.paymentMethod,
         status:         SaleStatus.completed,
+        amountPaid:     state.total,
+        paymentStatus:  PaymentStatus.paid,
         clientId:       state.selectedClient?.id,
         clientName:     state.selectedClient?.name,
         clientPhone:    state.selectedClient?.phone,
@@ -567,6 +626,32 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
         createdByUserId: Supabase.instance.client.auth.currentUser?.id,
       );
       await ds.saveOrder(sale);
+
+      // Mise à jour silencieuse de la fiche client si l'opérateur a saisi
+      // une adresse de livraison différente de celle enregistrée. Le client
+      // reflète toujours sa DERNIÈRE adresse connue (pour pré-remplir la
+      // prochaine commande), tandis que `Sale.deliveryAddress` reste un
+      // snapshot figé de l'adresse utilisée pour CETTE commande.
+      // `district` côté client = `deliveryAddress` côté sale (le sheet
+      // mappe le quartier dans deliveryAddress).
+      final client = state.selectedClient;
+      if (client != null) {
+        final newCity     = state.deliveryCity;
+        final newDistrict = state.deliveryAddress;
+        final cityChanged = newCity != null
+            && newCity.trim().isNotEmpty
+            && newCity.trim() != (client.city ?? '').trim();
+        final distChanged = newDistrict != null
+            && newDistrict.trim().isNotEmpty
+            && newDistrict.trim() != (client.district ?? '').trim();
+        if (cityChanged || distChanged) {
+          // ignore: discarded_futures
+          AppDatabase.saveClient(client.copyWith(
+            city:     cityChanged ? newCity.trim() : client.city,
+            district: distChanged ? newDistrict.trim() : client.district,
+          ));
+        }
+      }
 
       // Une vente immédiatement "completed" n'a pas besoin de rappel futur,
       // mais si la date est dans le futur on programme quand même (le client
@@ -929,7 +1014,7 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
           shopId:         event.shopId,
           items:          state.items,
           discountAmount: state.discountAmount,
-          taxRate:        state.taxRate ?? 0,
+          taxRate:        state.taxRate,
           fees:           state.fees.map((f) =>
               {'id': f.id, 'label': f.label, 'amount': f.amount}).toList(),
           paymentMethod:  state.paymentMethod,
@@ -965,7 +1050,7 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
           shopId:         event.shopId,
           items:          state.items,
           discountAmount: state.discountAmount,
-          taxRate:        state.taxRate ?? 0,
+          taxRate:        state.taxRate,
           fees:           state.fees.map((f) =>
               {'id': f.id, 'label': f.label, 'amount': f.amount}).toList(),
           paymentMethod:  state.paymentMethod,
@@ -973,7 +1058,9 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
           clientId:       state.selectedClient?.id,
           clientName:     state.selectedClient?.name,
           clientPhone:    state.selectedClient?.phone,
-          createdAt:      DateTime.now(),
+          // Antidatage : si le sheet de création fournit une date passée
+          // (vente oubliée / clôture), on l'utilise. Sinon now().
+          createdAt:      event.createdAt ?? DateTime.now(),
           scheduledAt:    state.deliveryDate,
           // Mode de livraison choisi sur la page panier (e-commerce) avant
           // enregistrement de la commande programmée.

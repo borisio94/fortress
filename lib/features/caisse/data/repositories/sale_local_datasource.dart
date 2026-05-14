@@ -96,6 +96,8 @@ class SaleLocalDatasource {
       'shipment_handler':     order.shipmentHandler,
       'cancellation_reason':  order.cancellationReason,
       'reschedule_reason':    order.rescheduleReason,
+      'amount_paid':          order.amountPaid,
+      'payment_status':       order.paymentStatus.key,
       'created_at':     order.createdAt.toUtc().toIso8601String(),
       'completed_at':   completedAt,
       'fees':           order.fees,
@@ -136,6 +138,8 @@ class SaleLocalDatasource {
       'shipment_handler':     order.shipmentHandler,
       'cancellation_reason':  order.cancellationReason,
       'reschedule_reason':    order.rescheduleReason,
+      'amount_paid':          order.amountPaid,
+      'payment_status':       order.paymentStatus.key,
       'created_at':     order.createdAt.toUtc().toIso8601String(),
       'completed_at':   completedAt,
       'synced_to_cloud': false,
@@ -172,7 +176,7 @@ class SaleLocalDatasource {
       if (!Hive.isBoxOpen(HiveBoxes.orders)) return null;
       final raw = _ordersBox.get(orderId);
       if (raw == null) return null;
-      return _mapToSaleWithStatus(Map<String, dynamic>.from(raw as Map));
+      return _mapToSaleWithStatus(Map<String, dynamic>.from(raw));
     } catch (_) {
       return null;
     }
@@ -186,7 +190,7 @@ class SaleLocalDatasource {
           .map((m) {
         try {
           return _mapToSaleWithStatus(
-              Map<String, dynamic>.from(m as Map));
+              Map<String, dynamic>.from(m));
         } catch (_) { return null; }
       })
           .whereType<Sale>()
@@ -235,6 +239,8 @@ class SaleLocalDatasource {
       'shipment_handler':     order.shipmentHandler,
       'cancellation_reason':  order.cancellationReason,
       'reschedule_reason':    order.rescheduleReason,
+      'amount_paid':          order.amountPaid,
+      'payment_status':       order.paymentStatus.key,
       'created_at':     order.createdAt.toUtc().toIso8601String(),
       'completed_at':   completedAt,
       'fees':           order.fees,
@@ -280,6 +286,8 @@ class SaleLocalDatasource {
       'shipment_handler':     order.shipmentHandler,
       'cancellation_reason':  order.cancellationReason,
       'reschedule_reason':    order.rescheduleReason,
+      'amount_paid':          order.amountPaid,
+      'payment_status':       order.paymentStatus.key,
       'completed_at':   completedAt,
       'fees':           order.fees,
       'items': order.items.map((i) => {
@@ -315,7 +323,7 @@ class SaleLocalDatasource {
   }) async {
     final raw = _ordersBox.get(orderId);
     if (raw == null) return;
-    final map = Map<String, dynamic>.from(raw as Map);
+    final map = Map<String, dynamic>.from(raw);
     if (paymentMethod != null) {
       map['payment_method'] = paymentMethod.name;
     }
@@ -343,7 +351,7 @@ class SaleLocalDatasource {
   Future<void> cancelOrderWithReason(String orderId, String reason) async {
     final raw = _ordersBox.get(orderId);
     if (raw == null) return;
-    final map = Map<String, dynamic>.from(raw as Map);
+    final map = Map<String, dynamic>.from(raw);
     map['cancellation_reason'] = reason.trim();
     await _ordersBox.put(orderId, map);
     await updateOrderStatus(orderId, SaleStatus.cancelled);
@@ -357,7 +365,7 @@ class SaleLocalDatasource {
       String orderId, DateTime newDate, String reason) async {
     final raw = _ordersBox.get(orderId);
     if (raw == null) return;
-    final map = Map<String, dynamic>.from(raw as Map);
+    final map = Map<String, dynamic>.from(raw);
     map['scheduled_at']      = newDate.toUtc().toIso8601String();
     map['reschedule_reason'] = reason.trim();
     await _ordersBox.put(orderId, map);
@@ -367,7 +375,7 @@ class SaleLocalDatasource {
   Future<void> updateOrderStatus(String orderId, SaleStatus status) async {
     final raw = _ordersBox.get(orderId);
     if (raw == null) return;
-    final map = Map<String, dynamic>.from(raw as Map);
+    final map = Map<String, dynamic>.from(raw);
 
     // Lire l'ancien statut AVANT modification pour gérer la compensation
     // de stock si on traverse la frontière "completed".
@@ -381,6 +389,27 @@ class SaleLocalDatasource {
       map['completed_at'] ??= DateTime.now().toUtc().toIso8601String();
     } else {
       map['completed_at'] = null;
+    }
+    // Sync paiement avec le statut (cf. hotfix_065). Transition vers
+    // completed = encaissement terminé (boutique acompte + partenaire solde
+    // ou tout en boutique) → on bascule payment_status à 'paid' et on
+    // remplit amount_paid au total facturé pour l'historique. Transition
+    // vers refunded → 'refunded'. Transitions inverses (completed → autre)
+    // → on remet à unpaid si plus rien d'encaissé est garanti.
+    if (status == SaleStatus.completed) {
+      // Calculer le total à partir du map (les items contiennent
+      // unit_price * quantity ; on respecte les arrondis Sale.total).
+      final fresh = _mapToSaleWithStatus(map);
+      map['amount_paid']    = fresh.total;
+      map['payment_status'] = PaymentStatus.paid.key;
+    } else if (status == SaleStatus.refunded) {
+      map['payment_status'] = PaymentStatus.refunded.key;
+    } else if (oldStatus == SaleStatus.completed) {
+      // Quittage du statut completed sans aller à refunded : on n'a plus
+      // de garantie d'encaissement total. Repasse à 'unpaid' (l'opérateur
+      // peut re-renseigner via le bouton acompte).
+      map['amount_paid']    = 0;
+      map['payment_status'] = PaymentStatus.unpaid.key;
     }
     await _ordersBox.put(orderId, map);
     final shopId = map['shop_id'] as String?;
@@ -619,6 +648,10 @@ class SaleLocalDatasource {
       shipmentHandler: m['shipment_handler'] as String?,
       cancellationReason: m['cancellation_reason'] as String?,
       rescheduleReason:   m['reschedule_reason']   as String?,
+      source:             (m['source'] as String?) ?? 'pos',
+      amountPaid:         (m['amount_paid'] as num?)?.toDouble() ?? 0,
+      paymentStatus:      PaymentStatusX.fromKey(
+                              m['payment_status'] as String?),
     );
   }
 

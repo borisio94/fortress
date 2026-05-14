@@ -21,6 +21,7 @@ import '../../data/dashboard_providers.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/services/document_service.dart';
 import '../../../inventaire/presentation/widgets/share_catalog_dialog.dart';
+import '../widgets/partner_debts_banner.dart';
 
 
 // ─── Page principale ──────────────────────────────────────────────────────────
@@ -281,6 +282,11 @@ class _DashBodyState extends ConsumerState<_DashBody> {
           _AlertsSection(alerts: alertKpis),
           const SizedBox(height: 14),
         ],
+
+        // ── Bandeau "ce que vos partenaires vous doivent" (cf. hotfix_065
+        // + partner_ledger). Self-hide si aucun partenaire n'a de solde
+        // positif. Tap → page Comptes partenaires.
+        PartnerDebtsBanner(shopId: widget.shopId),
 
         // ── Résumé financier (CA → bénéfice net + marge nette) ────────────
         _FinancialSummaryCard(data: data),
