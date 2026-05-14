@@ -434,27 +434,16 @@ class DocumentService {
     return buf.toString();
   }
 
+  /// Message catalogue minimaliste — 2 lignes max : « 🛍️ [Shop] » + « Notre
+  /// catalogue ». Le lien URL ajouté en dehors par le caller fournit le
+  /// reste (liste produits, prix, stock). On évite la prose verbeuse et la
+  /// duplication d'info avec la page catalogue publique. Le caller peut
+  /// laisser l'utilisateur éditer ce message dans le TextField de la
+  /// dialog Partager pour customiser (ex: « Notre catalogue de montres »).
   static String _catalogMessage(List<Product> products, ShopSummary? shop) {
-    final buf = StringBuffer();
-    buf.writeln('🛍️ ${shop?.name ?? "Nos produits"} — Nouveautés\n');
-    for (final p in products) {
-      final price = p.priceSellPos > 0
-          ? CurrencyFormatter.format(p.priceSellPos) : 'Sur demande';
-      buf.writeln('✨ ${p.name} — $price');
-      if (p.description != null && p.description!.isNotEmpty) {
-        final desc = p.description!.length > 60
-            ? '${p.description!.substring(0, 57)}…' : p.description!;
-        buf.writeln('   $desc');
-      }
-    }
-    buf.writeln('\n📦 Disponible maintenant en boutique');
-    buf.writeln('📞 Contactez-nous pour commander !');
-    if (shop != null) {
-      buf.write('\n_${shop.name}');
-      if (shop.phone != null) buf.write(' • ${shop.phone}');
-      buf.writeln('_');
-    }
-    return buf.toString();
+    final shopName = shop?.name ?? '';
+    if (shopName.isEmpty) return 'Notre catalogue';
+    return '🛍️ $shopName\nNotre catalogue';
   }
 
   /// Génère le message catalogue (accessible publiquement pour l'aperçu).

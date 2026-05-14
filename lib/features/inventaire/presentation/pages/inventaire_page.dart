@@ -24,6 +24,7 @@ import '../../../../features/inventaire/domain/entities/product.dart';
 import 'product_form_page.dart' show ProductFormExtra;
 import '../../../../core/services/document_service.dart';
 import '../../../../core/services/external_launcher.dart';
+import '../../../../core/services/url_shortener_service.dart';
 import '../../../../core/services/whatsapp/message_templates.dart';
 import '../../../../core/services/whatsapp_service.dart';
 import '../widgets/recipient_picker_sheet.dart';
@@ -504,10 +505,18 @@ class _InventairePageState extends ConsumerState<InventairePage>
     } else if (p.variants.length == 1) {
       variant = p.variants.first;
     }
+    // Stock filtré sur la vue active (Boutique seule / Partenaire X /
+    // Globale). Sans override le template tombe sur le cumul global
+    // (`variant.stockAvailable` ou `p.totalStock`) — incorrect quand
+    // le marchand consulte un partenaire.
+    final int stockOverride = variant != null
+        ? stock_loc.stockForVariantAtLocations(variant, _locIds)
+        : stock_loc.stockAtLocations(p, _locIds);
     final msg = MessageTemplates.buildProductShareMessage(
       product:  p,
       variant:  variant,
       currency: CurrencyFormatter.currentSymbol,
+      stockOverride: stockOverride,
     );
     final svc = ProviderScope.containerOf(context, listen: false)
         .read(whatsappServiceProvider);
@@ -553,18 +562,64 @@ class _InventairePageState extends ConsumerState<InventairePage>
         ? Uri.base.origin
         : 'https://fortress-pos.web.app';
     final qp = <String, String>{};
+    // Périmètre produits que va afficher la page catalogue côté visiteur —
+    // sert AUSSI à savoir lesquels embarquer dans le snapshot stock.
+    // `selection` : seulement les produits cochés (loadés via `ids=`).
+    // `category`/`all` : page catalogue charge tous les produits actifs
+    // visibles web → on snapshote le même périmètre.
+    List<Product> catalogueProducts;
     if (choice.kind == _CatalogueShareKind.category &&
         choice.category != null && choice.category!.isNotEmpty) {
       qp['cat'] = choice.category!;
+      catalogueProducts = _products
+          .where((p) => p.isActive && p.isVisibleWeb)
+          .toList();
     } else if (choice.kind == _CatalogueShareKind.selection) {
       qp['ids'] = selectedIds.join(',');
+      catalogueProducts = _products
+          .where((p) => p.id != null && _selected.contains(p.id))
+          .toList();
+      // Le partage explicite = consentement à exposer publiquement.
+      // Sans ça, la RLS `products_anon_read_visible_web` renvoie 0 row
+      // et le destinataire voit « Les produits partagés ne sont plus
+      // disponibles publiquement ». Idempotent, fire-and-forget.
+      if (catalogueProducts.isNotEmpty) {
+        AppDatabase.markProductsVisibleWeb(catalogueProducts).catchError((e) {
+          debugPrint('[Catalogue] markProductsVisibleWeb error: $e');
+        });
+      }
+    } else {
+      catalogueProducts = _products
+          .where((p) => p.isActive && p.isVisibleWeb)
+          .toList();
+    }
+    // Snapshot du stock filtré sur la vue active (Globale / Boutique seule
+    // / Partenaire X) — embarqué dans l'URL via `stock=`. Sans ça, la page
+    // catalogue retombe sur `stock_qty`/`stock_available` JSONB Supabase
+    // qui ne reflète que la boutique principale (bug rapporté).
+    final snapshot = _buildStockSnapshot(catalogueProducts);
+    if (snapshot.isNotEmpty) {
+      qp['stock'] = snapshot.entries
+          .map((e) => '${e.key}:${e.value}')
+          .join(',');
     }
     final qpString = qp.entries
         .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
         .join('&');
-    final url = qpString.isEmpty
+    final longUrl = qpString.isEmpty
         ? '$origin/#/catalogue/${widget.shopId}'
         : '$origin/#/catalogue/${widget.shopId}?$qpString';
+    // Raccourcir AVANT le picker destinataire : l'await est consommé
+    // avant la prochaine interaction utilisateur (clic recipient), qui
+    // fournit alors un user gesture frais pour `openExternal` côté web
+    // (anti popup-blocker). Si shortening échoue → fallback URL longue.
+    String url;
+    try {
+      url = await UrlShortenerService.shorten(longUrl);
+    } catch (_) {
+      url = longUrl;
+    }
+    if (!mounted) return;
 
     // 3) Choix du destinataire WhatsApp.
     final phone = await pickWhatsappRecipient(
@@ -574,22 +629,25 @@ class _InventairePageState extends ConsumerState<InventairePage>
 
     final shop = LocalStorageService.getShop(widget.shopId);
     final shopName = shop?.name ?? '';
-    String label;
+    // Message court : nom boutique + 1 ligne intitulé + URL. Le contenu
+    // détaillé (produits, prix, stock) est déjà visible dans la page
+    // ouverte par le lien — pas besoin de le répéter dans la prose.
+    String catalogLine;
     switch (choice.kind) {
       case _CatalogueShareKind.category:
-        label = 'la sélection « ${choice.category} »';
+        catalogLine = 'Notre catalogue — ${choice.category}';
         break;
       case _CatalogueShareKind.selection:
-        label = '${selectedIds.length} produit${selectedIds.length > 1 ? 's' : ''} sélectionné${selectedIds.length > 1 ? 's' : ''}';
+        catalogLine = 'Nos produits sélectionnés '
+            '(${selectedIds.length})';
         break;
       case _CatalogueShareKind.all:
-        label = 'notre catalogue';
+        catalogLine = 'Notre catalogue';
         break;
     }
-    final msg = (shopName.isEmpty
-            ? 'Découvrez $label :\n$url'
-            : 'Bonjour, découvrez $label de $shopName :\n$url')
-        + '\n\nVous pouvez parcourir nos produits et passer commande directement.';
+    final msg = shopName.isEmpty
+        ? '$catalogLine :\n$url'
+        : '🛍️ $shopName\n$catalogLine : $url';
 
     // 4) Ouvrir wa.me.
     final p = phone.replaceAll(RegExp(r'[^\d]'), '');
@@ -614,7 +672,12 @@ class _InventairePageState extends ConsumerState<InventairePage>
   /// partage directement.
   Future<void> _openSharePicker(Product p) async {
     if (p.variants.length <= 1) {
-      await DocumentService.shareProduct(p, shopId: widget.shopId);
+      // Stock filtré vue active — sinon le texte partagé via share sheet OS
+      // contient le cumul global (`p.totalStock`), pas le stock du
+      // partenaire/boutique que le marchand visualise.
+      await DocumentService.shareProduct(p,
+          shopId: widget.shopId,
+          stockOverride: stock_loc.stockAtLocations(p, _locIds));
       return;
     }
     final selectedIds = await showDialog<Set<String>>(
@@ -625,7 +688,13 @@ class _InventairePageState extends ConsumerState<InventairePage>
     final filtered = p.copyWith(
       variants: p.variants.where((v) =>
           v.id != null && selectedIds.contains(v.id)).toList());
-    await DocumentService.shareProduct(filtered, shopId: widget.shopId);
+    // Stock filtré = somme des variantes sélectionnées sur la vue active.
+    var stockOverride = 0;
+    for (final v in filtered.variants) {
+      stockOverride += stock_loc.stockForVariantAtLocations(v, _locIds);
+    }
+    await DocumentService.shareProduct(filtered,
+        shopId: widget.shopId, stockOverride: stockOverride);
   }
   Future<void> _delete(String id) async {
     final p = _products.where((p) => p.id == id).firstOrNull;
