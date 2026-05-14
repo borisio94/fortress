@@ -100,6 +100,15 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
     super.dispose();
   }
 
+  /// Vrai si la commande est déjà entièrement encaissée à l'ouverture
+  /// du sheet (acompte total saisi à la création). Dans ce cas, le sheet
+  /// ne montre QUE la section livraison — l'opérateur n'a pas à
+  /// re-confirmer le paiement.
+  bool get _isFullyPaid {
+    final total = widget.orderTotal ?? 0;
+    return total > 0 && widget.amountAlreadyPaid >= total;
+  }
+
   /// Calcule le nouveau total encaissé selon le choix utilisateur :
   ///   • keepCurrent → null (caller ne touche pas au paiement)
   ///   • addPartial  → amountAlreadyPaid + montant saisi, capé au total
@@ -146,15 +155,51 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                _SectionLabel('Mode de paiement'),
-                _ChipsRow<PaymentMethod>(
-                  values: PaymentMethod.values,
-                  selected: _payment,
-                  labelOf: _paymentLabel,
-                  iconOf:  _paymentIcon,
-                  onChanged: (v) => setState(() => _payment = v),
-                ),
-                const SizedBox(height: 14),
+                // Si la commande est DÉJÀ totalement payée (acompte boutique
+                // = total à la création), on saute les sections paiement.
+                // Le mode de paiement enregistré sur la Sale est conservé.
+                // Seul le mode de livraison reste à choisir.
+                if (!_isFullyPaid) ...[
+                  _SectionLabel('Mode de paiement'),
+                  _ChipsRow<PaymentMethod>(
+                    values: PaymentMethod.values,
+                    selected: _payment,
+                    labelOf: _paymentLabel,
+                    iconOf:  _paymentIcon,
+                    onChanged: (v) => setState(() => _payment = v),
+                  ),
+                  const SizedBox(height: 14),
+                ] else ...[
+                  // Bandeau confirmation "déjà payé en intégralité" pour
+                  // que l'opérateur sache pourquoi la section paiement
+                  // disparaît.
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 14),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: const Color(0xFF10B981)
+                              .withValues(alpha: 0.3)),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.check_circle_rounded,
+                          size: 14, color: Color(0xFF10B981)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                            'Commande déjà encaissée en intégralité '
+                            '(${_fmtMoney(widget.orderTotal!)})',
+                            style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF065F46))),
+                      ),
+                    ]),
+                  ),
+                ],
                 _SectionLabel('Mode de livraison'),
                 if ((widget.originLocationName ?? '').isNotEmpty) ...[
                   Padding(
@@ -219,7 +264,7 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                     ),
                   ),
                 ],
-                if ((widget.orderTotal ?? 0) > 0) ...[
+                if ((widget.orderTotal ?? 0) > 0 && !_isFullyPaid) ...[
                   const SizedBox(height: 16),
                   _SectionLabel(
                       'Paiement reçu — Total ${_fmtMoney(widget.orderTotal!)}'
