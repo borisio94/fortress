@@ -46,8 +46,12 @@ class DocumentService {
     InvoiceFormat format = InvoiceFormat.a4,
     PdfPageFormat? pageFormat,
     ShopSummary? shop,
-    String currency = 'XAF',
+    String? currency,
   }) async {
+    // Capture non-null avant la closure `pdf.addPage` — sans ça le
+    // type-promotion via `??=` ne traverse pas la frontière de closure
+    // et Dart refuse de passer `currency` (nullable) à `_tableHeader`.
+    final cur = currency ?? CurrencyFormatter.currentSymbol;
     final s         = shop ?? LocalStorageService.getShop(order.shopId);
     final shopName  = s?.name ?? 'Fortress';
     final shopPhone = s?.phone;
@@ -192,11 +196,11 @@ class DocumentService {
                 pw.SizedBox(height: 8),
 
                 // En-tête tableau
-                _tableHeader(isTicket, currency),
+                _tableHeader(isTicket, cur),
 
                 // Lignes
                 ...order.items.asMap().entries.map((e) =>
-                    _tableRow(e.value, e.key.isOdd, isTicket, currency, fmt)),
+                    _tableRow(e.value, e.key.isOdd, isTicket, cur, fmt)),
 
                 // Frais de commande
                 if (order.totalFees > 0) ...[
@@ -211,7 +215,7 @@ class DocumentService {
                         pw.Expanded(child: pw.Text(label,
                             style: pw.TextStyle(fontSize: isTicket ? 8 : 9,
                                 color: _grey500, fontStyle: pw.FontStyle.italic))),
-                        pw.Text('${fmt.format(amount)} $currency',
+                        pw.Text('${fmt.format(amount)} $cur',
                             style: pw.TextStyle(fontSize: isTicket ? 8 : 9,
                                 color: _grey700)),
                       ]),
@@ -232,18 +236,18 @@ class DocumentService {
                         borderRadius: pw.BorderRadius.circular(8),
                         border: pw.Border.all(color: _violet.shade(0.3), width: 0.5)),
                     child: pw.Column(children: [
-                      _recapRow('Sous-total', '${fmt.format(order.subtotal)} $currency', isTicket: isTicket),
+                      _recapRow('Sous-total', '${fmt.format(order.subtotal)} $cur', isTicket: isTicket),
                       if (order.totalFees > 0)
-                        _recapRow('Frais', '${fmt.format(order.totalFees)} $currency', isTicket: isTicket),
+                        _recapRow('Frais', '${fmt.format(order.totalFees)} $cur', isTicket: isTicket),
                       if (order.discountAmount > 0)
-                        _recapRow('Remise', '- ${fmt.format(order.discountAmount)} $currency',
+                        _recapRow('Remise', '- ${fmt.format(order.discountAmount)} $cur',
                             color: _orange, isTicket: isTicket),
                       if (order.taxRate > 0)
                         _recapRow('TVA (${order.taxRate.toStringAsFixed(0)}%)',
-                            '${fmt.format(order.taxAmount)} $currency', isTicket: isTicket),
+                            '${fmt.format(order.taxAmount)} $cur', isTicket: isTicket),
                       pw.Container(height: 0.5, color: _violet,
                           margin: const pw.EdgeInsets.symmetric(vertical: 6)),
-                      _recapRow('TOTAL', '${fmt.format(order.total)} $currency',
+                      _recapRow('TOTAL', '${fmt.format(order.total)} $cur',
                           bold: true, large: true, color: _violet, isTicket: isTicket),
                       pw.SizedBox(height: 4),
                       _recapRow('Paiement', _paymentLabel(order.paymentMethod),
@@ -362,9 +366,16 @@ class DocumentService {
   // ════════════════════════════════════════════════════════════════════════════
 
   /// Partager un seul produit (image + texte).
-  static Future<void> shareProduct(Product product, {String? shopId}) async {
+  ///
+  /// - [stockOverride] : si fourni, remplace `p.totalStock` dans le texte.
+  ///   Permet au caller d'envoyer le stock filtré par la vue active
+  ///   (Boutique seule / Partenaire X) au lieu du cumul global du produit.
+  static Future<void> shareProduct(Product product, {
+    String? shopId,
+    int? stockOverride,
+  }) async {
     final shop = shopId != null ? LocalStorageService.getShop(shopId) : null;
-    final msg  = _productMessage(product, shop);
+    final msg  = _productMessage(product, shop, stockOverride: stockOverride);
     final img  = await _resolveImage(product);
 
     if (img != null) {
@@ -408,12 +419,15 @@ class DocumentService {
   // MESSAGES TEXTE
   // ════════════════════════════════════════════════════════════════════════════
 
-  static String _productMessage(Product p, ShopSummary? shop) {
+  static String _productMessage(Product p, ShopSummary? shop, {
+    int? stockOverride,
+  }) {
+    final stock = stockOverride ?? p.totalStock;
     final buf = StringBuffer();
     if (shop != null) buf.writeln('🛍️ ${shop.name}\n');
     buf.writeln('✨ ${p.name}');
     if (p.priceSellPos > 0) buf.writeln('💰 Prix : ${CurrencyFormatter.format(p.priceSellPos)}');
-    buf.writeln('📦 Stock : ${p.totalStock} disponible${p.totalStock > 1 ? 's' : ''}');
+    buf.writeln('📦 Stock : $stock disponible${stock > 1 ? 's' : ''}');
     if (p.description != null && p.description!.isNotEmpty) buf.writeln('📝 ${p.description}');
     buf.writeln('\nContactez-nous pour commander !');
     if (shop?.phone != null) buf.writeln('📞 ${shop!.phone}');

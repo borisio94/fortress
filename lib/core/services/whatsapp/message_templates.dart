@@ -2,6 +2,7 @@ import 'package:intl/intl.dart';
 import '../../../features/caisse/domain/entities/sale.dart';
 import '../../../features/inventaire/domain/entities/product.dart';
 import '../../../features/shop_selector/domain/entities/shop_summary.dart';
+import '../../utils/currency_formatter.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // WhatsApp message templates — utilisés pour formater le message envoyé au
@@ -45,15 +46,18 @@ class MessageTemplates {
   /// - [ratingUrl]    : URL de notation (Premium uniquement) — si null le
   ///                    champ est OMIS, pas remplacé par une chaîne vide.
   /// - [style]        : style à utiliser (standard / short / premium).
-  /// - [currency]     : devise affichée à côté du montant (défaut XAF).
+  /// - [currency]     : symbole devise affiché à côté du montant. Défaut =
+  ///   `CurrencyFormatter.currentSymbol` (FCFA pour XAF, $ pour USD, etc.) —
+  ///   évite d'afficher le code ISO brut "XAF" aux clients.
   static String buildMessage({
     required Sale order,
     required String shortUrl,
     ShopSummary? shop,
     String? ratingUrl,
     WhatsappMessageStyle style = WhatsappMessageStyle.standard,
-    String currency = 'XAF',
+    String? currency,
   }) {
+    currency ??= CurrencyFormatter.currentSymbol;
     final firstName = _firstName(order.clientName);
     final shopName  = shop?.name ?? 'votre boutique';
     final invoiceNo = order.id ?? 'N/A';
@@ -132,13 +136,18 @@ class MessageTemplates {
   /// - [variant] : si renseignée, le titre devient "Produit — Variante" et
   ///   le prix/stock viennent de la variante. Sinon : prix de la variante
   ///   principale (ou produit), stock = stock total.
+  /// - [stockOverride] : si fourni, remplace le stock affiché (variante ou
+  ///   total). Permet au caller de passer le stock filtré par la vue
+  ///   active (Boutique seule / Partenaire X) au lieu du cumul global.
   /// - Si l'image est absente, la première ligne `📸 …` est omise pour
   ///   ne pas envoyer un emoji orphelin sans aperçu.
   static String buildProductShareMessage({
     required Product product,
     ProductVariant? variant,
-    String currency = 'XAF',
+    String? currency,
+    int? stockOverride,
   }) {
+    currency ??= CurrencyFormatter.currentSymbol;
     final fmt = NumberFormat('#,###', 'fr_FR');
     // Image
     final imageUrl = variant?.imageUrl?.isNotEmpty == true
@@ -149,13 +158,15 @@ class MessageTemplates {
         ? '${product.name} — ${variant.name}'
         : product.name;
     // Prix : variante si fournie, sinon variante principale, sinon produit
-    final mainVariant = product.variants.where((v) => v.isMain).firstOrNull
+    final mainVariant = product.featuredVariant()
         ?? (product.variants.isNotEmpty ? product.variants.first : null);
     final price = variant?.priceSellPos
         ?? mainVariant?.priceSellPos
         ?? product.priceSellPos;
-    // Stock : variante si fournie, sinon total agrégé
-    final stock = variant?.stockAvailable ?? product.totalStock;
+    // Stock : override (vue active) prioritaire, sinon variante si fournie,
+    // sinon total agrégé du produit.
+    final stock =
+        stockOverride ?? variant?.stockAvailable ?? product.totalStock;
 
     final lines = <String>[];
     if (imageUrl != null && imageUrl.isNotEmpty) {

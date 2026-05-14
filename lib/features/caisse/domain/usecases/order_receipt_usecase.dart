@@ -21,6 +21,7 @@ import '../../../inventaire/domain/entities/product.dart';
 import '../../../../core/services/whatsapp_service.dart';
 import '../../../../core/services/invoice_storage_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/phone_formatter.dart';
 
 class OrderReceiptUseCase {
@@ -36,15 +37,15 @@ class OrderReceiptUseCase {
   static final _grey500     = PdfColors.grey500;
   static final _grey700     = PdfColor.fromHex('#374151');
   static final _grey900     = PdfColor.fromHex('#111827');
-  static final _green       = PdfColor.fromHex('#10B981');
   static final _orange      = PdfColor.fromHex('#F59E0B');
 
   // ── Générer le PDF ──────────────────────────────────────────────────────────
   static Future<Uint8List> generatePdf(Sale order, {
     ShopSummary? shop,
-    String currency       = 'XAF',
+    String? currency,
     PdfPageFormat? pageFormat,
   }) async {
+    currency ??= CurrencyFormatter.currentSymbol;
     // Récupérer la boutique depuis Hive si non fournie
     final s        = shop ?? LocalStorageService.getShop(order.shopId);
     final shopName = s?.name ?? 'Fortress';
@@ -218,11 +219,11 @@ class OrderReceiptUseCase {
                                       fontWeight: pw.FontWeight.bold,
                                       color: _grey900)),
                               if (shopPhone != null)
-                                pw.Text(shopPhone!,
+                                pw.Text(shopPhone,
                                     style: pw.TextStyle(
                                         fontSize: 9, color: _grey700)),
                               if (shopEmail != null)
-                                pw.Text(shopEmail!,
+                                pw.Text(shopEmail,
                                     style: pw.TextStyle(
                                         fontSize: 9, color: _grey700)),
                               if (s?.country != null)
@@ -515,11 +516,12 @@ class OrderReceiptUseCase {
   /// actif (wa.me par défaut, Twilio/Meta plus tard). Si null, on tombe
   /// sur le default WameProvider — utile pour les services hors widget.
   static Future<bool> sendWhatsAppReminder(Sale order, {
-    String currency = 'XAF',
+    String? currency,
     ShopSummary? shop,
     String? customMessage,
     WhatsappService? whatsapp,
   }) async {
+    currency ??= CurrencyFormatter.currentSymbol;
     final phone = order.clientPhone ?? '';
     if (phone.trim().isEmpty) return false;
 
@@ -544,10 +546,11 @@ class OrderReceiptUseCase {
   // ── Visualiser le PDF (aperçu natif) ─────────────────────────────────────────
   static Future<void> printOrShare(
       Sale order, BuildContext context, {
-        String currency       = 'XAF',
+        String? currency,
         ShopSummary? shop,
         PdfPageFormat? pageFormat,
       }) async {
+    currency ??= CurrencyFormatter.currentSymbol;
     final bytes = await generatePdf(order,
         shop: shop, currency: currency,
         pageFormat: pageFormat);
@@ -570,10 +573,11 @@ class OrderReceiptUseCase {
   // ── Partager le PDF ─────────────────────────────────────────────────────────
   static Future<void> sharePdf(
       Sale order, {
-        String currency       = 'XAF',
+        String? currency,
         ShopSummary? shop,
         PdfPageFormat? pageFormat,
       }) async {
+    currency ??= CurrencyFormatter.currentSymbol;
     final s     = shop ?? LocalStorageService.getShop(order.shopId);
     final bytes = await generatePdf(order,
         shop: s, currency: currency,
@@ -671,7 +675,7 @@ class OrderReceiptUseCase {
           .filter('variants', 'cs', '[{"id":"$id"}]')
           .limit(1)
           .timeout(const Duration(seconds: 6));
-      if (r2 is List && r2.isNotEmpty) {
+      if (r2.isNotEmpty) {
         final row = Map<String, dynamic>.from(r2.first as Map);
         final url = _extractImageFromProductRow(row, variantId: id);
         if (url != null) return url;
@@ -716,7 +720,7 @@ class OrderReceiptUseCase {
   static Product? _findProductByVariantIdInHive(String variantId) {
     for (final raw in HiveBoxes.productsBox.values) {
       try {
-        final m = Map<String, dynamic>.from(raw as Map);
+        final m = Map<String, dynamic>.from(raw);
         final variants = m['variants'] as List? ?? [];
         for (final v in variants) {
           if (v is Map && v['id']?.toString() == variantId) {
@@ -788,8 +792,11 @@ class OrderReceiptUseCase {
   /// catalogues partagés via WhatsApp.
   static Future<Uint8List> generateReminderPdf(Sale order, {
     ShopSummary? shop,
-    String currency = 'XAF',
+    String? currency,
   }) async {
+    // Capture non-null avant la closure `pw.MultiPage.build` — le
+    // type-promotion via `??=` ne traverse pas la frontière de closure.
+    final cur = currency ?? CurrencyFormatter.currentSymbol;
     final s         = shop ?? LocalStorageService.getShop(order.shopId);
     final shopName  = s?.name ?? 'Fortress';
     final shopPhone = s?.phone ?? '';
@@ -898,7 +905,7 @@ class OrderReceiptUseCase {
           clientName: order.clientName ?? 'cher client',
           ref:        ref,
           dueStr:     dueStr,
-          totalStr:   '${fmt.format(order.total)} $currency',
+          totalStr:   '${fmt.format(order.total)} $cur',
         ),
         pw.SizedBox(height: 14),
         pw.Text('Détail de votre commande',
@@ -910,7 +917,7 @@ class OrderReceiptUseCase {
           items:    order.items,
           images:   itemImages,
           fmt:      fmt,
-          currency: currency,
+          currency: cur,
         ),
         pw.SizedBox(height: 16),
         _reminderClosing(),
@@ -1262,10 +1269,11 @@ class OrderReceiptUseCase {
   /// Retourne `false` si numéro client manquant, upload échoué, ou WhatsApp
   /// non disponible (le caller doit afficher une erreur).
   static Future<bool> sendWhatsAppReminderWithPdf(Sale order, {
-    String currency = 'XAF',
+    String? currency,
     ShopSummary? shop,
     WhatsappService? whatsapp,
   }) async {
+    currency ??= CurrencyFormatter.currentSymbol;
     final phone = order.clientPhone ?? '';
     if (phone.trim().isEmpty) return false;
 

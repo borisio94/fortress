@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../domain/entities/client.dart';
@@ -12,6 +13,8 @@ import '../../../../shared/widgets/phone_field.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/autocomplete_text_field.dart';
 import '../../../../shared/widgets/blocked_delete_dialog.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
+import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../core/services/danger_action_service.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 
@@ -91,10 +94,7 @@ class _ClientsPageState extends State<ClientsPage> {
               vipCount: vipCount,
               totalRevenue: total),
 
-        // ── Recherche pleine largeur ───────────────────────────────
-        // Le CTA « + Ajouter » est désormais dans la topbar shell
-        // (cf. ShopShell._topbarActionsFor) — la barre de recherche
-        // récupère 100% de la largeur ici.
+        // ── Recherche + bouton ajout (extrême droite) ─────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           child: Row(children: [
@@ -126,6 +126,25 @@ class _ClientsPageState extends State<ClientsPage> {
                       borderRadius: BorderRadius.circular(10),
                       borderSide: BorderSide(
                           color: AppColors.primary, width: 1.5)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Bouton "Ajouter client" inline — extrême droite. Remplace
+            // l'ancien FAB draggable + le bouton "+" topbar.
+            Tooltip(
+              message: l.crmAdd,
+              child: SizedBox(
+                width: 42, height: 42,
+                child: Material(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(10),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () => _showClientForm(context),
+                    child: const Icon(Icons.add_rounded,
+                        size: 22, color: Colors.white),
+                  ),
                 ),
               ),
             ),
@@ -256,12 +275,8 @@ class _ClientsPageState extends State<ClientsPage> {
   }
 
   void _showClientForm(BuildContext context, {Client? client}) {
-    showModalBottomSheet(
+    showAdaptiveFormSheet(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => ClientFormSheet(
         shopId:    widget.shopId,
         client:    client,
@@ -309,9 +324,10 @@ class _KpiStrip extends StatelessWidget {
       color: AppColors.divider);
 
   String _fmt(double n) {
-    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M XAF';
-    if (n >= 1000)    return '${(n / 1000).toStringAsFixed(0)}k XAF';
-    return '${n.toStringAsFixed(0)} XAF';
+    final sym = CurrencyFormatter.currentSymbol;
+    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M $sym';
+    if (n >= 1000)    return '${(n / 1000).toStringAsFixed(0)}k $sym';
+    return '${n.toStringAsFixed(0)} $sym';
   }
 }
 
@@ -324,7 +340,7 @@ class _Kpi extends StatelessWidget {
   Widget build(BuildContext context) => Expanded(
     child: Row(children: [
       Container(width: 30, height: 30,
-          decoration: BoxDecoration(color: color.withOpacity(0.1),
+          decoration: BoxDecoration(color: color.withValues(alpha:0.1),
               borderRadius: BorderRadius.circular(8)),
           child: Icon(icon, size: 14, color: color)),
       const SizedBox(width: 8),
@@ -367,7 +383,7 @@ class _FilterChip extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
           decoration: BoxDecoration(
             color: selected
-                ? Colors.white.withOpacity(0.25)
+                ? Colors.white.withValues(alpha:0.25)
                 : AppColors.inputFill,
             borderRadius: BorderRadius.circular(10),
           ),
@@ -406,7 +422,7 @@ class _ClientCard extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: AppColors.divider),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
               blurRadius: 6, offset: const Offset(0, 2))],
         ),
         child: Row(children: [
@@ -470,15 +486,16 @@ class _ClientCard extends StatelessWidget {
             Text(_fmtAmount(client.totalSpent),
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800,
                     color: color)),
-            const Text('XAF', style: TextStyle(fontSize: 9,
-                color: AppColors.textHint)),
+            Text(CurrencyFormatter.currentSymbol,
+                style: const TextStyle(fontSize: 9,
+                    color: AppColors.textHint)),
             const SizedBox(height: 6),
             Row(mainAxisSize: MainAxisSize.min, children: [
               GestureDetector(
                 onTap: onDelete,
                 child: Container(width: 28, height: 28,
                     decoration: BoxDecoration(
-                        color: AppColors.error.withOpacity(0.08),
+                        color: AppColors.error.withValues(alpha:0.08),
                         borderRadius: BorderRadius.circular(7)),
                     child: const Icon(Icons.delete_outline_rounded,
                         size: 13, color: AppColors.error)),
@@ -495,7 +512,7 @@ class _ClientCard extends StatelessWidget {
               ),
               const SizedBox(width: 4),
               Icon(Icons.chevron_right_rounded,
-                  size: 16, color: AppColors.textHint.withOpacity(0.5)),
+                  size: 16, color: AppColors.textHint.withValues(alpha:0.5)),
             ]),
           ]),
         ]),
@@ -550,9 +567,9 @@ class _TagBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
+          color: color.withValues(alpha:0.1),
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: color.withOpacity(0.3))),
+          border: Border.all(color: color.withValues(alpha:0.3))),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(_icon(), size: 10, color: color),
         const SizedBox(width: 3),
@@ -895,43 +912,25 @@ class ClientFormSheetState extends State<ClientFormSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: SingleChildScrollView(
+    final deleteAction = _isEdit
+        ? [
+            IconButton(
+              icon: const Icon(Icons.delete_outline_rounded,
+                  size: 20, color: AppColors.error),
+              onPressed: () async {
+                final ok = await _confirmDelete(context);
+                if (ok) _delete();
+              },
+            ),
+          ]
+        : null;
+    return AdaptiveFormFrame(
+      title: _isEdit ? 'Modifier le client' : 'Nouveau client',
+      icon: _isEdit ? Icons.edit_outlined : Icons.person_add_outlined,
+      actions: deleteAction,
+      body: Padding(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          // Poignée
-          Center(child: Container(width: 36, height: 4,
-              decoration: BoxDecoration(color: AppColors.divider,
-                  borderRadius: BorderRadius.circular(2)))),
-          const SizedBox(height: 16),
-
-          // Titre
-          Row(children: [
-            Container(width: 36, height: 36,
-                decoration: BoxDecoration(color: AppColors.primarySurface,
-                    borderRadius: BorderRadius.circular(9)),
-                child: Icon(
-                    _isEdit ? Icons.edit_outlined : Icons.person_add_outlined,
-                    size: 18, color: AppColors.primary)),
-            const SizedBox(width: 10),
-            Text(_isEdit ? 'Modifier le client' : 'Nouveau client',
-                style: const TextStyle(fontSize: 16,
-                    fontWeight: FontWeight.w700)),
-            if (_isEdit) ...[
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.delete_outline_rounded,
-                    size: 20, color: AppColors.error),
-                onPressed: () async {
-                  final ok = await _confirmDelete(context);
-                  if (ok) _delete();
-                },
-              ),
-            ],
-          ]),
-          const SizedBox(height: 20),
 
           // Nom (requis)
           AppLabeledField(
@@ -1067,31 +1066,67 @@ class ClientFormSheetState extends State<ClientFormSheet> {
     );
   }
 
+  // Refonte UX : dialog → bottom sheet verrouillé (cf. showFormSheet).
   Future<bool> _confirmDelete(BuildContext context) async {
-    return await showDialog<bool>(
+    return await showFormSheet<bool>(
       context: context,
-      builder: (dc) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Supprimer ce client ?',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-        content: const Text('Cette action est irréversible.',
-            style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(dc).pop(false),
-              child: const Text('Annuler',
-                  style: TextStyle(color: AppColors.textSecondary))),
-          ElevatedButton(
-            onPressed: () => Navigator.of(dc).pop(true),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.error,
-                foregroundColor: Colors.white, elevation: 0,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10))),
-            child: const Text('Supprimer'),
+      builder: (dc) {
+        final mq = MediaQuery.of(dc);
+        return Padding(
+          padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FormSheetHeader(
+                  title: 'Supprimer ce client ?',
+                  icon: Icons.delete_outline_rounded,
+                  iconColor: AppColors.error,
+                ),
+                const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 14, 20, 0),
+                  child: Text('Cette action est irréversible.',
+                      style: TextStyle(
+                          fontSize: 13,
+                          color: AppColors.textSecondary)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+                  child: Row(children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(dc).pop(false),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 44),
+                          foregroundColor: AppColors.textSecondary,
+                        ),
+                        child: const Text('Annuler'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.of(dc).pop(true),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.error,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          minimumSize: const Size(0, 44),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('Supprimer'),
+                      ),
+                    ),
+                  ]),
+                ),
+              ],
+            ),
           ),
-        ],
-      ),
+        );
+      },
     ) ?? false;
   }
 }

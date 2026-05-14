@@ -1,6 +1,7 @@
 import 'package:intl/intl.dart';
 import '../../features/inventaire/domain/entities/product.dart';
 import '../../features/shop_selector/domain/entities/shop_summary.dart';
+import '../utils/currency_formatter.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // CatalogueHtmlBuilder — génère une page HTML statique légère qui présente
@@ -47,15 +48,17 @@ class CatalogueHtmlBuilder {
   ///   ciblés (ou tous si highlightProductIds est vide).
   /// - [whatsappContact] : numéro à afficher dans le footer (format libre).
   ///   Si vide, on affiche juste l'invitation textuelle.
-  /// - [currency] : devise affichée (défaut XAF).
+  /// - [currency] : symbole devise affiché. Défaut = `CurrencyFormatter
+  ///   .currentSymbol` (FCFA pour XAF). Évite d'exposer le code ISO brut.
   static String build({
     required ShopSummary shop,
     required List<Product> products,
     CataloguePromo? promo,
     String? whatsappContact,
-    String currency = 'XAF',
+    String? currency,
     DateTime? generatedAt,
   }) {
+    currency ??= CurrencyFormatter.currentSymbol;
     final fmt = NumberFormat('#,###', 'fr_FR');
     final at  = generatedAt ?? DateTime.now();
     final dateStr = _date(at);
@@ -193,7 +196,7 @@ class CatalogueHtmlBuilder {
   }) {
     final name = _esc(p.name);
     final stock = p.totalStock;
-    final main = p.variants.where((v) => v.isMain).firstOrNull
+    final main = p.featuredVariant()
         ?? (p.variants.isNotEmpty ? p.variants.first : null);
     final priceVal = main?.priceSellPos ?? p.priceSellPos;
     final price = '${fmt.format(priceVal)} $currency';

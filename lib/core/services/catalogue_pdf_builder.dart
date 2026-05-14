@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../../features/inventaire/domain/entities/product.dart';
 import '../../features/shop_selector/domain/entities/shop_summary.dart';
+import '../utils/currency_formatter.dart';
 import 'catalogue_html_builder.dart' show CataloguePromo;
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -50,9 +51,12 @@ class CataloguePdfBuilder {
     required List<Product> products,
     CataloguePromo? promo,
     String? whatsappContact,
-    String currency = 'XAF',
+    String? currency,
     DateTime? generatedAt,
   }) async {
+    // Capture non-null avant la closure `pw.MultiPage.build` — le
+    // type-promotion via `??=` ne traverse pas la frontière de closure.
+    final cur = currency ?? CurrencyFormatter.currentSymbol;
     final fmt = NumberFormat('#,###', 'fr_FR');
     final at  = generatedAt ?? DateTime.now();
     final dateStr = '${at.day.toString().padLeft(2, '0')}/'
@@ -103,7 +107,7 @@ class CataloguePdfBuilder {
           entries: entries,
           images: entryImages,
           fmt: fmt,
-          currency: currency,
+          currency: cur,
           promo: promo,
         ),
       ],
@@ -471,7 +475,7 @@ class _Entry {
   double get price {
     final v = variant?.priceSellPos;
     if (v != null && v > 0) return v;
-    final main = product.variants.where((x) => x.isMain).firstOrNull
+    final main = product.featuredVariant()
         ?? (product.variants.isNotEmpty ? product.variants.first : null);
     return main?.priceSellPos ?? product.priceSellPos;
   }

@@ -6,6 +6,7 @@ import 'package:url_launcher/link.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/widgets/fortress_logo.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/autocomplete_text_field.dart';
@@ -206,6 +207,7 @@ class _CataloguePageState extends State<CataloguePage> {
   Uri _buildBatchOrderUri(_CatalogueData data) {
     final shopName = data.shop.name;
     final selectedItems = _selectedAvailable(data);
+    final sym = CurrencyFormatter.currentSymbol;
     final buf = StringBuffer()
       ..write('Bonjour ')
       ..write(shopName.isEmpty ? '' : '$shopName, ')
@@ -213,12 +215,12 @@ class _CataloguePageState extends State<CataloguePage> {
       ..writeln();
     var total = 0.0;
     for (final it in selectedItems) {
-      buf.writeln('• ${it.name} — ${it.price.toStringAsFixed(0)} XAF');
+      buf.writeln('• ${it.name} — ${it.price.toStringAsFixed(0)} $sym');
       total += it.price;
     }
     buf
       ..writeln()
-      ..writeln('Total estimé : ${total.toStringAsFixed(0)} XAF');
+      ..writeln('Total estimé : ${total.toStringAsFixed(0)} $sym');
     return _waUri(data.shop.phone, buf.toString());
   }
 
@@ -1087,7 +1089,9 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
                               style: const TextStyle(fontSize: 12)),
                         ),
                         const SizedBox(width: 10),
-                        Text('${it.price.toStringAsFixed(0)} XAF',
+                        Text(
+                            '${it.price.toStringAsFixed(0)} '
+                            '${CurrencyFormatter.currentSymbol}',
                             style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
@@ -1102,7 +1106,9 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
                               fontSize: 13,
                               fontWeight: FontWeight.w700)),
                     ),
-                    Text('${_total.toStringAsFixed(0)} XAF',
+                    Text(
+                        '${_total.toStringAsFixed(0)} '
+                        '${CurrencyFormatter.currentSymbol}',
                         style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w800,

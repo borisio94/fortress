@@ -1,31 +1,44 @@
 import 'package:fortress/shared/widgets/app_snack.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../bloc/caisse_bloc.dart';
+import '../../../dashboard/data/dashboard_providers.dart';
 import '../widgets/product_grid_widget.dart';
 import '../widgets/cart_widget.dart';
-import '../widgets/delivery_details_sheet.dart';
+import '../widgets/order_processing_sheet.dart';
+import '../widgets/order_completion_sheet.dart';
+import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../domain/usecases/order_receipt_usecase.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
+import '../../../../shared/widgets/order_source_badge.dart';
+import '../../../../shared/widgets/view_filter_chip_bar.dart';
+import '../widgets/transfer_delivery_sheet.dart';
+import '../widgets/transfer_history_section.dart';
+import '../../data/repositories/delivery_transfer_repository.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/permisions/app_permissions.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../shared/providers/current_shop_provider.dart';
 import '../../domain/entities/sale.dart';
 import '../../data/repositories/sale_local_datasource.dart';
+import '../../../../core/database/app_database.dart';
+import '../../../../core/services/external_launcher.dart';
+import '../../../../core/services/partner_ledger_service.dart';
+import '../../../parametres/domain/entities/partner_ledger_entry.dart';
 import '../../../../core/services/document_service.dart';
-import '../../../../core/services/whatsapp_service.dart';
 import '../../../../core/services/invoice_storage_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
-import '../../../../core/services/whatsapp/message_templates.dart';
 import '../../../../core/services/danger_action_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/utils/phone_formatter.dart';
-import '../../../parametres/data/shop_settings_store.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../crm/data/models/client_model.dart';
 
@@ -81,6 +94,32 @@ class _CaissePageState extends ConsumerState<CaissePage> {
         context.read<CaisseBloc>().add(SetSelectedClient(client));
       });
     }
+
+    // Phase 2 — propage la vue "Partenaire X" du dashboard vers le panier.
+    // Si l'utilisateur consulte le dashboard avec le filtre Flash Livraison
+    // Douala et clique Caisse, on pré-positionne le mode livraison sur ce
+    // partenaire pour que la vente utilise son stock. On ne touche que si
+    // le panier est vierge (pas d'articles ni de mode déjà choisi) — sinon
+    // on respecte la sélection en cours.
+    //
+    // À l'entrée Vente, si le filtre dashboard est `null` (Globale), on le
+    // force à `'_base'` : Globale n'est pas affichée sur la barre Vente
+    // (pas de sens en vente), donc on doit avoir un onglet actif cohérent.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final dashFilter = ref.read(dashViewFilterProvider);
+      if (dashFilter == null) {
+        ref.read(dashViewFilterProvider.notifier).state = '_base';
+        return;
+      }
+      if (dashFilter == '_base') return;
+      final bloc = context.read<CaisseBloc>();
+      if (bloc.state.items.isNotEmpty) return;
+      if (bloc.state.deliveryMode != null) return;
+      if ((bloc.state.deliveryLocationId ?? '').isNotEmpty) return;
+      bloc.add(SetDeliveryMode(
+          mode: DeliveryMode.partner, locationId: dashFilter));
+    });
   }
 
   bool get _isEcommerce {
@@ -92,7 +131,15 @@ class _CaissePageState extends ConsumerState<CaissePage> {
   Widget build(BuildContext context) {
     final l      = context.l10n;
 
-    return BlocListener<CaisseBloc, CaisseState>(
+    // Note : la `ViewFilterChipBar` (Boutique / Partenaires) côté Vente est
+    // un FILTRE VISUEL pur. Elle ne dispatche plus `SetDeliveryMode` — sinon
+    // elle force `deliveryMode=inHouse` sans `deliveryCity`, ce qui faisait
+    // échouer `_validateDelivery` au moment du Save (snackbar « Ville de
+    // livraison requise »). Le mode + ville restent pilotés par la sheet
+    // « Détails de livraison » du panier (action utilisateur explicite).
+    return MultiBlocListener(
+      listeners: [
+        BlocListener<CaisseBloc, CaisseState>(
         listenWhen: (prev, curr) =>
             prev.saleCompleted   != curr.saleCompleted   ||
             prev.orderSaved      != curr.orderSaved      ||
@@ -128,11 +175,13 @@ class _CaissePageState extends ConsumerState<CaissePage> {
             });
           }
         },
-        child: _PrincipalTab(
-            shopId:     widget.shopId,
-            isEcommerce: _isEcommerce,
-            onNewOrder: () => _showNewOrder(context, l)),
-      );
+        ),
+      ],
+      child: _PrincipalTab(
+          shopId:     widget.shopId,
+          isEcommerce: _isEcommerce,
+          onNewOrder: () => _showNewOrder(context, l)),
+    );
   }
 
   void _showNewOrder(BuildContext context, AppLocalizations l) {
@@ -174,22 +223,27 @@ class _PrincipalTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme  = Theme.of(context);
     final isWide = MediaQuery.of(context).size.width > 800;
+    // Fond identique aux autres pages (dashboard, inventaire) — repose sur
+    // le `scaffoldBackgroundColor` du thème pour cohérence visuelle. La
+    // chaleur vient des cards (ombre tintée primary sur ProductGridCard),
+    // pas d'un dégradé global.
+    final bg = theme.scaffoldBackgroundColor;
     if (isWide) {
       return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Expanded(
-          child: Container(
-              color: theme.scaffoldBackgroundColor,
+          child: ColoredBox(
+              color: bg,
               child: PosProductPanel(shopId: shopId)),
         ),
         Container(width: 1, color: theme.semantic.borderSubtle),
         SizedBox(
-          width: 280,
+          width: 380,
           child: CartWidget(shopId: shopId, isEcommerce: isEcommerce),
         ),
       ]);
     }
-    return Container(
-      color: theme.scaffoldBackgroundColor,
+    return ColoredBox(
+      color: bg,
       child: PosProductPanel(shopId: shopId),
     );
   }
@@ -239,13 +293,34 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
       final q = _searchCtrl.text.trim();
       if (q != _query) setState(() => _query = q);
     });
+    // Listener AppDatabase : rafraîchit la liste dès qu'une commande est
+    // créée / mise à jour (SaveOrder dans le panier émet
+    // `notifyOrderChange` après le put Hive). Sans ça, l'opérateur devait
+    // pull-to-refresh manuellement pour voir sa commande tout juste
+    // enregistrée.
+    AppDatabase.addListener(_onDataChanged);
+  }
+
+  void _onDataChanged(String table, String shopId) {
+    if (!mounted) return;
+    if (table == 'orders' && shopId == widget.shopId) {
+      setState(() {});
+    }
   }
 
   @override
   void dispose() {
+    AppDatabase.removeListener(_onDataChanged);
     _filter.dispose();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  /// Pull-to-refresh : re-fetch toutes les tables métier depuis Supabase
+  /// puis force un rebuild (le getter `_orders` relit Hive à jour).
+  Future<void> _pullAndReload() async {
+    await AppDatabase.pullAllForShop(widget.shopId);
+    if (mounted) setState(() {});
   }
 
   String _normalize(String s) => s
@@ -289,6 +364,42 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
           o.createdByUserId == me
           || o.status == SaleStatus.completed).toList();
     }
+    // Filtre vue dashboard.
+    // Principe métier : chaque commande est rattachée à un LIEU d'émission
+    // (boutique principale OU dépôt partenaire), via `o.deliveryLocationId`
+    // qui est désormais TOUJOURS rempli (cf. SetDeliveryMode bloc handler).
+    //   * Vue Globale (viewFilter == null) → toutes les commandes
+    //   * Vue Boutique (viewFilter == '_base') → commandes émises depuis
+    //     la stock_location de cette boutique (pas seulement "loc null")
+    //   * Vue Partenaire X → commandes émises depuis X
+    //
+    // Fallback `byPartner` (delivery_transfers) garde son rôle pour les
+    // commandes redirigées via une livraison effective postérieure.
+    // Compat héritée : les commandes avant ce sprint n'ont pas de
+    // deliveryLocationId — elles sont considérées "boutique" (rattachées
+    // à shopLocation) tant qu'aucun transfer ne les redirige ailleurs.
+    final viewFilter = ref.watch(dashViewFilterProvider);
+    if (viewFilter != null) {
+      final byPartner    = orderToPartnerLocId(widget.shopId);
+      final shopLoc      = AppDatabase.getShopLocation(widget.shopId);
+      final shopLocId    = shopLoc?.id;
+      list = list.where((o) {
+        final id = o.id;
+        if (id == null) return false;
+        // Lieu effectif : champ Sale d'abord, transfer en fallback.
+        final loc = (o.deliveryLocationId ?? '').isNotEmpty
+            ? o.deliveryLocationId
+            : byPartner[id];
+        if (viewFilter == '_base') {
+          // Vue Boutique = (a) lieu = shopLocation.id, ou (b) anciennes
+          // commandes sans lieu et sans transfer (compat rétro).
+          if (loc == null) return true;
+          return loc == shopLocId;
+        }
+        // Vue Partenaire X = lieu == X.
+        return loc == viewFilter;
+      }).toList();
+    }
     final r = _dateRange;
     if (r != null) {
       // Pour l'onglet "Complétée" on filtre sur la date d'encaissement
@@ -331,6 +442,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
   @override
   Widget build(BuildContext context) {
     return Column(children: [
+      // ── Onglets « Vue » : Globale / Boutique / Partenaires ──────────
+      // Le filtre s'applique aux lignes via `orderToPartnerLocId` plus haut
+      // dans `_orders` (cf. ref.watch(dashViewFilterProvider)).
+      ViewFilterChipBar(shopId: widget.shopId, useTabs: true),
+
       // ── Filtres ─────────────────────────────────────────────
       Container(
         color: Colors.white,
@@ -397,12 +513,12 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                     horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: _dateRange != null
-                      ? AppColors.primary.withOpacity(0.10)
+                      ? AppColors.primary.withValues(alpha:0.10)
                       : AppColors.inputFill,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
                       color: _dateRange != null
-                          ? AppColors.primary.withOpacity(0.4)
+                          ? AppColors.primary.withValues(alpha:0.4)
                           : AppColors.divider),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -446,14 +562,16 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 
       // ── Liste commandes ──────────────────────────────────────
       Expanded(
-        child: _orders.isEmpty
-            ? EmptyStateWidget(
+        child: RefreshIndicator(
+          onRefresh: _pullAndReload,
+          child: _orders.isEmpty
+            ? ListView(children: [EmptyStateWidget(
                 icon: Icons.inbox_outlined,
                 title: _filter.index == 0
                     ? 'Aucune commande'
                     : 'Aucune commande ${_filters[_filter.index].$2.toLowerCase()}',
                 subtitle: 'Les commandes que tu encaisses apparaîtront ici.',
-              )
+              )])
             : ListView.separated(
           padding: const EdgeInsets.all(12),
           itemCount: _orders.length,
@@ -478,48 +596,104 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                 return;
               }
               final order = _orders[i];
-              final wasCompleted = order.status == SaleStatus.completed;
-              final becomingCompleted =
-                  status == SaleStatus.completed && !wasCompleted;
+              final wasScheduled  = order.status == SaleStatus.scheduled;
+              final wasProcessing = order.status == SaleStatus.processing;
+              final becomingProcessing = status == SaleStatus.processing
+                  && wasScheduled;
+              final becomingCompleted = status == SaleStatus.completed
+                  && order.status != SaleStatus.completed;
 
-              // Quand la commande passe à "completed" → ouvrir le sheet de
-              // détails livraison/expédition pour que l'opérateur capture
-              // tout en une fois (mode, ville, adresse, agence d'expédition,
-              // responsable, date). Le stock sera déduit de la bonne source
-              // par updateOrderStatus (logique centralisée dans le datasource).
-              if (becomingCompleted) {
-                final res = await showDeliveryDetailsSheet(
+              // Transition scheduled → processing : sheet B (paiement + mode
+              // de livraison). Le mode par défaut suit le lieu d'origine de
+              // la commande (partner si dépôt partenaire, inHouse si
+              // boutique principale) — conforme au principe métier "tout
+              // est rattaché à un lieu".
+              if (becomingProcessing) {
+                final defaultMode = _modeForOrderLocation(order);
+                final res = await showOrderProcessingSheet(
                   context,
-                  shopId:                 order.shopId,
-                  initialPaymentMethod:   order.paymentMethod,
-                  initialMode:            order.deliveryMode,
-                  initialLocationId:      order.deliveryLocationId,
-                  initialPersonName:      order.deliveryPersonName,
-                  initialDeliveryCity:    order.deliveryCity,
-                  initialDeliveryAddress: order.deliveryAddress,
-                  initialShipmentCity:    order.shipmentCity,
-                  initialShipmentAgency:  order.shipmentAgency,
-                  initialShipmentHandler: order.shipmentHandler,
-                  initialDate:            order.scheduledAt,
+                  defaultMode:          defaultMode,
+                  initialPaymentMethod: order.paymentMethod,
+                  initialPersonName:    order.deliveryPersonName,
+                  originLocationName:   _locationNameOf(order),
                 );
-                if (res == null) return; // annulé → ne rien changer
+                if (res == null) return; // annulé → pas de changement
                 await _ds.updateOrderDelivery(
                   order.id!,
-                  paymentMethod:   res.paymentMethod,
-                  mode:            res.mode,
-                  locationId:      res.locationId,
-                  personName:      res.personName,
-                  deliveryCity:    res.deliveryCity,
-                  deliveryAddress: res.deliveryAddress,
-                  shipmentCity:    res.shipmentCity,
-                  shipmentAgency:  res.shipmentAgency,
-                  shipmentHandler: res.shipmentHandler,
-                  scheduledAt:     res.date,
+                  paymentMethod: res.paymentMethod,
+                  mode:          res.mode,
+                  // locationId conservé (= lieu d'origine de la commande)
+                  locationId:    order.deliveryLocationId,
+                  personName:    res.personName,
                 );
               }
 
+              // Transition processing/scheduled → completed : sheet C
+              // (frais de livraison/emballage inclus dans le montant payé).
+              if (becomingCompleted) {
+                // Si on saute scheduled → completed direct (raccourci POS),
+                // collecter aussi paiement+mode AVANT les frais. Sinon
+                // les valeurs déjà saisies au sheet B sont préservées.
+                if (!wasProcessing && wasScheduled) {
+                  final defaultMode = _modeForOrderLocation(order);
+                  final pres = await showOrderProcessingSheet(
+                    context,
+                    defaultMode:          defaultMode,
+                    initialPaymentMethod: order.paymentMethod,
+                    initialPersonName:    order.deliveryPersonName,
+                    originLocationName:   _locationNameOf(order),
+                  );
+                  if (pres == null) return;
+                  await _ds.updateOrderDelivery(
+                    order.id!,
+                    paymentMethod: pres.paymentMethod,
+                    mode:          pres.mode,
+                    locationId:    order.deliveryLocationId,
+                    personName:    pres.personName,
+                  );
+                }
+                if (!context.mounted) return;
+                // Re-lire l'ordre AVANT le sheet C : si Sheet B vient de
+                // changer le mode (ex: pickup → partner), il faut que le
+                // défaut "Qui a encaissé ?" reflète ce nouveau mode.
+                final freshForSheet = _ds.getOrderById(order.id!) ?? order;
+                final isPartnerNow =
+                    freshForSheet.deliveryMode == DeliveryMode.partner;
+                final partnerName = isPartnerNow
+                    ? _locationNameOf(freshForSheet)
+                    : null;
+                final fres = await showOrderCompletionSheet(
+                  context,
+                  initialFees: freshForSheet.fees
+                      .map((f) => OrderFee(
+                            id:     f['id']?.toString() ?? '',
+                            label:  f['label']?.toString() ?? '',
+                            amount: (f['amount'] as num?)?.toDouble() ?? 0,
+                          ))
+                      .toList(),
+                  defaultCollectedBy: isPartnerNow
+                      ? CollectedBy.partnerNotRemitted
+                      : CollectedBy.boutique,
+                  partnerName: partnerName,
+                );
+                if (fres == null) return; // annulé
+                final fresh = _ds.getOrderById(order.id!) ?? order;
+                final updated = fresh.copyWith(fees: fres.fees
+                    .map((f) => {
+                          'id': f.id,
+                          'label': f.label,
+                          'amount': f.amount,
+                        })
+                    .toList());
+                await _ds.updateOrder(updated);
+                // Génère les mouvements partenaires associés à la completion.
+                await _generatePartnerLedgerEntries(
+                    order: updated, fees: fres.fees,
+                    collectedBy: fres.collectedBy);
+              }
+
               await _ds.updateOrderStatus(order.id!, status);
-              setState(() {});
+              if (mounted) setState(() {});
             },
             onCancelWithReason: (reason) async {
               await _ds.cancelOrderWithReason(_orders[i].id!, reason);
@@ -536,8 +710,113 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
           );
           },
         ),
+        ),
       ),
     ]);
+  }
+
+  /// Mode de livraison par défaut au passage scheduled → processing.
+  /// Suit le lieu d'origine de la commande :
+  ///   * dépôt partenaire → partner
+  ///   * boutique principale (type shop) → inHouse (livraison équipe)
+  ///   * lieu inconnu → pickup (fallback safe)
+  /// L'opérateur peut toujours surcharger dans le sheet B.
+  DeliveryMode _modeForOrderLocation(Sale order) {
+    final locId = order.deliveryLocationId;
+    if (locId == null || locId.isEmpty) return DeliveryMode.pickup;
+    try {
+      final raw = HiveBoxes.stockLocationsBox.get(locId);
+      if (raw == null) return DeliveryMode.pickup;
+      final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+      return loc.type == StockLocationType.partner
+          ? DeliveryMode.partner
+          : DeliveryMode.inHouse;
+    } catch (_) {
+      return DeliveryMode.pickup;
+    }
+  }
+
+  /// Renvoie le nom du lieu d'origine de la commande (pour affichage
+  /// confirmation dans Sheet B). Null si le lieu est introuvable.
+  String? _locationNameOf(Sale order) {
+    final locId = order.deliveryLocationId;
+    if (locId == null || locId.isEmpty) return null;
+    try {
+      final raw = HiveBoxes.stockLocationsBox.get(locId);
+      if (raw == null) return null;
+      final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+      return loc.name;
+    } catch (_) { return null; }
+  }
+
+  /// Génère les mouvements partenaires consécutifs à la completion d'une
+  /// commande. Cas couverts (cf. modèle des dettes croisées) :
+  ///   * partenaire a encaissé (collectedBy=partnerNotRemitted)
+  ///       → +(total - frais_dûs_au_partenaire) au compte partenaire
+  ///   * livraison faite par un partenaire (deliveryMode=partner)
+  ///       → -frais_livraison au compte partenaire
+  /// Le partenaire ciblé est `deliveryLocationId` quand il s'agit d'un
+  /// dépôt partenaire ; sinon on ne crée rien (cas boutique pure).
+  Future<void> _generatePartnerLedgerEntries({
+    required Sale order,
+    required List<OrderFee> fees,
+    required CollectedBy collectedBy,
+  }) async {
+    final partnerId = order.deliveryLocationId;
+    if (partnerId == null || partnerId.isEmpty) return;
+    StockLocation? loc;
+    try {
+      final raw = HiveBoxes.stockLocationsBox.get(partnerId);
+      if (raw != null) {
+        loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+      }
+    } catch (_) {}
+    final isPartnerLoc = loc?.type == StockLocationType.partner;
+
+    // Idempotence : si la commande a déjà des mouvements (ex: re-completion
+    // après une annulation), on les efface pour repartir sur un état sain.
+    await PartnerLedgerService.removeForOrder(order.shopId, order.id!);
+
+    final feesTotal  = fees.fold<double>(0, (s, f) => s + f.amount);
+    final orderTotal = order.total;
+
+    // Cas A : encaissement par le partenaire — crédite le partenaire (le
+    // partenaire NOUS DOIT cet argent jusqu'au versement).
+    if (collectedBy == CollectedBy.partnerNotRemitted && isPartnerLoc) {
+      // Si le partenaire a aussi assuré la livraison (mode partner), on
+      // déduit directement les frais du montant qu'il nous doit (il a déjà
+      // sa rémunération en main, on n'a plus qu'à recevoir le net).
+      final livreurAussi = order.deliveryMode == DeliveryMode.partner;
+      final netDu = livreurAussi
+          ? (orderTotal - feesTotal)
+          : orderTotal;
+      await PartnerLedgerService.addEntry(
+        shopId:            order.shopId,
+        partnerLocationId: partnerId,
+        type:              PartnerLedgerEntryType.saleCollected,
+        amount:            netDu,
+        orderId:           order.id,
+        note:              livreurAussi
+            ? 'Vente encaissée (frais livraison déjà retenus)'
+            : 'Vente encaissée par le partenaire',
+      );
+      return;
+    }
+
+    // Cas B : livraison par le partenaire mais encaissement boutique →
+    // la boutique DOIT les frais de livraison au partenaire.
+    if (order.deliveryMode == DeliveryMode.partner
+        && isPartnerLoc
+        && feesTotal > 0) {
+      await PartnerLedgerService.addEntry(
+        shopId:            order.shopId,
+        partnerLocationId: partnerId,
+        type:              PartnerLedgerEntryType.deliveryOwed,
+        amount:            -feesTotal,
+        orderId:           order.id,
+        note:              'Frais de livraison à verser au partenaire',
+      );
+    }
   }
 }
 
@@ -592,10 +871,10 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
               color: _expanded
-                  ? color.withOpacity(0.35)
+                  ? color.withValues(alpha:0.35)
                   : AppColors.divider),
           boxShadow: [BoxShadow(
-              color: Colors.black.withOpacity(0.03),
+              color: Colors.black.withValues(alpha:0.03),
               blurRadius: 6, offset: const Offset(0, 2))],
         ),
         child: Column(
@@ -611,7 +890,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 7, vertical: 3),
                     decoration: BoxDecoration(
-                        color: color.withOpacity(0.12),
+                        color: color.withValues(alpha:0.12),
                         borderRadius: BorderRadius.circular(6)),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
                       Text(_statusLabel(s),
@@ -631,6 +910,11 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         ),
                     ]),
                   ),
+                  // Badge "Web" / "WhatsApp" — ne s'affiche que si source != 'pos'.
+                  if (widget.order.source != 'pos') ...[
+                    const SizedBox(width: 5),
+                    OrderSourceBadge(source: widget.order.source),
+                  ],
                   const SizedBox(width: 6),
                   Flexible(
                     child: Text(
@@ -689,7 +973,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
               // Partie droite fixe — prix + chevron collés à droite
               const SizedBox(width: 8),
               Text(
-                '${widget.order.total.toStringAsFixed(0)} XAF',
+                CurrencyFormatter.format(widget.order.total),
                 style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w900,
@@ -815,6 +1099,35 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     const SizedBox(height: 8),
                   ],
 
+                  // ── Transfert au livreur (cf. hotfix_049) ──────────
+                  // Affiché pour toute commande "scheduled" si le user a
+                  // la permission. Ouvre un sheet 2 étapes (destinataire
+                  // + aperçu éditable) qui appelle la RPC atomique
+                  // `transfer_order_to_delivery`.
+                  if (widget.order.status == SaleStatus.scheduled
+                      && _permsForOrder().canTransferDelivery) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _openTransferDeliverySheet(context),
+                        icon: const Icon(Icons.local_shipping_rounded,
+                            size: 14),
+                        label: Text(context.l10n.deliveryTransferBtn,
+                            style: const TextStyle(
+                                fontSize: 11, fontWeight: FontWeight.w700)),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF25D366),
+                          side: const BorderSide(
+                              color: Color(0xFF25D366), width: 1.2),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+
                   // ── Actions client ─────────────────────────────────
                   // Pour une commande "programmée" arrivée à échéance
                   // (date du jour ou passée) : raccourcis "validée" /
@@ -832,7 +1145,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppColors.secondary,
                             side: BorderSide(
-                                color: AppColors.secondary.withOpacity(0.6)),
+                                color: AppColors.secondary.withValues(alpha:0.6)),
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8)),
@@ -850,7 +1163,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppColors.error,
                             side: BorderSide(
-                                color: AppColors.error.withOpacity(0.6)),
+                                color: AppColors.error.withValues(alpha:0.6)),
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8)),
@@ -875,7 +1188,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.warning,
                           side: BorderSide(
-                              color: AppColors.warning.withOpacity(0.6)),
+                              color: AppColors.warning.withValues(alpha:0.6)),
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8)),
@@ -919,6 +1232,19 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       ),
                       const SizedBox(width: 6),
                     ],
+                    // Bouton "Relancer le client" — visible UNIQUEMENT pour
+                    // les commandes en cours / programmées (pas après
+                    // completed/cancelled/refused/refunded).
+                    if (widget.order.status == SaleStatus.scheduled ||
+                        widget.order.status == SaleStatus.processing) ...[
+                      _ActionBtn(
+                        icon: Icons.notifications_active_outlined,
+                        color: const Color(0xFF25D366),
+                        tooltip: context.l10n.orderRelaunchBtn,
+                        onTap: () => _relaunchClient(context),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
                     if (widget.canEdit) ...[
                       _ActionBtn(
                         icon: Icons.edit_rounded,
@@ -938,6 +1264,10 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         onTap: () => _confirmDelete(context),
                       ),
                   ]),
+                  // Historique des transferts au livreur (cf. hotfix_049).
+                  // S'affiche en lecture seule + bouton "Renvoyer" par row.
+                  if (widget.order.id != null)
+                    TransferHistorySection(orderId: widget.order.id!),
                 ],
               ),
             ),
@@ -973,94 +1303,181 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     return diff.inHours <= 24;
   }
 
-  Future<void> _remindClient(BuildContext context) async {
-    if ((widget.order.clientPhone ?? '').trim().isEmpty) {
+  /// Relance avec lien de suivi — ouvre WhatsApp **synchrone** dans le tick
+  /// du clic, avec un message contenant le lien `/track/<order_id>` qui
+  /// permet au client de voir sa commande et la valider en un clic
+  /// (status `scheduled` → `processing`).
+  ///
+  /// Pas d'`await` avant `window.open` : sur web le user gesture serait
+  /// perdu et le popup bloqué silencieusement. Le lien de tracking est
+  /// construit synchrone à partir de l'order id (rien à uploader).
+  void _remindClient(BuildContext context) {
+    final order = widget.order;
+    final phone = (order.clientPhone ?? '').trim();
+    if (phone.isEmpty) {
       AppSnack.error(context,
           'Numéro WhatsApp du client manquant — '
           'ajoute-le dans la fiche client puis réessaie.');
       return;
     }
-    setState(() => _sendingInvoice = true);
-    try {
-      final ok = await OrderReceiptUseCase.sendWhatsAppReminderWithPdf(
-        widget.order,
-        whatsapp: ref.read(whatsappServiceProvider),
-      );
+    final p = PhoneFormatter.toWame(phone).replaceAll(RegExp(r'[^\d]'), '');
+    if (p.isEmpty) {
+      AppSnack.error(context, 'Numéro WhatsApp invalide.');
+      return;
+    }
+    if (order.id == null) {
+      AppSnack.error(context,
+          'Cette commande n\'a pas encore été synchronisée. '
+          'Réessaie dans un instant.');
+      return;
+    }
+    final shop = LocalStorageService.getShop(order.shopId);
+    final shopName = shop?.name ?? 'Fortress';
+    final clientName = order.clientName ?? 'Cher client';
+    final totalStr = CurrencyFormatter.format(order.total);
+    // Lien de suivi public — le client y verra sa commande et pourra la
+    // valider en un tap. La RPC `validate_order_by_client` bascule alors
+    // le statut vers `processing` (cf. hotfix_057_order_tracking.sql).
+    final trackUrl = 'https://fortress-pos.web.app/track/${order.id}';
+    final msg =
+        'Bonjour $clientName,\n\n'
+        'Petit rappel pour votre commande chez $shopName '
+        '(total : $totalStr).\n\n'
+        'Voir et valider votre commande :\n$trackUrl\n\n'
+        'Merci et à bientôt 🙏';
+    final url = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
+
+    openExternal(url).then((ok) {
       if (!ok && context.mounted) {
         AppSnack.error(context,
-            'Impossible d\'envoyer le rappel — vérifie ta connexion '
-            'puis réessaie.');
+            'Impossible d\'ouvrir WhatsApp. Autorisez les pop-ups dans le navigateur.');
       }
-    } catch (e) {
-      if (context.mounted) {
-        AppSnack.error(context, 'Erreur lors de l\'envoi du rappel : $e');
-      }
-    } finally {
-      if (mounted) setState(() => _sendingInvoice = false);
-    }
+    });
   }
 
-  /// Envoie la facture PDF d'une commande complétée par WhatsApp :
-  /// 1. Génère le PDF (réutilise OrderReceiptUseCase.generatePdf)
-  /// 2. Upload sur Supabase Storage bucket `factures` → signed URL 30 jours
-  /// 3. Ouvre wa.me avec un message pré-rempli + lien
-  Future<void> _sendInvoiceWhatsApp(BuildContext context) async {
+  /// Relance le client par WhatsApp avec la liste des produits commandés
+  /// + le total. Le propriétaire complète/envoie depuis son WhatsApp.
+  ///
+  /// Volontairement **synchrone** jusqu'à `launchUrl` : sur web, n'importe
+  /// quel `await` avant l'ouverture rompt le user gesture et le navigateur
+  /// bloque silencieusement la nouvelle fenêtre wa.me.
+  void _relaunchClient(BuildContext context) {
     final order = widget.order;
-    final phone = order.clientPhone ?? '';
-    if (phone.trim().isEmpty) {
+    final phone = (order.clientPhone ?? '').trim();
+    if (phone.isEmpty) {
       AppSnack.error(context,
           'Numéro WhatsApp du client manquant — '
           'ajoute-le dans la fiche client puis réessaie.');
       return;
     }
-    setState(() => _sendingInvoice = true);
-    try {
-      final shop  = LocalStorageService.getShop(order.shopId);
-      final bytes = await OrderReceiptUseCase.generatePdf(order, shop: shop);
-      final orderId = order.id
-          ?? 'order_${order.createdAt.millisecondsSinceEpoch}';
-      final longUrl = await InvoiceStorageService.uploadInvoice(
-        shopId: order.shopId,
-        orderId: orderId,
-        bytes: bytes,
-      );
-      if (longUrl == null) {
-        if (mounted) {
-          AppSnack.error(context,
-              'Upload de la facture échoué. Vérifie ta connexion '
-              'puis réessaie.');
-        }
-        return;
-      }
-      // Raccourcit la signed URL (fallback silencieux à l'URL longue).
-      final shortUrl = await UrlShortenerService.shorten(longUrl);
-      // Style de message lu depuis les paramètres boutique.
-      final styleKey = ShopSettingsStore(order.shopId)
-          .read<String>('whatsapp_message_style', fallback: 'standard');
-      final style = WhatsappMessageStyleX.fromKey(styleKey);
-      // Construction du message via les templates centralisés.
-      final msg = MessageTemplates.buildMessage(
-        order:    order,
-        shop:     shop,
-        shortUrl: shortUrl,
-        style:    style,
-      );
-      // Numéro normalisé pour wa.me.
-      final wamePhone = PhoneFormatter.toWame(phone);
-      final ok = await ref.read(whatsappServiceProvider)
-          .sendMessage(wamePhone, msg);
-      if (!ok && mounted) {
-        AppSnack.error(context,
-            'Impossible d\'ouvrir WhatsApp. La facture est uploadée — '
-            'tu peux copier-coller manuellement le lien.');
-      }
-    } catch (e) {
-      if (mounted) {
-        AppSnack.error(context, 'Erreur envoi facture : $e');
-      }
-    } finally {
-      if (mounted) setState(() => _sendingInvoice = false);
+    final firstName = (order.clientName ?? '')
+        .trim().split(RegExp(r'\s+')).first;
+    final reference = order.id ?? order.createdAt.millisecondsSinceEpoch
+        .toRadixString(16).toUpperCase().substring(0, 6);
+    final items = order.items.map((it) {
+      final qty   = it.quantity;
+      final name  = it.productName;
+      final total = CurrencyFormatter.format(it.unitPrice * qty);
+      return '• ${qty}× $name — $total';
+    }).join('\n');
+    final totalStr = CurrencyFormatter.format(order.total);
+    final msg = context.l10n.orderRelaunchMessage(
+      firstName: firstName.isEmpty ? 'cher client' : firstName,
+      reference: reference,
+      items:     items.isEmpty ? '—' : items,
+      total:     totalStr,
+    );
+    final p = PhoneFormatter.toWame(phone).replaceAll(RegExp(r'[^\d]'), '');
+    if (p.isEmpty) {
+      AppSnack.error(context, 'Numéro WhatsApp invalide.');
+      return;
     }
+    final url = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
+    // `openExternal` utilise `window.open` synchrone sur web (bypass des
+    // popup blockers) et `url_launcher` natif sur mobile/desktop.
+    openExternal(url).then((ok) {
+      if (!ok && context.mounted) {
+        AppSnack.error(context,
+            'Impossible d\'ouvrir WhatsApp. Autorisez les pop-ups dans le navigateur.');
+      }
+    });
+  }
+
+  /// Envoie la facture PDF d'une commande complétée par WhatsApp.
+  ///
+  /// Même contrainte que `_remindClient` : sur web, l'ouverture de wa.me doit
+  /// se faire dans le tick du clic (sinon popup blocker). On ouvre donc
+  /// WhatsApp **synchrone** avec un message court, et on upload le PDF en
+  /// arrière-plan → lien copié dans le presse-papier pour collage dans le
+  /// chat.
+  void _sendInvoiceWhatsApp(BuildContext context) {
+    final order = widget.order;
+    final phone = (order.clientPhone ?? '').trim();
+    if (phone.isEmpty) {
+      AppSnack.error(context,
+          'Numéro WhatsApp du client manquant — '
+          'ajoute-le dans la fiche client puis réessaie.');
+      return;
+    }
+    final p = PhoneFormatter.toWame(phone).replaceAll(RegExp(r'[^\d]'), '');
+    if (p.isEmpty) {
+      AppSnack.error(context, 'Numéro WhatsApp invalide.');
+      return;
+    }
+    final shop = LocalStorageService.getShop(order.shopId);
+    final shopName = shop?.name ?? 'Fortress';
+    final clientName = order.clientName ?? 'Cher client';
+    final totalStr = CurrencyFormatter.format(order.total);
+    // Message court — sans lien (sera collé après par l'utilisateur).
+    final msg =
+        'Bonjour $clientName,\n\n'
+        'Merci pour votre achat chez $shopName '
+        '(total : $totalStr).\n\n'
+        'Votre facture PDF arrive dans un instant. À bientôt 🙏';
+    final url = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
+
+    // 1. Ouverture SYNCHRONE de WhatsApp dans le tick du clic.
+    openExternal(url).then((ok) {
+      if (!ok && context.mounted) {
+        AppSnack.error(context,
+            'Impossible d\'ouvrir WhatsApp. Autorisez les pop-ups dans le navigateur.');
+      }
+    });
+
+    // 2. En arrière-plan : génération + upload du PDF, copie du lien
+    //    dans le presse-papier, snackbar pour informer l'utilisateur.
+    setState(() => _sendingInvoice = true);
+    () async {
+      try {
+        final bytes = await OrderReceiptUseCase.generatePdf(order, shop: shop);
+        final orderId = order.id
+            ?? 'order_${order.createdAt.millisecondsSinceEpoch}';
+        final longUrl = await InvoiceStorageService.uploadInvoice(
+          shopId:  order.shopId,
+          orderId: orderId,
+          bytes:   bytes,
+        );
+        if (longUrl == null) {
+          if (mounted) {
+            AppSnack.error(context,
+                'Upload de la facture échoué — vérifie ta connexion.');
+          }
+          return;
+        }
+        final shortUrl = await UrlShortenerService.shorten(longUrl);
+        await Clipboard.setData(ClipboardData(text: shortUrl));
+        if (mounted) {
+          AppSnack.success(context,
+              'Lien de la facture copié — colle-le dans le chat WhatsApp.');
+        }
+      } catch (e) {
+        if (mounted) {
+          AppSnack.error(context, 'Erreur envoi facture : $e');
+        }
+      } finally {
+        if (mounted) setState(() => _sendingInvoice = false);
+      }
+    }();
   }
 
   /// Conditions pour afficher les raccourcis "Validée par client" /
@@ -1078,6 +1495,34 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
 
   /// "Reprogrammer" : disponible uniquement quand la commande est en cours.
   bool _canReschedule() => widget.order.status == SaleStatus.processing;
+
+  /// Permissions de l'utilisateur pour le shop de cette commande.
+  AppPermissions _permsForOrder() =>
+      ref.read(permissionsProvider(widget.order.shopId));
+
+  /// Ouvre le sheet de transfert au livreur (cf. hotfix_049).
+  Future<void> _openTransferDeliverySheet(BuildContext context) async {
+    final shop = LocalStorageService.getShop(widget.order.shopId);
+    final ok = await showAdaptiveFormSheet<bool>(
+      context: context,
+      builder: (_) => TransferDeliverySheet(
+        order:    widget.order,
+        shopId:   widget.order.shopId,
+        shopName: shop?.name ?? '',
+      ),
+    );
+    if (ok == true && context.mounted) {
+      // Rafraîchit l'écran : la commande est passée à processing via la RPC.
+      // Le realtime listener mettra Hive à jour, mais on déclenche aussi un
+      // refresh local pour retour visuel immédiat.
+      AppDatabase.notifyOrderChange(widget.order.shopId);
+      // Invalide la liste de transferts pour que la nouvelle row s'affiche
+      // immédiatement dans l'historique sous la fiche.
+      if (widget.order.id != null) {
+        ref.invalidate(orderDeliveryTransfersProvider(widget.order.id!));
+      }
+    }
+  }
 
   /// Libellé du statut, avec sous-statut "Reprogrammée" pour les commandes
   /// programmées dont la `rescheduleReason` est renseignée.
@@ -1339,7 +1784,7 @@ class _FormatPickerSheetState extends State<_FormatPickerSheet> {
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
                             color: sel
-                                ? AppColors.primary.withOpacity(0.5)
+                                ? AppColors.primary.withValues(alpha:0.5)
                                 : const Color(0xFFE8E8EE),
                             width: sel ? 1.5 : 1,
                           ),
@@ -1442,7 +1887,7 @@ class _FormatPickerSheetState extends State<_FormatPickerSheet> {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.primary,
                   side: BorderSide(
-                      color: AppColors.primary.withOpacity(0.4)),
+                      color: AppColors.primary.withValues(alpha:0.4)),
                   padding: const EdgeInsets.symmetric(vertical: 13),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
@@ -1478,7 +1923,7 @@ class _FormatPreview extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: AppColors.divider),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.08),
+          BoxShadow(color: Colors.black.withValues(alpha:0.08),
               blurRadius: 8, offset: const Offset(0, 3)),
         ],
       ),
@@ -1504,7 +1949,7 @@ class _FormatPreview extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _line(previewW * 0.5, AppColors.primary.withOpacity(0.3)),
+                _line(previewW * 0.5, AppColors.primary.withValues(alpha:0.3)),
                 const SizedBox(height: 4),
                 _line(previewW * 0.35, AppColors.divider),
                 const SizedBox(height: 6),
@@ -1517,7 +1962,7 @@ class _FormatPreview extends StatelessWidget {
                         Expanded(child: _line(double.infinity,
                             AppColors.divider)),
                         const SizedBox(width: 4),
-                        _line(18, AppColors.primary.withOpacity(0.2)),
+                        _line(18, AppColors.primary.withValues(alpha:0.2)),
                       ]),
                     )),
                 const Spacer(),
@@ -1530,7 +1975,7 @@ class _FormatPreview extends StatelessWidget {
                     borderRadius: BorderRadius.circular(3),
                   ),
                   child: Row(children: [
-                    _line(previewW * 0.25, AppColors.primary.withOpacity(0.4)),
+                    _line(previewW * 0.25, AppColors.primary.withValues(alpha:0.4)),
                     const Spacer(),
                     _line(previewW * 0.3, AppColors.primary),
                   ]),
@@ -1607,12 +2052,12 @@ class _ActionBtn extends StatelessWidget {
           decoration: BoxDecoration(
             color: disabled
                 ? AppColors.divider
-                : (bgColor ?? color.withOpacity(0.1)),
+                : (bgColor ?? color.withValues(alpha:0.1)),
             borderRadius: BorderRadius.circular(7),
             border: Border.all(
                 color: disabled
                     ? AppColors.divider
-                    : color.withOpacity(0.25)),
+                    : color.withValues(alpha:0.25)),
           ),
           child: Icon(icon,
               size: 15,
@@ -1692,10 +2137,10 @@ class _StatusMenu extends StatelessWidget {
           padding: const EdgeInsets.symmetric(
               horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: current.color.withOpacity(0.1),
+            color: current.color.withValues(alpha:0.1),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-                color: current.color.withOpacity(0.3)),
+                color: current.color.withValues(alpha:0.3)),
           ),
           child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1752,7 +2197,7 @@ class _OrderDetailsBlock extends StatelessWidget {
       '${d.hour.toString().padLeft(2, '0')}:'
       '${d.minute.toString().padLeft(2, '0')}';
 
-  String _money(double v) => '${v.toStringAsFixed(0)} XAF';
+  String _money(double v) => CurrencyFormatter.format(v);
 
   @override
   Widget build(BuildContext context) {
@@ -1921,14 +2366,38 @@ class _OrderDetailsBlock extends StatelessWidget {
                     fontFamily: 'monospace'),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
-          if ((order.clientPhone ?? '').isNotEmpty) ...[
-            const Icon(Icons.phone_rounded,
-                size: 10, color: AppColors.textHint),
-            const SizedBox(width: 3),
-            Text(order.clientPhone!,
-                style: const TextStyle(fontSize: 10,
-                    color: AppColors.textHint)),
-          ],
+          if ((order.clientPhone ?? '').isNotEmpty)
+            // Tap → ouvre WhatsApp avec le numéro du client (digits only).
+            // wa.me ignore les + et tirets, donc on nettoie. Si aucune
+            // boutique WhatsApp n'est associée, l'OS retombe sur le
+            // composeur natif. Pattern aligné sur les autres deep-links
+            // de la fiche (cf. _waUri dans share_catalog_dialog).
+            InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: () {
+                final digits = order.clientPhone!
+                    .replaceAll(RegExp(r'[^0-9]'), '');
+                if (digits.isEmpty) return;
+                openExternal('https://wa.me/$digits');
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 2, vertical: 1),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.phone_rounded,
+                      size: 10, color: AppColors.primary),
+                  const SizedBox(width: 3),
+                  Text(order.clientPhone!,
+                      style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                          decoration: TextDecoration.underline,
+                          decorationColor:
+                              AppColors.primary.withValues(alpha: 0.5))),
+                ]),
+              ),
+            ),
         ]),
       ],
     );
@@ -2012,9 +2481,9 @@ class _ReasonBanner extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(8),
     decoration: BoxDecoration(
-      color: color.withOpacity(0.06),
+      color: color.withValues(alpha:0.06),
       borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: color.withOpacity(0.25)),
+      border: Border.all(color: color.withValues(alpha:0.25)),
     ),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2041,7 +2510,9 @@ class _ReasonBanner extends StatelessWidget {
   );
 }
 
-// ─── Dialog "raison" (annulation, reprogrammation) ──────────────────────────
+// ─── Bottom sheet "raison" (annulation, reprogrammation) ────────────────────
+// Refonte UX : remplace l'ancien AlertDialog par un FormSheet verrouillé
+// (pas de tap-outside ni de swipe-down) avec bouton X intégré au header.
 class _ReasonDialog extends StatefulWidget {
   final String title;
   final String hint;
@@ -2054,8 +2525,8 @@ class _ReasonDialog extends StatefulWidget {
     required this.confirmColor,
   });
 
-  /// Ouvre le dialog et retourne la raison saisie (trim non vide), ou null
-  /// si l'utilisateur annule.
+  /// Ouvre le sheet et retourne la raison saisie (trim non vide), ou null
+  /// si l'utilisateur ferme via X / Annuler.
   static Future<String?> ask(
     BuildContext context, {
     required String title,
@@ -2063,7 +2534,7 @@ class _ReasonDialog extends StatefulWidget {
     required String confirmLabel,
     required Color confirmColor,
   }) =>
-      showDialog<String>(
+      showAdaptiveFormSheet<String>(
         context: context,
         builder: (_) => _ReasonDialog(
           title: title,
@@ -2089,50 +2560,70 @@ class _ReasonDialogState extends State<_ReasonDialog> {
   @override
   Widget build(BuildContext context) {
     final hasText = _ctrl.text.trim().isNotEmpty;
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      title: Text(widget.title,
-          style: const TextStyle(fontSize: 15,
-              fontWeight: FontWeight.w800)),
-      content: TextField(
-        controller: _ctrl,
-        autofocus: true,
-        maxLines: 3,
-        minLines: 2,
-        textCapitalization: TextCapitalization.sentences,
-        onChanged: (_) => setState(() {}),
-        decoration: InputDecoration(
-          hintText: widget.hint,
-          hintStyle: const TextStyle(fontSize: 12,
-              color: AppColors.textHint),
-          isDense: true,
-          contentPadding: const EdgeInsets.all(12),
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: AppColors.divider)),
-          focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: widget.confirmColor, width: 1.5)),
-        ),
+    return AdaptiveFormFrame(
+      title: widget.title,
+      icon: Icons.edit_note_rounded,
+      iconColor: widget.confirmColor,
+      body: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              child: TextField(
+                controller: _ctrl,
+                autofocus: true,
+                maxLines: 4,
+                minLines: 3,
+                textCapitalization: TextCapitalization.sentences,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: widget.hint,
+                  hintStyle: const TextStyle(
+                      fontSize: 12, color: AppColors.textHint),
+                  isDense: true,
+                  filled: true,
+                  fillColor: const Color(0xFFF9FAFB),
+                  contentPadding: const EdgeInsets.all(12),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide:
+                          BorderSide(color: AppColors.divider)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide:
+                          BorderSide(color: AppColors.divider)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(
+                          color: widget.confirmColor, width: 1.5)),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+              child: SizedBox(
+                width: double.infinity,
+                height: 44,
+                child: ElevatedButton(
+                  onPressed: hasText
+                      ? () => Navigator.of(context).pop(_ctrl.text.trim())
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: widget.confirmColor,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: const Color(0xFFE5E7EB),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    elevation: 0,
+                  ),
+                  child: Text(widget.confirmLabel,
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
-        ),
-        ElevatedButton(
-          onPressed: hasText
-              ? () => Navigator.of(context).pop(_ctrl.text.trim())
-              : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: widget.confirmColor,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8)),
-          ),
-          child: Text(widget.confirmLabel),
-        ),
-      ],
     );
   }
 }
