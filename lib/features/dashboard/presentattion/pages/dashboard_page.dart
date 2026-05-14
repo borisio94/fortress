@@ -12,7 +12,10 @@ import '../../../../shared/widgets/kpi_card.dart' as shared_kpi;
 import '../../../../shared/widgets/view_filter_chip_bar.dart';
 import '../../../inventaire/domain/entities/product.dart';
 import '../../../inventaire/domain/stock_at_location.dart' as stock_loc;
+import 'package:supabase_flutter/supabase_flutter.dart' show Supabase;
+
 import '../../../../core/database/app_database.dart';
+import '../../../../core/services/onboarding_tour_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../data/dashboard_providers.dart';
 import '../../../../core/permisions/subscription_provider.dart';
@@ -54,7 +57,19 @@ class _DashBodyState extends ConsumerState<_DashBody> {
     // Le Provider.family cache son résultat — sans ce bump, il réutiliserait
     // l'ancien résultat même si Hive a changé entre-temps.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) ref.read(dashSignalProvider.notifier).state++;
+      if (!mounted) return;
+      ref.read(dashSignalProvider.notifier).state++;
+      // Tour d'onboarding 5 étapes au premier login self-service (canvas
+      // Sprint 2.3). No-op si le flag `onboarding_done_<uid>` est set.
+      // Délai léger pour laisser le shell finir de painter (sinon le
+      // modal s'ouvre AVANT que la sidebar/drawer ait son layout — UX
+      // de fond noir trop brusque).
+      Future.delayed(const Duration(milliseconds: 350), () {
+        if (!mounted) return;
+        final uid =
+            Supabase.instance.client.auth.currentUser?.id ?? '';
+        OnboardingTourService.showIfFirstLogin(context, uid, widget.shopId);
+      });
     });
   }
 
@@ -1697,7 +1712,8 @@ class _NewProductsCard extends ConsumerWidget {
           if (products.isEmpty)
             _NewProductsEmpty(message: l.dashNoNewProducts)
           else
-            ...products.take(5).map((p) => _NewProductRow(product: p)),
+            ...products.take(5).map((p) =>
+                _NewProductRow(product: p, shopId: shopId)),
           if (products.length > 5) ...[
             const SizedBox(height: 6),
             Center(
@@ -1738,9 +1754,10 @@ class _NewProductsEmpty extends StatelessWidget {
       );
 }
 
-class _NewProductRow extends StatelessWidget {
+class _NewProductRow extends ConsumerWidget {
   final Product product;
-  const _NewProductRow({required this.product});
+  final String  shopId;
+  const _NewProductRow({required this.product, required this.shopId});
 
   String _ago(BuildContext context, DateTime createdAt) {
     final l = context.l10n;
@@ -1755,7 +1772,7 @@ class _NewProductRow extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l   = context.l10n;
     final img = product.mainImageUrl;
     final variantCount = product.variants.length;
@@ -1826,10 +1843,19 @@ class _NewProductRow extends StatelessWidget {
                 fontWeight: FontWeight.w700,
                 color: AppColors.secondary)),
         const SizedBox(width: 6),
-        // Bouton partager individuel
+        // Bouton partager individuel — stock filtré sur la vue active du
+        // dashboard (Boutique seule / Partenaire X / Globale). Sans
+        // override, `_productMessage` tombe sur `product.totalStock`
+        // = cumul global, pas le stock du périmètre visualisé.
         GestureDetector(
-          onTap: () => DocumentService.shareProduct(
-              product, shopId: product.storeId),
+          onTap: () {
+            final viewFilter = ref.read(dashViewFilterProvider);
+            final locIds = stock_loc.resolveLocationIds(viewFilter, shopId);
+            DocumentService.shareProduct(product,
+                shopId: shopId,
+                stockOverride:
+                    stock_loc.stockAtLocations(product, locIds));
+          },
           child: Container(
             width: 28, height: 28,
             decoration: BoxDecoration(

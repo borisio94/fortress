@@ -66,6 +66,18 @@ dependencies:
   timezone: ^0.9.4
   image_picker: ^1.1.2
 
+  # ── Traitement images (validation, resize, encode PNG) ───────────
+  # Utilisé runtime par lib/core/utils/image_validation.dart pour
+  # ré-encoder les photos produit en PNG lossless avant upload (cf.
+  # plan PNG strict — transparence préservée). Aussi utilisé en dev
+  # par tools/generate_logos.dart pour la génération des PNG logos.
+  image: ^4.5.0
+
+  # ── Audio (alertes commandes programmées) ────────────────────────
+  # Compat web depuis 5.x via WebAudio (les autoplay restrictions sont
+  # déverrouillées par AlarmSoundPlayer.unlock() au 1er clic).
+  audioplayers: ^6.1.0
+
   # ── Deep links (fortress://reset-password, universal links, …) ──
   app_links: ^6.3.2
 
@@ -78,10 +90,6 @@ dev_dependencies:
   riverpod_generator: ^2.4.0
   flutter_lints: ^4.0.0
   mocktail: ^1.0.4
-  # Génération pure Dart des PNG logos via tools/generate_logos.dart
-  # (sans dépendance Python/Pillow). Régénérer après modif :
-  #   dart run tools/generate_logos.dart
-  image: ^4.0.0
   # Génère les icônes Android/iOS/Web depuis fortress_app_icon.png.
   # Régénérer après modif :
   #   dart run flutter_launcher_icons
@@ -99,6 +107,7 @@ flutter:
     - assets/images/
     - assets/icons/
     - assets/logos/
+    - assets/sounds/
     - supabase/migrations/
 
 # ── Icônes app (Android/iOS/Web) ──────────────────────────────────────
