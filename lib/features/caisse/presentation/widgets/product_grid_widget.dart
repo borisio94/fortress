@@ -259,8 +259,8 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount:    isCompact ? 2 : 3,
               childAspectRatio:  isCompact ? 0.85 : 0.78,
-              crossAxisSpacing:  isCompact ? 6 : 10,
-              mainAxisSpacing:   isCompact ? 6 : 10,
+              crossAxisSpacing:  16,
+              mainAxisSpacing:   16,
             ),
             itemCount: products.length,
             itemBuilder: (ctx, i) => _ProductCard(

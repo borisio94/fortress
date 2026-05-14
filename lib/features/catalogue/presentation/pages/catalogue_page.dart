@@ -571,8 +571,8 @@ class _OrderHint extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest
             .withValues(alpha: 0.6),
