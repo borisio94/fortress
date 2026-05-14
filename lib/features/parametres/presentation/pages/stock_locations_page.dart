@@ -10,6 +10,7 @@ import '../../../../features/inventaire/domain/entities/stock_location.dart';
 import '../../../../shared/widgets/blocked_delete_dialog.dart';
 import '../../../../core/widgets/danger_confirm_dialog.dart';
 import '../widgets/location_form_sheet.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
 
 /// Gestion des emplacements de stockage du propriétaire :
 /// - Boutiques (type=shop, lecture seule, auto-créées)
@@ -54,15 +55,12 @@ class _StockLocationsPageState extends ConsumerState<StockLocationsPage> {
   }
 
   Future<void> _openForm({StockLocation? existing, StockLocationType? defaultType}) async {
-    final result = await showModalBottomSheet<bool>(
+    final result = await showAdaptiveFormSheet<bool>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (_) => LocationFormSheet(
         existing: existing,
         defaultType: defaultType ?? StockLocationType.warehouse,
+        shopId: widget.shopId,
       ),
     );
     if (result == true) {
@@ -221,9 +219,9 @@ class _Hint extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
-      color: AppColors.primary.withOpacity(0.08),
+      color: AppColors.primary.withValues(alpha:0.08),
       borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: AppColors.primary.withOpacity(0.20)),
+      border: Border.all(color: AppColors.primary.withValues(alpha:0.20)),
     ),
     child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Icon(Icons.info_outline_rounded,
@@ -237,7 +235,7 @@ class _Hint extends StatelessWidget {
           style: TextStyle(
               fontSize: 11,
               height: 1.35,
-              color: AppColors.primary.withOpacity(0.9)),
+              color: AppColors.primary.withValues(alpha:0.9)),
         ),
       ),
     ]),
@@ -289,7 +287,7 @@ class _Section extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(7),
               decoration: BoxDecoration(
-                color: color.withOpacity(0.10),
+                color: color.withValues(alpha:0.10),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(icon, size: 14, color: color),
@@ -314,7 +312,7 @@ class _Section extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.10),
+                  color: color.withValues(alpha:0.10),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text('${locations.length}',
@@ -351,10 +349,10 @@ class _Section extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.06),
+                  color: color.withValues(alpha:0.06),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                      color: color.withOpacity(0.3),
+                      color: color.withValues(alpha:0.3),
                       style: BorderStyle.solid,
                       width: 1),
                 ),
@@ -400,8 +398,29 @@ class _LocationTile extends StatelessWidget {
     // Seul le stock disponible compte pour la carte. En Phase 1, available
     // et physical sont copiés à l'identique depuis la variante, donc les
     // additionner donnait le double de la valeur réelle.
+    //
+    // Filtrage des `stock_levels` orphelins : une variante peut être
+    // supprimée du Product (champ JSONB) sans que les rows stock_levels
+    // associées soient nettoyées. Le résultat brut gonfle alors le total
+    // par rapport à InventairePage qui part des produits existants et
+    // ignore les stock_levels dont la variant_id n'a plus de match. On
+    // construit ici un Set des variant IDs encore présents chez le owner,
+    // puis on filtre. Coût O(N×V) par tile — négligeable pour ≤50 produits
+    // par boutique × ≤10 boutiques. Si profil plus large, mémoïser dans
+    // le State parent et passer en prop.
     final levels = AppDatabase.getStockLevelsForLocation(location.id);
-    return levels.fold<int>(0, (s, l) => s + l.stockAvailable);
+    final userId = LocalStorageService.getCurrentUser()?.id ?? '';
+    final validVariantIds = <String>{};
+    for (final s in LocalStorageService.getShopsForUser(userId)) {
+      for (final p in AppDatabase.getProductsForShop(s.id)) {
+        for (final v in p.variants) {
+          if (v.id != null) validVariantIds.add(v.id!);
+        }
+      }
+    }
+    return levels
+        .where((l) => validVariantIds.contains(l.variantId))
+        .fold<int>(0, (s, l) => s + l.stockAvailable);
   }
 
   @override
