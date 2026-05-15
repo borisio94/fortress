@@ -30,12 +30,36 @@ class ClientDetailPage extends StatefulWidget {
 
 class _ClientDetailPageState extends State<ClientDetailPage> {
   Client? _client;
+  /// Lien court du catalogue pré-généré à l'ouverture de la fiche. L'URL
+  /// catalogue est fixe (dépend du shop, pas du client) → on la raccourcit
+  /// une seule fois ici pour que `_sendCatalogue` puisse l'utiliser
+  /// SYNCHRONIQUEMENT au clic (wa.me sur web exige un user-gesture sans
+  /// await préalable). Fallback URL longue si pas encore prêt.
+  String? _catalogueShortUrl;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _prepareCatalogueShortLink();
     AppDatabase.addListener(_onDbChanged);
+  }
+
+  Future<void> _prepareCatalogueShortLink() async {
+    final origin = Uri.base.origin.startsWith('http')
+        ? Uri.base.origin
+        : 'https://fortress-pos.web.app';
+    final longUrl = '$origin/#/catalogue/${widget.shopId}';
+    try {
+      final short = await ShortLinkService.createShortLink(
+        longUrl:   longUrl,
+        linkType:  'catalogue',
+        expiresIn: const Duration(days: 365),
+      );
+      if (mounted && short != null) {
+        setState(() => _catalogueShortUrl = short);
+      }
+    } catch (_) {/* fallback URL longue */}
   }
 
   @override
@@ -191,51 +215,36 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
     final origin = Uri.base.origin.startsWith('http')
         ? Uri.base.origin
         : 'https://fortress-pos.web.app';
-    // URL longue → page publique catalogue où le client peut commander.
-    final longUrl = '$origin/#/catalogue/${widget.shopId}';
+    // Lien court pré-généré (initState) si dispo, sinon fallback URL longue
+    // (jamais bloquant — wa.me doit s'ouvrir dans le tick du clic sur web).
+    final link = _catalogueShortUrl
+        ?? '$origin/#/catalogue/${widget.shopId}';
     final shop = LocalStorageService.getShop(widget.shopId);
     final shopName = shop?.name ?? 'Fortress';
     final clientName = client.name;
 
-    // Rendu synchrone du template (pas d'await avant wa.me sur web pour
-    // ne pas casser le user-gesture). Le short-link est créé en background
-    // après l'ouverture de WhatsApp — le client cliquera sur le lien long
-    // initial, qui marche aussi.
     final container = ProviderScope.containerOf(context, listen: false);
     final tplRepo = container.read(whatsappTemplateRepositoryProvider);
     final tpl =
         tplRepo.getDefault(widget.shopId, WhatsappTemplateType.catalogue);
 
-    // Premier rendu avec URL longue (jamais bloquant).
-    final msgWithLongUrl = tpl == null
+    final msg = tpl == null
         ? 'Bonjour $clientName 👋\n\n'
-            'Découvrez notre catalogue.\n\n🛍️ $longUrl\n\n'
+            'Découvrez notre catalogue.\n\n🛍️ $link\n\n'
             'À très bientôt !\n\n$shopName'
         : WhatsappTemplateRenderer.render(tpl, {
             'client_name': clientName,
             'shop_name':   shopName,
-            'link':        longUrl,
+            'link':        link,
           });
 
-    final waUrl =
-        'https://wa.me/$p?text=${Uri.encodeComponent(msgWithLongUrl)}';
+    final waUrl = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
     openExternal(waUrl).then((ok) {
       if (!ok && context.mounted) {
         AppSnack.error(context,
             'Impossible d\'ouvrir WhatsApp. Autorisez les pop-ups dans le navigateur.');
       }
     });
-
-    // En arrière-plan : crée un short-link pour les futurs envois (stats).
-    () async {
-      try {
-        await ShortLinkService.createShortLink(
-          longUrl:   longUrl,
-          linkType:  'catalogue',
-          expiresIn: const Duration(days: 365),
-        );
-      } catch (_) {/* silencieux */}
-    }();
   }
 
   Future<void> _composeWhatsappMessage(
