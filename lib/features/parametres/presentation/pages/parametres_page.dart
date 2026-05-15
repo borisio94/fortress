@@ -77,26 +77,34 @@ class ParametresPage extends ConsumerWidget {
                     onTap: () =>
                         context.push('/shop/$shopId/parametres/caisse'),
                   ),
-                // Membres : admin (peut inviter) ET owner
+                // Modèles WhatsApp → owner uniquement (libellés partagés à
+                // la boutique entière, vus par tous les clients).
+                if (perms.isOwner)
+                  _Tile(
+                    icon: Icons.chat_outlined,
+                    label: l.waTemplatesTitle,
+                    subtitle: l.waTemplatesSubtitle,
+                    color: const Color(0xFF25D366),
+                    onTap: () => context.push(
+                        '/shop/$shopId/parametres/whatsapp-templates'),
+                  ),
+                // Membres : admin (peut inviter) ET owner.
+                // On push directement la cible finale (ShopSettingsPage avec
+                // l'onglet Membres) — `/parametres/users` existe encore mais
+                // redirige vers cette URL ; éviter la redirect en interne
+                // garde un seul match côté GoRouter.
                 if (perms.canManageMembers)
                   _Tile(
                     icon: Icons.people_rounded,
                     label: l.paramEmployes,
                     subtitle: l.paramEmployesSubtitle,
                     color: AppColors.primary,
-                    onTap: () =>
-                        context.push('/shop/$shopId/parametres/users'),
+                    onTap: () => context.push(
+                        '/shop/$shopId/parametres/shop'
+                        '?tab=members&with_overview=1'),
                   ),
-                // Emplacements de stock → owner uniquement
-                if (perms.isOwner)
-                  _Tile(
-                    icon: Icons.warehouse_rounded,
-                    label: 'Emplacements de stock',
-                    subtitle: 'Magasins centraux et dépôts partenaires',
-                    color: AppColors.primary,
-                    onTap: () =>
-                        context.push('/shop/$shopId/parametres/locations'),
-                  ),
+                // Emplacements de stock retiré — accessible directement
+                // depuis la page Inventaire pour éviter la duplication.
               ],
             ),
             const SizedBox(height: 12),
@@ -106,13 +114,13 @@ class ParametresPage extends ConsumerWidget {
           _Section(
             label: l.paramCompte,
             icon: Icons.person_rounded,
-            color: const Color(0xFF0EA5E9),
+            color: AppColors.primary,
             tiles: [
               _Tile(
                 icon: Icons.account_circle_outlined,
                 label: l.paramProfile,
                 subtitle: user?.email ?? l.paramProfileSubtitle,
-                color: const Color(0xFF0EA5E9),
+                color: AppColors.primary,
                 onTap: () => context.push('/shop/$shopId/parametres/profile'),
               ),
             ],
@@ -129,37 +137,42 @@ class ParametresPage extends ConsumerWidget {
           _Section(
             label: l.paramPreferences,
             icon: Icons.palette_outlined,
-            color: const Color(0xFF8B5CF6),
+            color: AppColors.primary,
             tiles: [
               _Tile(
                 icon: Icons.language_rounded,
                 label: l.paramLanguage,
                 subtitle: l.paramLanguageSubtitle,
-                color: const Color(0xFF8B5CF6),
+                color: AppColors.primary,
                 onTap: () => context.push('/shop/$shopId/parametres/language'),
               ),
               _Tile(
                 icon: Icons.color_lens_rounded,
                 label: l.paramTheme,
                 subtitle: l.paramThemeSubtitle,
-                color: const Color(0xFF8B5CF6),
+                color: AppColors.primary,
                 onTap: () => context.push('/shop/$shopId/parametres/theme'),
               ),
-              _Tile(
-                icon: Icons.payments_outlined,
-                label: l.paramCurrency,
-                subtitle: l.paramCurrencySubtitle,
-                color: const Color(0xFF8B5CF6),
-                onTap: () => context.push('/shop/$shopId/parametres/currency'),
-              ),
-              _Tile(
-                icon: Icons.notifications_outlined,
-                label: l.paramNotifications,
-                subtitle: l.paramNotifsSubtitle,
-                color: const Color(0xFF8B5CF6),
-                onTap: () =>
-                    context.push('/shop/$shopId/parametres/notifications'),
-              ),
+              // Devise (monnaie & format) → réservé admin + owner.
+              if (perms.isShopAdmin)
+                _Tile(
+                  icon: Icons.payments_outlined,
+                  label: l.paramCurrency,
+                  subtitle: l.paramCurrencySubtitle,
+                  color: AppColors.primary,
+                  onTap: () => context.push('/shop/$shopId/parametres/currency'),
+                ),
+              // Notifications (préférences notif in-app + push) → réservé
+              // admin + owner.
+              if (perms.isShopAdmin)
+                _Tile(
+                  icon: Icons.notifications_outlined,
+                  label: l.paramNotifications,
+                  subtitle: l.paramNotifsSubtitle,
+                  color: AppColors.primary,
+                  onTap: () =>
+                      context.push('/shop/$shopId/parametres/notifications'),
+                ),
             ],
           ),
           const SizedBox(height: 12),
@@ -171,34 +184,54 @@ class ParametresPage extends ConsumerWidget {
             const SizedBox(height: 12),
           ],
 
-          // ── Intégrations ──────────────────────────────────────────
-          _Section(
-            label: l.paramIntegrations,
-            icon: Icons.electrical_services_rounded,
-            color: AppColors.secondary,
-            tiles: [
-              _Tile(
-                icon: Icons.payment_rounded,
-                label: l.paramPayments,
-                subtitle: l.paramPaymentsSubtitle,
-                color: AppColors.secondary,
-                locked: !perms.canEditShopInfo,
-                onTap: () => context.push('/shop/$shopId/parametres/payments'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
+          // ── Intégrations ── (admin + owner uniquement) ──────────────
+          if (perms.isShopAdmin) ...[
+            _Section(
+              label: l.paramIntegrations,
+              icon: Icons.extension_rounded,
+              color: AppColors.primary,
+              tiles: [
+                _Tile(
+                  icon: Icons.payment_rounded,
+                  label: l.paramPayments,
+                  subtitle: l.paramPaymentsSubtitle,
+                  color: AppColors.primary,
+                  locked: !perms.canEditShopInfo,
+                  onTap: () => context.push('/shop/$shopId/parametres/payments'),
+                ),
+                _Tile(
+                  icon: Icons.local_shipping_outlined,
+                  label: l.deliveryTemplatesTitle,
+                  subtitle: l.deliveryTemplatesSubtitle,
+                  color: AppColors.primary,
+                  locked: !perms.canEditShopInfo,
+                  onTap: () => context.push(
+                      '/shop/$shopId/parametres/delivery-templates'),
+                ),
+                _Tile(
+                  icon: Icons.handshake_outlined,
+                  label: 'Comptes partenaires',
+                  subtitle: 'Soldes, dettes et versements croisés',
+                  color: AppColors.primary,
+                  locked: !perms.canEditShopInfo,
+                  onTap: () => context.push(
+                      '/shop/$shopId/parametres/partner-accounts'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
 
           // ── Super Admin ───────────────────────────────────────────
           _SuperAdminSection(ref: ref),
           const SizedBox(height: 12),
 
-          // ── Danger zone ───────────────────────────────────────────
-          // Masquée par défaut (mobile + desktop). Pour révéler la
-          // section, l'utilisateur doit saisir le PIN propriétaire.
-          // Le déverrouillage est valable pour la session courante de
-          // la page (pas persisté).
-          _DangerGate(shopId: shopId, l: l, perms: perms),
+          // ── Danger zone ── (admin + owner uniquement) ─────────────
+          // Masquée par défaut + réservée aux rôles privilégiés. Pour
+          // révéler la section, l'utilisateur doit saisir le PIN
+          // propriétaire.
+          if (perms.isShopAdmin)
+            _DangerGate(shopId: shopId, l: l, perms: perms),
         ],
       );
   }
@@ -249,9 +282,9 @@ class _ProfileHeader extends StatelessWidget {
         Container(
           width: 52, height: 52,
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.25),
+            color: Colors.white.withValues(alpha:0.25),
             shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withOpacity(0.4), width: 2),
+            border: Border.all(color: Colors.white.withValues(alpha:0.4), width: 2),
           ),
           child: Center(child: Text(initials,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800,
@@ -268,7 +301,7 @@ class _ProfileHeader extends StatelessWidget {
             const SizedBox(height: 2),
             Text(user?.email ?? '',
                 style: TextStyle(fontSize: 12,
-                    color: Colors.white.withOpacity(0.8)),
+                    color: Colors.white.withValues(alpha:0.8)),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
             if (shop != null || badge != null) ...[
               const SizedBox(height: 4),
@@ -281,7 +314,7 @@ class _ProfileHeader extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
+                        color: Colors.white.withValues(alpha:0.2),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(shop!,
@@ -336,7 +369,7 @@ class _SubscriptionSection extends ConsumerWidget {
 
     return _Section(
       label: l.drawerSubscription,
-      icon: Icons.workspace_premium_rounded,
+      icon: Icons.star_rounded,
       color: AppColors.warning,
       tiles: [
         _SubscriptionTile(
@@ -377,9 +410,9 @@ class _SubscriptionTile extends StatelessWidget {
           Container(
             width: 36, height: 36,
             decoration: BoxDecoration(
-                color: AppColors.warning.withOpacity(0.10),
+                color: AppColors.warning.withValues(alpha:0.10),
                 borderRadius: BorderRadius.circular(9)),
-            child: const Icon(Icons.workspace_premium_rounded,
+            child: const Icon(Icons.star_rounded,
                 size: 17, color: AppColors.warning),
           ),
           const SizedBox(width: 12),
@@ -404,7 +437,7 @@ class _SubscriptionTile extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: badgeColor!.withOpacity(0.15),
+                color: badgeColor!.withValues(alpha:0.15),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(badgeText!,
@@ -415,7 +448,7 @@ class _SubscriptionTile extends StatelessWidget {
             const SizedBox(width: 6),
           ],
           Icon(Icons.chevron_right_rounded, size: 16,
-              color: AppColors.textHint.withOpacity(0.6)),
+              color: AppColors.textHint.withValues(alpha:0.6)),
         ]),
       ),
     );
@@ -446,7 +479,7 @@ class _Section extends StatelessWidget {
             Container(
               width: 20, height: 20,
               decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
+                  color: color.withValues(alpha:0.12),
                   borderRadius: BorderRadius.circular(5)),
               child: Icon(icon, size: 11, color: color),
             ),
@@ -463,7 +496,7 @@ class _Section extends StatelessWidget {
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.divider),
             boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.03),
+              BoxShadow(color: Colors.black.withValues(alpha:0.03),
                   blurRadius: 8, offset: const Offset(0, 2)),
             ],
           ),
@@ -511,7 +544,7 @@ class _Tile extends StatelessWidget {
         locked ? AppColors.textHint : AppColors.textPrimary;
     final Color iconBg = locked
         ? AppColors.inputFill
-        : color.withOpacity(0.10);
+        : color.withValues(alpha:0.10);
     final Color iconColor = locked ? AppColors.textHint : color;
     // Tailles uniformes mobile + desktop, alignées sur la zone dangereuse :
     // icône 36, label 13, subtitle 11, chevron 16, padding vertical 11.
@@ -556,7 +589,7 @@ class _Tile extends StatelessWidget {
             ),
           ),
           Icon(Icons.chevron_right_rounded, size: 16,
-              color: AppColors.textHint.withOpacity(0.6)),
+              color: AppColors.textHint.withValues(alpha:0.6)),
         ]),
       ),
     );
@@ -629,7 +662,7 @@ class _DangerGateState extends State<_DangerGate> {
             Container(
               width: 20, height: 20,
               decoration: BoxDecoration(
-                  color: AppColors.error.withOpacity(0.12),
+                  color: AppColors.error.withValues(alpha:0.12),
                   borderRadius: BorderRadius.circular(5)),
               child: const Icon(Icons.warning_amber_rounded,
                   size: 11, color: AppColors.error),
@@ -644,9 +677,9 @@ class _DangerGateState extends State<_DangerGate> {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.error.withOpacity(0.2)),
+            border: Border.all(color: AppColors.error.withValues(alpha:0.2)),
             boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.03),
+              BoxShadow(color: Colors.black.withValues(alpha:0.03),
                   blurRadius: 8, offset: const Offset(0, 2)),
             ],
           ),
@@ -660,7 +693,7 @@ class _DangerGateState extends State<_DangerGate> {
                 Container(
                   width: 36, height: 36,
                   decoration: BoxDecoration(
-                      color: AppColors.error.withOpacity(0.08),
+                      color: AppColors.error.withValues(alpha:0.08),
                       borderRadius: BorderRadius.circular(9)),
                   child: const Icon(Icons.lock_outline_rounded,
                       size: 17, color: AppColors.error),
@@ -672,13 +705,13 @@ class _DangerGateState extends State<_DangerGate> {
                   Text('Accéder à la zone dangereuse',
                       style: TextStyle(fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.error)),
+                          color: AppColors.textPrimary)),
                   Text('Saisissez votre code PIN pour déverrouiller',
                       style: TextStyle(fontSize: 11,
                           color: AppColors.textHint)),
                 ])),
-                Icon(Icons.chevron_right_rounded,
-                    size: 16, color: AppColors.error.withOpacity(0.6)),
+                const Icon(Icons.chevron_right_rounded,
+                    size: 16, color: AppColors.divider),
               ]),
             ),
           ),
@@ -730,7 +763,7 @@ class _DangerSection extends ConsumerWidget {
             Container(
               width: 20, height: 20,
               decoration: BoxDecoration(
-                  color: AppColors.error.withOpacity(0.12),
+                  color: AppColors.error.withValues(alpha:0.12),
                   borderRadius: BorderRadius.circular(5)),
               child: Icon(Icons.warning_amber_rounded, size: 11,
                   color: AppColors.error),
@@ -745,9 +778,9 @@ class _DangerSection extends ConsumerWidget {
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.error.withOpacity(0.2)),
+            border: Border.all(color: AppColors.error.withValues(alpha:0.2)),
             boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.03),
+              BoxShadow(color: Colors.black.withValues(alpha:0.03),
                   blurRadius: 8, offset: const Offset(0, 2)),
             ],
           ),
@@ -837,8 +870,13 @@ class _DangerSection extends ConsumerWidget {
   }
 
   Widget _divider() => Divider(
-      height: 1, indent: 56, color: AppColors.error.withOpacity(0.1));
+      height: 1, indent: 56, color: AppColors.error.withValues(alpha:0.1));
 
+  /// Tile de la zone dangereuse — apparence alignée sur les autres tiles
+  /// (titre noir, sous-titre hint), avec une seule indication visuelle
+  /// d'avertissement : icône rouge dans un cercle atténué. Les actions
+  /// destructives elles-mêmes (modals, boutons "Supprimer définitivement"
+  /// dans `DangerActionPage`) restent en rouge plein.
   Widget _dangerTile({
     required IconData icon,
     required String label,
@@ -855,21 +893,22 @@ class _DangerSection extends ConsumerWidget {
             Container(
               width: 36, height: 36,
               decoration: BoxDecoration(
-                  color: AppColors.error.withOpacity(0.08),
+                  color: AppColors.error.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(9)),
               child: Icon(icon, size: 17, color: AppColors.error),
             ),
             const SizedBox(width: 12),
             Expanded(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(label, style: TextStyle(fontSize: 13,
-                  fontWeight: FontWeight.w600, color: AppColors.error)),
+              Text(label, style: const TextStyle(fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
               Text(subtitle, style: const TextStyle(
                   fontSize: 11, color: AppColors.textHint)),
             ])),
             if (trailingChevron)
               const Icon(Icons.chevron_right_rounded,
-                  size: 16, color: Color(0xFFD1D5DB)),
+                  size: 16, color: AppColors.divider),
           ]),
         ),
       );
@@ -924,8 +963,15 @@ class _DangerSection extends ConsumerWidget {
       actionLabel: 'Réinitialiser définitivement',
       requirePassword: true,
       onConfirm: (sheetCtx) async {
+        // 1. RPC Supabase — purge serveur (ventes, clients, stock, partenaires
+        //    de l'owner via hotfix_058). C'est la source de vérité.
         await Supabase.instance.client
             .rpc('reset_shop_data', params: {'p_shop_id': shopId});
+        // 2. Nettoyage Hive local immédiat — sans ça, l'utilisateur garde
+        //    visuellement ses partenaires/transferts jusqu'à la prochaine
+        //    propagation realtime (qui peut être lente ou ne pas couvrir
+        //    tous les DELETE owner-scoped).
+        await AppDatabase.clearShopLocalData(shopId);
         if (ctx.mounted) AppSnack.success(ctx, l.shopResetDone);
       },
     );
@@ -1122,7 +1168,7 @@ class _SuperAdminSection extends ConsumerWidget {
             Container(
               width: 20, height: 20,
               decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.12),
+                  color: AppColors.primary.withValues(alpha:0.12),
                   borderRadius: BorderRadius.circular(5)),
               child: Icon(Icons.admin_panel_settings_rounded,
                   size: 11, color: AppColors.primary),
@@ -1158,7 +1204,7 @@ class _SuperAdminSection extends ConsumerWidget {
             border: Border.all(color: AppColors.divider),
             boxShadow: [
               BoxShadow(
-                  color: Colors.black.withOpacity(0.03),
+                  color: Colors.black.withValues(alpha:0.03),
                   blurRadius: 8,
                   offset: const Offset(0, 2)),
             ],
@@ -1173,7 +1219,7 @@ class _SuperAdminSection extends ConsumerWidget {
                 Container(
                   width: 36, height: 36,
                   decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.10),
+                      color: AppColors.primary.withValues(alpha:0.10),
                       borderRadius: BorderRadius.circular(9)),
                   child: Icon(Icons.people_alt_rounded,
                       size: 17, color: AppColors.primary),
@@ -1349,7 +1395,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
             child: Row(children: [
               Container(width: 32, height: 32,
                   decoration: BoxDecoration(
-                      color: AppColors.error.withOpacity(0.1),
+                      color: AppColors.error.withValues(alpha:0.1),
                       borderRadius: BorderRadius.circular(8)),
                   child: Icon(Icons.person_remove_rounded,
                       size: 17, color: AppColors.error)),
@@ -1506,9 +1552,9 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: AppColors.error.withOpacity(0.06),
+            color: AppColors.error.withValues(alpha:0.06),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.error.withOpacity(0.2)),
+            border: Border.all(color: AppColors.error.withValues(alpha:0.2)),
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1607,7 +1653,7 @@ class _ReasonTile extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
-          color: selected ? AppColors.primary.withOpacity(0.06) : Colors.white,
+          color: selected ? AppColors.primary.withValues(alpha:0.06) : Colors.white,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
               color: selected ? AppColors.primary : AppColors.divider,
@@ -1734,6 +1780,14 @@ class _SecuritySectionState extends State<_SecuritySection> {
             color: AppColors.error,
             onTap: _deletePin,
           ),
+        _Tile(
+          icon: Icons.devices,
+          label: 'Sessions actives',
+          subtitle: 'Voir et déconnecter vos appareils connectés',
+          color: color,
+          onTap: () =>
+              context.push('/shop/${widget.shopId}/parametres/sessions'),
+        ),
       ],
     );
   }

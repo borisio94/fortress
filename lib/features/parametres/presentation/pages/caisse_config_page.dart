@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/permisions/subscription_provider.dart';
-import '../../../../core/services/whatsapp/message_templates.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -29,7 +28,6 @@ class _CaisseConfigPageState extends ConsumerState<CaisseConfigPage> {
   bool _taxEnabled = false;
   bool _quickSale = true;
   bool _confirmDelete = true;
-  WhatsappMessageStyle _whatsappStyle = WhatsappMessageStyle.standard;
 
   @override
   void initState() {
@@ -43,8 +41,6 @@ class _CaisseConfigPageState extends ConsumerState<CaisseConfigPage> {
     _taxEnabled       = _store.read<bool>('caisse_tax_enabled', fallback: false) ?? false;
     _quickSale        = _store.read<bool>('caisse_quick_sale', fallback: true) ?? true;
     _confirmDelete    = _store.read<bool>('caisse_confirm_delete', fallback: true) ?? true;
-    _whatsappStyle    = WhatsappMessageStyleX.fromKey(
-        _store.read<String>('whatsapp_message_style', fallback: 'standard'));
   }
 
   @override
@@ -66,7 +62,6 @@ class _CaisseConfigPageState extends ConsumerState<CaisseConfigPage> {
     await _store.write('caisse_tax_enabled', _taxEnabled);
     await _store.write('caisse_quick_sale', _quickSale);
     await _store.write('caisse_confirm_delete', _confirmDelete);
-    await _store.write('whatsapp_message_style', _whatsappStyle.key);
     if (mounted) AppSnack.success(context, context.l10n.commonSaved);
   }
 
@@ -144,44 +139,6 @@ class _CaisseConfigPageState extends ConsumerState<CaisseConfigPage> {
                   onChanged: (v) => setState(() => _confirmDelete = v),
                 ),
               ]),
-              const SizedBox(height: 12),
-              SettingsSectionCard(
-                title: l.whatsappStyleSection,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(l.whatsappStyleHint,
-                        style: TextStyle(fontSize: 11,
-                            color: AppColors.textSecondary)),
-                  ),
-                  _StyleRadio(
-                    label:    l.whatsappStyleStandard,
-                    hint:     l.whatsappStyleStandardHint,
-                    selected: _whatsappStyle == WhatsappMessageStyle.standard,
-                    onTap:    () => setState(() =>
-                        _whatsappStyle = WhatsappMessageStyle.standard),
-                  ),
-                  _StyleRadio(
-                    label:    l.whatsappStyleShort,
-                    hint:     l.whatsappStyleShortHint,
-                    selected: _whatsappStyle == WhatsappMessageStyle.short,
-                    onTap:    () => setState(() =>
-                        _whatsappStyle = WhatsappMessageStyle.short),
-                  ),
-                  _StyleRadio(
-                    label:    l.whatsappStylePremium,
-                    hint:     l.whatsappStylePremiumHint,
-                    selected: _whatsappStyle == WhatsappMessageStyle.premium,
-                    onTap:    () => setState(() =>
-                        _whatsappStyle = WhatsappMessageStyle.premium),
-                  ),
-                  const SizedBox(height: 12),
-                  _StylePreview(
-                    label: l.whatsappStylePreview,
-                    text:  MessageTemplates.preview(_whatsappStyle),
-                  ),
-                ],
-              ),
               const SizedBox(height: 20),
               if (canEdit)
                 SizedBox(
@@ -203,99 +160,3 @@ class _CaisseConfigPageState extends ConsumerState<CaisseConfigPage> {
   }
 }
 
-// ─── Tuile radio pour un style de message WhatsApp ──────────────────────────
-class _StyleRadio extends StatelessWidget {
-  final String label;
-  final String hint;
-  final bool   selected;
-  final VoidCallback onTap;
-  const _StyleRadio({
-    required this.label, required this.hint,
-    required this.selected, required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-    onTap: onTap,
-    borderRadius: BorderRadius.circular(8),
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: selected
-            ? AppColors.primary.withOpacity(0.06)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: selected
-              ? AppColors.primary
-              : AppColors.divider,
-          width: selected ? 1.5 : 1,
-        ),
-      ),
-      child: Row(children: [
-        Icon(
-          selected
-              ? Icons.radio_button_checked_rounded
-              : Icons.radio_button_off_rounded,
-          size: 18,
-          color: selected ? AppColors.primary : AppColors.textHint,
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: selected
-                        ? AppColors.primary
-                        : AppColors.textPrimary,
-                  )),
-              const SizedBox(height: 2),
-              Text(hint,
-                  style: TextStyle(fontSize: 11,
-                      color: AppColors.textSecondary)),
-            ],
-          ),
-        ),
-      ]),
-    ),
-  );
-}
-
-// ─── Aperçu du message — bulle "WhatsApp" ────────────────────────────────────
-class _StylePreview extends StatelessWidget {
-  final String label;
-  final String text;
-  const _StylePreview({required this.label, required this.text});
-
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(label.toUpperCase(),
-          style: TextStyle(fontSize: 10,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.5,
-              color: AppColors.textSecondary)),
-      const SizedBox(height: 6),
-      Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppColors.inputFill,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppColors.divider),
-        ),
-        child: Text(text,
-            style: TextStyle(fontSize: 12,
-                height: 1.4,
-                color: AppColors.textPrimary)),
-      ),
-    ],
-  );
-}

@@ -55,6 +55,7 @@ import '../../features/parametres/presentation/pages/language_page.dart';
 import '../../features/parametres/presentation/pages/currency_page.dart';
 import '../../features/parametres/presentation/pages/theme_page.dart';
 import '../../features/parametres/presentation/pages/caisse_config_page.dart';
+import '../../features/parametres/presentation/pages/whatsapp_templates_page.dart';
 import '../../features/parametres/presentation/pages/notifications_page.dart';
 import '../../features/parametres/presentation/pages/payments_page.dart';
 import '../../features/parametres/presentation/pages/delivery_templates_page.dart';
@@ -642,6 +643,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   shopId: s.pathParameters['shopId'])),
           GoRoute(path: '/shop/:shopId/parametres/caisse',
               builder: (c, s) => CaisseConfigPage(
+                  shopId: s.pathParameters['shopId']!)),
+          GoRoute(path: '/shop/:shopId/parametres/whatsapp-templates',
+              builder: (c, s) => WhatsAppTemplatesPage(
                   shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/notifications',
               builder: (c, s) => NotificationsPage(

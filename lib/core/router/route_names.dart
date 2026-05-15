@@ -39,6 +39,7 @@ class RouteNames {
   static const currencyPage  = '/shop/:shopId/parametres/currency';
   static const themePage     = '/shop/:shopId/parametres/theme';
   static const caisseConfigPage  = '/shop/:shopId/parametres/caisse';
+  static const whatsappTemplatesPage = '/shop/:shopId/parametres/whatsapp-templates';
   static const notificationsPage = '/shop/:shopId/parametres/notifications';
   static const paymentsPage      = '/shop/:shopId/parametres/payments';
   static const pinDeletePage     = '/shop/:shopId/parametres/pin/delete';

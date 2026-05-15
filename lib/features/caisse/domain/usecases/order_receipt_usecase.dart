@@ -19,10 +19,12 @@ import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../inventaire/domain/entities/product.dart';
 import '../../../../core/services/whatsapp_service.dart';
+import '../../../../core/services/whatsapp/message_templates.dart';
 import '../../../../core/services/invoice_storage_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/phone_formatter.dart';
+import '../../../parametres/data/shop_settings_store.dart';
 
 class OrderReceiptUseCase {
 
@@ -1277,11 +1279,7 @@ class OrderReceiptUseCase {
     final phone = order.clientPhone ?? '';
     if (phone.trim().isEmpty) return false;
 
-    final s        = shop ?? LocalStorageService.getShop(order.shopId);
-    final shopName = s?.name ?? 'Fortress';
-    final fmt      = NumberFormat('#,###', 'fr_FR');
-    final clientName = order.clientName ?? 'Cher client';
-    final total      = '${fmt.format(order.total)} $currency';
+    final s = shop ?? LocalStorageService.getShop(order.shopId);
 
     // 1. PDF avec images
     final bytes = await generateReminderPdf(order,
@@ -1300,14 +1298,17 @@ class OrderReceiptUseCase {
     // 3. Raccourcir l'URL (silencieux si échec → URL longue).
     final shortUrl = await UrlShortenerService.shorten(longUrl);
 
-    // 4. Message WhatsApp.
-    final msg =
-        'Bonjour $clientName,\n\n'
-        'Petit rappel pour votre commande chez $shopName '
-        '(total : $total).\n\n'
-        'Le détail complet de la commande est dans ce PDF :\n$shortUrl\n\n'
-        'Êtes-vous disponible pour la livraison ? '
-        'Merci et à bientôt 🙏';
+    // 4. Message WhatsApp court : `<label> : <url>`. Label éditable dans
+    //    Paramètres > Modèles WhatsApp (clé wa_label_order).
+    final label = ShopSettingsStore(order.shopId).read<String>(
+            WaTemplateKeys.order,
+            fallback: WaTemplateDefaults.order)
+        ?? WaTemplateDefaults.order;
+    final msg = MessageTemplates.buildShareMessage(
+      url:          shortUrl,
+      label:        label,
+      defaultLabel: WaTemplateDefaults.order,
+    );
 
     final wamePhone = PhoneFormatter.toWame(phone);
     final svc = whatsapp

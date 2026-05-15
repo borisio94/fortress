@@ -6,9 +6,15 @@ import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/whatsapp_service.dart';
+import '../../../../core/services/whatsapp/message_templates.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/phone_formatter.dart';
+import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/services/external_launcher.dart';
+import '../../../parametres/data/shop_settings_store.dart';
 import '../../domain/entities/client.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
+import '../../../../shared/widgets/form_sheet.dart';
 import 'clients_page.dart';
 
 class ClientDetailPage extends StatefulWidget {
@@ -143,6 +149,11 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
                       '/shop/${widget.shopId}/caisse'
                       '?clientId=${Uri.encodeComponent(widget.clientId)}')),
               const _Div(),
+              _ActionTile(icon: Icons.collections_bookmark_outlined,
+                  color: AppColors.secondary,
+                  label: context.l10n.catalogueSendBtn,
+                  onTap: () => _sendCatalogue(context, client)),
+              const _Div(),
               _ActionTile(icon: Icons.edit_outlined,
                   color: const Color(0xFF6B7280),
                   label: 'Modifier les informations',
@@ -160,11 +171,48 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
   /// `wa.me/<phone>?text=…`). Le numéro client est normalisé via
   /// `PhoneFormatter.toWame` pour gérer les formats `+237 6XX…` /
   /// `06XX…` / `6XX…` indifféremment.
+  /// Envoie le lien public du catalogue par WhatsApp.
+  /// **Synchrone** jusqu'à `launchUrl` — sur web, un await préalable
+  /// rompt le user gesture et le navigateur bloque la fenêtre wa.me.
+  void _sendCatalogue(BuildContext context, Client client) {
+    final phone = (client.phone ?? '').trim();
+    if (phone.isEmpty) {
+      AppSnack.warning(context, 'Numéro WhatsApp manquant.');
+      return;
+    }
+    final origin = Uri.base.origin.startsWith('http')
+        ? Uri.base.origin
+        : 'https://fortress-pos.web.app';
+    final url = '$origin/#/catalogue/${widget.shopId}';
+    final label = ShopSettingsStore(widget.shopId).read<String>(
+            WaTemplateKeys.catalogue,
+            fallback: WaTemplateDefaults.catalogue)
+        ?? WaTemplateDefaults.catalogue;
+    final msg = MessageTemplates.buildShareMessage(
+      url:          url,
+      label:        label,
+      defaultLabel: WaTemplateDefaults.catalogue,
+    );
+    final p = PhoneFormatter.toWame(phone).replaceAll(RegExp(r'[^\d]'), '');
+    if (p.isEmpty) {
+      AppSnack.error(context, 'Numéro WhatsApp invalide.');
+      return;
+    }
+    final waUrl = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
+    openExternal(waUrl).then((ok) {
+      if (!ok && context.mounted) {
+        AppSnack.error(context,
+            'Impossible d\'ouvrir WhatsApp. Autorisez les pop-ups dans le navigateur.');
+      }
+    });
+  }
+
   Future<void> _composeWhatsappMessage(
       BuildContext context, Client client) async {
     final phone = (client.phone ?? '').trim();
     if (phone.isEmpty) return;
-    final message = await showDialog<String>(
+    // Refonte UX : dialog → bottom sheet verrouillé (showFormSheet).
+    final message = await showFormSheet<String>(
       context: context,
       builder: (_) => _WhatsappComposeDialog(clientName: client.name),
     );
@@ -181,12 +229,8 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
   }
 
   void _showEdit(BuildContext context, Client client) {
-    showModalBottomSheet(
+    showAdaptiveFormSheet(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => ClientFormSheet(
         shopId: widget.shopId,
         client: client,
@@ -258,10 +302,10 @@ class _HeroHeader extends StatelessWidget {
     child: Column(children: [
       Stack(alignment: Alignment.center, children: [
         Container(width: 80, height: 80,
-            decoration: BoxDecoration(color: color.withOpacity(0.12),
+            decoration: BoxDecoration(color: color.withValues(alpha:0.12),
                 shape: BoxShape.circle)),
         Container(width: 70, height: 70,
-            decoration: BoxDecoration(color: color.withOpacity(0.2),
+            decoration: BoxDecoration(color: color.withValues(alpha:0.2),
                 shape: BoxShape.circle),
             child: Center(child: Text(initial,
                 style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800,
@@ -293,7 +337,7 @@ class _HeroHeader extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
               color: daysAgo! <= 7
-                  ? AppColors.secondary.withOpacity(0.1)
+                  ? AppColors.secondary.withValues(alpha:0.1)
                   : const Color(0xFFF3F4F6),
               borderRadius: BorderRadius.circular(20),
             ),
@@ -324,9 +368,9 @@ class _KpiCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(color: color.withOpacity(0.06),
+    decoration: BoxDecoration(color: color.withValues(alpha:0.06),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.15))),
+        border: Border.all(color: color.withValues(alpha:0.15))),
     child: Column(children: [
       Icon(icon, size: 18, color: color),
       const SizedBox(height: 6),
@@ -396,7 +440,7 @@ class _ActionTile extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(children: [
         Container(width: 34, height: 34,
-            decoration: BoxDecoration(color: color.withOpacity(0.1),
+            decoration: BoxDecoration(color: color.withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(8)),
             child: Icon(icon, size: 16, color: color)),
         const SizedBox(width: 12),
@@ -419,9 +463,9 @@ class _TagChip extends StatelessWidget {
         : tag == ClientTag.new_ ? AppColors.secondary : AppColors.primary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: color.withOpacity(0.1),
+      decoration: BoxDecoration(color: color.withValues(alpha:0.1),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: color.withOpacity(0.3))),
+          border: Border.all(color: color.withValues(alpha:0.3))),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         if (tag == ClientTag.vip)
           Padding(padding: const EdgeInsets.only(right: 4),
@@ -463,60 +507,79 @@ class _WhatsappComposeDialogState extends State<_WhatsappComposeDialog> {
   @override
   Widget build(BuildContext context) {
     final hasText = _ctrl.text.trim().isNotEmpty;
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      title: Row(children: [
-        const Icon(Icons.send_rounded,
-            size: 18, color: Color(0xFF25D366)),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text('Message WhatsApp à ${widget.clientName}',
-              style: const TextStyle(fontSize: 14,
-                  fontWeight: FontWeight.w800),
-              maxLines: 1, overflow: TextOverflow.ellipsis),
-        ),
-      ]),
-      content: TextField(
-        controller: _ctrl,
-        autofocus: true,
-        maxLines: 5,
-        minLines: 3,
-        textCapitalization: TextCapitalization.sentences,
-        onChanged: (_) => setState(() {}),
-        decoration: InputDecoration(
-          hintText: 'Tape ton message ici…',
-          hintStyle: const TextStyle(fontSize: 12,
-              color: AppColors.textHint),
-          isDense: true,
-          contentPadding: const EdgeInsets.all(12),
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: AppColors.divider)),
-          focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(
-                  color: Color(0xFF25D366), width: 1.5)),
-        ),
+    return AdaptiveFormFrame(
+      title: 'Message WhatsApp à ${widget.clientName}',
+      icon: Icons.send_rounded,
+      iconColor: const Color(0xFF25D366),
+      body: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: TextField(
+                controller: _ctrl,
+                autofocus: true,
+                maxLines: 6,
+                minLines: 4,
+                textCapitalization: TextCapitalization.sentences,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: 'Tape ton message ici…',
+                  hintStyle: const TextStyle(
+                      fontSize: 12, color: AppColors.textHint),
+                  isDense: true,
+                  filled: true,
+                  fillColor: const Color(0xFFF9FAFB),
+                  contentPadding: const EdgeInsets.all(12),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide:
+                          BorderSide(color: AppColors.divider)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide:
+                          BorderSide(color: AppColors.divider)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(
+                          color: Color(0xFF25D366), width: 1.5)),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+              child: Row(children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 44),
+                    ),
+                    child: const Text('Annuler'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: hasText
+                        ? () => Navigator.of(context).pop(_ctrl.text)
+                        : null,
+                    icon: const Icon(Icons.send_rounded, size: 14),
+                    label: const Text('Envoyer'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF25D366),
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: const Color(0xFFE5E7EB),
+                      minimumSize: const Size(0, 44),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
-        ),
-        ElevatedButton.icon(
-          onPressed: hasText
-              ? () => Navigator.of(context).pop(_ctrl.text)
-              : null,
-          icon: const Icon(Icons.send_rounded, size: 14),
-          label: const Text('Envoyer'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF25D366),
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8)),
-          ),
-        ),
-      ],
     );
   }
 }

@@ -385,9 +385,6 @@ class AppLocalizations {
   String catalogueInStock(int n) => _isFr
       ? 'Stock : $n'                : 'Stock: $n';
   String get catalogueCategoryAll => _isFr ? 'Toutes' : 'All';
-  String catalogueClientMessage(String firstName, String url) => _isFr
-      ? 'Consultez notre catalogue : $url'
-      : 'Check out our catalogue: $url';
   String get catalogueSendBtn    => _isFr
       ? 'Envoyer le catalogue'      : 'Send catalogue';
   String get orderRelaunchBtn    => _isFr
@@ -1397,22 +1394,40 @@ class AppLocalizations {
   String get whatsappConnected    => _isFr ? 'Connecté'                          : 'Connected';
   String get whatsappDisconnected => _isFr ? 'Non connecté'                      : 'Not connected';
 
-  // ── Style des messages WhatsApp (paramètres caisse) ──
-  String get whatsappStyleSection    => _isFr
-      ? 'Style des messages WhatsApp'                  : 'WhatsApp message style';
-  String get whatsappStyleHint       => _isFr
-      ? 'Format utilisé pour l\'envoi des factures aux clients.'
-      : 'Format used when sending invoices to customers.';
-  String get whatsappStyleStandard   => _isFr ? 'Standard' : 'Standard';
-  String get whatsappStyleStandardHint => _isFr
-      ? 'Équilibré, illustré, lisible.'                : 'Balanced, illustrated, readable.';
-  String get whatsappStyleShort      => _isFr ? 'Court'    : 'Short';
-  String get whatsappStyleShortHint  => _isFr
-      ? 'Ultra-condensé pour les achats rapides.'      : 'Ultra-compact for quick purchases.';
-  String get whatsappStylePremium    => _isFr ? 'Premium'  : 'Premium';
-  String get whatsappStylePremiumHint => _isFr
-      ? 'Présentation soignée + invitation à noter.'   : 'Refined layout + rating invitation.';
-  String get whatsappStylePreview    => _isFr ? 'Aperçu'   : 'Preview';
+  // ── Modèles WhatsApp (libellés courts éditables) ─────────────────────────
+  String get waTemplatesTitle      => _isFr
+      ? 'Modèles WhatsApp'                             : 'WhatsApp templates';
+  String get waTemplatesSubtitle   => _isFr
+      ? 'Libellés des messages envoyés aux clients'
+      : 'Labels of messages sent to customers';
+  String get waTemplatesIntro      => _isFr
+      ? 'Chaque message envoyé par WhatsApp suit le format « libellé : lien ». '
+        'Personnalisez ici le libellé pour chaque type de message.'
+      : 'Each WhatsApp message follows the format "label: link". '
+        'Customize the label here for each type of message.';
+  String get waTemplatesInvoice    => _isFr ? 'Facture'        : 'Invoice';
+  String get waTemplatesInvoiceHint => _isFr
+      ? 'Envoyé au client après une vente avec le lien du PDF facture.'
+      : 'Sent to the customer after a sale with the invoice PDF link.';
+  String get waTemplatesOrder      => _isFr ? 'Relance commande' : 'Order reminder';
+  String get waTemplatesOrderHint  => _isFr
+      ? 'Envoyé pour confirmer une commande programmée non livrée.'
+      : 'Sent to confirm a scheduled order pending delivery.';
+  String get waTemplatesCatalogue  => _isFr ? 'Catalogue'      : 'Catalogue';
+  String get waTemplatesCatalogueHint => _isFr
+      ? 'Envoyé lorsque vous partagez le catalogue avec un client.'
+      : 'Sent when you share the product catalogue with a customer.';
+  String get waTemplatesNews       => _isFr ? 'Nouveautés'     : 'New arrivals';
+  String get waTemplatesNewsHint   => _isFr
+      ? 'Annonce de nouveaux produits ajoutés à votre catalogue.'
+      : 'Announcement of new products added to your catalogue.';
+  String get waTemplatesPromo      => _isFr ? 'Promotion'      : 'Promotion';
+  String get waTemplatesPromoHint  => _isFr
+      ? 'Annonce d\'une campagne promotionnelle.'      : 'Promotional campaign announcement.';
+  String get waTemplatesFieldLabel => _isFr ? 'Libellé'         : 'Label';
+  String get waTemplatesReset      => _isFr
+      ? 'Restaurer le libellé par défaut'              : 'Restore default label';
+  String get waTemplatesPreview    => _isFr ? 'Aperçu'         : 'Preview';
 
   // ══ Page Paiements ══════════════════════════════════════════════════════════
   String get paymentsTitle        => _isFr ? 'Modes de paiement'                 : 'Payment methods';

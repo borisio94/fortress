@@ -1729,18 +1729,17 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     }
     final shop = LocalStorageService.getShop(order.shopId);
 
-    // ── Cas 1 : facture déjà pré-générée → message complet avec lien
-    //    intégré, ouverture SYNCHRONE de wa.me dans le tick du clic.
+    // ── Cas 1 : facture déjà pré-générée → message court "<label> : <url>"
+    //    avec ouverture SYNCHRONE de wa.me dans le tick du clic.
     //    Le client reçoit directement le PDF cliquable.
     if (_invoiceShortUrl != null) {
-      final styleKey = ShopSettingsStore(order.shopId)
-          .read<String>('whatsapp_message_style', fallback: 'standard');
-      final style = WhatsappMessageStyleX.fromKey(styleKey);
-      final msg = MessageTemplates.buildMessage(
-        order:    order,
-        shop:     shop,
-        shortUrl: _invoiceShortUrl!,
-        style:    style,
+      final label = ShopSettingsStore(order.shopId)
+          .read<String>(WaTemplateKeys.invoice,
+              fallback: WaTemplateDefaults.invoice) ?? WaTemplateDefaults.invoice;
+      final msg = MessageTemplates.buildShareMessage(
+        url:          _invoiceShortUrl!,
+        label:        label,
+        defaultLabel: WaTemplateDefaults.invoice,
       );
       final url = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
       openExternal(url).then((ok) {
@@ -1753,17 +1752,13 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     }
 
     // ── Cas 2 : facture pas encore prête (clic trop rapide après expand,
-    //    ou pré-génération échouée) → fallback legacy : message court
-    //    SANS lien, ouvre wa.me sync, upload + copie l'URL au
-    //    presse-papier pour collage manuel.
-    final shopName = shop?.name ?? 'Fortress';
-    final clientName = order.clientName ?? 'Cher client';
-    final totalStr = CurrencyFormatter.format(order.total);
-    final msg =
-        'Bonjour $clientName,\n\n'
-        'Merci pour votre achat chez $shopName '
-        '(total : $totalStr).\n\n'
-        'Votre facture PDF arrive dans un instant. À bientôt 🙏';
+    //    ou pré-génération échouée) → ouvre wa.me sync avec le libellé
+    //    seul, upload en arrière-plan + copie l'URL au presse-papier
+    //    pour collage manuel dans le chat.
+    final label = ShopSettingsStore(order.shopId)
+        .read<String>(WaTemplateKeys.invoice,
+            fallback: WaTemplateDefaults.invoice) ?? WaTemplateDefaults.invoice;
+    final msg = '$label (lien dans un instant)';
     final url = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
 
     openExternal(url).then((ok) {

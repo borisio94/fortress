@@ -330,17 +330,14 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
       // 3. Raccourcir l'URL signée (fallback silencieux à l'URL longue).
       final shortUrl = await UrlShortenerService.shorten(longUrl);
 
-      // 4. Style de message lu depuis les paramètres boutique (Hive).
-      final styleKey = ShopSettingsStore(sale.shopId)
-          .read<String>('whatsapp_message_style', fallback: 'standard');
-      final style = WhatsappMessageStyleX.fromKey(styleKey);
-
-      // 5. Construction du message via les templates centralisés.
-      final msg = MessageTemplates.buildMessage(
-        order:    sale,
-        shop:     shop,
-        shortUrl: shortUrl,
-        style:    style,
+      // 4. Libellé court (éditable dans Paramètres > Modèles WhatsApp).
+      final label = ShopSettingsStore(sale.shopId)
+          .read<String>(WaTemplateKeys.invoice,
+              fallback: WaTemplateDefaults.invoice) ?? WaTemplateDefaults.invoice;
+      final msg = MessageTemplates.buildShareMessage(
+        url:          shortUrl,
+        label:        label,
+        defaultLabel: WaTemplateDefaults.invoice,
       );
 
       // 6. Numéro normalisé pour wa.me (chiffres seulement, indicatif inclus).
