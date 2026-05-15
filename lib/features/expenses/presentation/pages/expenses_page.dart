@@ -250,65 +250,62 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
     // watch (pas read) pour rebuild quand l'utilisateur change la vue.
     ref.watch(dashViewFilterProvider);
     final filtered = _filtered;
-    return Column(children: [
-      _KpiHeader(
-        total:         _total,
-        directTotal:   _totalDirect,
-        feesTotal:     _totalOrderFees,
-        count:         filtered.length,
-        period:        _period,
-      ),
-      _Toolbar(
-        syncing: _syncing,
-        onSync: _syncing ? null : _syncInBackground,
-        onAdd:  () => _showForm(null),
-      ),
-      // Filtre emplacement piloté globalement par la page Finances
-      // (ViewFilterChipBar au niveau _FinancesBody). On lit juste l'état.
-      _PeriodBar(current: _period,
-          onChange: (p) => setState(() => _period = p)),
-      if (_byCategory.isNotEmpty)
-        _CategoryChips(
-          byCategory: _byCategory,
-          selected: _categoryFilter,
-          onSelect: (c) => setState(() =>
-              _categoryFilter = _categoryFilter == c ? null : c),
-        ),
-      Expanded(child: _body(filtered)),
-    ]);
-  }
-
-  Widget _body(List<_ExpenseRow> list) {
-    if (list.isEmpty) {
-      return RefreshIndicator(
-        onRefresh: _syncInBackground,
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          children: [
-            const SizedBox(height: 24),
-            EmptyStateWidget(
-              icon: Icons.account_balance_wallet_outlined,
-              title: 'Aucune dépense pour cette période',
-              subtitle: 'Garde un œil sur tes sorties d\'argent en '
-                  'enregistrant ta première dépense.',
-              ctaLabel: 'Ajouter une dépense',
-              onCta: () => _showForm(null),
-            ),
-          ],
-        ),
-      );
-    }
+    // Un SEUL ListView scrollable (en-têtes + liste) pour que l'onglet
+    // Dépenses défile d'un bloc comme Revenus/Pertes/Bilan, au lieu d'un
+    // header fixe + liste scrollable séparée.
     return RefreshIndicator(
       onRefresh: _syncInBackground,
-      child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 90),
-        itemCount: list.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 6),
-        itemBuilder: (_, i) => _ExpenseTile(
-          row: list[i],
-          onTap: () => _onTapRow(list[i]),
-          onDelete: () => _confirmDelete(list[i]),
-        ),
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.only(bottom: 90),
+        children: [
+          _KpiHeader(
+            total:         _total,
+            directTotal:   _totalDirect,
+            feesTotal:     _totalOrderFees,
+            count:         filtered.length,
+            period:        _period,
+          ),
+          _Toolbar(
+            syncing: _syncing,
+            onSync: _syncing ? null : _syncInBackground,
+            onAdd:  () => _showForm(null),
+          ),
+          // Filtre emplacement piloté globalement par la page Finances
+          // (ViewFilterChipBar au niveau _FinancesBody).
+          _PeriodBar(current: _period,
+              onChange: (p) => setState(() => _period = p)),
+          if (_byCategory.isNotEmpty)
+            _CategoryChips(
+              byCategory: _byCategory,
+              selected: _categoryFilter,
+              onSelect: (c) => setState(() =>
+                  _categoryFilter = _categoryFilter == c ? null : c),
+            ),
+          if (filtered.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 24),
+              child: EmptyStateWidget(
+                icon: Icons.account_balance_wallet_outlined,
+                title: 'Aucune dépense pour cette période',
+                subtitle: 'Garde un œil sur tes sorties d\'argent en '
+                    'enregistrant ta première dépense.',
+                ctaLabel: 'Ajouter une dépense',
+                onCta: () => _showForm(null),
+              ),
+            )
+          else
+            for (var i = 0; i < filtered.length; i++)
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                    12, i == 0 ? 8 : 6, 12, 0),
+                child: _ExpenseTile(
+                  row: filtered[i],
+                  onTap: () => _onTapRow(filtered[i]),
+                  onDelete: () => _confirmDelete(filtered[i]),
+                ),
+              ),
+        ],
       ),
     );
   }
