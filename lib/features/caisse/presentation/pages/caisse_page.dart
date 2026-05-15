@@ -37,6 +37,8 @@ import '../../../parametres/domain/entities/partner_ledger_entry.dart';
 import '../../../../core/services/document_service.dart';
 import '../../../../core/services/invoice_storage_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
+import '../../../../core/services/whatsapp/message_templates.dart';
+import '../../../parametres/data/shop_settings_store.dart';
 import '../../../../core/services/danger_action_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/storage/local_storage_service.dart';
@@ -918,6 +920,15 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   bool _expanded = false;
   bool _sendingInvoice = false;
 
+  // Pré-génération de la facture : déclenchée à l'expand de la card pour
+  // que l'envoi WhatsApp ait l'URL courte prête au moment du clic.
+  // Évite le problème de user-gesture web (Chrome bloque les pop-ups si
+  // on `await` entre le clic et `wa.me`). Tant que l'URL n'est pas prête,
+  // `_sendInvoiceWhatsApp` retombe sur le flow legacy (msg court +
+  // presse-papier).
+  String? _invoiceShortUrl;
+  bool    _preparingInvoice = false;
+
   /// Somme absolue des dépenses enregistrées comme dette envers le
   /// partenaire-livreur pour CETTE commande (entrées `deliveryOwed`
   /// négatives liées via `orderId`). Lue depuis partner_ledger à chaque
@@ -948,7 +959,10 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     final client = widget.order.clientName;
 
     return GestureDetector(
-      onTap: () => setState(() => _expanded = !_expanded),
+      onTap: () {
+        setState(() => _expanded = !_expanded);
+        if (_expanded) _prepareInvoice();
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeInOut,
@@ -1394,12 +1408,14 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       ),
                       const SizedBox(width: 6),
                       _ActionBtn(
-                        icon: _sendingInvoice
+                        icon: (_sendingInvoice || _preparingInvoice)
                             ? Icons.hourglass_top_rounded
                             : Icons.send_rounded,
                         color: const Color(0xFF25D366),
-                        tooltip: 'Envoyer la facture par WhatsApp',
-                        onTap: _sendingInvoice
+                        tooltip: _preparingInvoice
+                            ? 'Préparation de la facture…'
+                            : 'Envoyer la facture par WhatsApp',
+                        onTap: (_sendingInvoice || _preparingInvoice)
                             ? null
                             : () => _sendInvoiceWhatsApp(context),
                       ),
@@ -1668,6 +1684,35 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   /// WhatsApp **synchrone** avec un message court, et on upload le PDF en
   /// arrière-plan → lien copié dans le presse-papier pour collage dans le
   /// chat.
+  /// Pré-génère le PDF facture + upload + raccourcit l'URL. Stocke le
+  /// résultat dans `_invoiceShortUrl` pour que `_sendInvoiceWhatsApp`
+  /// puisse ouvrir wa.me synchroniquement avec le lien intégré au message.
+  /// No-op si déjà prêt ou en cours.
+  Future<void> _prepareInvoice() async {
+    if (_invoiceShortUrl != null || _preparingInvoice) return;
+    setState(() => _preparingInvoice = true);
+    final order = widget.order;
+    final shop  = LocalStorageService.getShop(order.shopId);
+    try {
+      final bytes = await OrderReceiptUseCase.generatePdf(order, shop: shop);
+      final orderId = order.id
+          ?? 'order_${order.createdAt.millisecondsSinceEpoch}';
+      final longUrl = await InvoiceStorageService.uploadInvoice(
+        shopId:  order.shopId,
+        orderId: orderId,
+        bytes:   bytes,
+      );
+      if (longUrl == null) return;
+      final shortUrl = await UrlShortenerService.shorten(longUrl);
+      if (mounted) setState(() => _invoiceShortUrl = shortUrl);
+    } catch (_) {
+      // Échec silencieux : `_sendInvoiceWhatsApp` retombera sur le flow
+      // legacy avec presse-papier.
+    } finally {
+      if (mounted) setState(() => _preparingInvoice = false);
+    }
+  }
+
   void _sendInvoiceWhatsApp(BuildContext context) {
     final order = widget.order;
     final phone = (order.clientPhone ?? '').trim();
@@ -1683,10 +1728,37 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       return;
     }
     final shop = LocalStorageService.getShop(order.shopId);
+
+    // ── Cas 1 : facture déjà pré-générée → message complet avec lien
+    //    intégré, ouverture SYNCHRONE de wa.me dans le tick du clic.
+    //    Le client reçoit directement le PDF cliquable.
+    if (_invoiceShortUrl != null) {
+      final styleKey = ShopSettingsStore(order.shopId)
+          .read<String>('whatsapp_message_style', fallback: 'standard');
+      final style = WhatsappMessageStyleX.fromKey(styleKey);
+      final msg = MessageTemplates.buildMessage(
+        order:    order,
+        shop:     shop,
+        shortUrl: _invoiceShortUrl!,
+        style:    style,
+      );
+      final url = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
+      openExternal(url).then((ok) {
+        if (!ok && context.mounted) {
+          AppSnack.error(context,
+              'Impossible d\'ouvrir WhatsApp. Autorisez les pop-ups dans le navigateur.');
+        }
+      });
+      return;
+    }
+
+    // ── Cas 2 : facture pas encore prête (clic trop rapide après expand,
+    //    ou pré-génération échouée) → fallback legacy : message court
+    //    SANS lien, ouvre wa.me sync, upload + copie l'URL au
+    //    presse-papier pour collage manuel.
     final shopName = shop?.name ?? 'Fortress';
     final clientName = order.clientName ?? 'Cher client';
     final totalStr = CurrencyFormatter.format(order.total);
-    // Message court — sans lien (sera collé après par l'utilisateur).
     final msg =
         'Bonjour $clientName,\n\n'
         'Merci pour votre achat chez $shopName '
@@ -1694,7 +1766,6 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         'Votre facture PDF arrive dans un instant. À bientôt 🙏';
     final url = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
 
-    // 1. Ouverture SYNCHRONE de WhatsApp dans le tick du clic.
     openExternal(url).then((ok) {
       if (!ok && context.mounted) {
         AppSnack.error(context,
@@ -1702,8 +1773,6 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       }
     });
 
-    // 2. En arrière-plan : génération + upload du PDF, copie du lien
-    //    dans le presse-papier, snackbar pour informer l'utilisateur.
     setState(() => _sendingInvoice = true);
     () async {
       try {
@@ -1725,6 +1794,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         final shortUrl = await UrlShortenerService.shorten(longUrl);
         await Clipboard.setData(ClipboardData(text: shortUrl));
         if (mounted) {
+          setState(() => _invoiceShortUrl = shortUrl);
           AppSnack.success(context,
               'Lien de la facture copié — colle-le dans le chat WhatsApp.');
         }

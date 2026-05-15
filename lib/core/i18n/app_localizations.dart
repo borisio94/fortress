@@ -31,17 +31,26 @@ class AppLocalizations {
   String get appTagline  => _isFr ? 'Votre POS intelligent' : 'Your smart POS';
 
   // ── Auth — Login ─────────────────────────────────────────────────────────
-  String get loginTitle        => _isFr ? 'Bon retour 👋'                 : 'Welcome back 👋';
-  String get loginSubtitle     => _isFr ? 'Connectez-vous à votre espace' : 'Sign in to your workspace';
-  String get loginEmail        => _isFr ? 'Adresse email'                 : 'Email address';
-  String get loginEmailHint    => _isFr ? 'exemple@email.com'             : 'example@email.com';
-  String get loginPassword     => _isFr ? 'Mot de passe'                  : 'Password';
+  String get loginTitle        => _isFr ? 'Bon retour'                          : 'Welcome back';
+  String get loginSubtitle     => _isFr ? 'Connectez-vous à votre espace Fortress' : 'Sign in to your Fortress workspace';
+  String get loginEmail        => _isFr ? 'Adresse email'                       : 'Email address';
+  String get loginEmailHint    => _isFr ? 'exemple@email.com'                   : 'example@email.com';
+  String get loginPassword     => _isFr ? 'Mot de passe'                        : 'Password';
   String get loginPasswordHint => '••••••••';
-  String get loginForgot       => _isFr ? 'Mot de passe oublié ?'         : 'Forgot password?';
-  String get loginButton       => _isFr ? 'Se connecter'                  : 'Sign in';
-  String get loginOrWith       => _isFr ? 'Ou se connecter avec'          : 'Or sign in with';
-  String get loginNoAccount    => _isFr ? 'Pas encore de compte ? '       : "Don't have an account? ";
-  String get loginCreate       => _isFr ? 'Créer un compte'               : 'Create one';
+  String get loginForgot       => _isFr ? 'Mot de passe oublié ?'               : 'Forgot password?';
+  String get loginButton       => _isFr ? 'Se connecter'                        : 'Sign in';
+  String get loginOrWith       => _isFr ? 'Ou se connecter avec'                : 'Or sign in with';
+  String get loginContinueWith => _isFr ? 'ou continuer avec'                   : 'or continue with';
+  String get loginNoAccount    => _isFr ? 'Pas encore de compte ? '             : "Don't have an account? ";
+  String get loginCreate       => _isFr ? 'Créer un compte'                     : 'Create one';
+  String get loginGoogleBtn    => _isFr ? 'Continuer avec Google'               : 'Continue with Google';
+
+  // ── Auth — Panel gauche : kicker + features (refonte version A) ──────────
+  String get loginPanelKicker           => 'Point of Sale';
+  String get loginPanelFeatureSales     => _isFr ? 'Ventes & caisse'        : 'Sales & checkout';
+  String get loginPanelFeatureInventory => _isFr ? 'Inventaire temps réel'  : 'Real-time inventory';
+  String get loginPanelFeatureCrm       => _isFr ? 'CRM clients'            : 'Client CRM';
+  String get loginPanelFeatureReports   => _isFr ? 'Rapports'               : 'Reports';
 
   // ── Auth — Validation ────────────────────────────────────────────────────
   String get errEmailRequired    => _isFr ? 'Email requis'                             : 'Email required';
@@ -302,6 +311,100 @@ class AppLocalizations {
   String get featWhatsappAuto     => _isFr
       ? 'WhatsApp automatique'                   : 'WhatsApp automation';
 
+  // ── Cartes de plans (page admin) ──────────────────────────────────────────
+  String get planTrialDesc    => _isFr
+      ? 'Découvrez Fortress sans engagement.'
+      : 'Try Fortress with no commitment.';
+  String get planStarterDesc  => _isFr
+      ? 'Pour démarrer rapidement avec une boutique unique.'
+      : 'Get started quickly with a single shop.';
+  String get planProDesc      => _isFr
+      ? 'Pour développer votre activité sur plusieurs boutiques.'
+      : 'Grow your business across multiple shops.';
+  String get planBusinessDesc => _isFr
+      ? 'Pour les enseignes qui gèrent un réseau étendu.'
+      : 'For chains running an extensive network.';
+
+  String get planPriceMonthly   => _isFr ? 'Mensuel'     : 'Monthly';
+  String get planPriceQuarterly => _isFr ? 'Trimestriel' : 'Quarterly';
+  String get planPriceYearly    => _isFr ? 'Annuel'      : 'Yearly';
+
+  String get planFeaturesTitle => _isFr ? 'Fonctionnalités' : 'Features';
+  String get planOffline       => _isFr ? 'Hors-ligne'      : 'Offline';
+  String get planTitle         => _isFr ? 'Plans tarifaires' : 'Pricing plans';
+  String get planAddNew        => _isFr ? 'Ajouter un plan'  : 'Add plan';
+  String planTrialBadge(int days) => _isFr
+      ? 'Essai $days jour${days > 1 ? 's' : ''}'
+      : 'Trial $days day${days > 1 ? 's' : ''}';
+
+  String planMaxShops(int n) {
+    if (n <= 0) return _isFr ? 'Aucune boutique' : 'No shop';
+    if (n >= 2147483647) return _isFr ? 'Boutiques illimitées' : 'Unlimited shops';
+    return _isFr
+        ? '$n boutique${n > 1 ? 's' : ''}'
+        : '$n shop${n > 1 ? 's' : ''}';
+  }
+
+  String planMaxUsersPerShop(int n) {
+    if (n <= 0) return _isFr ? 'Aucun utilisateur' : 'No user';
+    if (n >= 2147483647) return _isFr
+        ? 'Utilisateurs illimités / boutique'
+        : 'Unlimited users / shop';
+    return _isFr
+        ? '$n utilisateur${n > 1 ? 's' : ''} / boutique'
+        : '$n user${n > 1 ? 's' : ''} / shop';
+  }
+
+  String planSavingsBadge(int percent) =>
+      _isFr ? '−$percent %' : '−$percent%';
+
+  // 10 features affichées sur les cards plans, dans l'ordre fixe défini
+  // par la spec super-admin (caisse → inventaire → clients → rapports →
+  // export CSV → finances → multi-boutiques → API → support → hub central).
+  String get featCaisseLong       => _isFr
+      ? 'Caisse & ventes'           : 'Checkout & sales';
+  String get featInventaireLong   => _isFr
+      ? 'Inventaire'                : 'Inventory';
+  String get featClientsLong      => _isFr
+      ? 'Clients'                   : 'Clients';
+  String get featSupportPriority  => _isFr
+      ? 'Support prioritaire'       : 'Priority support';
+  String get featHubCentral       => _isFr
+      ? 'Hub central'               : 'Central hub';
+
+  // ── Catalogue public ──────────────────────────────────────────────────────
+  String get catalogueTitle      => _isFr
+      ? 'Notre catalogue'           : 'Our catalogue';
+  String get catalogueTagline    => _isFr
+      ? 'Commandez en quelques clics' : 'Order in a few clicks';
+  String get catalogueOrder      => _isFr ? 'Commander' : 'Order';
+  String get catalogueEmpty      => _isFr
+      ? 'Aucun produit disponible pour le moment.'
+      : 'No products available right now.';
+  String get cataloguePending    => _isFr ? 'Indisponible' : 'Out of stock';
+  String catalogueInStock(int n) => _isFr
+      ? 'Stock : $n'                : 'Stock: $n';
+  String get catalogueCategoryAll => _isFr ? 'Toutes' : 'All';
+  String catalogueClientMessage(String firstName, String url) => _isFr
+      ? 'Consultez notre catalogue : $url'
+      : 'Check out our catalogue: $url';
+  String get catalogueSendBtn    => _isFr
+      ? 'Envoyer le catalogue'      : 'Send catalogue';
+  String get orderRelaunchBtn    => _isFr
+      ? 'Relancer le client'        : 'Follow up with client';
+  String orderRelaunchMessage({
+    required String firstName,
+    required String reference,
+    required String items,
+    required String total,
+  }) => _isFr
+      ? 'Bonjour $firstName,\nVotre commande #$reference est prête :\n'
+        '$items\nTotal : $total XAF\n\n'
+        'Répondez OUI pour confirmer ou NON pour annuler.'
+      : 'Hello $firstName,\nYour order #$reference is ready:\n'
+        '$items\nTotal: $total XAF\n\n'
+        'Reply YES to confirm or NO to cancel.';
+
   // ── Upgrade Sheet ─────────────────────────────────────────────────────────
   String get upgradeFeatureTitle => _isFr
       ? 'Fonctionnalité premium'                : 'Premium feature';
@@ -491,6 +594,8 @@ class AppLocalizations {
       : 'Cancel / refund a sale';
   String get permSalesDiscount    => _isFr ? 'Appliquer une remise hors barème'
       : 'Apply custom discount';
+  String get permDeliveryWhatsApp => _isFr ? 'Transférer une commande au livreur (WhatsApp)'
+      : 'Transfer an order to delivery (WhatsApp)';
   String get permMembersInvite    => _isFr ? 'Inviter de nouveaux membres'
       : 'Invite new members';
   String get permShopDelete       => _isFr ? 'Supprimer la boutique (propriétaire)'
@@ -1027,6 +1132,20 @@ class AppLocalizations {
   String get prodAddImage         => _isFr ? 'Ajouter une image'          : 'Add image';
   String get prodImageUrl         => _isFr ? 'URL de l\'image'           : 'Image URL';
   String get prodImageUrlHint     => _isFr ? 'https://...'                : 'https://...';
+
+  // ── Validation & upload d'images (helper image_validation.dart) ─────────
+  String get imageFormatInvalid => _isFr
+      ? "Format d'image non reconnu. Utilisez JPEG ou PNG."
+      : 'Image format not recognized. Use JPEG or PNG.';
+  String imageTooSmall(int w, int h) => _isFr
+      ? 'Image trop petite ($w×$h px). Minimum requis : 800×800 px.'
+      : 'Image too small ($w×$h px). Minimum: 800×800 px.';
+  String get imageUploadHint => _isFr
+      ? 'Conseil : image carrée PNG, 1024×1024 px minimum.'
+      : 'Tip: square PNG image, 1024×1024 px minimum.';
+  String imageSaved(int w, int h) => _isFr
+      ? 'Image enregistrée $w×$h PNG'
+      : 'Image saved $w×$h PNG';
   String get prodWeightDims       => _isFr ? 'Poids & dimensions'         : 'Weight & dimensions';
   String get prodWeight           => _isFr ? 'Poids (g)'                  : 'Weight (g)';
   String get prodLength           => _isFr ? 'Longueur (cm)'              : 'Length (cm)';
@@ -1327,6 +1446,7 @@ class AppLocalizations {
   // ══ Commun ══════════════════════════════════════════════════════════════════
   String get commonSave    => _isFr ? 'Enregistrer' : 'Save';
   String get commonCancel  => _isFr ? 'Annuler'     : 'Cancel';
+  String get commonCreate  => _isFr ? 'Créer'       : 'Create';
   String get commonSaved   => _isFr ? 'Enregistré'  : 'Saved';
   String get commonError   => _isFr ? 'Erreur'      : 'Error';
   String get commonLoading => _isFr ? 'Chargement…' : 'Loading…';
@@ -1450,6 +1570,198 @@ class AppLocalizations {
   String get hrSearchPlaceholder => _isFr
       ? 'Rechercher par nom ou email…'
       : 'Search by name or email…';
+
+  // ── Source de commande (badge) ─────────────────────────────────────────
+  String get orderSourceBadgeWeb       => _isFr ? 'Web'      : 'Web';
+  String get orderSourceBadgePos       => _isFr ? 'Boutique' : 'In-store';
+  String get orderSourceBadgeWhatsApp  => _isFr ? 'WhatsApp' : 'WhatsApp';
+  String get orderSourceWebTooltip     => _isFr
+      ? 'Commande passée depuis le catalogue en ligne'
+      : 'Order placed from the online catalogue';
+  String get orderSourceWhatsAppTooltip=> _isFr
+      ? 'Commande reçue via WhatsApp'
+      : 'Order received via WhatsApp';
+
+  // ── Partage catalogue (multi-destinataires) ────────────────────────────
+  String get catShareTitle             => _isFr ? 'Partager le catalogue'              : 'Share catalogue';
+  String get catShareRecipients        => _isFr ? 'Destinataires'                       : 'Recipients';
+  String get catShareOtherNumber       => _isFr ? 'Autre destinataire'                  : 'Other recipient';
+  String get catShareOtherNumberHint   => _isFr ? 'Numéro WhatsApp libre'               : 'Free WhatsApp number';
+  String get catShareAddBtn            => _isFr ? 'Ajouter'                             : 'Add';
+  String get catShareSendBtn           => _isFr ? 'Envoyer'                             : 'Send';
+  String get catShareSentBadge         => _isFr ? '✓ Envoyé'                            : '✓ Sent';
+  String get catShareCopyAllBtn        => _isFr ? 'Tout copier'                         : 'Copy all';
+  String get catShareCopyBtn           => _isFr ? 'Copier message + lien'               : 'Copy message + link';
+  String get catShareCopied            => _isFr ? 'Copié dans le presse-papiers'        : 'Copied to clipboard';
+  String get catShareMaxReached        => _isFr ? 'Limite : 30 destinataires'           : 'Limit: 30 recipients';
+  String get catShareInvalidPhone      => _isFr ? 'Numéro invalide'                     : 'Invalid number';
+  String get catShareDuplicatePhone    => _isFr ? 'Ce numéro est déjà ajouté'           : 'This number is already added';
+  String get catShareEmptyRecipients   => _isFr ? 'Ajoutez au moins un destinataire'    : 'Add at least one recipient';
+  String get catShareShortenerError    => _isFr
+      ? 'Lien long utilisé (raccourcissement indisponible)'
+      : 'Using long URL (shortener unavailable)';
+  String get catShareCustomRecipient   => _isFr ? 'Numéro libre'                        : 'Custom number';
+  String catShareCounter(int sent, int total) =>
+      _isFr ? '$sent/$total envoyés' : '$sent/$total sent';
+
+  // ── Templates de livraison (hotfix_049) ────────────────────────────────
+  String get deliveryTemplatesTitle    => _isFr ? 'Templates de livraison'        : 'Delivery templates';
+  String get deliveryTemplatesSubtitle => _isFr
+      ? 'Configurer le message envoyé au livreur'
+      : 'Configure the message sent to the delivery person';
+  String get deliveryTplListEmpty      => _isFr ? 'Aucun template'                : 'No template';
+  String get deliveryTplCreateBtn      => _isFr ? 'Nouveau template'              : 'New template';
+  String get deliveryTplDefaultBadge   => _isFr ? 'Par défaut'                    : 'Default';
+  String get deliveryTplEdit           => _isFr ? 'Modifier'                       : 'Edit';
+  String get deliveryTplDelete         => _isFr ? 'Supprimer'                      : 'Delete';
+  String get deliveryTplSetDefault     => _isFr ? 'Définir par défaut'             : 'Set as default';
+  String get deliveryTplDeleteConfirm  => _isFr
+      ? 'Supprimer ce template ? Les destinataires qui l\'utilisent reviendront au template par défaut.'
+      : 'Delete this template? Recipients using it will fall back to the default template.';
+  String get deliveryTplDeleteDefaultBlocked => _isFr
+      ? 'Impossible de supprimer le template par défaut. Désignez d\'abord un autre template comme défaut.'
+      : 'Cannot delete the default template. Set another one as default first.';
+  String get deliveryTplFormCreateTitle => _isFr ? 'Nouveau template'              : 'New template';
+  String get deliveryTplFormEditTitle   => _isFr ? 'Modifier le template'          : 'Edit template';
+  String get deliveryTplFormName        => _isFr ? 'Nom du template'               : 'Template name';
+  String get deliveryTplFormNameHint    => _isFr ? 'Ex: Format Dépôt Bonamoussadi' : 'Ex: Bonamoussadi depot format';
+  String get deliveryTplFormBody        => _isFr ? 'Corps du message'              : 'Message body';
+  String get deliveryTplFormBodyHint    => _isFr
+      ? 'Utilisez {{client_name}}, {{produits}}, {{total}}…'
+      : 'Use {{client_name}}, {{produits}}, {{total}}…';
+  String get deliveryTplFormDefault     => _isFr ? 'Définir comme template par défaut du shop' : 'Set as shop default';
+  String get deliveryTplFormVarsHint    => _isFr ? 'Variables disponibles'         : 'Available variables';
+  String get deliveryTplSaved           => _isFr ? 'Template enregistré'           : 'Template saved';
+  String get deliveryTplDeleted         => _isFr ? 'Template supprimé'             : 'Template deleted';
+  String get deliveryTplNameRequired    => _isFr ? 'Le nom est requis'             : 'Name is required';
+  String get deliveryTplBodyRequired    => _isFr ? 'Le corps du message est requis': 'Message body is required';
+  String get deliveryTplNameDuplicate   => _isFr ? 'Un template porte déjà ce nom' : 'A template with this name already exists';
+
+  // ── Transfert au livreur (hotfix_049) ──────────────────────────────────
+  String get deliveryTransferBtn       => _isFr ? 'Transférer au livreur'         : 'Transfer to delivery';
+  String get deliveryTransferTitle     => _isFr ? 'Transférer au livreur'         : 'Transfer to delivery';
+  String get deliveryTargetSection     => _isFr ? 'Choisir le destinataire'       : 'Choose recipient';
+  String get deliveryTargetPartners    => _isFr ? 'Dépôts partenaires'            : 'Partner depots';
+  String get deliveryTargetEmployees   => _isFr ? 'Employés'                      : 'Employees';
+  String get deliveryTargetFree        => _isFr ? 'Numéro libre'                  : 'Free number';
+  String get deliveryTargetFreeHint    => _isFr ? 'Numéro WhatsApp du livreur'    : 'Driver WhatsApp number';
+  String get deliveryTargetNameHint    => _isFr ? 'Nom du livreur'                : 'Driver name';
+  String get deliveryPreviewTitle      => _isFr ? 'Aperçu du message'             : 'Message preview';
+  String get deliveryPreviewEditBtn    => _isFr ? 'Modifier'                       : 'Edit';
+  String get deliveryPreviewResetBtn   => _isFr ? 'Réinitialiser'                  : 'Reset';
+  String get deliverySendBtn           => _isFr ? 'Envoyer & passer en cours'     : 'Send & start processing';
+  String get deliverySent              => _isFr ? 'Commande transférée'            : 'Order transferred';
+  String get deliveryTransferForbidden => _isFr
+      ? 'Permission requise pour transférer une commande au livreur.'
+      : 'Permission required to transfer an order to a delivery person.';
+  String get deliveryNoTemplate        => _isFr
+      ? 'Aucun template configuré. Créez-en un dans Paramètres.'
+      : 'No template configured. Create one in Settings.';
+  String get deliveryHistoryTitle      => _isFr ? 'Historique des transferts'     : 'Transfer history';
+  String get deliveryHistoryEmpty      => _isFr ? 'Aucun transfert pour l\'instant' : 'No transfer yet';
+  String get deliveryResendBtn         => _isFr ? 'Renvoyer'                       : 'Resend';
+
+  // ── Transfert via groupe WhatsApp (hotfix_050) ─────────────────────────
+  String get deliveryCopyMsgBtn        => _isFr ? 'Copier'                         : 'Copy';
+  String get deliveryOpenGroupBtn      => _isFr ? 'Ouvrir le groupe'               : 'Open group';
+  String get deliveryCopied            => _isFr
+      ? 'Message copié dans le presse-papiers'
+      : 'Message copied to clipboard';
+
+  // ── Card produit (grille caisse / inventaire / catalogue public) ───────
+  String get productStockBadgeRupture     => _isFr ? 'rupture'        : 'out';
+  String get productStockBadgeLow         => _isFr ? 'stock bas'      : 'low stock';
+  String get productStockBadgeAvailable   => _isFr ? 'disponible'     : 'available';
+  String productVariantsMore(int n)       => _isFr ? '+$n var.'       : '+$n var.';
+  String get productPromoBadge            => _isFr ? 'Promo'          : 'Sale';
+
+  // ── Mini-dashboard du panier vide (caisse) ─────────────────────────────
+  String dashboardGreeting(String name)   => _isFr ? 'Bonjour $name'  : 'Hello $name';
+  String get dashboardWishGoodSelling     => _isFr ? 'Bonne vente !'  : 'Good selling!';
+  String get dashboardSalesToday          => _isFr ? 'Ventes du jour' : "Today's sales";
+  String dashboardSalesCount(int s, int c) => _isFr
+      ? '$s vente${s > 1 ? "s" : ""} · $c client${c > 1 ? "s" : ""}'
+      : '$s sale${s > 1 ? "s" : ""} · $c client${c > 1 ? "s" : ""}';
+  String get dashboardAvgCart             => _isFr ? 'Panier moyen'   : 'Avg. cart';
+  String get dashboardLastSale            => _isFr ? 'Dernière vente' : 'Last sale';
+  String dashboardLastSaleAgo(String w)   => _isFr ? 'il y a $w'      : '$w ago';
+  String get dashboardLastSaleJustNow     => _isFr ? 'à l\'instant'   : 'just now';
+  String dashboardOutOfStockAlert(int n)  => _isFr
+      ? '⚠ $n produit${n > 1 ? "s" : ""} en rupture'
+      : '⚠ $n product${n > 1 ? "s" : ""} out of stock';
+  String get dashboardEmptyCartHint       => _isFr
+      ? 'Cliquez sur un produit pour commencer'
+      : 'Click a product to start';
+
+  // ── Toggle settings : tableau de bord panier vide ──────────────────────
+  String get settingsEmptyDashboardToggle => _isFr
+      ? 'Tableau de bord dans le panier vide'
+      : 'Dashboard in empty cart';
+  String get settingsEmptyDashboardHint   => _isFr
+      ? 'Affiche les KPIs du jour à la place de l\'icône quand aucun '
+        'article n\'est sélectionné.'
+      : 'Show today\'s KPIs instead of the icon when no item is selected.';
+
+  // ── Alertes commandes programmées (sprint alertes) ─────────────────────
+  String get scheduledAlertModalTitle =>
+      _isFr ? 'COMMANDE IMMINENTE' : 'IMMINENT ORDER';
+  String scheduledAlertCountdown(String time) =>
+      _isFr ? 'dans $time' : 'in $time';
+  String get scheduledAlertAcknowledge =>
+      _isFr ? 'J\'ai vu — préparer maintenant' : 'Acknowledged — prepare now';
+  String get scheduledAlertBannerTitle =>
+      _isFr ? 'COMMANDE' : 'ORDER';
+  String scheduledAlertBannerText(int n, String time) =>
+      _isFr ? '$n dans $time' : '$n in $time';
+  String scheduledAlertMultipleOrders(int n) => _isFr
+      ? '$n commande${n > 1 ? "s" : ""} urgente${n > 1 ? "s" : ""}'
+      : '$n urgent order${n > 1 ? "s" : ""}';
+  String get scheduledAlertSeen =>
+      _isFr ? 'Voir' : 'View';
+  String get scheduledAlertOverdue =>
+      _isFr ? 'EN RETARD' : 'OVERDUE';
+  String scheduledAlertOverdueBy(String time) =>
+      _isFr ? 'depuis $time' : 'by $time';
+  String get scheduledAlertTitleFlash =>
+      _isFr ? '⚠ COMMANDE — ' : '⚠ ORDER — ';
+  String get scheduledAlertTransferBtn =>
+      _isFr ? 'Transférer au livreur' : 'Transfer to courier';
+  String get scheduledAlertCancelledByClient =>
+      _isFr ? 'Annulée par le client' : 'Cancelled by client';
+  String scheduledAlertCarouselIndicator(int current, int total) =>
+      '$current / $total';
+
+  // ── Paramètres alertes (sprint 2B) ────────────────────────────────────
+  String get scheduledAlertEnableSoundHint => _isFr
+      ? 'Cliquez n\'importe où pour activer les alertes sonores'
+      : 'Click anywhere to enable sound alerts';
+  String get settingsNotifsTitle => _isFr ? 'Notifications' : 'Notifications';
+  String get settingsScheduledAlerts => _isFr
+      ? 'Alertes commandes programmées'
+      : 'Scheduled order alerts';
+  String get settingsAlertSound =>
+      _isFr ? 'Son d\'alarme' : 'Alarm sound';
+  String get settingsAlertVolume =>
+      _isFr ? 'Volume' : 'Volume';
+  String get settingsAlertThresholds =>
+      _isFr ? 'Seuils d\'alerte' : 'Alert thresholds';
+  String get settingsAlertModalEnabled => _isFr
+      ? 'Modal plein écran à H-1'
+      : 'Full-screen modal at H-1';
+  String get settingsAlertBanner =>
+      _isFr ? 'Bandeau persistant' : 'Persistent banner';
+  String get settingsAlertFavicon =>
+      _isFr ? 'Favicon clignotant' : 'Blinking favicon';
+  String get settingsAlertSoundEnabled =>
+      _isFr ? 'Alarme sonore' : 'Sound alarm';
+  String get settingsAlertTitleFlash =>
+      _isFr ? 'Titre onglet clignotant' : 'Tab title flashing';
+  String get soundChoiceBell =>
+      _isFr ? 'Cloche moderne' : 'Modern bell';
+  String get soundChoiceSiren =>
+      _isFr ? 'Sirène' : 'Siren';
+  String get soundChoiceNotification =>
+      _isFr ? 'Notification' : 'Notification';
 }
 
 class _AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {
