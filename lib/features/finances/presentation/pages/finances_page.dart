@@ -6,10 +6,11 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/permisions/subscription_provider.dart';
-import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/kpi_card.dart';
 import '../../../../shared/widgets/period_selector.dart';
+import '../../../../shared/widgets/view_filter_chip_bar.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
 import '../../../expenses/presentation/pages/expenses_page.dart';
 import '../../../subscription/domain/models/plan_type.dart';
@@ -70,7 +71,6 @@ class _FinancesPageState extends ConsumerState<FinancesPage>
 
   @override
   Widget build(BuildContext context) {
-    final l = context.l10n;
     final plan  = ref.watch(currentPlanProvider);
     final perms = ref.watch(permissionsProvider(widget.shopId));
 
@@ -107,7 +107,7 @@ class _LockedFeaturePlaceholder extends StatelessWidget {
         padding: const EdgeInsets.all(24),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.workspace_premium_rounded,
-              size: 64, color: cs.primary.withOpacity(0.6)),
+              size: 64, color: cs.primary.withValues(alpha:0.6)),
           const SizedBox(height: 16),
           Text(context.l10n.upgradeFeatureTitle,
               textAlign: TextAlign.center,
@@ -154,6 +154,10 @@ class _FinancesBody extends ConsumerWidget {
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
         child: const PeriodSelector(),
       ),
+      const SizedBox(height: 8),
+      // Filtre emplacement global : pilote dashViewFilterProvider →
+      // KPI, graphiques (dashDataProvider) ET l'onglet Dépenses suivent.
+      ViewFilterChipBar(shopId: shopId, useTabs: true),
       const SizedBox(height: 12),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -240,7 +244,7 @@ class _FinancesKpiGrid extends ConsumerWidget {
     var count = 0;
     for (final raw in HiveBoxes.expensesBox.values) {
       try {
-        final m = Map<String, dynamic>.from(raw as Map);
+        final m = Map<String, dynamic>.from(raw);
         if (m['shop_id'] == shopId) count++;
       } catch (_) {}
     }
@@ -274,7 +278,7 @@ class _FinancesKpiGrid extends ConsumerWidget {
     }) => KpiData(
       label: label,
       value: _fmt(value),
-      unit: 'XAF',
+      unit: CurrencyFormatter.currentSymbol,
       icon: icon,
       color: color,
       delta: trend.delta,
@@ -391,7 +395,7 @@ class _RevenueSubKpis extends StatelessWidget {
         KpiData(
           label: l.financesPanier,
           value: _fmt(data.avgTicket),
-          unit:  'XAF',
+          unit:  CurrencyFormatter.currentSymbol,
           icon:  Icons.shopping_basket_rounded,
           color: AppColors.primary,
         ),
@@ -430,7 +434,7 @@ class _PertesTab extends ConsumerWidget {
           KpiData(
             label: l.dashLoss,
             value: _fmt(data.totalLoss),
-            unit:  'XAF',
+            unit:  CurrencyFormatter.currentSymbol,
             icon:  Icons.trending_down_rounded,
             color: AppColors.error,
             errorIndicator: data.totalLoss > 0,
@@ -438,7 +442,7 @@ class _PertesTab extends ConsumerWidget {
           KpiData(
             label: l.financesBilanScrapped,
             value: _fmt(data.scrappedLoss),
-            unit:  'XAF',
+            unit:  CurrencyFormatter.currentSymbol,
             icon:  Icons.delete_forever_rounded,
             color: AppColors.error,
             errorIndicator: data.scrappedLoss > 0,
@@ -446,7 +450,7 @@ class _PertesTab extends ConsumerWidget {
           KpiData(
             label: l.financesBilanRepair,
             value: _fmt(data.repairCost),
-            unit:  'XAF',
+            unit:  CurrencyFormatter.currentSymbol,
             icon:  Icons.build_rounded,
             color: AppColors.warning,
           ),
@@ -507,14 +511,14 @@ class _FinancialRecap extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.divider),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 4, offset: const Offset(0, 2))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Container(width: 28, height: 28,
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.10),
+                color: AppColors.primary.withValues(alpha:0.10),
                 borderRadius: BorderRadius.circular(7),
               ),
               child: Icon(Icons.account_balance_rounded,
@@ -525,25 +529,29 @@ class _FinancialRecap extends StatelessWidget {
                   fontSize: 13, fontWeight: FontWeight.w700)),
         ]),
         const SizedBox(height: 12),
-        _row(l.financesBilanCA, '+${_fmt(data.totalSales)} XAF',
+        _row(l.financesBilanCA,
+            '+${_fmt(data.totalSales)} ${CurrencyFormatter.currentSymbol}',
             AppColors.textPrimary),
         const SizedBox(height: 4),
-        _row(l.financesBilanProductCost, '−${_fmt(productCost)} XAF',
+        _row(l.financesBilanProductCost,
+            '−${_fmt(productCost)} ${CurrencyFormatter.currentSymbol}',
             AppColors.textSecondary),
         if (data.scrappedLoss > 0) ...[
           const SizedBox(height: 4),
-          _row(l.financesBilanScrapped, '−${_fmt(data.scrappedLoss)} XAF',
+          _row(l.financesBilanScrapped,
+              '−${_fmt(data.scrappedLoss)} ${CurrencyFormatter.currentSymbol}',
               AppColors.error),
         ],
         if (data.repairCost > 0) ...[
           const SizedBox(height: 4),
-          _row(l.financesBilanRepair, '−${_fmt(data.repairCost)} XAF',
+          _row(l.financesBilanRepair,
+              '−${_fmt(data.repairCost)} ${CurrencyFormatter.currentSymbol}',
               AppColors.warning),
         ],
         if (data.operatingExpenses > 0) ...[
           const SizedBox(height: 4),
           _row(l.financesBilanExpenses,
-              '−${_fmt(data.operatingExpenses)} XAF',
+              '−${_fmt(data.operatingExpenses)} ${CurrencyFormatter.currentSymbol}',
               AppColors.error),
         ],
         const SizedBox(height: 8),
@@ -553,7 +561,8 @@ class _FinancialRecap extends StatelessWidget {
           Expanded(child: Text(l.financesBilanNet,
               style: const TextStyle(
                   fontSize: 12, fontWeight: FontWeight.w700))),
-          Text('${isPositive ? '+' : '−'}${_fmt(net.abs())} XAF',
+          Text(
+              '${isPositive ? '+' : '−'}${_fmt(net.abs())} ${CurrencyFormatter.currentSymbol}',
               style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800,
                   color: isPositive
                       ? AppColors.primary
@@ -647,7 +656,7 @@ class _SalesBarChart extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.divider),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 5, offset: const Offset(0, 2))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -836,7 +845,7 @@ class _AccessDeniedPlaceholder extends StatelessWidget {
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               fontSize: 13,
-              color: cs.onSurface.withOpacity(0.6),
+              color: cs.onSurface.withValues(alpha:0.6),
               height: 1.5,
             ),
           ),

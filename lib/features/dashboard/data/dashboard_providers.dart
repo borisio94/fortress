@@ -4,6 +4,8 @@ import '../../../core/storage/hive_boxes.dart';
 import '../../../core/storage/local_storage_service.dart';
 import '../../../core/permisions/subscription_provider.dart';
 import '../../inventaire/domain/entities/product.dart';
+import '../../inventaire/domain/entities/stock_location.dart';
+import '../../inventaire/domain/entities/stock_level.dart';
 
 /// Période affichée par le dashboard.
 enum DashPeriod { today, yesterday, week, month, quarter, year, custom }
@@ -224,6 +226,107 @@ final dashPeriodProvider =
 final dashCustomRangeProvider =
     StateProvider<DashRange?>((ref) => null);
 
+/// Filtre de périmètre du dashboard de la boutique courante.
+///   * `null`        → vue globale (boutique + tous ses partenaires).
+///   * `'_base'`     → uniquement la `StockLocation type='shop'` de la boutique.
+///   * `<location_id>` → uniquement ce partenaire (`StockLocation type='partner'`).
+///
+/// Les KPI et listes du dashboard observent ce provider pour filtrer leurs
+/// requêtes. Reset à `null` au changement de boutique (cf. listener dans
+/// `_DashViewFilter`).
+final dashViewFilterProvider = StateProvider<String?>((ref) => null);
+
+/// Vrai si une dépense (de `locationId` donné) doit être comptée dans la
+/// vue `viewFilter` :
+///   • viewFilter null    (Globale)   → tout
+///   • viewFilter '_base' (Boutique)  → dépenses globales (null) + boutique
+///   • viewFilter <id>    (Partenaire)→ strictement ce partenaire
+bool expenseMatchesView(String? locationId, String? viewFilter) {
+  if (viewFilter == null) return true;
+  if (viewFilter == '_base') {
+    return locationId == null || locationId == '_base';
+  }
+  return locationId == viewFilter;
+}
+
+/// Résout `dashViewFilterProvider` en liste d'`location_id` à considérer.
+///   * filtre null → null (pas de filtre, tout passe).
+///   * filtre `'_base'` → ids des `StockLocation type='shop'` du shop.
+///   * filtre `<id>` → [id] (un partenaire).
+List<String>? resolveLocationIdsFor(String? viewFilter, String shopId) {
+  if (viewFilter == null) return null;
+  if (viewFilter == '_base') {
+    final ids = <String>[];
+    for (final raw in HiveBoxes.stockLocationsBox.values) {
+      try {
+        final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+        if (loc.shopId == shopId
+            && loc.type == StockLocationType.shop
+            && loc.isActive) {
+          ids.add(loc.id);
+        }
+      } catch (_) {/* skip */}
+    }
+    return ids;
+  }
+  return [viewFilter];
+}
+
+/// Index `order_id → partner_location_id` pour la boutique courante,
+/// construit depuis le cache Hive `delivery_transfers`. Si plusieurs
+/// transferts existent pour une même commande (re-routage), on garde le
+/// PLUS RÉCENT (l'opération qui livre effectivement). Seuls les transferts
+/// `target_type='partner'` peuplent l'index — les transferts vers employés
+/// ou numéros libres n'ont pas de location pertinente.
+///
+/// Utilisé par les pages Commandes/Dashboard pour filtrer "commandes
+/// livrées par tel partenaire".
+Map<String, String> orderToPartnerLocId(String shopId) {
+  final byOrder = <String, ({String locId, DateTime at})>{};
+  // 1. Source primaire : table `delivery_transfers` (livraisons effectives).
+  for (final raw in HiveBoxes.deliveryTransfersBox.values) {
+    try {
+      final m = Map<String, dynamic>.from(raw);
+      if (m['shop_id']?.toString() != shopId) continue;
+      if (m['target_type'] != 'partner') continue;
+      final orderId = m['order_id']?.toString();
+      final locId   = m['target_ref']?.toString();
+      if (orderId == null || locId == null || locId.isEmpty) continue;
+      final at = DateTime.tryParse(m['created_at']?.toString() ?? '')
+          ?? DateTime.now();
+      final cur = byOrder[orderId];
+      if (cur == null || at.isAfter(cur.at)) {
+        byOrder[orderId] = (locId: locId, at: at);
+      }
+    } catch (_) {/* skip */}
+  }
+  // 2. Fallback : commandes créées avec `delivery_mode = 'partner'` mais
+  //    sans transfert encore enregistré. Sans ce fallback, une commande
+  //    qui vient juste d'être passée en mode partner (chip partenaire)
+  //    n'apparaîtrait pas dans la vue "Partenaire X" tant qu'aucun
+  //    delivery_transfer n'a été créé manuellement — incohérent avec
+  //    le comportement attendu par l'opérateur. La source de vérité
+  //    métier est `Sale.deliveryLocationId` quand le mode est partner.
+  for (final raw in HiveBoxes.ordersBox.values) {
+    try {
+      final m = Map<String, dynamic>.from(raw);
+      if (m['shop_id']?.toString() != shopId) continue;
+      if (m['delivery_mode'] != 'partner') continue;
+      final orderId = m['id']?.toString();
+      final locId   = m['delivery_location_id']?.toString();
+      if (orderId == null || locId == null || locId.isEmpty) continue;
+      // Ne pas écraser une entrée déjà posée par delivery_transfers (qui
+      // est plus précise — elle reflète la livraison réelle, pas juste
+      // l'intention de la vente).
+      if (byOrder.containsKey(orderId)) continue;
+      final at = DateTime.tryParse(m['created_at']?.toString() ?? '')
+          ?? DateTime.now();
+      byOrder[orderId] = (locId: locId, at: at);
+    } catch (_) {/* skip */}
+  }
+  return byOrder.map((k, v) => MapEntry(k, v.locId));
+}
+
 /// Journal des rebuts résolus pour la boutique + période courantes.
 /// Trié par date (plus récent d'abord).
 final scrapJournalProvider =
@@ -260,7 +363,7 @@ final scrapJournalProvider =
   final entries = <ScrapEntry>[];
   for (final raw in HiveBoxes.incidentsBox.values) {
     try {
-      final m = Map<String, dynamic>.from(raw as Map);
+      final m = Map<String, dynamic>.from(raw);
       if (m['shop_id'] != shopId) continue;
       if (m['status'] != 'resolved') continue;
       if (m['type'] != 'scrapped') continue;
@@ -319,7 +422,12 @@ class FinancialSnapshot {
 /// Calcule les agrégats financiers pour une plage donnée, sans recalculer
 /// le top produits / nouveautés / transactions récentes. Utilisé pour
 /// produire l'instantané de la période précédente (comparatif).
-FinancialSnapshot _computeFinancialSnapshot(String shopId, DashRange range) {
+///
+/// [viewFilter] reproduit la logique de `dashDataProvider` pour que les
+/// pills tendance de la page Finances soient cohérentes avec la vue
+/// sélectionnée (Globale / boutique seule / partenaire spécifique).
+FinancialSnapshot _computeFinancialSnapshot(String shopId, DashRange range,
+    {String? viewFilter}) {
   // Coûts produits (repris tel quel de dashDataProvider)
   final products = LocalStorageService.getProductsForShop(shopId);
   final costByProduct = <String, double>{};
@@ -344,9 +452,24 @@ FinancialSnapshot _computeFinancialSnapshot(String shopId, DashRange range) {
 
   double totalSales = 0, totalLoss = 0, totalProfit = 0, operatingExpenses = 0;
 
+  // Index partenaire pour aligner sur la vue active.
+  final ordersByPartner = (viewFilter != null)
+      ? orderToPartnerLocId(shopId)
+      : const <String, String>{};
+
   for (final raw in HiveBoxes.ordersBox.values) {
-    final o = Map<String, dynamic>.from(raw as Map);
+    final o = Map<String, dynamic>.from(raw);
     if (o['shop_id'] != shopId) continue;
+    // Filtre vue dashboard cohérent avec `dashDataProvider`.
+    if (viewFilter != null) {
+      final orderId = o['id']?.toString() ?? '';
+      final partnerLoc = ordersByPartner[orderId];
+      if (viewFilter == '_base') {
+        if (partnerLoc != null) continue; // commande livrée par partenaire → skip
+      } else {
+        if (partnerLoc != viewFilter) continue;
+      }
+    }
     final createdAt = DateTime.tryParse(o['created_at']?.toString() ?? '')
         ?.toLocal();
     if (createdAt == null) continue;
@@ -408,12 +531,14 @@ FinancialSnapshot _computeFinancialSnapshot(String shopId, DashRange range) {
   // Dépenses directes
   for (final raw in HiveBoxes.expensesBox.values) {
     try {
-      final m = Map<String, dynamic>.from(raw as Map);
+      final m = Map<String, dynamic>.from(raw);
       if (m['shop_id'] != shopId) continue;
       final paidAt = DateTime.tryParse(m['paid_at']?.toString() ?? '')
           ?.toLocal();
       if (paidAt == null) continue;
       if (paidAt.isBefore(range.from) || paidAt.isAfter(range.to)) continue;
+      if (!expenseMatchesView(
+          m['location_id'] as String?, viewFilter)) continue;
       operatingExpenses += (m['amount'] as num?)?.toDouble() ?? 0;
     } catch (_) {}
   }
@@ -422,7 +547,7 @@ FinancialSnapshot _computeFinancialSnapshot(String shopId, DashRange range) {
   double scrappedLoss = 0, repairCost = 0;
   for (final raw in HiveBoxes.incidentsBox.values) {
     try {
-      final m = Map<String, dynamic>.from(raw as Map);
+      final m = Map<String, dynamic>.from(raw);
       if (m['shop_id'] != shopId) continue;
       if (m['status'] != 'resolved') continue;
       final resolved = DateTime.tryParse(
@@ -457,6 +582,7 @@ final financesPreviousSnapshotProvider = Provider.autoDispose
   ref.watch(dashSignalProvider);
   final period = ref.watch(dashPeriodProvider);
   final custom = ref.watch(dashCustomRangeProvider);
+  final viewFilter = ref.watch(dashViewFilterProvider);
   final currentRange = period == DashPeriod.custom && custom != null
       ? custom
       : rangeFor(period);
@@ -465,7 +591,8 @@ final financesPreviousSnapshotProvider = Provider.autoDispose
     currentRange.from.subtract(duration),
     currentRange.from,
   );
-  return _computeFinancialSnapshot(shopId, previousRange);
+  return _computeFinancialSnapshot(shopId, previousRange,
+      viewFilter: viewFilter);
 });
 
 /// Données agrégées du dashboard pour une boutique donnée et la période
@@ -496,7 +623,87 @@ final dashDataProvider =
       .toList()
     ..sort((a, b) => b.createdAt!.compareTo(a.createdAt!));
 
-  final lowStock = allProducts.where((p) => p.isLowStock).toList();
+  // Stock bas — résolu via `stock_levels` (multi-emplacement) selon la vue.
+  //   * Globale (viewFilter null) → SOMME des stock_levels sur tous les
+  //     emplacements de la boutique courante (type='shop' rattachée au shop)
+  //     PLUS tous les partenaires actifs du même owner.
+  //   * Boutique seule ('_base') → uniquement les locations type='shop' du shop.
+  //   * Partenaire X → uniquement cette location_id.
+  // Auparavant, Globale s'appuyait sur `Product.isLowStock` qui ne lit que
+  // `variant.stockAvailable` (= la boutique uniquement, pas les partenaires).
+  // Cette nouvelle règle assure que cliquer Globale agrège bien tous les
+  // emplacements visibles par l'utilisateur.
+  final viewFilter = ref.watch(dashViewFilterProvider);
+  final targetLocIds = <String>{};
+  if (viewFilter == null) {
+    // Globale : shop locations + partenaires actifs du même owner.
+    final shop = LocalStorageService.getShop(shopId);
+    final ownerId = shop?.ownerId;
+    for (final m in HiveBoxes.stockLocationsBox.values) {
+      try {
+        final loc = StockLocation.fromMap(Map<String, dynamic>.from(m));
+        if (!loc.isActive) continue;
+        final isShopLoc = loc.shopId == shopId
+            && loc.type == StockLocationType.shop;
+        final isOwnerPartner = ownerId != null
+            && loc.ownerId == ownerId
+            && loc.type == StockLocationType.partner;
+        if (isShopLoc || isOwnerPartner) {
+          targetLocIds.add(loc.id);
+        }
+      } catch (_) {/* skip ligne corrompue */}
+    }
+  } else if (viewFilter == '_base') {
+    // StockLocation type='shop' rattachée à cette boutique.
+    for (final m in HiveBoxes.stockLocationsBox.values) {
+      try {
+        final loc = StockLocation.fromMap(Map<String, dynamic>.from(m));
+        if (loc.shopId == shopId
+            && loc.type == StockLocationType.shop
+            && loc.isActive) {
+          targetLocIds.add(loc.id);
+        }
+      } catch (_) {/* skip */}
+    }
+  } else {
+    // Partenaire ou warehouse — on prend l'id tel quel.
+    targetLocIds.add(viewFilter);
+  }
+
+  // Index variant_id → {location_id: stock_available}, construit une fois.
+  final stockByVariantLoc = <String, Map<String, int>>{};
+  for (final m in HiveBoxes.stockLevelsBox.values) {
+    try {
+      final lvl = StockLevel.fromMap(Map<String, dynamic>.from(m));
+      stockByVariantLoc
+          .putIfAbsent(lvl.variantId, () => <String, int>{})
+          [lvl.locationId] = lvl.stockAvailable;
+    } catch (_) {/* skip */}
+  }
+
+  final lowStock = <Product>[];
+  for (final p in allProducts) {
+    int totalAtLocations = 0;
+    for (final v in p.variants) {
+      if (v.id == null) continue;
+      final locMap = stockByVariantLoc[v.id];
+      if (locMap == null) continue;
+      for (final locId in targetLocIds) {
+        totalAtLocations += locMap[locId] ?? 0;
+      }
+    }
+    // Fallback : si stock_levels vide pour ce produit (pas encore migré),
+    // retomber sur la règle Phase 1 (variant.stockAvailable) — mais
+    // uniquement en vue Globale ou Boutique seule, pas pour un partenaire
+    // (un partenaire sans stock_levels = vraiment 0, pas le stock variant).
+    final usableTotal = totalAtLocations > 0 || viewFilter == null
+        || viewFilter == '_base'
+        ? (totalAtLocations > 0 ? totalAtLocations : p.totalStock)
+        : 0;
+    if (usableTotal > 0 && usableTotal <= p.stockMinAlert) {
+      lowStock.add(p);
+    }
+  }
 
   // Prix de revient par variante :
   //   priceBuy(variante) + customsFee/stock(produit) + expenses/stock(produit)
@@ -540,11 +747,35 @@ final dashDataProvider =
   final myUid = Supabase.instance.client.auth.currentUser?.id;
   final restrictToOwn = !perms.isAdmin && !perms.isOwner && myUid != null;
 
+  // Filtre commandes selon la vue dashboard :
+  //   * Globale (viewFilter null) → toutes les commandes du shop.
+  //   * Partenaire X → commandes ayant un transfer.target_ref==X (ou
+  //                    transfer.shop_id==shopId pour les warehouses) en
+  //                    consultant l'index `orderToPartnerLocId`.
+  //   * Boutique seule ('_base') → commandes SANS transfer partenaire
+  //                    actif (livrées par la boutique elle-même).
+  final ordersByPartner = (viewFilter != null)
+      ? orderToPartnerLocId(shopId)
+      : const <String, String>{};
+
+  bool keepOrderForView(Map<String, dynamic> o) {
+    if (viewFilter == null) return true;            // Globale : tout
+    final orderId = o['id']?.toString() ?? '';
+    final partnerLoc = ordersByPartner[orderId];
+    if (viewFilter == '_base') {
+      // Commande livrée par la boutique = pas de transfer partenaire.
+      return partnerLoc == null;
+    }
+    // Vue partenaire X : la commande doit pointer sur ce X.
+    return partnerLoc == viewFilter;
+  }
+
   final orders = HiveBoxes.ordersBox.values
       .map((m) => Map<String, dynamic>.from(m))
       .where((o) => o['shop_id'] == shopId)
       .where((o) => !restrictToOwn
           || o['created_by_user_id'] == myUid)
+      .where(keepOrderForView)
       .toList();
 
   final salesSeries    = List<double>.filled(range.buckets, 0);
@@ -756,7 +987,7 @@ final dashDataProvider =
   int    pendingIncidents = 0;
   for (final raw in HiveBoxes.incidentsBox.values) {
     try {
-      final m = Map<String, dynamic>.from(raw as Map);
+      final m = Map<String, dynamic>.from(raw);
       if (m['shop_id'] != shopId) continue;
       final status = m['status'] as String? ?? 'pending';
       if (status == 'pending' || status == 'in_progress') pendingIncidents++;
@@ -801,11 +1032,13 @@ final dashDataProvider =
   // Filtrées sur la période via `paid_at`.
   for (final raw in HiveBoxes.expensesBox.values) {
     try {
-      final m = Map<String, dynamic>.from(raw as Map);
+      final m = Map<String, dynamic>.from(raw);
       if (m['shop_id'] != shopId) continue;
       final paidAt = DateTime.tryParse(m['paid_at']?.toString() ?? '')?.toLocal();
       if (paidAt == null) continue;
       if (paidAt.isBefore(range.from) || paidAt.isAfter(range.to)) continue;
+      if (!expenseMatchesView(
+          m['location_id'] as String?, viewFilter)) continue;
       final amount = (m['amount'] as num?)?.toDouble() ?? 0;
       operatingExpenses += amount;
       final cat = (m['category'] as String?) ?? 'other';

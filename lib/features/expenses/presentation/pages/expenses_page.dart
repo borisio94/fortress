@@ -10,7 +10,6 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
-import '../../../../shared/widgets/view_filter_chip_bar.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../core/widgets/danger_confirm_dialog.dart';
@@ -264,7 +263,8 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
         onSync: _syncing ? null : _syncInBackground,
         onAdd:  () => _showForm(null),
       ),
-      ViewFilterChipBar(shopId: widget.shopId, useTabs: true),
+      // Filtre emplacement piloté globalement par la page Finances
+      // (ViewFilterChipBar au niveau _FinancesBody). On lit juste l'état.
       _PeriodBar(current: _period,
           onChange: (p) => setState(() => _period = p)),
       if (_byCategory.isNotEmpty)
