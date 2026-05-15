@@ -77,6 +77,11 @@ class Expense extends Equatable {
   final String?        notes;
   final String?        createdBy;
   final DateTime       createdAt;
+  /// Emplacement rattaché. Convention (cf. dashViewFilterProvider) :
+  ///   • null     → dépense GLOBALE (non attribuable, comptée partout)
+  ///   • '_base'  → dépense de la BOUTIQUE
+  ///   • <id>     → dépense d'un PARTENAIRE précis
+  final String?        locationId;
 
   const Expense({
     required this.id,
@@ -90,6 +95,7 @@ class Expense extends Equatable {
     this.notes,
     this.createdBy,
     required this.createdAt,
+    this.locationId,
   });
 
   Expense copyWith({
@@ -102,6 +108,8 @@ class Expense extends Equatable {
     bool clearReceiptUrl = false,
     String? notes,
     bool clearNotes = false,
+    String? locationId,
+    bool clearLocationId = false,
   }) => Expense(
     id:            id,
     shopId:        shopId,
@@ -114,9 +122,10 @@ class Expense extends Equatable {
     notes:         clearNotes      ? null : (notes      ?? this.notes),
     createdBy:     createdBy,
     createdAt:     createdAt,
+    locationId:    clearLocationId ? null : (locationId ?? this.locationId),
   );
 
   @override
   List<Object?> get props => [id, shopId, amount, category, label, paidAt,
-      paymentMethod, receiptUrl, notes];
+      paymentMethod, receiptUrl, notes, locationId];
 }

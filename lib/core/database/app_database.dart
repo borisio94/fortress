@@ -3024,6 +3024,7 @@ end \$\$;""",
     'notes':          e.notes,
     'created_by':     e.createdBy,
     'created_at':     e.createdAt.toUtc().toIso8601String(),
+    'location_id':    e.locationId,
   };
 
   static Map<String, dynamic> _expenseToSupabase(Expense e) =>
@@ -3045,6 +3046,7 @@ end \$\$;""",
     createdAt:  m['created_at'] != null
         ? DateTime.parse(m['created_at'] as String).toLocal()
         : DateTime.now(),
+    locationId: m['location_id'] as String?,
   );
 
   /// Convertit une ligne Supabase en map Hive (mêmes colonnes, conversion UUID).
@@ -3060,6 +3062,7 @@ end \$\$;""",
     'notes':          row['notes'],
     'created_by':     row['created_by']?.toString(),
     'created_at':     row['created_at'],
+    'location_id':    row['location_id'],
   };
 
   /// Synchroniser les commandes depuis Supabase vers Hive (pull)

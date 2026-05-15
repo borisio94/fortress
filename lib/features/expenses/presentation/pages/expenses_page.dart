@@ -5,9 +5,14 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../core/storage/hive_boxes.dart';
+import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
+import '../../../../shared/widgets/view_filter_chip_bar.dart';
+import '../../../dashboard/data/dashboard_providers.dart';
+import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../core/widgets/danger_confirm_dialog.dart';
 import '../../../caisse/domain/entities/sale.dart' show PaymentMethod;
 import '../../domain/entities/expense.dart';
@@ -55,6 +60,11 @@ class _ExpenseRow {
   final DateTime paidAt;
   final Expense? source;    // non-null pour les dépenses directes
   final String? orderId;    // non-null pour les frais de commande
+  /// Emplacement rattaché (cf. dashViewFilterProvider) :
+  ///   null = global, '_base' = boutique, <id> = partenaire.
+  /// Dépense directe → Expense.locationId. Frais de commande →
+  /// deliveryLocationId de la commande (partenaire-livreur) si présent.
+  final String? locationId;
 
   const _ExpenseRow({
     required this.id,
@@ -64,6 +74,7 @@ class _ExpenseRow {
     required this.paidAt,
     this.source,
     this.orderId,
+    this.locationId,
   });
 
   bool get isVirtual => orderId != null;
@@ -75,6 +86,7 @@ class _ExpenseRow {
     label:    e.label,
     paidAt:   e.paidAt,
     source:   e,
+    locationId: e.locationId,
   );
 
   factory _ExpenseRow.fromOrderFee({
@@ -84,6 +96,7 @@ class _ExpenseRow {
     required double amount,
     required DateTime paidAt,
     required String? orderLabel,
+    String? deliveryLocationId,
   }) => _ExpenseRow(
     id:       'fee_${orderId}_$feeIndex',
     amount:   amount,
@@ -91,6 +104,7 @@ class _ExpenseRow {
     label:    feeLabel.isEmpty ? 'Frais de commande' : feeLabel,
     paidAt:   paidAt,
     orderId:  orderId,
+    locationId: deliveryLocationId,
   );
 }
 
@@ -147,7 +161,7 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
     // changement de statut, ajout/suppression de frais, ou suppression.
     try {
       for (final raw in HiveBoxes.ordersBox.values) {
-        final o = Map<String, dynamic>.from(raw as Map);
+        final o = Map<String, dynamic>.from(raw);
         if (o['shop_id'] != widget.shopId) continue;
         final status = (o['status'] as String?) ?? 'completed';
         if (status == 'cancelled' || status == 'refused') continue;
@@ -172,6 +186,7 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
             amount:     amount,
             paidAt:     effectiveAt,
             orderLabel: orderLabel,
+            deliveryLocationId: o['delivery_location_id'] as String?,
           ));
         }
       }
@@ -191,11 +206,26 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
     _refresh();
   }
 
+  /// Filtre emplacement (cf. dashViewFilterProvider) :
+  ///   • null    (Globale) → toutes les dépenses
+  ///   • '_base' (Boutique) → locationId == '_base' OU null (les charges
+  ///     globales sont supportées par la boutique de base)
+  ///   • <id>    (Partenaire) → locationId == <id> strictement
+  bool _matchesLocationView(_ExpenseRow r, String? view) {
+    if (view == null) return true;
+    if (view == '_base') {
+      return r.locationId == null || r.locationId == '_base';
+    }
+    return r.locationId == view;
+  }
+
   List<_ExpenseRow> get _filtered {
     final from = _period.from;
+    final view = ref.read(dashViewFilterProvider);
     return _rows.where((r) {
       if (from != null && r.paidAt.isBefore(from)) return false;
       if (_categoryFilter != null && r.category != _categoryFilter) return false;
+      if (!_matchesLocationView(r, view)) return false;
       return true;
     }).toList();
   }
@@ -218,6 +248,8 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
 
   @override
   Widget build(BuildContext context) {
+    // watch (pas read) pour rebuild quand l'utilisateur change la vue.
+    ref.watch(dashViewFilterProvider);
     final filtered = _filtered;
     return Column(children: [
       _KpiHeader(
@@ -232,6 +264,7 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
         onSync: _syncing ? null : _syncInBackground,
         onAdd:  () => _showForm(null),
       ),
+      ViewFilterChipBar(shopId: widget.shopId, useTabs: true),
       _PeriodBar(current: _period,
           onChange: (p) => setState(() => _period = p)),
       if (_byCategory.isNotEmpty)
@@ -290,12 +323,8 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
   }
 
   void _showForm(Expense? expense) {
-    showModalBottomSheet(
+    showFormSheet(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => ExpenseFormSheet(
         shopId: widget.shopId,
         expense: expense,
@@ -358,8 +387,8 @@ class _KpiHeader extends StatelessWidget {
     padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(
       gradient: LinearGradient(colors: [
-        AppColors.primary.withOpacity(0.9),
-        AppColors.primaryLight.withOpacity(0.8),
+        AppColors.primary.withValues(alpha:0.9),
+        AppColors.primaryLight.withValues(alpha:0.8),
       ]),
       borderRadius: BorderRadius.circular(14),
     ),
@@ -368,7 +397,7 @@ class _KpiHeader extends StatelessWidget {
         Container(
           width: 42, height: 42,
           decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
+              color: Colors.white.withValues(alpha:0.15),
               borderRadius: BorderRadius.circular(10)),
           child: const Icon(Icons.account_balance_wallet_rounded,
               color: Colors.white, size: 22),
@@ -394,7 +423,7 @@ class _KpiHeader extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.12),
+            color: Colors.white.withValues(alpha:0.12),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(children: [
@@ -515,10 +544,10 @@ class _CategoryChips extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: active ? cat.color : cat.color.withOpacity(0.08),
+                color: active ? cat.color : cat.color.withValues(alpha:0.08),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: active
-                    ? cat.color : cat.color.withOpacity(0.3)),
+                    ? cat.color : cat.color.withValues(alpha:0.3)),
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 Icon(cat.icon, size: 13,
@@ -530,7 +559,7 @@ class _CategoryChips extends StatelessWidget {
                 const SizedBox(width: 6),
                 Text(CurrencyFormatter.format(e.value),
                     style: TextStyle(fontSize: 10,
-                        color: active ? Colors.white70 : cat.color.withOpacity(0.8),
+                        color: active ? Colors.white70 : cat.color.withValues(alpha:0.8),
                         fontWeight: FontWeight.w600)),
               ]),
             ),
@@ -564,7 +593,7 @@ class _ExpenseTile extends StatelessWidget {
         child: Row(children: [
           Container(width: 36, height: 36,
               decoration: BoxDecoration(
-                  color: cat.color.withOpacity(0.12),
+                  color: cat.color.withValues(alpha:0.12),
                   borderRadius: BorderRadius.circular(9)),
               child: Icon(cat.icon, size: 17, color: cat.color)),
           const SizedBox(width: 10),
@@ -582,7 +611,7 @@ class _ExpenseTile extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 5, vertical: 1),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF3B82F6).withOpacity(0.12),
+                    color: const Color(0xFF3B82F6).withValues(alpha:0.12),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: const Text('Commande',
@@ -699,6 +728,8 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
   late ExpenseCategory _category;
   late PaymentMethod _paymentMethod;
   late DateTime _paidAt;
+  /// null = dépense globale, '_base' = boutique, <id> = partenaire.
+  String? _locationId;
   bool _saving = false;
 
   @override
@@ -711,6 +742,27 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
     _category     = e?.category ?? ExpenseCategory.subscription;
     _paymentMethod = e?.paymentMethod ?? PaymentMethod.cash;
     _paidAt       = e?.paidAt ?? DateTime.now();
+    _locationId   = e?.locationId;
+  }
+
+  /// Partenaires actifs de la boutique (StockLocation type='partner').
+  List<StockLocation> _partners() {
+    final shop = LocalStorageService.getShop(widget.shopId);
+    final ownerId = shop?.ownerId;
+    if (ownerId == null) return const [];
+    final out = <StockLocation>[];
+    for (final raw in HiveBoxes.stockLocationsBox.values) {
+      try {
+        final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+        if (loc.ownerId == ownerId
+            && loc.type == StockLocationType.partner
+            && loc.isActive) {
+          out.add(loc);
+        }
+      } catch (_) {/* ligne corrompue ignorée */}
+    }
+    out.sort((a, b) => a.name.compareTo(b.name));
+    return out;
   }
 
   @override
@@ -738,6 +790,7 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
       receiptUrl:    widget.expense?.receiptUrl,
       createdBy:     widget.expense?.createdBy,
       createdAt:     widget.expense?.createdAt ?? DateTime.now(),
+      locationId:    _locationId,
     );
     await AppDatabase.saveExpense(expense);
     await ActivityLogService.log(
@@ -768,22 +821,20 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
   @override
   Widget build(BuildContext context) {
     final viewInsets = MediaQuery.of(context).viewInsets.bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, 14, 20, viewInsets + 20),
-      child: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Center(child: Container(width: 36, height: 4,
-                decoration: BoxDecoration(color: const Color(0xFFE5E7EB),
-                    borderRadius: BorderRadius.circular(2)))),
-            const SizedBox(height: 16),
-            Text(widget.expense == null ? 'Nouvelle dépense' : 'Modifier',
-                style: const TextStyle(fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF0F172A))),
-            const SizedBox(height: 16),
+    return Form(
+      key: _formKey,
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        FormSheetHeader(
+          title: widget.expense == null ? 'Nouvelle dépense' : 'Modifier',
+          icon: widget.expense == null
+              ? Icons.add_card_outlined
+              : Icons.edit_outlined,
+        ),
+        Flexible(child: Padding(
+          padding: EdgeInsets.fromLTRB(20, 4, 20, viewInsets + 20),
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start, children: [
 
             // Libellé
             TextFormField(
@@ -798,7 +849,7 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
             TextFormField(
               controller: _amountCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: _dec('Montant (XAF)', '0'),
+              decoration: _dec('Montant (${CurrencyFormatter.currentSymbol})', '0'),
               validator: (v) {
                 final d = double.tryParse((v ?? '').replaceAll(',', '.'));
                 if (d == null || d < 0) return 'Montant invalide';
@@ -822,10 +873,10 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 10, vertical: 7),
                   decoration: BoxDecoration(
-                    color: active ? c.color : c.color.withOpacity(0.08),
+                    color: active ? c.color : c.color.withValues(alpha:0.08),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: active
-                        ? c.color : c.color.withOpacity(0.3)),
+                        ? c.color : c.color.withValues(alpha:0.3)),
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     Icon(c.icon, size: 13,
@@ -881,6 +932,31 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
             ),
             const SizedBox(height: 12),
 
+            // Emplacement rattaché : Global / Boutique / Partenaire.
+            // Permet d'imputer la charge au bon périmètre et de filtrer
+            // les finances ensuite (cf. dashViewFilterProvider).
+            DropdownButtonFormField<String?>(
+              value: _locationId,
+              decoration: _dec('Rattachée à', ''),
+              items: [
+                const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('Globale (toute la boutique)'),
+                ),
+                const DropdownMenuItem<String?>(
+                  value: '_base',
+                  child: Text('Boutique'),
+                ),
+                for (final p in _partners())
+                  DropdownMenuItem<String?>(
+                    value: p.id,
+                    child: Text(p.name),
+                  ),
+              ],
+              onChanged: (v) => setState(() => _locationId = v),
+            ),
+            const SizedBox(height: 12),
+
             // Notes (optionnelles)
             TextFormField(
               controller: _notesCtrl,
@@ -908,9 +984,10 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
                       style: const TextStyle(fontSize: 14,
                           fontWeight: FontWeight.w600)),
             )),
-          ]),
-        ),
-      ),
+            ]),
+          ),
+        )),
+      ]),
     );
   }
 
