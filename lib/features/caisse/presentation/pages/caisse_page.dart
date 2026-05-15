@@ -36,6 +36,7 @@ import '../../../../core/services/partner_ledger_service.dart';
 import '../../../parametres/domain/entities/partner_ledger_entry.dart';
 import '../../../../core/services/document_service.dart';
 import '../../../../core/services/invoice_storage_service.dart';
+import '../../../../core/services/short_link_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
 import '../../../../core/services/whatsapp/message_templates.dart';
 import '../../../parametres/data/shop_settings_store.dart';
@@ -1703,7 +1704,13 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         bytes:   bytes,
       );
       if (longUrl == null) return;
-      final shortUrl = await UrlShortenerService.shorten(longUrl);
+      // Raccourcisseur maison (Edge Function `r`) avec expiration 90j.
+      // Fallback TinyURL si la création échoue.
+      final shortUrl = await ShortLinkService.createShortLink(
+        longUrl:   longUrl,
+        linkType:  'invoice',
+        expiresIn: const Duration(days: 90),
+      ) ?? await UrlShortenerService.shorten(longUrl);
       if (mounted) setState(() => _invoiceShortUrl = shortUrl);
     } catch (_) {
       // Échec silencieux : `_sendInvoiceWhatsApp` retombera sur le flow
@@ -1711,6 +1718,25 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     } finally {
       if (mounted) setState(() => _preparingInvoice = false);
     }
+  }
+
+  /// Compose le message WhatsApp facture structuré en 4 parties :
+  /// salutation client, libellé d'annonce (éditable), lien court,
+  /// remerciement signé de la boutique.
+  String _buildInvoiceMessage({
+    required String  clientName,
+    required String  shopName,
+    required String  label,
+    required String  shortUrl,
+  }) {
+    final greeting = clientName.trim().isNotEmpty
+        ? 'Bonjour $clientName 👋'
+        : 'Bonjour 👋';
+    return '$greeting\n\n'
+        '$label.\n\n'
+        '📄 $shortUrl\n\n'
+        'Merci pour votre confiance.\n\n'
+        '$shopName';
   }
 
   void _sendInvoiceWhatsApp(BuildContext context) {
@@ -1729,17 +1755,21 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     }
     final shop = LocalStorageService.getShop(order.shopId);
 
-    // ── Cas 1 : facture déjà pré-générée → message court "<label> : <url>"
-    //    avec ouverture SYNCHRONE de wa.me dans le tick du clic.
-    //    Le client reçoit directement le PDF cliquable.
+    final label = ShopSettingsStore(order.shopId)
+        .read<String>(WaTemplateKeys.invoice,
+            fallback: WaTemplateDefaults.invoice) ?? WaTemplateDefaults.invoice;
+    final clientName = order.clientName ?? '';
+    final shopName   = shop?.name ?? 'Fortress';
+
+    // ── Cas 1 : facture déjà pré-générée → message 4 parties (salutation,
+    //    notification, lien court, remerciement) avec ouverture SYNCHRONE
+    //    de wa.me dans le tick du clic.
     if (_invoiceShortUrl != null) {
-      final label = ShopSettingsStore(order.shopId)
-          .read<String>(WaTemplateKeys.invoice,
-              fallback: WaTemplateDefaults.invoice) ?? WaTemplateDefaults.invoice;
-      final msg = MessageTemplates.buildShareMessage(
-        url:          _invoiceShortUrl!,
-        label:        label,
-        defaultLabel: WaTemplateDefaults.invoice,
+      final msg = _buildInvoiceMessage(
+        clientName: clientName,
+        shopName:   shopName,
+        label:      label,
+        shortUrl:   _invoiceShortUrl!,
       );
       final url = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
       openExternal(url).then((ok) {
@@ -1752,14 +1782,14 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     }
 
     // ── Cas 2 : facture pas encore prête (clic trop rapide après expand,
-    //    ou pré-génération échouée) → ouvre wa.me sync avec le libellé
-    //    seul, upload en arrière-plan + copie l'URL au presse-papier
+    //    ou pré-génération échouée) → ouvre wa.me sync avec un message
+    //    d'attente, upload en arrière-plan + copie l'URL au presse-papier
     //    pour collage manuel dans le chat.
-    final label = ShopSettingsStore(order.shopId)
-        .read<String>(WaTemplateKeys.invoice,
-            fallback: WaTemplateDefaults.invoice) ?? WaTemplateDefaults.invoice;
-    final msg = '$label (lien dans un instant)';
-    final url = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
+    final greeting = clientName.trim().isNotEmpty
+        ? 'Bonjour $clientName 👋'
+        : 'Bonjour 👋';
+    final waitMsg = '$greeting\n\n$label (lien dans un instant)';
+    final url = 'https://wa.me/$p?text=${Uri.encodeComponent(waitMsg)}';
 
     openExternal(url).then((ok) {
       if (!ok && context.mounted) {
@@ -1786,7 +1816,12 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
           }
           return;
         }
-        final shortUrl = await UrlShortenerService.shorten(longUrl);
+        final shortUrl = await ShortLinkService.createShortLink(
+              longUrl:   longUrl,
+              linkType:  'invoice',
+              expiresIn: const Duration(days: 90),
+            )
+            ?? await UrlShortenerService.shorten(longUrl);
         await Clipboard.setData(ClipboardData(text: shortUrl));
         if (mounted) {
           setState(() => _invoiceShortUrl = shortUrl);

@@ -11,6 +11,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/services/invoice_storage_service.dart';
+import '../../../../core/services/short_link_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
 import '../../../../core/services/whatsapp/message_templates.dart';
 import '../../../../core/services/whatsapp_service.dart';
@@ -327,19 +328,31 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
         return;
       }
 
-      // 3. Raccourcir l'URL signée + composer `<label> : <url courte>`.
-      //    Libellé éditable dans Paramètres > Modèles WhatsApp.
-      final shortUrl = await UrlShortenerService.shorten(longUrl);
+      // 3. Lien court via raccourcisseur maison (fallback TinyURL).
+      final shortUrl = await ShortLinkService.createShortLink(
+            longUrl:   longUrl,
+            linkType:  'invoice',
+            expiresIn: const Duration(days: 90),
+          )
+          ?? await UrlShortenerService.shorten(longUrl);
+
+      // 4. Composition du message structuré 4 parties :
+      //    salutation, notification, lien court, remerciement.
       final label = ShopSettingsStore(sale.shopId)
           .read<String>(WaTemplateKeys.invoice,
               fallback: WaTemplateDefaults.invoice) ?? WaTemplateDefaults.invoice;
-      final msg = MessageTemplates.buildShareMessage(
-        url:          shortUrl,
-        label:        label,
-        defaultLabel: WaTemplateDefaults.invoice,
-      );
+      final clientName = sale.clientName ?? '';
+      final shopName   = shop?.name ?? 'Fortress';
+      final greeting = clientName.trim().isNotEmpty
+          ? 'Bonjour $clientName 👋'
+          : 'Bonjour 👋';
+      final msg = '$greeting\n\n'
+          '$label.\n\n'
+          '📄 $shortUrl\n\n'
+          'Merci pour votre confiance.\n\n'
+          '$shopName';
 
-      // 6. Numéro normalisé pour wa.me (chiffres seulement, indicatif inclus).
+      // 5. Numéro normalisé pour wa.me (chiffres seulement, indicatif inclus).
       final wamePhone = PhoneFormatter.toWame(phone);
       final ok = await ref.read(whatsappServiceProvider)
           .sendMessage(wamePhone, msg);
