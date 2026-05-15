@@ -15,6 +15,9 @@ import '../../features/super_admin/presentation/pages/admin_subscriptions_page.d
 import '../../features/super_admin/presentation/pages/plans_page.dart';
 import '../../features/catalogue/presentation/pages/catalogue_page.dart';
 import '../../features/marketing/presentation/pages/landing_page.dart';
+import '../../features/promo_campaigns/presentation/pages/campaign_send_page.dart';
+import '../../features/promo_campaigns/presentation/pages/campaigns_page.dart';
+import '../../features/promo_campaigns/presentation/pages/promo_showcase_page.dart';
 import '../../features/marketing/presentation/pages/pricing_page.dart';
 import '../../features/tracking/presentation/pages/order_tracking_page.dart';
 import '../../features/subscription/presentation/pages/subscription_page.dart';
@@ -271,6 +274,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final isAcceptInviteRoute  = loc.startsWith('/accept-invite');
       final isCatalogueRoute     = loc.startsWith('/catalogue/');
       final isTrackRoute         = loc.startsWith('/track/');
+      final isPromoRoute         = loc.startsWith('/promo/');
       // Routes marketing publiques (`/` landing + `/pricing`). Toujours
       // accessibles sans auth ; un utilisateur loggé qui les visite est
       // redirigé vers sa destination habituelle (dashboard / shop-selector).
@@ -285,6 +289,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (isCatalogueRoute) return null;
       // ── /track/:orderId : suivi de commande public sans auth ───────
       if (isTrackRoute) return null;
+      // ── /promo/:shopId/:campaignId : vitrine promo publique ────────
+      if (isPromoRoute) return null;
       // ── / et /pricing : pages marketing publiques sans auth.
       // Pour les visiteurs anonymes → on laisse passer. Pour les utilisateurs
       // déjà loggés, le bloc plus bas (`CAS 3 — Abonnement actif : isAuthRoute
@@ -405,6 +411,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           builder: (c, s) => const LandingPage()),
       GoRoute(path: RouteNames.pricing,
           builder: (c, s) => const PricingPage()),
+
+      // Vitrine publique d'une campagne promo/nouveautés (cf. hotfix_068).
+      GoRoute(path: '/promo/:shopId/:campaignId',
+          builder: (c, s) => PromoShowcasePage(
+                shopId:     s.pathParameters['shopId']!,
+                campaignId: s.pathParameters['campaignId']!,
+              )),
 
       GoRoute(path: '/catalogue/:shopId',
           builder: (c, s) {
@@ -665,6 +678,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/parametres/sessions',
               builder: (c, s) => SessionsPage(
                   shopId: s.pathParameters['shopId']!)),
+
+          // ── Campagnes marketing (promotions + nouveautés) ──────────
+          GoRoute(path: '/shop/:shopId/campaigns',
+              builder: (c, s) => CampaignsPage(
+                  shopId: s.pathParameters['shopId']!)),
+          GoRoute(path: '/shop/:shopId/campaigns/:campaignId/send',
+              builder: (c, s) => CampaignSendPage(
+                    shopId:     s.pathParameters['shopId']!,
+                    campaignId: s.pathParameters['campaignId']!,
+                  )),
         ],
       ),
     ],

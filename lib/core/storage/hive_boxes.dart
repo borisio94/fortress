@@ -51,6 +51,10 @@ class HiveBoxes {
   // delivery_templates qui ciblent les livreurs internes.
   static const String whatsappTemplates = 'whatsapp_templates_box';
 
+  // Campagnes marketing (promotions + annonces nouveautés) — cf. hotfix_068.
+  // Contient le snapshot des produits + remise + analytics.
+  static const String promoCampaigns = 'promo_campaigns_box';
+
   // Transferts de commandes vers livreurs/partenaires (cf. hotfix_049/050).
   // Permet aux pages dashboard / commandes / finances de filtrer par
   // partenaire de livraison sans pull réseau à chaque rendu.
@@ -133,6 +137,7 @@ class HiveBoxes {
       await _safeOpenMap(stockTransfers);
       await _safeOpenMap(deliveryTemplates);
       await _safeOpenMap(whatsappTemplates);
+      await _safeOpenMap(promoCampaigns);
       await _safeOpenMap(deliveryTransfers);
       await _safeOpenMap(shopTickets);
       await _safeOpenMap(ticketMessages);
@@ -208,7 +213,7 @@ class HiveBoxes {
     suppliers, receptions, incidents, stockMovements, purchaseOrders, stockArrivals,
     activityLogs, expenses, notifications,
     stockLocations, stockLevels, stockTransfers,
-    deliveryTemplates, whatsappTemplates, deliveryTransfers,
+    deliveryTemplates, whatsappTemplates, promoCampaigns, deliveryTransfers,
     shopTickets, ticketMessages,
     acknowledgedAlerts,
     partnerLedger,
@@ -248,6 +253,7 @@ class HiveBoxes {
   static Box<Map>   get stockTransfersBox => Hive.box<Map>(stockTransfers);
   static Box<Map>   get deliveryTemplatesBox => Hive.box<Map>(deliveryTemplates);
   static Box<Map>   get whatsappTemplatesBox => Hive.box<Map>(whatsappTemplates);
+  static Box<Map>   get promoCampaignsBox    => Hive.box<Map>(promoCampaigns);
   static Box<Map>   get deliveryTransfersBox => Hive.box<Map>(deliveryTransfers);
   static Box<Map>   get shopTicketsBox    => Hive.box<Map>(shopTickets);
   static Box<Map>   get ticketMessagesBox => Hive.box<Map>(ticketMessages);

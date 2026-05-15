@@ -88,6 +88,15 @@ class ParametresPage extends ConsumerWidget {
                     onTap: () => context.push(
                         '/shop/$shopId/parametres/whatsapp-templates'),
                   ),
+                // Campagnes marketing → owner uniquement.
+                if (perms.isOwner)
+                  _Tile(
+                    icon: Icons.campaign_outlined,
+                    label: 'Campagnes marketing',
+                    subtitle: 'Promotions et annonces nouveautés',
+                    color: const Color(0xFFEF4444),
+                    onTap: () => context.push('/shop/$shopId/campaigns'),
+                  ),
                 // Membres : admin (peut inviter) ET owner.
                 // On push directement la cible finale (ShopSettingsPage avec
                 // l'onglet Membres) — `/parametres/users` existe encore mais
