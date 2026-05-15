@@ -63,6 +63,27 @@ class _CataloguePageState extends State<CataloguePage> {
     _future = _load();
   }
 
+  /// Retourne le prix promo d'une variante si `promo_enabled` ET la date
+  /// courante est dans la fenêtre [promo_start, promo_end[. Sinon retourne
+  /// [fallback] (= prix normal). Bénéficie à tout le catalogue : un produit
+  /// avec promo activée (manuellement ou via une campagne) affiche son
+  /// prix réduit côté client.
+  static double _effectivePrice(Map src, double fallback) {
+    if (src['promo_enabled'] != true) return fallback;
+    final promo = (src['promo_price'] as num?)?.toDouble();
+    if (promo == null || promo <= 0) return fallback;
+    final now = DateTime.now();
+    final start = src['promo_start'] != null
+        ? DateTime.tryParse(src['promo_start'].toString())
+        : null;
+    final end = src['promo_end'] != null
+        ? DateTime.tryParse(src['promo_end'].toString())
+        : null;
+    if (start != null && now.isBefore(start)) return fallback;
+    if (end != null && !now.isBefore(end)) return fallback;
+    return promo;
+  }
+
   Future<_CatalogueData> _load() async {
     final db = Supabase.instance.client;
     final shopRow = await db
@@ -123,6 +144,17 @@ class _CataloguePageState extends State<CataloguePage> {
           // par le marchand au moment du partage. Sinon → stock_qty
           // global Supabase (cumul historique toutes locations).
           final snapStock = override?[pid];
+          final basePrice =
+              (p['price_sell_pos'] as num?)?.toDouble() ?? 0;
+          // Le prix promo est porté par la 1ʳᵉ variante (le sync campagne
+          // applique promo_* sur les variantes). On la lit même si elle
+          // est "fausse" (nom vide) pour les produits sans vraie variante.
+          final firstV = variants.isNotEmpty && variants.first is Map
+              ? Map<String, dynamic>.from(variants.first as Map)
+              : null;
+          final price = firstV != null
+              ? _effectivePrice(firstV, basePrice)
+              : basePrice;
           items.add(_CatalogueItem(
             productId:       pid,
             variantId:       null,
@@ -130,7 +162,7 @@ class _CataloguePageState extends State<CataloguePage> {
             baseProductName: base,
             variantName:     null,
             sku:             p['sku'] as String?,
-            price:           (p['price_sell_pos'] as num?)?.toDouble() ?? 0,
+            price:           price,
             stock:           snapStock
                 ?? (p['stock_qty'] as num?)?.toInt() ?? 0,
             imageUrl:        p['image_url'] as String?,
@@ -155,8 +187,10 @@ class _CataloguePageState extends State<CataloguePage> {
               baseProductName: base,
               variantName:     variantName,
               sku:             (v['sku'] as String?) ?? (p['sku'] as String?),
-              price: (v['price_sell_pos'] as num?)?.toDouble()
-                  ?? (p['price_sell_pos'] as num?)?.toDouble() ?? 0,
+              price: _effectivePrice(
+                  v,
+                  (v['price_sell_pos'] as num?)?.toDouble()
+                      ?? (p['price_sell_pos'] as num?)?.toDouble() ?? 0),
               stock: snapStock
                   ?? ((v['stock_available'] ?? v['stock_qty']) as num?)
                       ?.toInt()

@@ -61,6 +61,8 @@ class _PromoShowcasePageState extends ConsumerState<PromoShowcasePage> {
         .maybeSingle();
   }
 
+  bool _redirected = false;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -73,25 +75,47 @@ class _PromoShowcasePageState extends ConsumerState<PromoShowcasePage> {
                 child: CircularProgressIndicator(strokeWidth: 2));
           }
           final campaign = snap.data;
-          if (campaign == null) {
+          if (campaign == null || campaign.shopId != widget.shopId) {
             return _NotFound(shopId: widget.shopId);
           }
-          if (campaign.shopId != widget.shopId) {
-            // Sécurité : campagne d'un autre shop → 404.
-            return _NotFound(shopId: widget.shopId);
+
+          // Campagne pas encore démarrée → on montre la vitrine "à venir"
+          // (pas de redirection : les produits ne sont pas encore en promo).
+          if (campaign.isPending) {
+            return FutureBuilder<Map<String, dynamic>?>(
+              future: _futureShop,
+              builder: (_, shopSnap) {
+                final shop = shopSnap.data;
+                return _PromoContent(
+                  campaign:  campaign,
+                  shopName:  (shop?['name'] as String?) ?? 'Boutique',
+                  shopLogo:  shop?['logo_url'] as String?,
+                  shopPhone: shop?['phone'] as String?,
+                );
+              },
+            );
           }
-          return FutureBuilder<Map<String, dynamic>?>(
-            future: _futureShop,
-            builder: (_, shopSnap) {
-              final shop = shopSnap.data;
-              return _PromoContent(
-                campaign:  campaign,
-                shopName:  (shop?['name'] as String?) ?? 'Boutique',
-                shopLogo:  shop?['logo_url'] as String?,
-                shopPhone: shop?['phone'] as String?,
-              );
-            },
-          );
+
+          // Campagne active → redirection vers le catalogue FILTRÉ sur les
+          // produits de la campagne. Le catalogue offre le flow de commande
+          // complet (sélection multi → bandeau "Commander" → formulaire
+          // infos/livraison → validation) + applique les prix promo des
+          // variantes (promo_enabled). On passe les productIds dédupliqués.
+          if (!_redirected) {
+            _redirected = true;
+            final ids = campaign.products
+                .map((p) => p.productId)
+                .where((id) => id.isNotEmpty)
+                .toSet()
+                .join(',');
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                context.go('/catalogue/${widget.shopId}?ids=$ids');
+              }
+            });
+          }
+          return const Center(
+              child: CircularProgressIndicator(strokeWidth: 2));
         },
       ),
     );
