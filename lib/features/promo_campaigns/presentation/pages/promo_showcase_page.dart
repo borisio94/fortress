@@ -4,8 +4,10 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/services/external_launcher.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/utils/phone_formatter.dart';
 import '../../domain/entities/promo_campaign.dart';
 import '../providers/promo_campaign_provider.dart';
 
@@ -54,7 +56,7 @@ class _PromoShowcasePageState extends ConsumerState<PromoShowcasePage> {
     // Charge les infos boutique (nom, logo) en parallèle.
     _futureShop = Supabase.instance.client
         .from('shops')
-        .select('id, name, logo_url')
+        .select('id, name, logo_url, phone')
         .eq('id', widget.shopId)
         .maybeSingle();
   }
@@ -83,9 +85,10 @@ class _PromoShowcasePageState extends ConsumerState<PromoShowcasePage> {
             builder: (_, shopSnap) {
               final shop = shopSnap.data;
               return _PromoContent(
-                campaign: campaign,
-                shopName: (shop?['name'] as String?) ?? 'Boutique',
-                shopLogo: shop?['logo_url'] as String?,
+                campaign:  campaign,
+                shopName:  (shop?['name'] as String?) ?? 'Boutique',
+                shopLogo:  shop?['logo_url'] as String?,
+                shopPhone: shop?['phone'] as String?,
               );
             },
           );
@@ -99,10 +102,12 @@ class _PromoContent extends StatelessWidget {
   final PromoCampaign campaign;
   final String        shopName;
   final String?       shopLogo;
+  final String?       shopPhone;
   const _PromoContent({
     required this.campaign,
     required this.shopName,
     this.shopLogo,
+    this.shopPhone,
   });
 
   @override
@@ -123,12 +128,15 @@ class _PromoContent extends StatelessWidget {
               crossAxisCount:    crossAxisCount,
               mainAxisSpacing:   10,
               crossAxisSpacing:  10,
-              childAspectRatio:  0.72,
+              childAspectRatio:  0.62,
             ),
             delegate: SliverChildBuilderDelegate(
               (_, i) => _ProductCard(
-                product: campaign.products[i],
+                product:        campaign.products[i],
                 globalDiscount: campaign.discountPercent,
+                shopName:       shopName,
+                shopPhone:      shopPhone,
+                canOrder:       campaign.isActiveNow,
               ),
               childCount: campaign.products.length,
             ),
@@ -338,10 +346,31 @@ class _Badge extends StatelessWidget {
 class _ProductCard extends StatelessWidget {
   final PromoProductSnapshot product;
   final int?                  globalDiscount;
+  final String                shopName;
+  final String?               shopPhone;
+  final bool                  canOrder;
   const _ProductCard({
     required this.product,
     this.globalDiscount,
+    required this.shopName,
+    this.shopPhone,
+    this.canOrder = true,
   });
+
+  void _orderViaWhatsApp() {
+    final phone = (shopPhone ?? '').trim();
+    if (phone.isEmpty) return;
+    final p = PhoneFormatter.toWame(phone).replaceAll(RegExp(r'[^\d]'), '');
+    if (p.isEmpty) return;
+    final eff = product.effectivePrice(globalDiscount);
+    final priceStr = CurrencyFormatter.format(eff);
+    final msg = 'Bonjour $shopName 👋\n\n'
+        'Je voudrais commander :\n'
+        '• ${product.name}\n'
+        '  Prix promo : $priceStr\n\n'
+        'Merci de me confirmer la disponibilité.';
+    openExternal('https://wa.me/$p?text=${Uri.encodeComponent(msg)}');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -352,6 +381,7 @@ class _ProductCard extends StatelessWidget {
         ?? (hasDiscount
             ? ((1 - effPrice / product.originalPrice) * 100).round()
             : null);
+    final hasPhone = (shopPhone ?? '').trim().isNotEmpty;
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(12),
@@ -398,33 +428,60 @@ class _ProductCard extends StatelessWidget {
                   ),
               ]),
             ),
-            Padding(
-              padding: const EdgeInsets.all(8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(product.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 11, fontWeight: FontWeight.w700,
-                          height: 1.3)),
-                  const SizedBox(height: 4),
-                  if (hasDiscount) ...[
-                    Text(CurrencyFormatter.format(product.originalPrice),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(product.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 11, fontWeight: FontWeight.w700,
+                            height: 1.3)),
+                    const SizedBox(height: 4),
+                    if (hasDiscount) ...[
+                      Text(CurrencyFormatter.format(product.originalPrice),
+                          style: TextStyle(
+                              fontSize: 9,
+                              decoration: TextDecoration.lineThrough,
+                              color: AppColors.textHint)),
+                    ],
+                    Text(CurrencyFormatter.format(effPrice),
                         style: TextStyle(
-                            fontSize: 9,
-                            decoration: TextDecoration.lineThrough,
-                            color: AppColors.textHint)),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: hasDiscount
+                                ? AppColors.error
+                                : AppColors.primary)),
+                    const Spacer(),
+                    // Bouton Commander : wa.me direct vers la boutique avec
+                    // message pré-rempli mentionnant le produit/variante.
+                    if (canOrder && hasPhone)
+                      SizedBox(
+                        width: double.infinity,
+                        height: 30,
+                        child: ElevatedButton.icon(
+                          onPressed: _orderViaWhatsApp,
+                          icon: const Icon(Icons.shopping_cart_rounded,
+                              size: 13),
+                          label: const Text('Commander',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF25D366),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: EdgeInsets.zero,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6)),
+                          ),
+                        ),
+                      ),
                   ],
-                  Text(CurrencyFormatter.format(effPrice),
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          color: hasDiscount
-                              ? AppColors.error
-                              : AppColors.primary)),
-                ],
+                ),
               ),
             ),
           ],

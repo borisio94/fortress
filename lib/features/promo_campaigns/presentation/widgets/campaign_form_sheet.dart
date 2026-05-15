@@ -158,19 +158,42 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
     }
   }
 
-  PromoProductSnapshot _snapshotFromProduct(Product p) {
-    final variant = p.variants.isNotEmpty ? p.variants.first : null;
-    final price = variant?.priceSellPos ?? p.priceSellPos;
-    final imageUrl = variant?.imageUrl?.isNotEmpty == true
-        ? variant!.imageUrl
-        : p.mainImageUrl;
-    return PromoProductSnapshot(
-      productId:     p.id ?? '',
-      variantId:     variant?.id,
-      name:          p.name,
-      imageUrl:      imageUrl,
-      originalPrice: price,
-    );
+  /// Génère une liste de snapshots — UN par variante du produit si le
+  /// produit en a, sinon un seul snapshot sans variantId. Permet à la
+  /// vitrine d'afficher chaque variante (couleur/taille/etc.) avec sa
+  /// propre image et son propre prix.
+  List<PromoProductSnapshot> _snapshotsFromProduct(Product p) {
+    if (p.variants.isEmpty) {
+      return [
+        PromoProductSnapshot(
+          productId:     p.id ?? '',
+          variantId:     null,
+          name:          p.name,
+          imageUrl:      p.mainImageUrl,
+          originalPrice: p.priceSellPos,
+        ),
+      ];
+    }
+    return p.variants.map((v) {
+      // Nom : si la variante a un nom (Rouge, M, etc.) on l'affiche après
+      // le nom produit. Si nom variante = nom produit ou vide, on garde
+      // juste le nom produit (cas variante "Standard" auto-créée).
+      final variantName = v.name.trim();
+      final displayName = (variantName.isEmpty
+              || variantName.toLowerCase() == p.name.toLowerCase())
+          ? p.name
+          : '${p.name} — ${v.name}';
+      final image = (v.imageUrl?.isNotEmpty ?? false)
+          ? v.imageUrl
+          : p.mainImageUrl;
+      return PromoProductSnapshot(
+        productId:     p.id ?? '',
+        variantId:     v.id,
+        name:          displayName,
+        imageUrl:      image,
+        originalPrice: v.priceSellPos > 0 ? v.priceSellPos : p.priceSellPos,
+      );
+    }).toList();
   }
 
   Future<void> _save() async {
@@ -204,7 +227,7 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
     try {
       final selected = _allProducts
           .where((p) => _selectedProductIds.contains(p.id))
-          .map(_snapshotFromProduct)
+          .expand(_snapshotsFromProduct)
           .toList();
       final discount = int.tryParse(_discountCtrl.text.trim());
       final notifier =

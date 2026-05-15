@@ -126,13 +126,16 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> {
     final url = '$origin/#/promo/${c.shopId}/${c.id}';
     showDialog<void>(
       context: context,
-      builder: (_) => AlertDialog(
+      // ctx du builder pour fermer correctement le dialog. Utiliser le
+      // context du parent (showDialog) pouvait pointer vers un Navigator
+      // qui n'inclut pas la route du dialog dans certains layouts shell.
+      builder: (ctx) => AlertDialog(
         title: const Text('Lien public'),
         content: SelectableText(url,
             style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),
         actions: [
           TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () => Navigator.of(ctx).pop(),
               child: const Text('Fermer')),
         ],
       ),
@@ -142,16 +145,16 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> {
   Future<void> _confirmDelete(BuildContext context, PromoCampaign c) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         title: const Text('Supprimer la campagne ?'),
         content: const Text(
             'Le lien public ne sera plus accessible après suppression.'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
+              onPressed: () => Navigator.of(ctx).pop(false),
               child: const Text('Annuler')),
           FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
+              onPressed: () => Navigator.of(ctx).pop(true),
               style: FilledButton.styleFrom(backgroundColor: AppColors.error),
               child: const Text('Supprimer')),
         ],
