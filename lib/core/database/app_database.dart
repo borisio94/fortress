@@ -4278,8 +4278,12 @@ end \$\$;""",
       if (o['client_id'] != clientId) continue;
       if ((o['status'] as String?) != 'completed') continue;
 
-      // Montant total = Σ lignes (custom_price ?? unit_price) × qty × (1 - disc/100)
-      // + Σ frais - discount_amount + TVA sur (sous-total + frais - discount)
+      // Montant dépensé par le client = Σ lignes (custom ?? unit) × qty
+      // × (1 - disc/100) - discount_amount + TVA. Les FRAIS DE LIVRAISON
+      // sont EXCLUS : ils sont reversés au livreur/partenaire, ce n'est
+      // pas un revenu boutique ni une dépense du client pour les produits.
+      // Aligné sur le calcul des ventes du dashboard
+      // (_computeFinancialSnapshot : orderTotal sans fees).
       final items = (o['items'] as List?) ?? [];
       double subtotal = 0;
       for (final raw in items) {
@@ -4290,16 +4294,9 @@ end \$\$;""",
         final disc  = (it['discount'] as num?)?.toDouble() ?? 0;
         subtotal += (cust ?? unit) * qty * (1 - disc / 100);
       }
-      double fees = 0;
-      final rawFees = o['fees'] as List?;
-      if (rawFees != null) {
-        for (final f in rawFees) {
-          if (f is Map) fees += (f['amount'] as num?)?.toDouble() ?? 0;
-        }
-      }
       final discountAmt = (o['discount_amount'] as num?)?.toDouble() ?? 0;
       final taxRate     = (o['tax_rate'] as num?)?.toDouble() ?? 0;
-      final taxable     = subtotal + fees - discountAmt;
+      final taxable     = subtotal - discountAmt;
       final orderTotal  = taxable + taxable * taxRate / 100;
 
       totalSpent  += orderTotal;
