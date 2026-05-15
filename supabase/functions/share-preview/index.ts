@@ -32,6 +32,11 @@ const SERVICE_ROLE  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const BOT_UA_REGEX =
   /whatsapp|facebookexternalhit|facebot|twitterbot|telegrambot|linkedinbot|slackbot|discordbot|skypeuripreview|pinterest|googlebot|bingbot|applebot|embedly|preview/i;
 
+// Image fallback pour le preview WhatsApp quand la boutique n'a pas de
+// logo. WhatsApp/Facebook refusent souvent d'afficher une carte preview
+// riche sans og:image, donc on garantit toujours une image.
+const FALLBACK_OG_IMAGE = 'https://fortress-pos.web.app/icons/Icon-512.png';
+
 function escapeHtml(s: string | null | undefined): string {
   if (!s) return '';
   return s
@@ -51,7 +56,13 @@ function renderPreviewHtml(opts: {
 }): string {
   const title       = escapeHtml(opts.label);
   const description = escapeHtml(opts.description || 'Cliquez pour ouvrir');
-  const imageUrl    = opts.imageUrl ? escapeHtml(opts.imageUrl) : '';
+  // Toujours fournir une og:image — WhatsApp refuse souvent d'afficher
+  // une carte preview riche sans image. Fallback sur le logo Fortress.
+  const imageUrl    = escapeHtml(
+    (opts.imageUrl && opts.imageUrl.trim().length > 0)
+      ? opts.imageUrl
+      : FALLBACK_OG_IMAGE,
+  );
   const pageUrl     = escapeHtml(opts.pageUrl);
   const targetUrl   = escapeHtml(opts.targetUrl);
   return `<!DOCTYPE html>
@@ -61,18 +72,20 @@ function renderPreviewHtml(opts: {
   <title>${title}</title>
   <meta property="og:title" content="${title}">
   <meta property="og:description" content="${description}">
-  ${imageUrl ? `<meta property="og:image" content="${imageUrl}">` : ''}
+  <meta property="og:image" content="${imageUrl}">
+  <meta property="og:image:width" content="512">
+  <meta property="og:image:height" content="512">
   <meta property="og:url" content="${pageUrl}">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Fortress POS">
-  <meta name="twitter:card" content="${imageUrl ? 'summary_large_image' : 'summary'}">
+  <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="${title}">
   <meta name="twitter:description" content="${description}">
-  ${imageUrl ? `<meta name="twitter:image" content="${imageUrl}">` : ''}
-  <meta http-equiv="refresh" content="0; url=${targetUrl}">
+  <meta name="twitter:image" content="${imageUrl}">
 </head>
 <body>
-  <p>Redirection en cours… <a href="${targetUrl}">Cliquez ici</a> si rien ne se passe.</p>
+  <p><a href="${targetUrl}">Ouvrir le document</a></p>
+  <script>window.location.replace(${JSON.stringify(opts.targetUrl)});</script>
 </body>
 </html>`;
 }
@@ -115,11 +128,14 @@ serve(async (req) => {
   const isBot = BOT_UA_REGEX.test(ua);
 
   if (isBot) {
+    // Force le scheme https dans og:url (req.url peut être http:// si
+    // Supabase route via un proxy interne avant Cloudflare).
+    const canonicalUrl = req.url.replace(/^http:\/\//i, 'https://');
     const html = renderPreviewHtml({
       label:       data.label,
       description: data.description,
       imageUrl:    data.image_url,
-      pageUrl:     req.url,
+      pageUrl:     canonicalUrl,
       targetUrl:   data.target_url,
     });
     return new Response(html, {
