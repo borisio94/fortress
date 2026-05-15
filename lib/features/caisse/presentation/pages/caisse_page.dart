@@ -36,7 +36,6 @@ import '../../../../core/services/partner_ledger_service.dart';
 import '../../../parametres/domain/entities/partner_ledger_entry.dart';
 import '../../../../core/services/document_service.dart';
 import '../../../../core/services/invoice_storage_service.dart';
-import '../../../../core/services/share_link_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
 import '../../../../core/services/whatsapp/message_templates.dart';
 import '../../../parametres/data/shop_settings_store.dart';
@@ -1704,25 +1703,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         bytes:   bytes,
       );
       if (longUrl == null) return;
-
-      // Crée un share_link → URL preview WhatsApp avec le libellé custom
-      // comme og:title. Fallback shortener si la création échoue (WhatsApp
-      // affichera l'URL nue sans preview riche, mais le client pourra
-      // quand même télécharger).
-      final label = ShopSettingsStore(order.shopId)
-          .read<String>(WaTemplateKeys.invoice,
-              fallback: WaTemplateDefaults.invoice) ?? WaTemplateDefaults.invoice;
-      final shareUrl = await ShareLinkService.create(
-        kind:        'invoice',
-        shopId:      order.shopId,
-        resourceId:  orderId,
-        targetUrl:   longUrl,
-        label:       label,
-        description: shop?.name,
-        imageUrl:    shop?.logoUrl,
-      );
-      final finalUrl = shareUrl ?? await UrlShortenerService.shorten(longUrl);
-      if (mounted) setState(() => _invoiceShortUrl = finalUrl);
+      final shortUrl = await UrlShortenerService.shorten(longUrl);
+      if (mounted) setState(() => _invoiceShortUrl = shortUrl);
     } catch (_) {
       // Échec silencieux : `_sendInvoiceWhatsApp` retombera sur le flow
       // legacy avec presse-papier.
@@ -1747,13 +1729,19 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     }
     final shop = LocalStorageService.getShop(order.shopId);
 
-    // ── Cas 1 : facture déjà pré-générée → on envoie SEULEMENT l'URL
-    //    share-preview. WhatsApp fetch l'URL côté serveur, lit les
-    //    og:tags et génère une carte preview avec le libellé custom en
-    //    titre. Le client voit "Téléchargez votre facture" comme titre
-    //    de carte, et plus aucune URL longue dans le texte du message.
+    // ── Cas 1 : facture déjà pré-générée → message court "<label> : <url>"
+    //    avec ouverture SYNCHRONE de wa.me dans le tick du clic.
+    //    Le client reçoit directement le PDF cliquable.
     if (_invoiceShortUrl != null) {
-      final url = 'https://wa.me/$p?text=${Uri.encodeComponent(_invoiceShortUrl!)}';
+      final label = ShopSettingsStore(order.shopId)
+          .read<String>(WaTemplateKeys.invoice,
+              fallback: WaTemplateDefaults.invoice) ?? WaTemplateDefaults.invoice;
+      final msg = MessageTemplates.buildShareMessage(
+        url:          _invoiceShortUrl!,
+        label:        label,
+        defaultLabel: WaTemplateDefaults.invoice,
+      );
+      final url = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
       openExternal(url).then((ok) {
         if (!ok && context.mounted) {
           AppSnack.error(context,
@@ -1798,20 +1786,10 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
           }
           return;
         }
-        final shareUrl = await ShareLinkService.create(
-          kind:        'invoice',
-          shopId:      order.shopId,
-          resourceId:  orderId,
-          targetUrl:   longUrl,
-          label:       label,
-          description: shop?.name,
-          imageUrl:    shop?.logoUrl,
-        );
-        final finalUrl = shareUrl
-            ?? await UrlShortenerService.shorten(longUrl);
-        await Clipboard.setData(ClipboardData(text: finalUrl));
+        final shortUrl = await UrlShortenerService.shorten(longUrl);
+        await Clipboard.setData(ClipboardData(text: shortUrl));
         if (mounted) {
-          setState(() => _invoiceShortUrl = finalUrl);
+          setState(() => _invoiceShortUrl = shortUrl);
           AppSnack.success(context,
               'Lien de la facture copié — colle-le dans le chat WhatsApp.');
         }

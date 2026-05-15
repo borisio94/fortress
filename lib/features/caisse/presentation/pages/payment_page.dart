@@ -11,7 +11,6 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/services/invoice_storage_service.dart';
-import '../../../../core/services/share_link_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
 import '../../../../core/services/whatsapp/message_templates.dart';
 import '../../../../core/services/whatsapp_service.dart';
@@ -328,23 +327,17 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
         return;
       }
 
-      // 3. Libellé custom + génération d'un share-link → URL preview WhatsApp.
-      //    Le message envoyé est juste l'URL : WhatsApp affichera une carte
-      //    avec le libellé comme titre (og:title) et le logo boutique en
-      //    image. Fallback : URL longue raccourcie si la création échoue.
+      // 3. Raccourcir l'URL signée + composer `<label> : <url courte>`.
+      //    Libellé éditable dans Paramètres > Modèles WhatsApp.
+      final shortUrl = await UrlShortenerService.shorten(longUrl);
       final label = ShopSettingsStore(sale.shopId)
           .read<String>(WaTemplateKeys.invoice,
               fallback: WaTemplateDefaults.invoice) ?? WaTemplateDefaults.invoice;
-      final shareUrl = await ShareLinkService.create(
-        kind:        'invoice',
-        shopId:      sale.shopId,
-        resourceId:  orderId,
-        targetUrl:   longUrl,
-        label:       label,
-        description: shop?.name,
-        imageUrl:    shop?.logoUrl,
+      final msg = MessageTemplates.buildShareMessage(
+        url:          shortUrl,
+        label:        label,
+        defaultLabel: WaTemplateDefaults.invoice,
       );
-      final msg = shareUrl ?? await UrlShortenerService.shorten(longUrl);
 
       // 6. Numéro normalisé pour wa.me (chiffres seulement, indicatif inclus).
       final wamePhone = PhoneFormatter.toWame(phone);
