@@ -127,7 +127,9 @@ final List<ShellNavItem> kShellNavItems = [
     label:        (l) => l.navInventory,
     labelMobile:  (l) => l.navStock,
     route:        (id) => '/shop/$id/inventaire',
-    visibleIf:    (p) => p.canViewProducts,
+    // Inventaire réservé à admin + owner (cf. demande UX). Les employés
+    // (rôle 'user') ne voient pas l'item dans le drawer.
+    visibleIf:    (p) => p.isShopAdmin && p.canViewProducts,
     badge:        _inventoryIncidentsBadge,
     primary:      true,
     children: [
@@ -136,25 +138,21 @@ final List<ShellNavItem> kShellNavItems = [
         iconSelected: Icons.inventory_2_rounded,
         label:        (l) => l.navInvProduits,
         route:        (id) => '/shop/$id/inventaire',
-        visibleIf:    (p) => p.canViewProducts,
+        visibleIf:    (p) => p.isShopAdmin && p.canViewProducts,
       ),
       ShellNavItem(
         icon:         Icons.warehouse_outlined,
         iconSelected: Icons.warehouse_rounded,
         label:        (l) => l.navInvEmplacements,
         route:        (id) => '/shop/$id/parametres/locations',
-        visibleIf:    (p) => p.canViewProducts,
+        visibleIf:    (p) => p.isShopAdmin && p.canViewProducts,
       ),
-      // Transferts + Mouvements supprimés du menu (round 13) — accessibles
-      // depuis les actions inline produit (transfert) et la page emplacements
-      // (historique mouvements). Évite la confusion entre "Mouvement" et
-      // "Historique".
       ShellNavItem(
         icon:         Icons.warning_amber_outlined,
         iconSelected: Icons.warning_amber_rounded,
         label:        (l) => l.navInvIncidents,
         route:        (id) => '/shop/$id/inventaire/incidents',
-        visibleIf:    (p) => p.canViewProducts,
+        visibleIf:    (p) => p.isShopAdmin && p.canViewProducts,
         badge:        _inventoryIncidentsBadge,
       ),
     ],
@@ -184,16 +182,17 @@ final List<ShellNavItem> kShellNavItems = [
     route:        (id) => '/shop/$id/historique',
     visibleIf:    (p) => p.canViewActivity,
   ),
-  // Membres — desktop uniquement. Sur mobile, l'accès passe par
-  // Paramètres › Gestion boutique pour alléger le drawer.
+  // Messagerie — visible pour tout membre (vendeurs inclus) afin qu'ils
+  // puissent ouvrir un ticket. La page filtre côté UI selon hiérarchie.
   ShellNavItem(
-    icon:         Icons.group_outlined,
-    iconSelected: Icons.group_rounded,
-    label:        (l) => l.navMembers,
-    route:        (id) => '/shop/$id/parametres/users',
-    visibleIf:    (p) => p.canManageMembers,
-    mobileHidden: true,
+    icon:         Icons.chat_bubble_outline_rounded,
+    iconSelected: Icons.chat_bubble_rounded,
+    label:        (_) => 'Messagerie',
+    route:        (id) => '/shop/$id/tickets',
+    visibleIf:    (p) => p.isMember,
   ),
+  // Membres retiré du drawer (mobile + desktop) — accessible uniquement
+  // depuis Paramètres › Paramètres boutique pour éviter le doublon.
   ShellNavItem(
     icon:         Icons.settings_outlined,
     iconSelected: Icons.settings_rounded,
@@ -213,12 +212,10 @@ final List<ShellNavItem> kShellNavItems = [
     label:        (l) => l.navHub,
     // Hub central est hors ShellRoute : la route est fixe (/hub) et
     // indépendante du shopId courant. Réservée aux owners qui gèrent
-    // potentiellement plusieurs boutiques. `mobileHidden: true` car un
-    // user mobile gère typiquement une seule boutique — Hub reste
-    // accessible via la sidebar desktop.
+    // potentiellement plusieurs boutiques. Désormais visible aussi dans
+    // le drawer mobile (un owner multi-boutiques en a besoin sur mobile).
     route:        (_) => '/hub',
     visibleIf:    (p) => p.isOwner,
-    mobileHidden: true,
   ),
 ];
 
@@ -265,7 +262,20 @@ List<ShellNavItem> shellAllItems(AppPermissions perms) =>
 /// Les routes sont testées par longueur décroissante pour que
 /// `/shop/$id/inventaire/incidents` matche le sous-item Incidents
 /// (route plus spécifique) plutôt que Inventaire (préfixe).
-int shellSelectedIndex(String currentLocation, String shopId) {
+int shellSelectedIndex(String currentLocation, String shopId,
+    {String? tabQuery}) {
+  // Cas spécial Membres : /parametres/shop?tab=members doit highlight
+  // l'item Membres (route nominale `/parametres/users`). Sans ce check,
+  // le matching par préfixe retomberait sur Paramètres car
+  // `/parametres/shop` startsWith `/parametres/`.
+  if (tabQuery == 'members'
+      && currentLocation == '/shop/$shopId/parametres/shop') {
+    final membersRoute = '/shop/$shopId/parametres/users';
+    final idx = kShellNavItems
+        .indexWhere((i) => !i.desktopHidden && i.route(shopId) == membersRoute);
+    if (idx >= 0) return idx;
+  }
+
   // (parentIndex, route) — inclut routes parents ET routes enfants.
   // Les items `desktopHidden` sont ignorés ici : ce sont des entrées
   // alternatives (drawer Plus mobile), pas le propriétaire canonique de
