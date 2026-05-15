@@ -70,6 +70,15 @@ class ShareLinkService {
     // targetUrl pour le script doit être sérialisé en JSON pour échapper
     // les guillemets et caractères spéciaux.
     final uJson = jsonEncode(targetUrl);
+    // Note : PAS de `<meta http-equiv="refresh">` — Facebook/WhatsApp
+    // suivent cette redirection comme une 302, atterrissent sur la cible
+    // (PDF) qui n'a pas d'og:tags, et écrasent nos métadonnées par celles
+    // déduites du PDF (og:title = domaine, og:image vide, etc.).
+    //
+    // Solution : redirect uniquement via JavaScript. Les crawlers n'exécutent
+    // pas le JS → ils lisent nos og:tags. Les vrais utilisateurs ont JS
+    // activé → ils sont redirigés en transparent. Lien <a> en fallback
+    // visible si JS désactivé.
     return '''<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -86,10 +95,12 @@ class ShareLinkService {
   <meta name="twitter:title" content="$t">
   <meta name="twitter:description" content="$d">
   <meta name="twitter:image" content="$i">
-  <meta http-equiv="refresh" content="0; url=$u">
 </head>
-<body>
-  <p><a href="$u">Ouvrir le document</a></p>
+<body style="font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f3f4f6;">
+  <div style="text-align:center;padding:24px;">
+    <p style="font-size:16px;color:#374151;margin-bottom:16px;">$t</p>
+    <a href="$u" style="display:inline-block;padding:12px 24px;background:#534AB7;color:white;text-decoration:none;border-radius:8px;font-weight:600;">Ouvrir le document</a>
+  </div>
   <script>window.location.replace($uJson);</script>
 </body>
 </html>''';
