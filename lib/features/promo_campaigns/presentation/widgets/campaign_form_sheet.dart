@@ -78,7 +78,11 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
     }
     _selectedProductIds.addAll(
         widget.existing?.products.map((p) => p.productId) ?? []);
-    _allProducts = AppDatabase.getProductsForShop(widget.shopId);
+    // Exclut les produits en rupture : une campagne ne doit pas pousser
+    // un article indisponible (le catalogue les masquerait de toute façon).
+    _allProducts = AppDatabase.getProductsForShop(widget.shopId)
+        .where((p) => p.totalStock > 0)
+        .toList();
   }
 
   @override

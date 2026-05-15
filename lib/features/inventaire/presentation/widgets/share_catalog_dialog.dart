@@ -126,7 +126,13 @@ class _ShareCatalogDialogState extends State<ShareCatalogDialog> {
   }
 
   // ── Sélections ─────────────────────────────────────────────────────────
-  List<Product> get _pickedProducts => widget.products
+  /// Produits envoyables : exclut les ruptures de stock (un produit à 0
+  /// ne doit jamais être partagé). Source de vérité unique pour la liste,
+  /// le "tout sélectionner" et les produits effectivement partagés.
+  List<Product> get _sendableProducts =>
+      widget.products.where((p) => p.totalStock > 0).toList();
+
+  List<Product> get _pickedProducts => _sendableProducts
       .where((p) => p.id != null && _selectedProducts.contains(p.id))
       .toList();
 
@@ -273,7 +279,7 @@ class _ShareCatalogDialogState extends State<ShareCatalogDialog> {
           const Divider(height: 1, color: Color(0xFFF0F0F0)),
           Expanded(child: switch (_step) {
             0 => _ProductStep(
-                  products: widget.products,
+                  products: _sendableProducts,
                   selected: _selectedProducts,
                   onToggle: (id) => setState(() {
                     _selectedProducts.contains(id)
@@ -281,10 +287,11 @@ class _ShareCatalogDialogState extends State<ShareCatalogDialog> {
                         : _selectedProducts.add(id);
                   }),
                   onSelectAll: () => setState(() {
-                    if (_selectedProducts.length == widget.products.length) {
+                    final sendable = _sendableProducts;
+                    if (_selectedProducts.length == sendable.length) {
                       _selectedProducts.clear();
                     } else {
-                      _selectedProducts.addAll(widget.products
+                      _selectedProducts.addAll(sendable
                           .map((p) => p.id).whereType<String>());
                     }
                   }),
@@ -432,7 +439,10 @@ class _ProductStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final allSelected = selected.length == products.length;
+    // `products` est déjà filtré (sans rupture) côté parent via
+    // `_sendableProducts`.
+    final allSelected =
+        products.isNotEmpty && selected.length == products.length;
     return Column(children: [
       InkWell(
         onTap: onSelectAll,

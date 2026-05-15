@@ -206,6 +206,12 @@ class _CataloguePageState extends State<CataloguePage> {
       }
     }
 
+    // Règle métier : ne JAMAIS exposer un produit/variante en rupture dans
+    // le catalogue public (envoi WhatsApp catalogue OU lien promotion qui
+    // redirige ici). Le `stock` reflète déjà le périmètre choisi (snapshot
+    // location si fourni, sinon stock global). Stock ≤ 0 → masqué.
+    items.removeWhere((it) => it.stock <= 0);
+
     debugPrint('[Catalogue] shop=${widget.shopId} '
         'produits=${products.length} items=${items.length} '
         '(ids=${ids?.length ?? 'all'}, cat=${widget.initialCategory ?? 'all'})');
