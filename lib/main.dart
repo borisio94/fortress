@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app.dart';
@@ -8,48 +9,53 @@ import 'core/services/supabase_service.dart';
 import 'core/database/app_database.dart';
 import 'core/database/supabase_migrations.dart';
 import 'core/services/delivery_reminder_service.dart';
+import 'core/services/scheduled_order_alert_service.dart';
+import 'shared/widgets/alerts/alarm_sound_player.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
-/// Boot séquence — optimisé pour que l'utilisateur voie une UI Flutter
-/// animée IMMÉDIATEMENT au lieu du splash natif statique pendant 2-5s.
-/// Stratégie en 3 temps :
+/// Boot séquence.
 ///
-///   1. **Binding only** (~50ms) : SentryWidgetsFlutterBinding init.
-///      C'est le minimum pour pouvoir appeler `runApp`.
-///   2. **runApp(_BootSplashApp)** : Flutter prend le relais du splash
-///      natif et affiche fond violet + logo + spinner ANIMÉ. Sans ce
-///      relais, le user voit l'image violette figée du splash natif
-///      pendant tout l'init (et croit l'app freezée).
-///   3. **Init parallélisé** (Hive + Supabase + AppDB), puis
-///      `runApp(PosApp)` qui remplace le splash Flutter par l'app
-///      réelle. Le 2e `runApp` est supporté par le framework — il
-///      remplace le widget root proprement.
+/// **Web** : le splash HTML inline (`web/index.html` → `#fortress-splash`)
+/// reste visible jusqu'au `flutter-first-frame`. On saute le splash Flutter
+/// `_BootSplashApp` pour éviter un double écran de chargement.
 ///
-/// Pour l'arrière-plan : Sentry + notifs + migrations cloud sont lancés
-/// dans `_initBackgroundServices` après le 2e runApp. Sentry n'est pas
-/// dans le pre-runApp parce que son init réseau (validation DSN + crash
-/// handler natif) prend 1-2s — bloquerait inutilement.
+/// **Mobile** : on relaie le splash natif Android/iOS (image figée) par un
+/// splash Flutter animé pendant l'init. Sans ce relais, l'utilisateur voit
+/// l'image figée pendant 2-5s et croit l'app gelée. Stratégie :
+///   1. Binding minimal (~50ms).
+///   2. `runApp(_BootSplashApp)` — fond violet + logo + spinner animé.
+///   3. Init parallélisé (Hive + Supabase + AppDB).
+///   4. `runApp(PosApp)` — remplace le splash par l'app réelle.
 ///
-/// `SentryWidgetsFlutterBinding` (au lieu du standard
-/// `WidgetsFlutterBinding`) active le frame tracking Sentry visible
-/// dans les transactions performance.
+/// Sentry + notifs + migrations cloud sont lancés en background dans
+/// `_initBackgroundServices` (non bloquant).
 void main() async {
+  // [BOOT-1] log très tôt — confirme que CETTE version de main.dart
+  // s'exécute. Si absent de la console : cache navigateur tenace.
+  debugPrint('[BOOT] main() entered — Fortress build 2026-05-09 sync-banner');
+
   // 1. Binding minimal — requis avant tout `runApp`.
   SentryWidgetsFlutterBinding.ensureInitialized();
 
-  // 2. Splash Flutter ANIMÉ rendu immédiatement. Le splash natif
-  // (statique) disparaît dès le first frame Flutter — donc le user
-  // passe d'image violette figée → spinner qui tourne en ~50-100ms,
-  // sans la sensation de freeze.
-  runApp(const _BootSplashApp());
+  // 2. Splash Flutter animé — uniquement mobile/desktop.
+  // Sur web, le splash HTML inline est déjà visible (cf. web/index.html).
+  if (!kIsWeb) {
+    runApp(const _BootSplashApp());
+  }
 
-  // 3. Init essentiels en PARALLÈLE pendant que le splash Flutter anime.
-  // Total ≈ max(Hive, Supabase, AppDB) au lieu de la somme.
+  // 3. Init séquencé : Hive d'abord (AppDatabase + Notif en dépendent),
+  //    puis Supabase + AppDatabase + purge SecureStorage en parallèle.
+  //    Lancer AppDatabase.init() en parallèle de HiveBoxes.init() crée une
+  //    race condition : _bootstrapAntiStaleMarkers utilise settingsBox qui
+  //    peut ne pas être encore ouverte → HiveError uncaught au boot.
+  try {
+    await HiveBoxes.init();
+  } catch (e) {
+    debugPrint('Hive init error: $e');
+  }
   await Future.wait([
-    HiveBoxes.init().then((_) async {
-      // Sécurité : migre les mots de passe stockés en clair par les versions
-      // antérieures (champ `_pwd` dans usersBox + clés `_pwd_<email>` dans
-      // settingsBox) vers SecureStorage. Idempotent — ne fait rien si clean.
+    // Migration mots de passe legacy → SecureStorage. Idempotent.
+    () async {
       try {
         final migrated =
             await SecureStorageService.purgeLegacyPlaintextPasswords();
@@ -60,9 +66,7 @@ void main() async {
       } catch (e) {
         debugPrint('SecureStorage purge error: $e');
       }
-    }).catchError((Object e) {
-      debugPrint('Hive init error: $e');
-    }),
+    }(),
     SupabaseService.init().catchError((Object e) {
       debugPrint('Supabase init error: $e');
     }),
@@ -72,10 +76,15 @@ void main() async {
   ]);
 
   // 4. Bascule vers l'app réelle. Le runApp précédent est remplacé.
-  runApp(SentryWidget(child: const ProviderScope(child: PosApp())));
+  //    Le wrapper `_AudioUnlocker` capte le 1er pointer down (web only)
+  //    pour déverrouiller l'AudioContext — sans ça le navigateur refuse
+  //    de jouer un son issu du Timer du ScheduledOrderAlertService.
+  runApp(SentryWidget(
+      child: const ProviderScope(child: _AudioUnlocker(child: PosApp()))));
 
-  // 5. Tâches non-critiques en background — Sentry, notifs, migrations.
-  // Erreurs swallow car non fatales (cf. catchError sur chaque init).
+  // 5. Tâches non-critiques en background — Sentry, notifs, migrations,
+  //    moteur d'alertes commandes programmées. Erreurs swallow car non
+  //    fatales (cf. catchError sur chaque init).
   unawaited(_initBackgroundServices());
 }
 
@@ -148,5 +157,43 @@ Future<void> _initBackgroundServices() async {
     SupabaseMigrations.runIfNeeded().catchError((Object e) {
       debugPrint('Supabase migrations error: $e');
     }),
+    // Moteur d'alertes commandes programmées — surveille ordersBox et
+    // déclenche sons/Stream selon les seuils J-1, H-2, H-1, etc.
+    // Non bloquant : retry interne 2s si AppDatabase pas prêt.
+    ScheduledOrderAlertService.instance.start().catchError((Object e) {
+      debugPrint('ScheduledOrderAlertService init error: $e');
+    }),
   ]);
+}
+
+/// Wrap l'app pour déverrouiller l'AudioContext web au 1er pointer down.
+/// Sans ça, le navigateur (Chrome, Safari, Firefox) refuse tout `play()`
+/// qui ne provient pas d'un événement utilisateur synchrone — y compris
+/// ceux issus des Timer périodiques du ScheduledOrderAlertService.
+///
+/// Sur natif (mobile/desktop), l'AudioContext n'a pas ce verrou et le
+/// wrapper est transparent (no-op).
+class _AudioUnlocker extends StatefulWidget {
+  final Widget child;
+  const _AudioUnlocker({required this.child});
+  @override
+  State<_AudioUnlocker> createState() => _AudioUnlockerState();
+}
+
+class _AudioUnlockerState extends State<_AudioUnlocker> {
+  bool _done = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) {
+        if (_done || !kIsWeb) return;
+        _done = true;
+        // ignore: discarded_futures
+        AlarmSoundPlayer.instance.unlock();
+      },
+      child: widget.child,
+    );
+  }
 }
