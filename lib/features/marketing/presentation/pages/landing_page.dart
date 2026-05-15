@@ -145,7 +145,25 @@ class _HeroSection extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 14),
+            // Lien de connexion explicite pour les utilisateurs qui ont
+            // déjà un compte et atterrissent par défaut sur la landing.
+            // Le bouton "Connexion" en haut à droite n'est pas toujours
+            // remarqué — ce raccourci au cœur du hero les évite d'aller
+            // créer un compte par erreur via le CTA principal.
+            TextButton.icon(
+              onPressed: () => context.go(RouteNames.login),
+              icon: const Icon(Icons.login_rounded, size: 16),
+              label: const Text('J\'ai déjà un compte — Se connecter',
+                  style: TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w700)),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 8),
+              ),
+            ),
+            const SizedBox(height: 12),
             Wrap(
               alignment: WrapAlignment.center,
               spacing: 16,
