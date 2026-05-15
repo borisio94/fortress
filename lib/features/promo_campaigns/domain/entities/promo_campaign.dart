@@ -99,6 +99,9 @@ class PromoCampaign extends Equatable {
   /// Remise globale (% appliqué à tous les produits sans promoPrice
   /// individuel). Null = pas de remise globale (typique news).
   final int?                    discountPercent;
+  /// Date de début planifiée (now() + délai obligatoire à la création).
+  /// Si null (campagnes legacy), considérer comme actif depuis createdAt.
+  final DateTime?               startsAt;
   final DateTime?               validUntil;
   final String?                 description;
   final int                     sentCount;
@@ -113,6 +116,7 @@ class PromoCampaign extends Equatable {
     required this.name,
     this.products = const [],
     this.discountPercent,
+    this.startsAt,
     this.validUntil,
     this.description,
     this.sentCount = 0,
@@ -121,6 +125,22 @@ class PromoCampaign extends Equatable {
     required this.updatedAt,
   });
 
+  /// Vrai si la campagne est actuellement active (startsAt ≤ now < validUntil).
+  bool get isActiveNow {
+    final now = DateTime.now();
+    final effectiveStart = startsAt ?? createdAt;
+    if (now.isBefore(effectiveStart)) return false;
+    if (validUntil != null && !now.isBefore(validUntil!)) return false;
+    return true;
+  }
+
+  /// Vrai si la campagne n'a pas encore démarré.
+  bool get isPending {
+    final s = startsAt;
+    if (s == null) return false;
+    return DateTime.now().isBefore(s);
+  }
+
   PromoCampaign copyWith({
     String?                        id,
     String?                        shopId,
@@ -128,6 +148,7 @@ class PromoCampaign extends Equatable {
     String?                        name,
     List<PromoProductSnapshot>?    products,
     int?                           discountPercent,
+    DateTime?                      startsAt,
     DateTime?                      validUntil,
     String?                        description,
     int?                           sentCount,
@@ -142,6 +163,7 @@ class PromoCampaign extends Equatable {
         name:            name            ?? this.name,
         products:        products        ?? this.products,
         discountPercent: discountPercent ?? this.discountPercent,
+        startsAt:        startsAt        ?? this.startsAt,
         validUntil:      validUntil      ?? this.validUntil,
         description:     description     ?? this.description,
         sentCount:       sentCount       ?? this.sentCount,
@@ -157,6 +179,7 @@ class PromoCampaign extends Equatable {
         'name':             name,
         'products':         products.map((p) => p.toMap()).toList(),
         if (discountPercent != null) 'discount_percent': discountPercent,
+        if (startsAt != null) 'starts_at': startsAt!.toIso8601String(),
         if (validUntil != null) 'valid_until': validUntil!.toIso8601String(),
         if (description != null) 'description': description,
         'sent_count':       sentCount,
@@ -176,6 +199,9 @@ class PromoCampaign extends Equatable {
                 Map<String, dynamic>.from(p)))
             .toList(),
         discountPercent: (m['discount_percent'] as num?)?.toInt(),
+        startsAt:        m['starts_at'] != null
+            ? DateTime.tryParse(m['starts_at'].toString())
+            : null,
         validUntil:      m['valid_until'] != null
             ? DateTime.tryParse(m['valid_until'].toString())
             : null,
@@ -193,6 +219,6 @@ class PromoCampaign extends Equatable {
   @override
   List<Object?> get props => [
         id, shopId, type, name, products, discountPercent,
-        validUntil, sentCount, viewCount,
+        startsAt, validUntil, sentCount, viewCount,
       ];
 }

@@ -42,15 +42,21 @@ class CampaignFormSheet extends ConsumerStatefulWidget {
 }
 
 class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
+  /// Délai minimum entre la création de la campagne et son démarrage
+  /// effectif. Évite les promos déclenchées par erreur ; laisse le temps
+  /// de réviser/annuler. Côté UI, la 1ʳᵉ date proposée est now()+1h.
+  static const Duration _minStartDelay = Duration(hours: 1);
+
   final _nameCtrl     = TextEditingController();
   final _descCtrl     = TextEditingController();
   final _discountCtrl = TextEditingController();
   late PromoCampaignType _type;
+  DateTime?  _startsAt;
   DateTime?  _validUntil;
   final Set<String> _selectedProductIds = {};
   String _searchQuery = '';
   bool   _saving = false;
-  String? _nameError, _productsError;
+  String? _nameError, _productsError, _datesError;
 
   late List<Product> _allProducts;
 
@@ -64,7 +70,12 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
     _descCtrl.text = widget.existing?.description ?? '';
     _discountCtrl.text =
         widget.existing?.discountPercent?.toString() ?? '';
+    _startsAt   = widget.existing?.startsAt;
     _validUntil = widget.existing?.validUntil;
+    // En création, propose now()+24h par défaut (laisse une vraie marge).
+    if (widget.existing == null && _startsAt == null) {
+      _startsAt = DateTime.now().add(const Duration(days: 1));
+    }
     _selectedProductIds.addAll(
         widget.existing?.products.map((p) => p.productId) ?? []);
     _allProducts = AppDatabase.getProductsForShop(widget.shopId);
@@ -86,15 +97,65 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
         || (p.brand?.toLowerCase().contains(q) ?? false));
   }
 
-  Future<void> _pickValidUntil() async {
+  Future<void> _pickStartsAt() async {
     final now = DateTime.now();
+    final minStart = now.add(_minStartDelay);
     final picked = await showDatePicker(
       context: context,
-      initialDate: _validUntil ?? now.add(const Duration(days: 7)),
-      firstDate:  now,
+      initialDate: _startsAt != null && _startsAt!.isAfter(minStart)
+          ? _startsAt!
+          : now.add(const Duration(days: 1)),
+      firstDate:  minStart,
       lastDate:   now.add(const Duration(days: 365)),
     );
-    if (picked != null) setState(() => _validUntil = picked);
+    if (picked != null) {
+      // On garde l'heure courante (12h00 par défaut si nouvelle date),
+      // l'utilisateur peut affiner via le TimePicker.
+      final time = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(
+            _startsAt ?? DateTime(picked.year, picked.month, picked.day, 9)),
+      );
+      final hour   = time?.hour   ?? 9;
+      final minute = time?.minute ?? 0;
+      final chosen =
+          DateTime(picked.year, picked.month, picked.day, hour, minute);
+      // Vérifie que c'est au moins après le délai minimum (l'utilisateur
+      // peut choisir aujourd'hui avec une heure passée — on rejette).
+      if (chosen.isBefore(minStart)) {
+        setState(() => _datesError =
+            'La promo doit démarrer au moins 1h après maintenant.');
+        return;
+      }
+      setState(() {
+        _startsAt = chosen;
+        _datesError = null;
+        // Si validUntil < startsAt, on l'ajuste à +7j par défaut.
+        if (_validUntil != null && !_validUntil!.isAfter(chosen)) {
+          _validUntil = chosen.add(const Duration(days: 7));
+        }
+      });
+    }
+  }
+
+  Future<void> _pickValidUntil() async {
+    final now = DateTime.now();
+    final minEnd = (_startsAt ?? now).add(const Duration(hours: 1));
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _validUntil != null && _validUntil!.isAfter(minEnd)
+          ? _validUntil!
+          : minEnd.add(const Duration(days: 7)),
+      firstDate:  minEnd,
+      lastDate:   now.add(const Duration(days: 730)),
+    );
+    if (picked != null) {
+      setState(() {
+        _validUntil = DateTime(
+            picked.year, picked.month, picked.day, 23, 59);
+        _datesError = null;
+      });
+    }
   }
 
   PromoProductSnapshot _snapshotFromProduct(Product p) {
@@ -114,13 +175,30 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
 
   Future<void> _save() async {
     final name = _nameCtrl.text.trim();
+    final now = DateTime.now();
+    final minStart = now.add(_minStartDelay);
+    String? datesErr;
+    if (_type == PromoCampaignType.promo) {
+      if (_startsAt == null) {
+        datesErr = 'Date de début requise pour une promotion';
+      } else if (_startsAt!.isBefore(minStart)) {
+        datesErr = 'La promo doit démarrer au moins 1h après maintenant';
+      } else if (_validUntil != null
+          && !_validUntil!.isAfter(_startsAt!)) {
+        datesErr = 'La date de fin doit être après la date de début';
+      }
+    }
     setState(() {
       _nameError = name.isEmpty ? 'Nom requis' : null;
       _productsError = _selectedProductIds.isEmpty
           ? 'Sélectionnez au moins un produit'
           : null;
+      _datesError = datesErr;
     });
-    if (_nameError != null || _productsError != null) return;
+    if (_nameError != null || _productsError != null
+        || _datesError != null) {
+      return;
+    }
 
     setState(() => _saving = true);
     try {
@@ -137,6 +215,7 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
           name:            name,
           products:        selected,
           discountPercent: discount,
+          startsAt:        _startsAt,
           validUntil:      _validUntil,
           description:     _descCtrl.text.trim().isEmpty
               ? null : _descCtrl.text.trim(),
@@ -147,6 +226,7 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
           name:            name,
           products:        selected,
           discountPercent: discount,
+          startsAt:        _startsAt,
           validUntil:      _validUntil,
           description:     _descCtrl.text.trim().isEmpty
               ? null : _descCtrl.text.trim(),
@@ -222,41 +302,42 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
                   keyboardType: TextInputType.number,
                 ),
               ],
+              if (_type == PromoCampaignType.promo) ...[
+                const SizedBox(height: 14),
+                AppFieldLabel('Démarre le', required: true),
+                const SizedBox(height: 4),
+                _DateRow(
+                  icon:      Icons.play_circle_outline_rounded,
+                  emptyHint: 'Choisir une date de début',
+                  value:     _startsAt,
+                  onPick:    _pickStartsAt,
+                  onClear:   null, // start obligatoire pour promo
+                ),
+                const SizedBox(height: 4),
+                Text(
+                    'Démarrage planifié au moins 1h après création — '
+                    'délai obligatoire pour valider la planification.',
+                    style: TextStyle(
+                        fontSize: 10,
+                        fontStyle: FontStyle.italic,
+                        color: AppColors.textHint)),
+              ],
               const SizedBox(height: 14),
               const AppFieldLabel('Valable jusqu\'au'),
               const SizedBox(height: 4),
-              InkWell(
-                onTap: _pickValidUntil,
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF9FAFB),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE5E7EB)),
-                  ),
-                  child: Row(children: [
-                    Icon(Icons.event_rounded,
-                        size: 16, color: AppColors.textSecondary),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(
-                      _validUntil == null
-                          ? 'Aucune date limite'
-                          : '${_validUntil!.day.toString().padLeft(2, '0')}/'
-                            '${_validUntil!.month.toString().padLeft(2, '0')}/'
-                            '${_validUntil!.year}',
-                      style: const TextStyle(fontSize: 13),
-                    )),
-                    if (_validUntil != null)
-                      IconButton(
-                        icon: const Icon(Icons.close_rounded, size: 16),
-                        onPressed: () =>
-                            setState(() => _validUntil = null),
-                      ),
-                  ]),
-                ),
+              _DateRow(
+                icon:      Icons.event_rounded,
+                emptyHint: 'Aucune date limite',
+                value:     _validUntil,
+                onPick:    _pickValidUntil,
+                onClear:   () => setState(() => _validUntil = null),
               ),
+              if (_datesError != null) ...[
+                const SizedBox(height: 6),
+                Text(_datesError!,
+                    style: TextStyle(
+                        fontSize: 11, color: AppColors.error)),
+              ],
               const SizedBox(height: 14),
               AppFieldLabel(
                   'Produits (${_selectedProductIds.length})',
@@ -469,4 +550,59 @@ class _ProductTile extends StatelessWidget {
             size: 18,
             color: AppColors.primary.withValues(alpha: 0.4)),
       );
+}
+
+class _DateRow extends StatelessWidget {
+  final IconData      icon;
+  final String        emptyHint;
+  final DateTime?     value;
+  final VoidCallback  onPick;
+  final VoidCallback? onClear;
+  const _DateRow({
+    required this.icon,
+    required this.emptyHint,
+    required this.value,
+    required this.onPick,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final v = value;
+    return InkWell(
+      onTap: onPick,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF9FAFB),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        child: Row(children: [
+          Icon(icon, size: 16, color: AppColors.textSecondary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              v == null
+                  ? emptyHint
+                  : '${v.day.toString().padLeft(2, '0')}/'
+                    '${v.month.toString().padLeft(2, '0')}/${v.year} '
+                    '${v.hour.toString().padLeft(2, '0')}:'
+                    '${v.minute.toString().padLeft(2, '0')}',
+              style: TextStyle(
+                  fontSize: 13,
+                  color: v == null
+                      ? AppColors.textHint : AppColors.textPrimary),
+            ),
+          ),
+          if (v != null && onClear != null)
+            IconButton(
+              icon: const Icon(Icons.close_rounded, size: 16),
+              onPressed: onClear,
+            ),
+        ]),
+      ),
+    );
+  }
 }

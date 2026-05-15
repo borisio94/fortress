@@ -42,6 +42,7 @@ class PromoCampaignsNotifier
     required String                   name,
     required List<PromoProductSnapshot> products,
     int?                              discountPercent,
+    DateTime?                         startsAt,
     DateTime?                         validUntil,
     String?                           description,
   }) async {
@@ -51,6 +52,7 @@ class PromoCampaignsNotifier
       name:            name,
       products:        products,
       discountPercent: discountPercent,
+      startsAt:        startsAt,
       validUntil:      validUntil,
       description:     description,
     );

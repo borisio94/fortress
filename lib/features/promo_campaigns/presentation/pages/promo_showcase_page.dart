@@ -227,24 +227,55 @@ class _Header extends StatelessWidget {
               ),
           ]),
           const SizedBox(height: 18),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => context.go('/catalogue/${campaign.shopId}'),
-              icon: const Icon(Icons.shopping_bag_rounded, size: 18),
-              label: const Text('Commander maintenant',
-                  style: TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w800)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: const Color(0xFF6C3FC7),
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
+          if (campaign.isPending) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(children: [
+                const Icon(Icons.schedule_rounded,
+                    size: 18, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                      'Campagne à venir — démarre le '
+                      '${DateFormat('dd/MM à HH:mm').format(campaign.startsAt!.toLocal())}',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12, fontWeight: FontWeight.w700)),
+                ),
+              ]),
+            ),
+          ] else
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                // Catalogue filtré : ne montre QUE les produits de la
+                // campagne grâce au paramètre ?ids=p1,p2,p3.
+                onPressed: () {
+                  final ids = campaign.products
+                      .map((p) => p.productId)
+                      .where((id) => id.isNotEmpty)
+                      .join(',');
+                  context.go(
+                      '/catalogue/${campaign.shopId}?ids=$ids');
+                },
+                icon: const Icon(Icons.shopping_bag_rounded, size: 18),
+                label: const Text('Commander maintenant',
+                    style: TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w800)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: const Color(0xFF6C3FC7),
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
               ),
             ),
-          ),
         ],
       ),
     );
