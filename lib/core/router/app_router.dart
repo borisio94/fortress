@@ -645,7 +645,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               builder: (c, s) => CaisseConfigPage(
                   shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/whatsapp-templates',
-              builder: (c, s) => WhatsAppTemplatesPage(
+              builder: (c, s) => WhatsappTemplatesPage(
                   shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/notifications',
               builder: (c, s) => NotificationsPage(

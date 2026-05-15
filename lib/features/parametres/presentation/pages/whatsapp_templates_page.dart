@@ -1,181 +1,341 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../../core/i18n/app_localizations.dart';
+
 import '../../../../core/permisions/subscription_provider.dart';
-import '../../../../core/services/whatsapp/message_templates.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
-import '../../data/shop_settings_store.dart';
-import '../widgets/settings_widgets.dart';
+import '../../../../shared/widgets/draggable_fab.dart';
+import '../../domain/entities/whatsapp_template.dart';
+import '../providers/whatsapp_template_provider.dart';
+import '../widgets/whatsapp_template_form_sheet.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
-// WhatsAppTemplatesPage — éditeur des libellés courts utilisés dans tous les
-// messages WhatsApp envoyés depuis l'app.
+// WhatsappTemplatesPage — CRUD des templates de message WhatsApp envoyés aux
+// clients (factures, relances, catalogue, nouveautés, promotion).
 //
-// Tous les messages suivent le format `<libellé> : <url>`. Le libellé est
-// le call-to-action que verra le destinataire (ex: « Téléchargez votre
-// facture », « Voir la commande »).
-//
-// 5 libellés éditables :
-//   • facture       — envoi du PDF facture après une vente
-//   • commande      — relance d'une commande programmée non livrée
-//   • catalogue     — partage du catalogue produits avec un client
-//   • nouveautés    — annonce de nouveaux produits (réservé)
-//   • promotion     — annonce d'une campagne promo (réservé)
-//
-// Persistance : ShopSettingsStore avec clés `wa_label_*` (cf.
-// [WaTemplateKeys]). Bouton de réinitialisation par défaut sur chaque champ.
+// Calquée sur DeliveryTemplatesPage (hotfix_049). Ajoute un filtre par type
+// en chips horizontaux. Le FAB crée un nouveau template avec le type filtré
+// pré-sélectionné.
 // ═════════════════════════════════════════════════════════════════════════════
 
-class WhatsAppTemplatesPage extends ConsumerStatefulWidget {
+class WhatsappTemplatesPage extends ConsumerStatefulWidget {
   final String shopId;
-  const WhatsAppTemplatesPage({super.key, required this.shopId});
+  const WhatsappTemplatesPage({super.key, required this.shopId});
 
   @override
-  ConsumerState<WhatsAppTemplatesPage> createState() =>
-      _WhatsAppTemplatesPageState();
+  ConsumerState<WhatsappTemplatesPage> createState() =>
+      _WhatsappTemplatesPageState();
 }
 
-class _WhatsAppTemplatesPageState
-    extends ConsumerState<WhatsAppTemplatesPage> {
-  late final ShopSettingsStore _store = ShopSettingsStore(widget.shopId);
-
-  final _invoiceCtrl   = TextEditingController();
-  final _orderCtrl     = TextEditingController();
-  final _catalogueCtrl = TextEditingController();
-  final _newsCtrl      = TextEditingController();
-  final _promoCtrl     = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _invoiceCtrl.text   = _store.read<String>(WaTemplateKeys.invoice,
-        fallback: WaTemplateDefaults.invoice) ?? WaTemplateDefaults.invoice;
-    _orderCtrl.text     = _store.read<String>(WaTemplateKeys.order,
-        fallback: WaTemplateDefaults.order) ?? WaTemplateDefaults.order;
-    _catalogueCtrl.text = _store.read<String>(WaTemplateKeys.catalogue,
-        fallback: WaTemplateDefaults.catalogue) ?? WaTemplateDefaults.catalogue;
-    _newsCtrl.text      = _store.read<String>(WaTemplateKeys.news,
-        fallback: WaTemplateDefaults.news) ?? WaTemplateDefaults.news;
-    _promoCtrl.text     = _store.read<String>(WaTemplateKeys.promo,
-        fallback: WaTemplateDefaults.promo) ?? WaTemplateDefaults.promo;
-  }
-
-  @override
-  void dispose() {
-    _invoiceCtrl.dispose();
-    _orderCtrl.dispose();
-    _catalogueCtrl.dispose();
-    _newsCtrl.dispose();
-    _promoCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    await _store.write(WaTemplateKeys.invoice,   _invoiceCtrl.text.trim());
-    await _store.write(WaTemplateKeys.order,     _orderCtrl.text.trim());
-    await _store.write(WaTemplateKeys.catalogue, _catalogueCtrl.text.trim());
-    await _store.write(WaTemplateKeys.news,      _newsCtrl.text.trim());
-    await _store.write(WaTemplateKeys.promo,     _promoCtrl.text.trim());
-    if (mounted) AppSnack.success(context, context.l10n.commonSaved);
-  }
+class _WhatsappTemplatesPageState
+    extends ConsumerState<WhatsappTemplatesPage> {
+  /// null = tous types, sinon filtre.
+  WhatsappTemplateType? _filter;
 
   @override
   Widget build(BuildContext context) {
-    final l = context.l10n;
     final perms = ref.watch(permissionsProvider(widget.shopId));
     final canEdit = perms.canEditShopInfo;
+    final asyncList = ref.watch(whatsappTemplatesProvider(widget.shopId));
+
+    final body = Column(children: [
+      _TypeFilterBar(
+        current: _filter,
+        onChanged: (t) => setState(() => _filter = t),
+      ),
+      Expanded(
+        child: asyncList.when(
+          loading: () =>
+              const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          error: (e, _) => Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(e.toString(),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppColors.error)),
+            ),
+          ),
+          data: (templates) {
+            final filtered = _filter == null
+                ? templates
+                : templates.where((t) => t.type == _filter).toList();
+            if (filtered.isEmpty) {
+              return _EmptyState(
+                  filter: _filter,
+                  canEdit: canEdit,
+                  onCreate: () => _openForm(context, ref, null));
+            }
+            return RefreshIndicator(
+              onRefresh: () => ref
+                  .read(whatsappTemplatesProvider(widget.shopId).notifier)
+                  .refresh(),
+              child: ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+                itemCount: filtered.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (_, i) => _TemplateCard(
+                  template: filtered[i],
+                  canEdit:  canEdit,
+                  onTap:    () => _openForm(context, ref, filtered[i]),
+                  onSetDefault: () =>
+                      _setDefault(context, ref, filtered[i]),
+                  onDelete: () =>
+                      _confirmDelete(context, ref, filtered[i]),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    ]);
 
     return AppScaffold(
       shopId: widget.shopId,
-      title: l.waTemplatesTitle,
+      title: 'Modèles WhatsApp',
       isRootPage: false,
-      body: AbsorbPointer(
-        absorbing: !canEdit,
-        child: Opacity(
-          opacity: canEdit ? 1 : 0.55,
-          child: ListView(
-            padding: const EdgeInsets.all(16),
+      body: canEdit
+          ? DraggableFabContainer(
+              storageKey: 'whatsapp-templates',
+              onTap: () => _openForm(context, ref, null),
+              tooltip: 'Nouveau template',
+              child: body,
+            )
+          : body,
+    );
+  }
+
+  Future<void> _openForm(
+      BuildContext context, WidgetRef ref, WhatsappTemplate? existing) async {
+    final saved = await showAdaptiveFormSheet<bool>(
+      context: context,
+      builder: (_) => WhatsappTemplateFormSheet(
+        shopId:      widget.shopId,
+        existing:    existing,
+        initialType: _filter,
+      ),
+    );
+    if (saved == true && context.mounted) {
+      AppSnack.success(context, 'Template enregistré');
+    }
+  }
+
+  Future<void> _setDefault(
+      BuildContext context, WidgetRef ref, WhatsappTemplate t) async {
+    if (t.isDefault) return;
+    try {
+      await ref
+          .read(whatsappTemplatesProvider(widget.shopId).notifier)
+          .updateTemplate(t.copyWith(isDefault: true));
+      if (context.mounted) AppSnack.success(context, 'Défaut mis à jour');
+    } catch (e) {
+      if (context.mounted) AppSnack.error(context, e.toString());
+    }
+  }
+
+  Future<void> _confirmDelete(
+      BuildContext context, WidgetRef ref, WhatsappTemplate t) async {
+    if (t.isDefault) {
+      AppSnack.error(context,
+          'Impossible de supprimer un template défini par défaut. '
+          'Désigne un autre template comme défaut d\'abord.');
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Supprimer ce template ?'),
+        content: const Text(
+            'Cette action est irréversible. Les envois en cours ne sont pas '
+            'affectés.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Annuler')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+              child: const Text('Supprimer')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ref
+          .read(whatsappTemplatesProvider(widget.shopId).notifier)
+          .deleteTemplate(t.id);
+      if (context.mounted) AppSnack.success(context, 'Template supprimé');
+    } catch (e) {
+      if (context.mounted) AppSnack.error(context, e.toString());
+    }
+  }
+}
+
+// ─── Barre de filtre par type (chips horizontaux) ────────────────────────
+class _TypeFilterBar extends StatelessWidget {
+  final WhatsappTemplateType? current;
+  final ValueChanged<WhatsappTemplateType?> onChanged;
+  const _TypeFilterBar({required this.current, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: AppColors.divider)),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(children: [
+          _Chip(label: 'Tous', selected: current == null,
+              onTap: () => onChanged(null)),
+          const SizedBox(width: 6),
+          for (final t in WhatsappTemplateType.values) ...[
+            _Chip(label: t.label, selected: current == t,
+                onTap: () => onChanged(t)),
+            const SizedBox(width: 6),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
+class _Chip extends StatelessWidget {
+  final String label;
+  final bool   selected;
+  final VoidCallback onTap;
+  const _Chip(
+      {required this.label, required this.selected, required this.onTap});
+  @override
+  Widget build(BuildContext context) => Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(20),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: selected
+                  ? AppColors.primary
+                  : AppColors.primary.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                  color: selected
+                      ? AppColors.primary
+                      : AppColors.primary.withValues(alpha: 0.2)),
+            ),
+            child: Text(label,
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: selected ? Colors.white : AppColors.primary)),
+          ),
+        ),
+      );
+}
+
+// ─── Card d'un template ──────────────────────────────────────────────────
+class _TemplateCard extends StatelessWidget {
+  final WhatsappTemplate template;
+  final bool             canEdit;
+  final VoidCallback     onTap;
+  final VoidCallback     onSetDefault;
+  final VoidCallback     onDelete;
+  const _TemplateCard({
+    required this.template,
+    required this.canEdit,
+    required this.onTap,
+    required this.onSetDefault,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: canEdit ? onTap : null,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: template.isDefault
+                    ? AppColors.primary.withValues(alpha: 0.4)
+                    : AppColors.divider),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (!canEdit) const ReadOnlyBanner(),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 14),
-                child: Container(
-                  padding: const EdgeInsets.all(12),
+              Row(children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.06),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                        color: AppColors.primary.withValues(alpha: 0.25)),
+                      color: AppColors.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(6)),
+                  child: Text(template.type.label,
+                      style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.primary)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: Text(template.name,
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w700),
+                    maxLines: 1, overflow: TextOverflow.ellipsis)),
+                if (template.isDefault)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Text('Défaut',
+                        style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.primary)),
                   ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.info_outline_rounded,
-                          size: 16, color: AppColors.primary),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(l.waTemplatesIntro,
-                            style: const TextStyle(
-                                fontSize: 12, height: 1.4)),
-                      ),
+                if (canEdit)
+                  PopupMenuButton<String>(
+                    icon: Icon(Icons.more_vert_rounded,
+                        size: 18, color: AppColors.textHint),
+                    onSelected: (v) {
+                      switch (v) {
+                        case 'default': onSetDefault(); break;
+                        case 'delete':  onDelete();     break;
+                      }
+                    },
+                    itemBuilder: (_) => [
+                      if (!template.isDefault)
+                        const PopupMenuItem(
+                            value: 'default',
+                            child: Text('Définir comme défaut')),
+                      PopupMenuItem(
+                          value: 'delete',
+                          child: Text('Supprimer',
+                              style: TextStyle(color: AppColors.error))),
                     ],
                   ),
-                ),
-              ),
-              _TemplateCard(
-                title:        l.waTemplatesInvoice,
-                hint:         l.waTemplatesInvoiceHint,
-                controller:   _invoiceCtrl,
-                defaultLabel: WaTemplateDefaults.invoice,
-                onChanged:    () => setState(() {}),
-              ),
-              const SizedBox(height: 10),
-              _TemplateCard(
-                title:        l.waTemplatesOrder,
-                hint:         l.waTemplatesOrderHint,
-                controller:   _orderCtrl,
-                defaultLabel: WaTemplateDefaults.order,
-                onChanged:    () => setState(() {}),
-              ),
-              const SizedBox(height: 10),
-              _TemplateCard(
-                title:        l.waTemplatesCatalogue,
-                hint:         l.waTemplatesCatalogueHint,
-                controller:   _catalogueCtrl,
-                defaultLabel: WaTemplateDefaults.catalogue,
-                onChanged:    () => setState(() {}),
-              ),
-              const SizedBox(height: 10),
-              _TemplateCard(
-                title:        l.waTemplatesNews,
-                hint:         l.waTemplatesNewsHint,
-                controller:   _newsCtrl,
-                defaultLabel: WaTemplateDefaults.news,
-                onChanged:    () => setState(() {}),
-              ),
-              const SizedBox(height: 10),
-              _TemplateCard(
-                title:        l.waTemplatesPromo,
-                hint:         l.waTemplatesPromoHint,
-                controller:   _promoCtrl,
-                defaultLabel: WaTemplateDefaults.promo,
-                onChanged:    () => setState(() {}),
-              ),
-              const SizedBox(height: 20),
-              if (canEdit)
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                    onPressed: _save,
-                    child: Text(l.commonSave),
-                  ),
-                ),
+              ]),
+              const SizedBox(height: 8),
+              Text(template.body,
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 11,
+                      height: 1.5,
+                      color: AppColors.textSecondary,
+                      fontFamily: 'monospace')),
             ],
           ),
         ),
@@ -184,90 +344,38 @@ class _WhatsAppTemplatesPageState
   }
 }
 
-class _TemplateCard extends StatelessWidget {
-  final String              title;
-  final String              hint;
-  final TextEditingController controller;
-  final String              defaultLabel;
-  final VoidCallback        onChanged;
-  const _TemplateCard({
-    required this.title,
-    required this.hint,
-    required this.controller,
-    required this.defaultLabel,
-    required this.onChanged,
+class _EmptyState extends StatelessWidget {
+  final WhatsappTemplateType? filter;
+  final bool                  canEdit;
+  final VoidCallback          onCreate;
+  const _EmptyState({
+    required this.filter,
+    required this.canEdit,
+    required this.onCreate,
   });
 
   @override
   Widget build(BuildContext context) {
-    final l = context.l10n;
-    final label = controller.text.trim().isEmpty
-        ? defaultLabel
-        : controller.text.trim();
-    final preview = '$label : https://exemple.com/abc';
-    return SettingsSectionCard(
-      title: title,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Text(hint,
-              style: TextStyle(
-                  fontSize: 11, color: AppColors.textSecondary)),
-        ),
-        Row(children: [
-          Expanded(
-            child: SettingsField(
-              label: l.waTemplatesFieldLabel,
-              controller: controller,
-              hint: defaultLabel,
+    final msg = filter == null
+        ? 'Aucun template encore créé.'
+        : 'Aucun template pour ${filter!.label.toLowerCase()}.';
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.chat_outlined, size: 56, color: AppColors.textHint),
+          const SizedBox(height: 12),
+          Text(msg, style: TextStyle(color: AppColors.textHint)),
+          if (canEdit) ...[
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: onCreate,
+              icon: const Icon(Icons.add_rounded, size: 16),
+              label: const Text('Créer un template'),
             ),
-          ),
-          const SizedBox(width: 8),
-          IconButton(
-            tooltip: l.waTemplatesReset,
-            icon: const Icon(Icons.restart_alt_rounded, size: 18),
-            color: AppColors.textSecondary,
-            onPressed: () {
-              controller.text = defaultLabel;
-              onChanged();
-            },
-          ),
-        ]),
-        const SizedBox(height: 8),
-        _Preview(text: preview),
-      ],
-    );
-  }
-}
-
-class _Preview extends StatelessWidget {
-  final String text;
-  const _Preview({required this.text});
-  @override
-  Widget build(BuildContext context) {
-    final l = context.l10n;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(l.waTemplatesPreview.toUpperCase(),
-            style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.5,
-                color: AppColors.textSecondary)),
-        const SizedBox(height: 6),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: const Color(0xFFDCF8C6),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFFB7E6A6)),
-          ),
-          child: Text(text,
-              style: const TextStyle(fontSize: 12, height: 1.4)),
-        ),
-      ],
+          ],
+        ],
+      ),
     );
   }
 }

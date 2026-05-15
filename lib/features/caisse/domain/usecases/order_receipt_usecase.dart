@@ -19,12 +19,14 @@ import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../inventaire/domain/entities/product.dart';
 import '../../../../core/services/whatsapp_service.dart';
-import '../../../../core/services/whatsapp/message_templates.dart';
+import '../../../../core/services/whatsapp/whatsapp_template_renderer.dart';
 import '../../../../core/services/invoice_storage_service.dart';
+import '../../../../core/services/short_link_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/phone_formatter.dart';
-import '../../../parametres/data/shop_settings_store.dart';
+import '../../../parametres/data/repositories/whatsapp_template_repository.dart';
+import '../../../parametres/domain/entities/whatsapp_template.dart';
 
 class OrderReceiptUseCase {
 
@@ -1295,20 +1297,37 @@ class OrderReceiptUseCase {
     );
     if (longUrl == null) return false;
 
-    // 3. Raccourcir l'URL (silencieux si échec → URL longue).
-    final shortUrl = await UrlShortenerService.shorten(longUrl);
+    // 3. Lien court via raccourcisseur maison (fallback TinyURL).
+    final shortUrl = await ShortLinkService.createShortLink(
+          longUrl:   longUrl,
+          linkType:  'order_reminder',
+          expiresIn: const Duration(days: 90),
+        )
+        ?? await UrlShortenerService.shorten(longUrl);
 
-    // 4. Message WhatsApp court : `<label> : <url>`. Label éditable dans
-    //    Paramètres > Modèles WhatsApp (clé wa_label_order).
-    final label = ShopSettingsStore(order.shopId).read<String>(
-            WaTemplateKeys.order,
-            fallback: WaTemplateDefaults.order)
-        ?? WaTemplateDefaults.order;
-    final msg = MessageTemplates.buildShareMessage(
-      url:          shortUrl,
-      label:        label,
-      defaultLabel: WaTemplateDefaults.order,
-    );
+    // 4. Rendu du template `order_reminder` par défaut du shop. Si aucun
+    //    template (seed pas exécuté), fallback hardcoded minimal.
+    final tplRepo = WhatsappTemplateRepository();
+    final tpl =
+        tplRepo.getDefault(order.shopId, WhatsappTemplateType.orderReminder);
+    final fmt = NumberFormat('#,###', 'fr_FR');
+    final shopName   = s?.name ?? 'Fortress';
+    final clientName = order.clientName ?? '';
+    final dueStr = order.scheduledAt != null
+        ? '${order.scheduledAt!.day.toString().padLeft(2, '0')}/'
+            '${order.scheduledAt!.month.toString().padLeft(2, '0')}'
+        : '—';
+    final msg = tpl == null
+        ? 'Bonjour $clientName 👋\n\n'
+            'Petit rappel pour votre commande.\n\n📦 $shortUrl\n\n'
+            'Êtes-vous disponible pour la livraison ?\n\n$shopName'
+        : WhatsappTemplateRenderer.render(tpl, {
+            'client_name':   clientName,
+            'shop_name':     shopName,
+            'link':          shortUrl,
+            'total':         '${fmt.format(order.total)} $currency',
+            'delivery_date': dueStr,
+          });
 
     final wamePhone = PhoneFormatter.toWame(phone);
     final svc = whatsapp

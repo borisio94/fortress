@@ -1,5 +1,6 @@
 import 'package:fortress/shared/widgets/app_snack.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -38,8 +39,9 @@ import '../../../../core/services/document_service.dart';
 import '../../../../core/services/invoice_storage_service.dart';
 import '../../../../core/services/short_link_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
-import '../../../../core/services/whatsapp/message_templates.dart';
-import '../../../parametres/data/shop_settings_store.dart';
+import '../../../../core/services/whatsapp/whatsapp_template_renderer.dart';
+import '../../../parametres/domain/entities/whatsapp_template.dart';
+import '../../../parametres/presentation/providers/whatsapp_template_provider.dart';
 import '../../../../core/services/danger_action_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/storage/local_storage_service.dart';
@@ -1720,23 +1722,23 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     }
   }
 
-  /// Compose le message WhatsApp facture structuré en 4 parties :
-  /// salutation client, libellé d'annonce (éditable), lien court,
-  /// remerciement signé de la boutique.
-  String _buildInvoiceMessage({
-    required String  clientName,
-    required String  shopName,
-    required String  label,
-    required String  shortUrl,
+  /// Variables d'interpolation pour le template `invoice`.
+  Map<String, String?> _invoiceContext({
+    required Sale order,
+    required String shopName,
+    required String shortUrl,
   }) {
-    final greeting = clientName.trim().isNotEmpty
-        ? 'Bonjour $clientName 👋'
-        : 'Bonjour 👋';
-    return '$greeting\n\n'
-        '$label.\n\n'
-        '📄 $shortUrl\n\n'
-        'Merci pour votre confiance.\n\n'
-        '$shopName';
+    final fmt = NumberFormat('#,###', 'fr_FR');
+    return {
+      'client_name': order.clientName ?? '',
+      'shop_name':   shopName,
+      'link':        shortUrl,
+      'total':       '${fmt.format(order.total)} ${CurrencyFormatter.currentSymbol}',
+      'order_id':    (order.id ?? '').replaceFirst('order_', ''),
+      'date':        '${order.createdAt.day.toString().padLeft(2, '0')}/'
+                     '${order.createdAt.month.toString().padLeft(2, '0')}/'
+                     '${order.createdAt.year}',
+    };
   }
 
   void _sendInvoiceWhatsApp(BuildContext context) {
@@ -1754,22 +1756,24 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       return;
     }
     final shop = LocalStorageService.getShop(order.shopId);
+    final shopName = shop?.name ?? 'Fortress';
 
-    final label = ShopSettingsStore(order.shopId)
-        .read<String>(WaTemplateKeys.invoice,
-            fallback: WaTemplateDefaults.invoice) ?? WaTemplateDefaults.invoice;
-    final clientName = order.clientName ?? '';
-    final shopName   = shop?.name ?? 'Fortress';
+    // Template `invoice` par défaut (seedé automatiquement par le provider
+    // au premier accès à la page Paramètres > Modèles WhatsApp).
+    final tplRepo = ref.read(whatsappTemplateRepositoryProvider);
+    final template =
+        tplRepo.getDefault(order.shopId, WhatsappTemplateType.invoice);
 
-    // ── Cas 1 : facture déjà pré-générée → message 4 parties (salutation,
-    //    notification, lien court, remerciement) avec ouverture SYNCHRONE
-    //    de wa.me dans le tick du clic.
-    if (_invoiceShortUrl != null) {
-      final msg = _buildInvoiceMessage(
-        clientName: clientName,
-        shopName:   shopName,
-        label:      label,
-        shortUrl:   _invoiceShortUrl!,
+    // ── Cas 1 : facture déjà pré-générée → render template + ouverture
+    //    SYNCHRONE de wa.me dans le tick du clic.
+    if (_invoiceShortUrl != null && template != null) {
+      final msg = WhatsappTemplateRenderer.render(
+        template,
+        _invoiceContext(
+          order:    order,
+          shopName: shopName,
+          shortUrl: _invoiceShortUrl!,
+        ),
       );
       final url = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
       openExternal(url).then((ok) {
@@ -1781,14 +1785,14 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       return;
     }
 
-    // ── Cas 2 : facture pas encore prête (clic trop rapide après expand,
-    //    ou pré-génération échouée) → ouvre wa.me sync avec un message
-    //    d'attente, upload en arrière-plan + copie l'URL au presse-papier
-    //    pour collage manuel dans le chat.
+    // ── Cas 2 : facture pas encore prête → message d'attente, upload en
+    //    arrière-plan + copie l'URL au presse-papier pour collage manuel.
+    final clientName = order.clientName ?? '';
     final greeting = clientName.trim().isNotEmpty
         ? 'Bonjour $clientName 👋'
         : 'Bonjour 👋';
-    final waitMsg = '$greeting\n\n$label (lien dans un instant)';
+    final waitMsg = '$greeting\n\nVotre facture est en cours de préparation, '
+        'le lien arrive dans un instant.';
     final url = 'https://wa.me/$p?text=${Uri.encodeComponent(waitMsg)}';
 
     openExternal(url).then((ok) {

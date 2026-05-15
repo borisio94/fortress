@@ -46,6 +46,11 @@ class HiveBoxes {
   // (cf. hotfix_049). Cache offline-first synchronisé via Realtime.
   static const String deliveryTemplates = 'delivery_templates_box';
 
+  // Templates de message WhatsApp envoyés aux CLIENTS (factures, relances,
+  // catalogue, nouveautés, promo) — cf. hotfix_067. Distinct des
+  // delivery_templates qui ciblent les livreurs internes.
+  static const String whatsappTemplates = 'whatsapp_templates_box';
+
   // Transferts de commandes vers livreurs/partenaires (cf. hotfix_049/050).
   // Permet aux pages dashboard / commandes / finances de filtrer par
   // partenaire de livraison sans pull réseau à chaque rendu.
@@ -127,6 +132,7 @@ class HiveBoxes {
       await _safeOpenMap(stockLevels);
       await _safeOpenMap(stockTransfers);
       await _safeOpenMap(deliveryTemplates);
+      await _safeOpenMap(whatsappTemplates);
       await _safeOpenMap(deliveryTransfers);
       await _safeOpenMap(shopTickets);
       await _safeOpenMap(ticketMessages);
@@ -202,7 +208,7 @@ class HiveBoxes {
     suppliers, receptions, incidents, stockMovements, purchaseOrders, stockArrivals,
     activityLogs, expenses, notifications,
     stockLocations, stockLevels, stockTransfers,
-    deliveryTemplates, deliveryTransfers,
+    deliveryTemplates, whatsappTemplates, deliveryTransfers,
     shopTickets, ticketMessages,
     acknowledgedAlerts,
     partnerLedger,
@@ -241,6 +247,7 @@ class HiveBoxes {
   static Box<Map>   get stockLevelsBox    => Hive.box<Map>(stockLevels);
   static Box<Map>   get stockTransfersBox => Hive.box<Map>(stockTransfers);
   static Box<Map>   get deliveryTemplatesBox => Hive.box<Map>(deliveryTemplates);
+  static Box<Map>   get whatsappTemplatesBox => Hive.box<Map>(whatsappTemplates);
   static Box<Map>   get deliveryTransfersBox => Hive.box<Map>(deliveryTransfers);
   static Box<Map>   get shopTicketsBox    => Hive.box<Map>(shopTickets);
   static Box<Map>   get ticketMessagesBox => Hive.box<Map>(ticketMessages);

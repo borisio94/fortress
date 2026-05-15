@@ -3,53 +3,16 @@ import '../../../features/inventaire/domain/entities/product.dart';
 import '../../utils/currency_formatter.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
-// WhatsApp message templates — format ultra-court : `<libellé> : <url>`.
+// MessageTemplates — utilitaires de formatage de messages WhatsApp non
+// templatables (partage de produit avec aperçu d'image).
 //
-// Tous les messages WhatsApp (facture, relance commande, catalogue, marketing,
-// promotion) suivent ce même format. Le libellé est éditable dans la page
-// Paramètres > Modèles WhatsApp (ShopSettingsStore : clés `wa_label_*`).
-// Les défauts sont définis dans [WaTemplateDefaults].
-//
-// Le format court a été choisi pour 3 raisons :
-//   • prévisualisation WhatsApp : avec moins de texte, l'aperçu du lien
-//     (image / titre / hostname) s'affiche correctement
-//   • lisibilité mobile : le client voit l'action attendue en 1 ligne
-//   • personnalisation : l'utilisateur écrit son propre call-to-action
+// Les messages templatables (facture, relance, catalogue, nouveautés, promo)
+// sont gérés par le système CRUD `WhatsappTemplate` (cf. hotfix_067) + le
+// renderer `WhatsappTemplateRenderer`. Cette classe ne contient plus que les
+// helpers qui ne s'inscrivent pas dans le modèle template (partage produit).
 // ═════════════════════════════════════════════════════════════════════════════
 
-/// Libellés par défaut pour chaque type de message WhatsApp. Utilisés par
-/// la page de paramètres comme valeur initiale, et par le code en fallback
-/// quand l'utilisateur n'a rien renseigné.
-class WaTemplateDefaults {
-  static const String invoice   = 'Téléchargez votre facture';
-  static const String order     = 'Voir la commande';
-  static const String catalogue = 'Consultez le catalogue';
-  static const String news      = 'Nouveautés';
-  static const String promo     = 'Voir les produits';
-}
-
-/// Clés de persistance dans `ShopSettingsStore`. Centralisées ici pour
-/// éviter les chaînes magiques dispersées.
-class WaTemplateKeys {
-  static const String invoice   = 'wa_label_invoice';
-  static const String order     = 'wa_label_order';
-  static const String catalogue = 'wa_label_catalogue';
-  static const String news      = 'wa_label_news';
-  static const String promo     = 'wa_label_promo';
-}
-
 class MessageTemplates {
-  /// Construit un message WhatsApp court de la forme `<label> : <url>`.
-  /// Si [label] est vide après trim, utilise [defaultLabel] en fallback.
-  static String buildShareMessage({
-    required String url,
-    required String label,
-    required String defaultLabel,
-  }) {
-    final cleaned = label.trim().isEmpty ? defaultLabel : label.trim();
-    return '$cleaned : $url';
-  }
-
   /// Message wa.me pour partager un produit (ou une variante donnée).
   /// Le format est conçu pour que WhatsApp affiche automatiquement un
   /// aperçu de l'image quand `imageUrl` est en première ligne.

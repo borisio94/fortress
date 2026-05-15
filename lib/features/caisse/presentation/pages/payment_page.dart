@@ -13,11 +13,13 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/services/invoice_storage_service.dart';
 import '../../../../core/services/short_link_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
-import '../../../../core/services/whatsapp/message_templates.dart';
+import '../../../../core/services/whatsapp/whatsapp_template_renderer.dart';
 import '../../../../core/services/whatsapp_service.dart';
+import '../../../parametres/domain/entities/whatsapp_template.dart';
+import '../../../parametres/presentation/providers/whatsapp_template_provider.dart';
+import 'package:intl/intl.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/utils/phone_formatter.dart';
-import '../../../parametres/data/shop_settings_store.dart';
 import 'package:printing/printing.dart';
 import '../../domain/entities/sale.dart';
 import '../../domain/usecases/order_receipt_usecase.dart';
@@ -336,21 +338,27 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
           )
           ?? await UrlShortenerService.shorten(longUrl);
 
-      // 4. Composition du message structuré 4 parties :
-      //    salutation, notification, lien court, remerciement.
-      final label = ShopSettingsStore(sale.shopId)
-          .read<String>(WaTemplateKeys.invoice,
-              fallback: WaTemplateDefaults.invoice) ?? WaTemplateDefaults.invoice;
-      final clientName = sale.clientName ?? '';
-      final shopName   = shop?.name ?? 'Fortress';
-      final greeting = clientName.trim().isNotEmpty
-          ? 'Bonjour $clientName 👋'
-          : 'Bonjour 👋';
-      final msg = '$greeting\n\n'
-          '$label.\n\n'
-          '📄 $shortUrl\n\n'
-          'Merci pour votre confiance.\n\n'
-          '$shopName';
+      // 4. Rendu du template `invoice` par défaut. Si aucun template (cas
+      //    extrême : seed pas encore exécuté), fallback hardcoded.
+      final tplRepo = ref.read(whatsappTemplateRepositoryProvider);
+      final tpl = tplRepo.getDefault(sale.shopId, WhatsappTemplateType.invoice);
+      final fmt = NumberFormat('#,###', 'fr_FR');
+      final shopName = shop?.name ?? 'Fortress';
+      final msg = tpl == null
+          ? 'Bonjour ${sale.clientName ?? ''} 👋\n\n'
+              'Votre facture est disponible.\n\n📄 $shortUrl\n\n'
+              'Merci pour votre confiance.\n\n$shopName'
+          : WhatsappTemplateRenderer.render(tpl, {
+              'client_name': sale.clientName ?? '',
+              'shop_name':   shopName,
+              'link':        shortUrl,
+              'total':       '${fmt.format(sale.total)} '
+                              '${CurrencyFormatter.currentSymbol}',
+              'order_id':    (sale.id ?? '').replaceFirst('order_', ''),
+              'date':        '${sale.createdAt.day.toString().padLeft(2, '0')}/'
+                              '${sale.createdAt.month.toString().padLeft(2, '0')}/'
+                              '${sale.createdAt.year}',
+            });
 
       // 5. Numéro normalisé pour wa.me (chiffres seulement, indicatif inclus).
       final wamePhone = PhoneFormatter.toWame(phone);

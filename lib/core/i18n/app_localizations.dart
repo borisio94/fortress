@@ -1394,40 +1394,12 @@ class AppLocalizations {
   String get whatsappConnected    => _isFr ? 'Connecté'                          : 'Connected';
   String get whatsappDisconnected => _isFr ? 'Non connecté'                      : 'Not connected';
 
-  // ── Modèles WhatsApp (libellés courts éditables) ─────────────────────────
-  String get waTemplatesTitle      => _isFr
-      ? 'Modèles WhatsApp'                             : 'WhatsApp templates';
-  String get waTemplatesSubtitle   => _isFr
-      ? 'Libellés des messages envoyés aux clients'
-      : 'Labels of messages sent to customers';
-  String get waTemplatesIntro      => _isFr
-      ? 'Chaque message envoyé par WhatsApp suit le format « libellé : lien ». '
-        'Personnalisez ici le libellé pour chaque type de message.'
-      : 'Each WhatsApp message follows the format "label: link". '
-        'Customize the label here for each type of message.';
-  String get waTemplatesInvoice    => _isFr ? 'Facture'        : 'Invoice';
-  String get waTemplatesInvoiceHint => _isFr
-      ? 'Envoyé au client après une vente avec le lien du PDF facture.'
-      : 'Sent to the customer after a sale with the invoice PDF link.';
-  String get waTemplatesOrder      => _isFr ? 'Relance commande' : 'Order reminder';
-  String get waTemplatesOrderHint  => _isFr
-      ? 'Envoyé pour confirmer une commande programmée non livrée.'
-      : 'Sent to confirm a scheduled order pending delivery.';
-  String get waTemplatesCatalogue  => _isFr ? 'Catalogue'      : 'Catalogue';
-  String get waTemplatesCatalogueHint => _isFr
-      ? 'Envoyé lorsque vous partagez le catalogue avec un client.'
-      : 'Sent when you share the product catalogue with a customer.';
-  String get waTemplatesNews       => _isFr ? 'Nouveautés'     : 'New arrivals';
-  String get waTemplatesNewsHint   => _isFr
-      ? 'Annonce de nouveaux produits ajoutés à votre catalogue.'
-      : 'Announcement of new products added to your catalogue.';
-  String get waTemplatesPromo      => _isFr ? 'Promotion'      : 'Promotion';
-  String get waTemplatesPromoHint  => _isFr
-      ? 'Annonce d\'une campagne promotionnelle.'      : 'Promotional campaign announcement.';
-  String get waTemplatesFieldLabel => _isFr ? 'Libellé'         : 'Label';
-  String get waTemplatesReset      => _isFr
-      ? 'Restaurer le libellé par défaut'              : 'Restore default label';
-  String get waTemplatesPreview    => _isFr ? 'Aperçu'         : 'Preview';
+  // ── Modèles WhatsApp (page CRUD, cf. hotfix_067) ────────────────────────
+  String get waTemplatesTitle    => _isFr
+      ? 'Modèles WhatsApp'           : 'WhatsApp templates';
+  String get waTemplatesSubtitle => _isFr
+      ? 'Messages envoyés aux clients (facture, relance, catalogue…)'
+      : 'Messages sent to customers (invoice, reminder, catalogue…)';
 
   // ══ Page Paiements ══════════════════════════════════════════════════════════
   String get paymentsTitle        => _isFr ? 'Modes de paiement'                 : 'Payment methods';
