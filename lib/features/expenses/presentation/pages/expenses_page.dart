@@ -12,7 +12,6 @@ import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
 import '../../../../shared/widgets/form_sheet.dart';
-import '../../../../core/widgets/danger_confirm_dialog.dart';
 import '../../../caisse/domain/entities/sale.dart' show PaymentMethod;
 import '../../domain/entities/expense.dart';
 
@@ -341,17 +340,25 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
       return;
     }
     final e = row.source!;
-    final ok = await DangerConfirmDialog.show(
+    final ok = await showDialog<bool>(
       context: context,
-      title: 'Supprimer la dépense',
-      description:
-          '${e.label} — ${CurrencyFormatter.format(e.amount)}',
-      consequences: const [
-        'L\'écriture comptable disparaît de l\'historique.',
-        'Le solde de trésorerie sera recalculé.',
-      ],
-      confirmText: e.label,
-      onConfirmed: () {},
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer la dépense ?'),
+        content: Text(
+            '${e.label} — ${CurrencyFormatter.format(e.amount)}\n\n'
+            'L\'écriture disparaît de l\'historique et le solde de '
+            'trésorerie sera recalculé.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Annuler')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFEF4444)),
+              child: const Text('Supprimer')),
+        ],
+      ),
     );
     if (ok != true || !mounted) return;
     await AppDatabase.deleteExpense(e.id, e.shopId);

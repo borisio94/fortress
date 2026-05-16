@@ -119,6 +119,47 @@ class _PartnerLedgerDetailPageState
     }
   }
 
+  /// Solde le compte d'un coup : crée un versement `remittance` égal à
+  /// l'opposé du solde courant → solde ramené à 0. Pratique quand la dette
+  /// est intégralement réglée sans avoir à ressaisir le montant exact.
+  Future<void> _settleDebt(double balance) async {
+    if (balance == 0) return;
+    final partnerOwes = balance > 0;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Marquer la dette réglée ?'),
+        content: Text(
+          partnerOwes
+              ? 'Confirme que ${_partnerName} a versé '
+                '${CurrencyFormatter.format(balance.abs())} à la '
+                'boutique. Le solde sera remis à zéro.'
+              : 'Confirme que la boutique a versé '
+                '${CurrencyFormatter.format(balance.abs())} à '
+                '${_partnerName}. Le solde sera remis à zéro.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Annuler')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Confirmer')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    // amount = -balance → SUM ramené à 0 quel que soit le sens.
+    await PartnerLedgerService.addEntry(
+      shopId:            widget.shopId,
+      partnerLocationId: widget.partnerLocationId,
+      type:              PartnerLedgerEntryType.remittance,
+      amount:            -balance,
+      note:              'Dette soldée (règlement intégral)',
+    );
+    if (mounted) AppSnack.success(context, 'Dette réglée — solde à zéro.');
+  }
+
   Future<void> _registerRemittance() async {
     final res = await showFormSheet<_RemittanceResult>(
       context: context,
@@ -197,19 +238,36 @@ class _PartnerLedgerDetailPageState
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _registerRemittance,
-              icon: const Icon(Icons.payments_outlined, size: 18),
-              label: const Text('Enregistrer un versement'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                minimumSize: const Size(0, 44),
+          child: Row(children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _registerRemittance,
+                icon: const Icon(Icons.payments_outlined, size: 18),
+                label: const Text('Versement'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(0, 44),
+                ),
               ),
             ),
-          ),
+            if (balance != 0) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _settleDebt(balance),
+                  icon: const Icon(Icons.task_alt_rounded, size: 18),
+                  label: const Text('Marquer réglée'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    side: BorderSide(
+                        color: AppColors.primary.withValues(alpha: 0.5)),
+                    minimumSize: const Size(0, 44),
+                  ),
+                ),
+              ),
+            ],
+          ]),
         ),
         const SizedBox(height: 4),
         Expanded(
