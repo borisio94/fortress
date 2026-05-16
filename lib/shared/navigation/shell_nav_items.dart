@@ -236,11 +236,11 @@ final List<ShellNavItem> kShellNavItems = [
   // WhatsApp — groupe : modèles de messages + campagnes marketing.
   // Déplacés depuis Paramètres pour un accès direct (owner uniquement).
   ShellNavItem(
-    // Bulle de message Material (chat_bubble) : prouvée présente (item
-    // Messagerie). Le glyphe FontAwesome Brands "whatsapp" ne se chargeait
-    // pas sur web release (police Brands non embarquée → carré tofu).
-    icon:         Icons.chat_bubble_outline_rounded,
-    iconSelected: Icons.chat_bubble_rounded,
+    // send_rounded (avion папier) : prouvée présente (bouton « Envoyer
+    // facture WhatsApp »). Distincte de Messagerie (chat_bubble) pour
+    // lever la confusion. FA Brands "whatsapp" ne se chargeait pas (tofu).
+    icon:         Icons.send_outlined,
+    iconSelected: Icons.send_rounded,
     label:        (_) => 'WhatsApp',
     route:        (id) => '/shop/$id/parametres/whatsapp-templates',
     visibleIf:    (p) => p.isOwner,

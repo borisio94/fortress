@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +5,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/database/app_database.dart';
 import '../../core/i18n/app_localizations.dart';
+import '../../core/services/notification_service.dart';
+import '../../core/storage/hive_boxes.dart';
 import '../../core/permisions/app_permissions.dart';
 import '../../core/permisions/permission_guard.dart';
 import '../../core/permisions/subscription_provider.dart';
@@ -23,26 +23,26 @@ import '../navigation/shell_nav_items.dart';
 import '../providers/current_shop_provider.dart';
 import 'app_primary_button.dart';
 import 'offline_banner_widget.dart';
+import 'sync_status_banner.dart';
+import 'order_source_badge.dart';
 import 'pin_lock_banner.dart';
 import 'stock_nav_chips.dart';
+import 'alerts/scheduled_alerts_banner_host.dart';
+import '../providers/scheduled_alerts_provider.dart';
+import '../navigation/page_titles.dart';
 
 /// Largeur minimale en logical pixels pour activer le layout desktop
-/// (sidebar 200px + topbar). En dessous, on bascule sur le layout mobile
-/// (bottom nav + drawer Plus) — utile quand l'utilisateur redimensionne
-/// la fenêtre desktop pour qu'elle ressemble à un écran téléphone.
+/// (sidebar fixe 190px + topbar, drawer toujours visible). En dessous,
+/// on bascule sur le layout mobile (AppBar + drawer caché derrière le
+/// hamburger). Critère unique = largeur de fenêtre — s'applique à toutes
+/// les plateformes (web, desktop natif, mobile).
 const double _kDesktopWidthBreakpoint = 900;
 
-/// True si l'OS est desktop (Windows / macOS / Linux), hors web.
-bool _isDesktopOS() {
-  if (kIsWeb) return false;
-  return Platform.isWindows || Platform.isLinux || Platform.isMacOS;
-}
-
-/// True si on doit afficher le layout desktop : OS desktop **et** fenêtre
-/// suffisamment large. Sur OS mobile (Android/iOS) ou fenêtre desktop
-/// étroite, on retombe sur le layout mobile.
+/// True si la fenêtre est assez large pour le layout desktop, peu importe
+/// la plateforme. Garantit qu'un Chrome desktop plein écran ou un Windows
+/// natif voient la même sidebar fixe ; un mobile ou une fenêtre étroite
+/// retombe sur le drawer caché.
 bool _useDesktopLayout(BuildContext context) {
-  if (!_isDesktopOS()) return false;
   return MediaQuery.of(context).size.width >= _kDesktopWidthBreakpoint;
 }
 
@@ -131,8 +131,28 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
   @override
   Widget build(BuildContext context) {
     final perms        = ref.watch(permissionsProvider(widget.shopId));
-    final loc          = GoRouterState.of(context).matchedLocation;
-    final selectedIdx  = shellSelectedIndex(loc, widget.shopId);
+    // Active les notifications in-app pour TOUT membre actif. Le filtrage
+    // fin se fait côté émetteur (cf. `_emitStockNotification` et
+    // `_emitOrderNotification` qui restent réservés aux admins/owners ;
+    // les notifs tickets sont déjà routées par destinataire dans
+    // `_emitTicketNotification`/`_emitTicketReplyNotification`).
+    final notifEnabled = perms.isMember;
+    final wasEnabled   = NotificationService.enabledForCurrentUser.value;
+    NotificationService.enabledForCurrentUser.value = notifEnabled;
+    // Sur transition false→true (premier rendu membre), rejoue les
+    // alertes stock pour les produits déjà bas/épuisés. La fonction
+    // gate elle-même le rôle (admin/owner uniquement) ; pour un vendeur
+    // l'appel est inerte mais sans effet de bord.
+    if (notifEnabled && !wasEnabled) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        AppDatabase.scanStockNotifications(widget.shopId);
+      });
+    }
+    final goState      = GoRouterState.of(context);
+    final loc          = goState.matchedLocation;
+    final tabQuery     = goState.uri.queryParameters['tab'];
+    final selectedIdx  = shellSelectedIndex(loc, widget.shopId,
+        tabQuery: tabQuery);
     // Layout desktop ssi OS desktop + fenêtre ≥ 900px de large. Sur fenêtre
     // étroite (utilisateur qui split-screen, ou OS mobile), on bascule
     // automatiquement sur le layout mobile.
@@ -186,15 +206,13 @@ class _MobileShell extends StatelessWidget {
     // matche un enfant DIFFÉRENT de la route propre du parent, on est
     // sur une sub-page « enfant ». Le titre devient alors un breadcrumb
     // « ParentLabel › ChildLabel » et un back button apparaît.
-    String? breadcrumbParent;
     String? breadcrumbChild;
     if (selectedIndex >= 0 && kShellNavItems[selectedIndex].hasChildren) {
       final parent = kShellNavItems[selectedIndex];
       final childIdx = activeChildIndex(parent, loc, shopId);
       if (childIdx >= 0 &&
           parent.children![childIdx].route(shopId) != parent.route(shopId)) {
-        breadcrumbParent = (parent.labelMobile ?? parent.label)(l);
-        breadcrumbChild  = parent.children![childIdx].label(l);
+        breadcrumbChild = parent.children![childIdx].label(l);
       }
     }
     final isChildSubPage = breadcrumbChild != null;
@@ -224,18 +242,29 @@ class _MobileShell extends StatelessWidget {
       // dashes → espaces, capitaliser chaque mot
       final words = segment.split('-').map((w) =>
           w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}');
-      return '${l.hubBrand} › ${words.join(' ')}';
+      return words.join(' ');
     }
-    // Sur les tabs Stock, le titre reste « Stock » (label parent
-    // Inventaire) — le chip actif sous la topbar montre déjà la
-    // sous-page courante, pas besoin de breadcrumb dans le titre.
-    final title = onStockTab
-        ? (kShellNavItems[2].labelMobile ?? kShellNavItems[2].label)(l)
-        : (breadcrumbChild != null
-            ? '$breadcrumbParent › $breadcrumbChild'
-            : (selectedIndex < 0
-                ? fallbackSubPageTitle()
-                : kShellNavItems[selectedIndex].label(l)));
+    // Titre = nom EXACT de la page courante. Ordre de résolution :
+    //   1. Mapping explicite des routes via `titleForLocation` (le plus
+    //      précis, gère les sous-pages et sous-sous-pages — cf.
+    //      page_titles.dart).
+    //   2. Stock tab → label "Inventaire".
+    //   3. Breadcrumb child (sous-page enregistrée comme child d'un item
+    //      nav).
+    //   4. Item nav courant.
+    //   5. Fallback dérivé du dernier segment d'URL.
+    final tabQuery = extractTabQuery(context, loc);
+    final explicitTitle =
+        titleForLocation(location: loc, shopId: shopId, l: l,
+                         tabQuery: tabQuery);
+    final title = explicitTitle
+        ?? (onStockTab
+            ? (kShellNavItems[2].labelMobile ?? kShellNavItems[2].label)(l)
+            : (breadcrumbChild != null
+                ? breadcrumbChild
+                : (selectedIndex < 0
+                    ? fallbackSubPageTitle()
+                    : kShellNavItems[selectedIndex].label(l))));
 
     // Spec round 9 : sur les root pages mobile, fond AppBar = primary
     // thème + titre/icônes blancs. Sur les sub-pages (back button visible),
@@ -284,7 +313,9 @@ class _MobileShell extends StatelessWidget {
         title: Text(title, style: titleStyle),
         actions: [
           _CartBadgeBtn(shopId: shopId),
-          const _NotifBtn(),
+          // Cloche notifications réservée admin + owner (les employés
+          // n'ont pas accès aux notifs in-app de la boutique).
+          if (perms.isMember) const _NotifBtnWithAlertHalo(),
           if (extraActions != null) ...extraActions!,
           const SizedBox(width: 4),
         ],
@@ -292,10 +323,15 @@ class _MobileShell extends StatelessWidget {
       body: Column(children: [
         const PinLockBanner(),
         const OfflineBanner(),
+        const SyncStatusBanner(),
         // Owner-only — auto-hide si plan actif, fond warning/danger selon
         // l'état (cf. permission_guard.dart). Restauré ici pour reproduire
         // le comportement global qu'avait l'ancien app_scaffold.dart.
         const SubscriptionBanner(),
+        // Banner alertes commandes programmées (sprint 2B) — affiché dès
+        // qu'une alerte WARNING+ est active. Auto-hide quand la liste se
+        // vide (ack via modal ou statut commande change).
+        const ScheduledAlertsBannerHost(),
         // StockNavChips supprimés round 13 — doublon avec le menu drawer
         // (Inventaire → Produits / Emplacements / Incidents). La nav passe
         // désormais uniquement par le drawer pour éviter la redondance.
@@ -392,7 +428,7 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
                       maxLines: 1, overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 10,
                           letterSpacing: 0.6,
-                          color: theme.colorScheme.onSurface.withOpacity(0.5))),
+                          color: theme.colorScheme.onSurface.withValues(alpha:0.5))),
                 ],
               )),
               IconButton(
@@ -403,7 +439,7 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
             ]),
           ),
           Divider(height: 1,
-              color: theme.colorScheme.onSurface.withOpacity(0.08)),
+              color: theme.colorScheme.onSurface.withValues(alpha:0.08)),
           // ── Items ───────────────────────────────────────────────────
           Expanded(child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 6),
@@ -446,7 +482,7 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
           )),
           // ── Footer : abonnement (owner) + déconnexion ──────────────
           Divider(height: 1,
-              color: theme.colorScheme.onSurface.withOpacity(0.08)),
+              color: theme.colorScheme.onSurface.withValues(alpha:0.08)),
           if (widget.perms.isOwner)
             const _SubscriptionTile(asListTile: true),
           ListTile(
@@ -459,8 +495,14 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
                     color: theme.colorScheme.error,
                     fontWeight: FontWeight.w600)),
             onTap: () {
+              // Capturer le context du Navigator racine AVANT le pop —
+              // le context du ListTile devient invalide dès que le drawer
+              // se démonte, et `AppLocalizations.of(context)!` planterait
+              // ensuite avec "Null check operator used on a null value".
+              final rootCtx =
+                  Navigator.of(context, rootNavigator: true).context;
               Navigator.of(context).pop();
-              _confirmLogout(context);
+              _confirmLogout(rootCtx);
             },
           ),
         ]),
@@ -769,7 +811,6 @@ class _DesktopShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final loc = GoRouterState.of(context).matchedLocation;
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       floatingActionButton: fab,
@@ -784,10 +825,14 @@ class _DesktopShell extends StatelessWidget {
             shopId:        shopId,
             selectedIndex: selectedIndex,
             extraActions:  extraActions,
+            perms:         perms,
           ),
           const PinLockBanner(),
           const OfflineBanner(),
+          const SyncStatusBanner(),
           const SubscriptionBanner(),
+          // Banner alertes commandes programmées (sprint 2B) — cf. mobile.
+          const ScheduledAlertsBannerHost(),
           // StockNavChips supprimés round 13 — doublon avec la sidebar
           // (Inventaire → Produits / Emplacements / Incidents). La nav
           // passe uniquement par la sidebar pour éviter la redondance.
@@ -851,12 +896,14 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
     final loc     = GoRouterState.of(context).matchedLocation;
 
     return Container(
-      width: 190,
+      // Largeur sidebar desktop : 190 → 247 (+30%) pour libellés longs
+      // (« Bénéfice net », « Campagnes marketing »…) sans troncature.
+      width: 247,
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         border: Border(
             right: BorderSide(
-                color: theme.colorScheme.onSurface.withOpacity(0.08),
+                color: theme.colorScheme.onSurface.withValues(alpha:0.08),
                 width: 0.5)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -881,7 +928,7 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
           ]),
         ),
         Divider(height: 1,
-            color: theme.colorScheme.onSurface.withOpacity(0.08)),
+            color: theme.colorScheme.onSurface.withValues(alpha:0.08)),
         // ── Items ──────────────────────────────────────────────────
         Expanded(child: ListView(
           padding: const EdgeInsets.symmetric(vertical: 6),
@@ -914,7 +961,7 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
         )),
         // ── Footer : abonnement (owner) + déconnexion ──────────────
         Divider(height: 1,
-            color: theme.colorScheme.onSurface.withOpacity(0.08)),
+            color: theme.colorScheme.onSurface.withValues(alpha:0.08)),
         if (widget.perms.isOwner) const _SubscriptionTile(),
         const _LogoutTile(),
       ]),
@@ -1105,14 +1152,16 @@ class _SidebarRow extends StatelessWidget {
 }
 
 class _DesktopTopbar extends StatelessWidget {
-  final String        shopId;
-  final int           selectedIndex;
-  final List<Widget>? extraActions;
+  final String         shopId;
+  final int            selectedIndex;
+  final List<Widget>?  extraActions;
+  final AppPermissions perms;
 
   const _DesktopTopbar({
     required this.shopId,
     required this.selectedIndex,
     required this.extraActions,
+    required this.perms,
   });
 
   @override
@@ -1128,7 +1177,7 @@ class _DesktopTopbar extends StatelessWidget {
         color: theme.colorScheme.surface,
         border: Border(
             bottom: BorderSide(
-                color: theme.colorScheme.onSurface.withOpacity(0.08))),
+                color: theme.colorScheme.onSurface.withValues(alpha:0.08))),
       ),
       padding: const EdgeInsets.fromLTRB(8, 8, 12, 8),
       child: Row(children: [
@@ -1150,13 +1199,13 @@ class _DesktopTopbar extends StatelessWidget {
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 1.2,
-                color: theme.colorScheme.onSurface.withOpacity(0.6))),
+                color: theme.colorScheme.onSurface.withValues(alpha:0.6))),
         if (!isSubPage) ...[
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6),
             child: Icon(Icons.chevron_right_rounded,
                 size: 16,
-                color: theme.colorScheme.onSurface.withOpacity(0.4)),
+                color: theme.colorScheme.onSurface.withValues(alpha:0.4)),
           ),
           Text(activeLabel,
               style: TextStyle(
@@ -1166,7 +1215,8 @@ class _DesktopTopbar extends StatelessWidget {
         ],
         const Spacer(),
         _CartBadgeBtn(shopId: shopId),
-        const _NotifBtn(),
+        // Cloche notifications réservée admin + owner.
+        if (perms.isShopAdmin) const _NotifBtnWithAlertHalo(),
         if (extraActions != null) ...extraActions!,
         const SizedBox(width: 4),
       ]),
@@ -1218,16 +1268,102 @@ class _CartBadgeBtn extends ConsumerWidget {
       backgroundColor: theme.colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => BlocProvider.value(
+      builder: (sheetCtx) => BlocProvider.value(
         value: bloc,
-        child: DraggableScrollableSheet(
-          initialChildSize: 0.92,
-          minChildSize:     0.5,
-          maxChildSize:     0.97,
-          expand: false,
-          builder: (_, __) => CartWidget(shopId: shopId, isEcommerce: isEcom),
+        // Auto-fermeture du sheet panier dès que la commande est
+        // enregistrée — sinon l'opérateur restait sur un panier vidé,
+        // ce qui prêtait à confusion (pas de feedback de succès clair).
+        child: BlocListener<CaisseBloc, CaisseState>(
+          listenWhen: (prev, curr) =>
+              prev.orderSaved != curr.orderSaved && curr.orderSaved == true,
+          listener: (_, __) {
+            if (Navigator.of(sheetCtx).canPop()) {
+              Navigator.of(sheetCtx).pop();
+            }
+          },
+          child: DraggableScrollableSheet(
+            initialChildSize: 0.92,
+            minChildSize:     0.5,
+            maxChildSize:     0.97,
+            expand: false,
+            builder: (_, __) =>
+                CartWidget(shopId: shopId, isEcommerce: isEcom),
+          ),
         ),
       ),
+    );
+  }
+}
+
+/// Wrapper Riverpod du `_NotifBtn` qui superpose un halo rouge animé
+/// (pulse) quand au moins une alerte commande programmée de niveau
+/// ≥ CRITICAL est active. Le halo NE DISPARAÎT PAS au clic sur la cloche
+/// (qui ouvre le panel notifs in-app) — il ne disparaît que quand l'alerte
+/// critique est acquittée via la modal ou que la commande change de
+/// statut. Sinon on aurait un faux signal de résolution.
+///
+/// Pas de fusion avec le badge chiffre des notifs : badge = unread count
+/// du `NotificationService`, halo = alerte commande critique. Signaux
+/// distincts qui peuvent coexister.
+class _NotifBtnWithAlertHalo extends ConsumerStatefulWidget {
+  const _NotifBtnWithAlertHalo();
+  @override
+  ConsumerState<_NotifBtnWithAlertHalo> createState() =>
+      _NotifBtnWithAlertHaloState();
+}
+
+class _NotifBtnWithAlertHaloState
+    extends ConsumerState<_NotifBtnWithAlertHalo>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 900))
+      ..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasCritical = ref.watch(scheduledAlertsHasCriticalProvider);
+    if (!hasCritical) return const _NotifBtn();
+    final danger = Theme.of(context).semantic.danger;
+    return Stack(
+      alignment: Alignment.center,
+      clipBehavior: Clip.none,
+      children: [
+        AnimatedBuilder(
+          animation: _pulse,
+          builder: (_, __) {
+            // Opacity 0.25 ↔ 0.65 + scale 1.0 ↔ 1.15 pour un pulse
+            // visible sans envahissant.
+            final t = _pulse.value;
+            return Container(
+              width:  44, height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: danger.withValues(alpha: 0.25 + 0.40 * t),
+                boxShadow: [
+                  BoxShadow(
+                    color: danger.withValues(alpha: 0.35 * (1 - t * 0.5)),
+                    blurRadius: 10 + 6 * t,
+                    spreadRadius: 1 + 2 * t,
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+        const _NotifBtn(),
+      ],
     );
   }
 }
@@ -1239,47 +1375,251 @@ class _NotifBtn extends StatelessWidget {
   Widget build(BuildContext context) {
     final l     = context.l10n;
     final theme = Theme.of(context);
-    return AppIconBadge(
-      icon:    Icons.notifications_outlined,
-      count:   0,
-      tooltip: l.notificationsTitle,
-      onTap: () {
-        showModalBottomSheet<void>(
-          context: context,
-          backgroundColor: theme.colorScheme.surface,
-          shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-          builder: (_) => Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Container(width: 36, height: 4,
+    // Badge live — se met à jour à chaque notif émise.
+    return ValueListenableBuilder<int>(
+      valueListenable: NotificationService.rev,
+      builder: (_, __, ___) {
+        final unread = NotificationService.unreadCount();
+        return AppIconBadge(
+          icon:    Icons.notifications_outlined,
+          count:   unread,
+          tooltip: l.notificationsTitle,
+          onTap: () {
+            showModalBottomSheet<void>(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: theme.colorScheme.surface,
+              shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+              builder: (_) => const _NotificationsSheet(),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _NotificationsSheet extends StatelessWidget {
+  const _NotificationsSheet();
+
+  IconData _iconFor(NotifKind k) {
+    switch (k) {
+      case NotifKind.stockLow:        return Icons.warning_amber_rounded;
+      case NotifKind.stockOut:        return Icons.remove_shopping_cart_rounded;
+      case NotifKind.orderNew:        return Icons.receipt_long_rounded;
+      case NotifKind.orderCompleted:  return Icons.task_alt_rounded;
+      case NotifKind.orderCancelled:  return Icons.cancel_outlined;
+      case NotifKind.orderRejected:   return Icons.block_rounded;
+      case NotifKind.ticketNew:       return Icons.forum_rounded;
+      case NotifKind.ticketEscalated: return Icons.upgrade_rounded;
+      case NotifKind.ticketReply:     return Icons.reply_rounded;
+    }
+  }
+
+  Color _colorFor(NotifKind k, ThemeData theme) {
+    final sem = theme.semantic;
+    switch (k) {
+      case NotifKind.stockLow:        return sem.warning;
+      case NotifKind.stockOut:        return theme.colorScheme.error;
+      case NotifKind.orderNew:        return theme.colorScheme.primary;
+      case NotifKind.orderCompleted:  return sem.success;
+      case NotifKind.orderCancelled:  return sem.warning;
+      case NotifKind.orderRejected:   return theme.colorScheme.error;
+      case NotifKind.ticketNew:       return sem.info;
+      case NotifKind.ticketEscalated: return sem.warning;
+      case NotifKind.ticketReply:     return theme.colorScheme.primary;
+    }
+  }
+
+  String _formatTime(DateTime t) {
+    final diff = DateTime.now().difference(t);
+    if (diff.inMinutes < 1)  return "À l'instant";
+    if (diff.inMinutes < 60) return 'Il y a ${diff.inMinutes} min';
+    if (diff.inHours   < 24) return 'Il y a ${diff.inHours} h';
+    return 'Il y a ${diff.inDays} j';
+  }
+
+  /// Tap sur une notif → ferme le sheet puis navigue selon le type :
+  ///   * ticketNew / ticketEscalated → page détail du ticket.
+  ///   * ticketReply → résout d'abord ticket_id depuis le messageId.
+  ///   * Autres types → pas de navigation (juste mark-as-read).
+  void _handleNotifTap(BuildContext context, AppNotification n) {
+    final shopId = n.shopId;
+    if (shopId == null || shopId.isEmpty) return;
+    String? ticketId;
+    switch (n.kind) {
+      case NotifKind.ticketNew:
+        ticketId = n.targetId;
+      case NotifKind.ticketEscalated:
+        // targetId = "<ticketId>_owner" ou "<ticketId>_super"
+        final t = n.targetId ?? '';
+        final i = t.lastIndexOf('_');
+        ticketId = i > 0 ? t.substring(0, i) : t;
+      case NotifKind.ticketReply:
+        // targetId = messageId → résout via la box messages.
+        final raw = HiveBoxes.ticketMessagesBox.get(n.targetId);
+        if (raw is Map) {
+          ticketId = raw['ticket_id']?.toString();
+        }
+      default:
+        return;
+    }
+    if (ticketId == null || ticketId.isEmpty) return;
+    Navigator.of(context).pop(); // ferme le sheet
+    context.push('/shop/$shopId/tickets/$ticketId');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l     = context.l10n;
+    final theme = Theme.of(context);
+    return DraggableScrollableSheet(
+      initialChildSize: 0.6,
+      minChildSize: 0.3,
+      maxChildSize: 0.92,
+      expand: false,
+      builder: (_, scrollCtrl) {
+        return ValueListenableBuilder<int>(
+          valueListenable: NotificationService.rev,
+          builder: (_, __, ___) {
+            final items = NotificationService.list();
+            final unread = items.where((n) => !n.read).length;
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 8),
+                Container(
+                  width: 36, height: 4,
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.onSurface.withOpacity(0.12),
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(2),
-                  )),
-              const SizedBox(height: 16),
-              Text(l.notificationsTitle,
-                  style: TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w700,
-                      color: theme.colorScheme.onSurface)),
-              const SizedBox(height: 32),
-              Icon(Icons.notifications_off_outlined,
-                  size: 40,
-                  color: theme.colorScheme.onSurface.withOpacity(0.3)),
-              const SizedBox(height: 12),
-              Text(l.notifEmptyTitle,
-                  style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600,
-                      color: theme.colorScheme.onSurface.withOpacity(0.7))),
-              const SizedBox(height: 4),
-              Text(l.notifEmptyHint,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 11,
-                      color: theme.colorScheme.onSurface.withOpacity(0.5))),
-              const SizedBox(height: 24),
-            ]),
-          ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 12, 6),
+                  child: Row(children: [
+                    Expanded(
+                      child: Text(l.notificationsTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: theme.colorScheme.onSurface)),
+                    ),
+                    if (unread > 0)
+                      TextButton(
+                        onPressed: () =>
+                            NotificationService.markAllAsRead(),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        child: Text('Tout marquer lu',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: theme.colorScheme.primary)),
+                      ),
+                  ]),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: items.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.notifications_off_outlined,
+                                  size: 40,
+                                  color: theme.colorScheme.onSurface
+                                      .withValues(alpha: 0.3)),
+                              const SizedBox(height: 12),
+                              Text(l.notifEmptyTitle,
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: theme.colorScheme.onSurface
+                                          .withValues(alpha: 0.7))),
+                              const SizedBox(height: 4),
+                              Text(l.notifEmptyHint,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: theme.colorScheme.onSurface
+                                          .withValues(alpha: 0.5))),
+                            ],
+                          ),
+                        )
+                      : ListView.separated(
+                          controller: scrollCtrl,
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          itemCount: items.length,
+                          separatorBuilder: (_, __) => Divider(
+                              height: 1,
+                              color: theme.colorScheme.outline
+                                  .withValues(alpha: 0.15)),
+                          itemBuilder: (_, i) {
+                            final n = items[i];
+                            final color = _colorFor(n.kind, theme);
+                            return ListTile(
+                              leading: Container(
+                                width: 36, height: 36,
+                                decoration: BoxDecoration(
+                                  color: color.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                alignment: Alignment.center,
+                                child: Icon(_iconFor(n.kind),
+                                    size: 18, color: color),
+                              ),
+                              title: Row(children: [
+                                Flexible(
+                                  child: Text(n.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: n.read
+                                              ? FontWeight.w500
+                                              : FontWeight.w700,
+                                          color: theme.colorScheme.onSurface)),
+                                ),
+                                // Badge canal pour les notifs orderNew issues
+                                // d'une source non-pos (web / whatsapp).
+                                if (n.kind == NotifKind.orderNew
+                                    && n.source != null
+                                    && n.source != 'pos') ...[
+                                  const SizedBox(width: 6),
+                                  OrderSourceBadge(source: n.source!),
+                                ],
+                              ]),
+                              subtitle: Text(n.message,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: theme.colorScheme.onSurface
+                                          .withValues(alpha: 0.7))),
+                              trailing: Text(_formatTime(n.createdAt),
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: theme.colorScheme.onSurface
+                                          .withValues(alpha: 0.5))),
+                              onTap: () {
+                                NotificationService.markAsRead(n.id);
+                                _handleNotifTap(context, n);
+                              },
+                            );
+                          },
+                        ),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -1331,12 +1671,12 @@ class _SubscriptionTile extends ConsumerWidget {
     if (asListTile) {
       return ListTile(
         leading: Icon(Icons.workspace_premium_rounded,
-            color: theme.colorScheme.onSurface.withOpacity(0.75)),
+            color: theme.colorScheme.onSurface.withValues(alpha:0.75)),
         title: Text(l.drawerSubscription),
         trailing: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
-            color: badgeColor.withOpacity(0.15),
+            color: badgeColor.withValues(alpha:0.15),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Text(badgeText,
@@ -1359,19 +1699,19 @@ class _SubscriptionTile extends ConsumerWidget {
         child: Row(children: [
           Icon(Icons.workspace_premium_rounded,
               size: 18,
-              color: theme.colorScheme.onSurface.withOpacity(0.75)),
+              color: theme.colorScheme.onSurface.withValues(alpha:0.75)),
           const SizedBox(width: 10),
           Expanded(child: Text(l.drawerSubscription,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
-                  color: theme.colorScheme.onSurface.withOpacity(0.85)))),
+                  color: theme.colorScheme.onSurface.withValues(alpha:0.85)))),
           const SizedBox(width: 6),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: badgeColor.withOpacity(0.15),
+              color: badgeColor.withValues(alpha:0.15),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(badgeText,
