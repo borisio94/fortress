@@ -209,7 +209,8 @@ class _MobileShell extends StatelessWidget {
     String? breadcrumbChild;
     if (selectedIndex >= 0 && kShellNavItems[selectedIndex].hasChildren) {
       final parent = kShellNavItems[selectedIndex];
-      final childIdx = activeChildIndex(parent, loc, shopId);
+      final childIdx = activeChildIndex(parent, loc, shopId,
+          tabQuery: GoRouterState.of(context).uri.queryParameters['tab']);
       if (childIdx >= 0 &&
           parent.children![childIdx].route(shopId) != parent.route(shopId)) {
         breadcrumbChild = parent.children![childIdx].label(l);
@@ -602,7 +603,8 @@ class _MobileDrawerGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
-    final activeChild = activeChildIndex(parent, currentLocation, shopId);
+    final activeChild = activeChildIndex(parent, currentLocation, shopId,
+        tabQuery: GoRouterState.of(context).uri.queryParameters['tab']);
     final children = parent.children!;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       _MobileDrawerRow(
@@ -1028,7 +1030,8 @@ class _SidebarGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
-    final activeChild = activeChildIndex(parent, currentLocation, shopId);
+    final activeChild = activeChildIndex(parent, currentLocation, shopId,
+        tabQuery: GoRouterState.of(context).uri.queryParameters['tab']);
     final visibleChildren = parent.children!;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       _SidebarRow(

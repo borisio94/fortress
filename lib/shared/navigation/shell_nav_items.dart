@@ -359,18 +359,6 @@ List<ShellNavItem> shellAllItems(AppPermissions perms) =>
 /// (route plus spécifique) plutôt que Inventaire (préfixe).
 int shellSelectedIndex(String currentLocation, String shopId,
     {String? tabQuery}) {
-  // Cas spécial Membres : /parametres/shop?tab=members doit highlight
-  // l'item Membres (route nominale `/parametres/users`). Sans ce check,
-  // le matching par préfixe retomberait sur Paramètres car
-  // `/parametres/shop` startsWith `/parametres/`.
-  if (tabQuery == 'members'
-      && currentLocation == '/shop/$shopId/parametres/shop') {
-    final membersRoute = '/shop/$shopId/parametres/users';
-    final idx = kShellNavItems
-        .indexWhere((i) => !i.desktopHidden && i.route(shopId) == membersRoute);
-    if (idx >= 0) return idx;
-  }
-
   // (parentIndex, route) — inclut routes parents ET routes enfants.
   // Les items `desktopHidden` sont ignorés ici : ce sont des entrées
   // alternatives (drawer Plus mobile), pas le propriétaire canonique de
@@ -390,24 +378,44 @@ int shellSelectedIndex(String currentLocation, String shopId,
   }
   candidates.sort((a, b) => b.$2.length.compareTo(a.$2.length));
   for (final (idx, route) in candidates) {
-    if (currentLocation == route || currentLocation.startsWith('$route/')) {
+    if (_routeMatches(route, currentLocation, tabQuery)) {
       return idx;
     }
   }
   return -1;
 }
 
+/// True si la route nav [route] correspond à la localisation courante.
+///
+/// Une route peut porter un suffixe `?tab=X` (ex. Membres
+/// `/parametres/shop?tab=members`, sous-items Finances `/finances?tab=…`).
+/// `GoRouterState.matchedLocation` exclut la query string, donc on compare
+/// le **chemin** à [loc] et, si la route exige un onglet, on vérifie en
+/// plus que [tabQuery] (lu depuis `uri.queryParameters['tab']`) l'égale.
+/// Sans ce check, `/parametres/shop?tab=members` ne matchait jamais et
+/// l'item Membres + son parent CRM perdaient le focus à la sélection.
+bool _routeMatches(String route, String loc, String? tabQuery) {
+  final uri     = Uri.parse(route);
+  final path    = uri.path;
+  final wantTab = uri.queryParameters['tab'];
+  if (wantTab != null) {
+    return loc == path && tabQuery == wantTab;
+  }
+  return loc == path || loc.startsWith('$path/');
+}
+
 /// Retourne l'index du sous-item actif dans `parent.children`, ou `-1` si
 /// aucun n'est actif. Utilisé par la sidebar desktop pour highlighter le
 /// bon enfant et auto-déplier le parent quand on est sur une route enfant.
-int activeChildIndex(ShellNavItem parent, String currentLocation, String shopId) {
+int activeChildIndex(ShellNavItem parent, String currentLocation, String shopId,
+    {String? tabQuery}) {
   if (parent.children == null) return -1;
   final indexed = List.generate(parent.children!.length, (i) => i);
   indexed.sort((a, b) => parent.children![b].route(shopId).length
       .compareTo(parent.children![a].route(shopId).length));
   for (final i in indexed) {
     final route = parent.children![i].route(shopId);
-    if (currentLocation == route || currentLocation.startsWith('$route/')) {
+    if (_routeMatches(route, currentLocation, tabQuery)) {
       return i;
     }
   }
