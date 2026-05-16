@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../core/i18n/app_localizations.dart';
 import '../../core/permisions/app_permissions.dart';
 import '../../core/storage/hive_boxes.dart';
@@ -179,11 +180,12 @@ final List<ShellNavItem> kShellNavItems = [
       ),
       // Membres — page Membres pure (sans with_overview → pas d'onglet
       // Boutique ; l'onglet Copier a été retiré globalement → un seul
-      // contenu affiché, sans TabBar). supervisor_account : icône
-      // ancienne, présente dans la police bundlée.
+      // contenu affiché, sans TabBar). people_rounded : prouvée présente
+      // (parent CRM sélectionné l'utilise), supervisor_account ne
+      // s'affichait pas (codepoint absent du .otf bundlé).
       ShellNavItem(
-        icon:         Icons.supervisor_account_outlined,
-        iconSelected: Icons.supervisor_account_rounded,
+        icon:         Icons.people_rounded,
+        iconSelected: Icons.people_rounded,
         label:        (_) => 'Membres',
         route:        (id) => '/shop/$id/parametres/shop?tab=members',
         visibleIf:    (p) => p.canManageMembers,
@@ -235,10 +237,10 @@ final List<ShellNavItem> kShellNavItems = [
   // WhatsApp — groupe : modèles de messages + campagnes marketing.
   // Déplacés depuis Paramètres pour un accès direct (owner uniquement).
   ShellNavItem(
-    // chat_bubble_*_rounded : déjà utilisées (item Messagerie) → présentes
-    // dans la police bundlée. chat_outlined ne s'affichait pas.
-    icon:         Icons.chat_bubble_outline_rounded,
-    iconSelected: Icons.chat_bubble_rounded,
+    // Logo WhatsApp officiel (FontAwesome brand, police bundlée par
+    // font_awesome_flutter → glyphe garanti, pas de souci de codepoint).
+    icon:         FontAwesomeIcons.whatsapp,
+    iconSelected: FontAwesomeIcons.whatsapp,
     label:        (_) => 'WhatsApp',
     route:        (id) => '/shop/$id/parametres/whatsapp-templates',
     visibleIf:    (p) => p.isOwner,
