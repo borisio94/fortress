@@ -647,37 +647,27 @@ class _ExpenseTile extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                       color: Color(0xFFEF4444))),
               if (!row.isVirtual) ...[
-                const SizedBox(height: 2),
-                SizedBox(
-                  height: 26,
-                  child: PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_vert_rounded,
-                        size: 17, color: Color(0xFF9CA3AF)),
-                    padding: EdgeInsets.zero,
-                    tooltip: 'Actions',
-                    onSelected: (v) {
-                      if (v == 'edit')   onTap();
-                      if (v == 'delete') onDelete();
-                    },
-                    itemBuilder: (_) => [
-                      const PopupMenuItem(value: 'edit', height: 36,
-                        child: Row(children: [
-                          Icon(Icons.edit_outlined, size: 15,
-                              color: Color(0xFF3B82F6)),
-                          SizedBox(width: 8),
-                          Text('Modifier',
-                              style: TextStyle(fontSize: 12.5)),
-                        ])),
-                      const PopupMenuItem(value: 'delete', height: 36,
-                        child: Row(children: [
-                          Icon(Icons.delete_outline_rounded, size: 15,
-                              color: Color(0xFFEF4444)),
-                          SizedBox(width: 8),
-                          Text('Supprimer',
-                              style: TextStyle(fontSize: 12.5,
-                                  color: Color(0xFFEF4444))),
-                        ])),
-                    ],
+                const SizedBox(height: 6),
+                InkWell(
+                  onTap: onDelete,
+                  borderRadius: BorderRadius.circular(7),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEF4444).withValues(alpha:0.10),
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                    child: const Row(mainAxisSize: MainAxisSize.min,
+                        children: [
+                      Icon(Icons.delete_outline_rounded, size: 14,
+                          color: Color(0xFFEF4444)),
+                      SizedBox(width: 4),
+                      Text('Supprimer',
+                          style: TextStyle(fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFFEF4444))),
+                    ]),
                   ),
                 ),
               ],
