@@ -160,8 +160,11 @@ final List<ShellNavItem> kShellNavItems = [
   // CRM — groupe regroupant la relation client. Clients en sous-item
   // (extensible : segments, relances, etc. à venir).
   ShellNavItem(
-    icon:         Icons.contacts_outlined,
-    iconSelected: Icons.contacts_rounded,
+    // person_*_rounded : déjà utilisées (ancien item Clients) → présentes
+    // dans la police MaterialIcons bundlée. contacts_* (récente) ne
+    // s'affichait pas (codepoint absent du .otf embarqué).
+    icon:         Icons.people_outline_rounded,
+    iconSelected: Icons.people_rounded,
     label:        (_) => 'CRM',
     route:        (id) => '/shop/$id/crm',
     visibleIf:    (p) => p.canViewClients,
@@ -207,8 +210,9 @@ final List<ShellNavItem> kShellNavItems = [
         visibleIf:    (p) => p.canViewFinances,
       ),
       ShellNavItem(
-        icon:         Icons.savings_outlined,
-        iconSelected: Icons.savings_rounded,
+        // account_balance_rounded : déjà utilisée (ExpenseCategory.taxes).
+        icon:         Icons.account_balance_outlined,
+        iconSelected: Icons.account_balance_rounded,
         label:        (_) => 'Bénéfice net',
         route:        (id) => '/shop/$id/finances?tab=bilan',
         visibleIf:    (p) => p.canViewFinances,
@@ -218,21 +222,24 @@ final List<ShellNavItem> kShellNavItems = [
   // WhatsApp — groupe : modèles de messages + campagnes marketing.
   // Déplacés depuis Paramètres pour un accès direct (owner uniquement).
   ShellNavItem(
-    icon:         Icons.chat_outlined,
-    iconSelected: Icons.chat_rounded,
+    // chat_bubble_*_rounded : déjà utilisées (item Messagerie) → présentes
+    // dans la police bundlée. chat_outlined ne s'affichait pas.
+    icon:         Icons.chat_bubble_outline_rounded,
+    iconSelected: Icons.chat_bubble_rounded,
     label:        (_) => 'WhatsApp',
     route:        (id) => '/shop/$id/parametres/whatsapp-templates',
     visibleIf:    (p) => p.isOwner,
     children: [
       ShellNavItem(
-        icon:         Icons.chat_outlined,
-        iconSelected: Icons.chat_rounded,
+        icon:         Icons.chat_bubble_outline_rounded,
+        iconSelected: Icons.chat_bubble_rounded,
         label:        (l) => l.waTemplatesTitle,
         route:        (id) => '/shop/$id/parametres/whatsapp-templates',
         visibleIf:    (p) => p.isOwner,
       ),
       ShellNavItem(
-        icon:         Icons.campaign_outlined,
+        // campaign_rounded : déjà utilisée (ExpenseCategory.marketing).
+        icon:         Icons.campaign_rounded,
         iconSelected: Icons.campaign_rounded,
         label:        (_) => 'Campagnes marketing',
         route:        (id) => '/shop/$id/campaigns',
