@@ -583,11 +583,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/crm/notify',
               builder: (c, s) => SendNotificationPage(shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/finances',
-              pageBuilder: (c, s) => _shellPage(s,
+              pageBuilder: (c, s) {
+                final tab = s.uri.queryParameters['tab'];
+                // ValueKey dépendante du `tab` : state.pageKey est basée
+                // sur le PATH uniquement → sans cette key, changer de
+                // sous-menu Finances (?tab=X) ne recrée pas la page et
+                // l'onglet ne bascule pas. La key force Flutter à
+                // reconstruire FinancesPage avec le bon initialTab.
+                return _shellPage(s,
                   FinancesPage(
-                    shopId: s.pathParameters['shopId']!,
-                    initialTab: s.uri.queryParameters['tab'],
-                  ))),
+                    key:        ValueKey('finances-${tab ?? 'revenus'}'),
+                    shopId:     s.pathParameters['shopId']!,
+                    initialTab: tab,
+                  ));
+              }),
           GoRoute(path: '/shop/:shopId/historique',
               builder: (c, s) => ActivityLogPage(shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/tickets',
