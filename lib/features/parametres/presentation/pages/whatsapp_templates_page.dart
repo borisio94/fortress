@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -44,6 +45,52 @@ class _WhatsappTemplatesPageState
       _TypeFilterBar(
         current: _filter,
         onChanged: (t) => setState(() => _filter = t),
+      ),
+      // Accès aux modèles de transfert livraison (regroupés ici depuis
+      // Paramètres). Système distinct (attribution par livreur/partenaire)
+      // → page dédiée, mais accessible depuis le même hub « Modèles ».
+      Material(
+        color: Colors.white,
+        child: InkWell(
+          onTap: () => context.push(
+              '/shop/${widget.shopId}/parametres/delivery-templates'),
+          child: Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border(
+                  bottom: BorderSide(color: AppColors.divider)),
+            ),
+            child: Row(children: [
+              Container(
+                width: 34, height: 34,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(Icons.local_shipping_rounded,
+                    size: 17, color: AppColors.primary),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Modèles de livraison',
+                        style: TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w700)),
+                    Text('Messages de transfert au livreur / partenaire',
+                        style: TextStyle(
+                            fontSize: 11, color: Color(0xFF9CA3AF))),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded,
+                  size: 18,
+                  color: AppColors.textHint.withValues(alpha: 0.6)),
+            ]),
+          ),
+        ),
       ),
       Expanded(
         child: asyncList.when(

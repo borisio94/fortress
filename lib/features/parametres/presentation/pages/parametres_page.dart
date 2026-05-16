@@ -176,15 +176,8 @@ class ParametresPage extends ConsumerWidget {
                   locked: !perms.canEditShopInfo,
                   onTap: () => context.push('/shop/$shopId/parametres/payments'),
                 ),
-                _Tile(
-                  icon: Icons.local_shipping_outlined,
-                  label: l.deliveryTemplatesTitle,
-                  subtitle: l.deliveryTemplatesSubtitle,
-                  color: AppColors.primary,
-                  locked: !perms.canEditShopInfo,
-                  onTap: () => context.push(
-                      '/shop/$shopId/parametres/delivery-templates'),
-                ),
+                // Templates de livraison déplacés dans la page « Modèles
+                // WhatsApp » (regroupement des modèles de message).
                 _Tile(
                   icon: Icons.handshake_outlined,
                   label: 'Comptes partenaires',
