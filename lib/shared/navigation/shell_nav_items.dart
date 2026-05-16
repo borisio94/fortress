@@ -177,6 +177,17 @@ final List<ShellNavItem> kShellNavItems = [
         route:        (id) => '/shop/$id/crm',
         visibleIf:    (p) => p.canViewClients,
       ),
+      // Membres déplacé ici (ex-item « Employés & permissions »).
+      // supervisor_account : icône Material ancienne → présente dans la
+      // police bundlée.
+      ShellNavItem(
+        icon:         Icons.supervisor_account_outlined,
+        iconSelected: Icons.supervisor_account_rounded,
+        label:        (l) => l.paramEmployes,
+        route:        (id) => '/shop/$id/parametres/shop'
+            '?tab=members&with_overview=1',
+        visibleIf:    (p) => p.canManageMembers,
+      ),
     ],
   ),
   // Finances — groupe : chaque sous-item ouvre la page sur l'onglet
@@ -210,8 +221,10 @@ final List<ShellNavItem> kShellNavItems = [
         visibleIf:    (p) => p.canViewFinances,
       ),
       ShellNavItem(
-        // account_balance_rounded : déjà utilisée (ExpenseCategory.taxes).
-        icon:         Icons.account_balance_outlined,
+        // account_balance_rounded : déjà utilisée (ExpenseCategory.taxes),
+        // présente dans la police. Même icône pour les 2 états car
+        // account_balance_outlined (variante récente) ne s'affiche pas.
+        icon:         Icons.account_balance_rounded,
         iconSelected: Icons.account_balance_rounded,
         label:        (_) => 'Bénéfice net',
         route:        (id) => '/shop/$id/finances?tab=bilan',
@@ -247,15 +260,9 @@ final List<ShellNavItem> kShellNavItems = [
       ),
     ],
   ),
-  // Employés & permissions — déplacé depuis Paramètres › Membres.
-  ShellNavItem(
-    icon:         Icons.badge_outlined,
-    iconSelected: Icons.badge_rounded,
-    label:        (_) => 'Employés & permissions',
-    route:        (id) => '/shop/$id/parametres/shop'
-        '?tab=members&with_overview=1',
-    visibleIf:    (p) => p.canManageMembers,
-  ),
+  // (Employés & permissions retiré : Membres est désormais un sous-item
+  //  de CRM ; le reste de la config boutique reste dans Paramètres ›
+  //  Paramètres de boutique.)
   // Item « Commandes » supprimé du drawer (round 14) — les sous-pages
   // Fournisseurs / Réceptions / Retours restent accessibles via les
   // actions inline produits ou directement par leurs routes.
