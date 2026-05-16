@@ -177,15 +177,15 @@ final List<ShellNavItem> kShellNavItems = [
         route:        (id) => '/shop/$id/crm',
         visibleIf:    (p) => p.canViewClients,
       ),
-      // Membres déplacé ici (ex-item « Employés & permissions »).
-      // supervisor_account : icône Material ancienne → présente dans la
-      // police bundlée.
+      // Membres — page Membres pure (sans with_overview → pas d'onglet
+      // Boutique ; l'onglet Copier a été retiré globalement → un seul
+      // contenu affiché, sans TabBar). supervisor_account : icône
+      // ancienne, présente dans la police bundlée.
       ShellNavItem(
         icon:         Icons.supervisor_account_outlined,
         iconSelected: Icons.supervisor_account_rounded,
-        label:        (l) => l.paramEmployes,
-        route:        (id) => '/shop/$id/parametres/shop'
-            '?tab=members&with_overview=1',
+        label:        (_) => 'Membres',
+        route:        (id) => '/shop/$id/parametres/shop?tab=members',
         visibleIf:    (p) => p.canManageMembers,
       ),
     ],

@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../core/widgets/owner_pin_dialog.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -51,12 +52,11 @@ class ShopSettingsPage extends ConsumerStatefulWidget {
 class _ShopSettingsPageState extends ConsumerState<ShopSettingsPage>
     with SingleTickerProviderStateMixin {
   late TabController _tab;
-  bool _loadingMembers = false;
-  List<Map<String, dynamic>> _members = [];
 
+  // Onglet « Copier » retiré (plus utilisé). Reste « Membres » ; l'onglet
+  // « Boutique » (overview) n'est ajouté que si showOverviewTab.
   static const _baseTabs = [
     (icon: Icons.people_alt_rounded,       label: 'Membres'),
-    (icon: Icons.content_copy_rounded,     label: 'Copier'),
   ];
 
   static const _overviewTabDef =
@@ -70,26 +70,24 @@ class _ShopSettingsPageState extends ConsumerState<ShopSettingsPage>
   /// l'onglet Boutique (overview) en première position. `danger` est
   /// historique (onglet retiré) — mappé sur Membres pour rétro-compat.
   int _initialIndexFor(ShopSettingsTab t) {
+    // Onglets : [Boutique?, Membres]. Boutique en 0 si présent, Membres
+    // toujours dernier. `copy`/`danger` (legacy enum) → Membres.
     if (widget.showOverviewTab) {
       return switch (t) {
         ShopSettingsTab.overview => 0,
-        ShopSettingsTab.members || ShopSettingsTab.danger => 1,
-        ShopSettingsTab.copy     => 2,
+        _                        => 1, // members / copy / danger
       };
     }
-    return switch (t) {
-      ShopSettingsTab.overview
-          || ShopSettingsTab.members
-          || ShopSettingsTab.danger => 0,
-      ShopSettingsTab.copy   => 1,
-    };
+    return 0; // un seul onglet (Membres)
   }
 
   /// Index de l'onglet « Membres » selon le mode d'affichage.
   int get _membersIndex => widget.showOverviewTab ? 1 : 0;
 
-  /// Index de l'onglet « Copier » (toujours le dernier).
-  int get _copyIndex => _tabs.length - 1;
+  /// Index de l'onglet visible — driven par un listener du `_tab` plutôt
+  /// que par `TabBarView` (cf. `build`). Permet d'utiliser un IndexedStack
+  /// qui pré-monte tous les onglets et évite le flash du premier swap.
+  late int _shownIndex;
 
   @override
   void initState() {
@@ -99,20 +97,33 @@ class _ShopSettingsPageState extends ConsumerState<ShopSettingsPage>
       vsync: this,
       initialIndex: _initialIndexFor(widget.initialTab),
     );
+    _shownIndex = _tab.index;
     // Sync URL ↔ tab : sans ce listener, switcher de tab via la TabBar
     // interne ne change pas l'URL, donc le ShopShell ne sait pas qu'on
     // est passé sur Membres et le bouton « + » de la topbar shell ne
     // s'affiche pas. Avec ce sync, /parametres/shop ↔ /parametres/users
     // suit le tap utilisateur.
     _tab.addListener(_syncUrlWithTab);
-    _loadMembers();
+    _tab.addListener(_onTabIndexChanged);
   }
 
   @override
   void dispose() {
     _tab.removeListener(_syncUrlWithTab);
+    _tab.removeListener(_onTabIndexChanged);
     _tab.dispose();
     super.dispose();
+  }
+
+  /// Met à jour `_shownIndex` quand `_tab.index` change réellement (pas
+  /// pendant l'animation, où l'index est déjà à la cible mais
+  /// indexIsChanging=true). setState seulement quand c'est nécessaire
+  /// pour éviter de spammer l'IndexedStack.
+  void _onTabIndexChanged() {
+    if (!mounted) return;
+    if (_shownIndex != _tab.index) {
+      setState(() => _shownIndex = _tab.index);
+    }
   }
 
   void _syncUrlWithTab() {
@@ -120,21 +131,20 @@ class _ShopSettingsPageState extends ConsumerState<ShopSettingsPage>
     // l'index a vraiment changé (post-animation OU swipe terminé).
     if (_tab.indexIsChanging) return;
     if (!mounted) return;
-    // Membres → /parametres/users (active le bouton « + » dans la topbar
-    // shell). Boutique/Copier → URL générique /parametres/shop. Pour
-    // Copier on ajoute `tab=copy` car le path /parametres/shop seul est
-    // ambigu (Boutique vs Copier) — sans ce marqueur, le push démontait
-    // la page et la reconstruisait avec l'onglet Boutique par défaut,
-    // d'où le clignotement Copier→Boutique signalé.
+    // Tous les onglets restent sur le même path `/parametres/shop` —
+    // seul le query `tab=members|copy` (overview = pas de query) change.
+    // GoRouter conserve la même `pageKey` quand le path ne bouge pas,
+    // donc la page n'est jamais démontée → plus de flash visuel entre
+    // tabs. ShopShell._topbarActionsFor lit `tab=members` pour activer
+    // le bouton « + » dans la topbar quand on est sur l'onglet Membres.
     final isMembers = _tab.index == _membersIndex;
-    final isCopy    = _tab.index == _copyIndex && !isMembers;
-    final basePath  = isMembers
-        ? '/shop/${widget.shopId}/parametres/users'
-        : '/shop/${widget.shopId}/parametres/shop';
+    final basePath  = '/shop/${widget.shopId}/parametres/shop';
     final queryParts = <String>[
       if (widget.showOverviewTab) 'with_overview=1',
-      if (isCopy)                 'tab=copy',
     ];
+    if (isMembers) {
+      queryParts.add('tab=members');
+    }
     final target = queryParts.isEmpty
         ? basePath
         : '$basePath?${queryParts.join('&')}';
@@ -144,26 +154,22 @@ class _ShopSettingsPageState extends ConsumerState<ShopSettingsPage>
     if (currentFull != target) context.go(target);
   }
 
-  Future<void> _loadMembers() async {
-    setState(() => _loadingMembers = true);
-    try {
-      final m = await AppDatabase.getShopMembers(widget.shopId);
-      if (mounted) setState(() => _members = m);
-    } finally {
-      if (mounted) setState(() => _loadingMembers = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final shop = ref.watch(currentShopProvider);
+    // IndexedStack monte les 3 (ou 2) onglets en même temps au mount
+    // initial — premier swap = page déjà construite → pas de flash.
+    // Tradeoff vs TabBarView : plus d'animation de swipe entre tabs,
+    // mais transition instantanée et stable.
+    final idx = _shownIndex.clamp(0, _tabs.length - 1);
     return Column(children: [
-      // ── Tab Bar ────────────────────────────────────────────────
-      _TabBar(controller: _tab, tabs: _tabs),
-      // ── Contenu ────────────────────────────────────────────────
+      // TabBar masqué quand un seul onglet (accès « Membres » direct
+      // depuis CRM → page Membres pure, sans onglet unique disgracieux).
+      if (_tabs.length > 1)
+        _TabBar(controller: _tab, tabs: _tabs),
       Expanded(
-        child: TabBarView(
-          controller: _tab,
+        child: IndexedStack(
+          index: idx,
           children: [
             if (widget.showOverviewTab)
               _OverviewTab(shop: shop, shopId: widget.shopId),
@@ -171,7 +177,6 @@ class _ShopSettingsPageState extends ConsumerState<ShopSettingsPage>
               shopId:          widget.shopId,
               embedInScaffold: false,
             ),
-            _CopyTab(shopId: widget.shopId, onSnack: _snack, ref: ref),
           ],
         ),
       ),
@@ -482,7 +487,7 @@ class _ShopHeroCard extends StatelessWidget {
         ),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
-          BoxShadow(color: AppColors.primary.withOpacity(0.25),
+          BoxShadow(color: AppColors.primary.withValues(alpha:0.25),
               blurRadius: 12, offset: const Offset(0, 4)),
         ],
       ),
@@ -492,7 +497,7 @@ class _ShopHeroCard extends StatelessWidget {
           Container(
             width: 56, height: 56,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.22),
+              color: Colors.white.withValues(alpha:0.22),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Icon(_sectorIcon(shop.sector),
@@ -530,7 +535,7 @@ class _ShopHeroCard extends StatelessWidget {
               label: Text(l.shopActionShare),
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.white,
-                side: BorderSide(color: Colors.white.withOpacity(0.5)),
+                side: BorderSide(color: Colors.white.withValues(alpha:0.5)),
                 minimumSize: const Size(0, 38),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -573,7 +578,7 @@ class _HeroBadge extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
     decoration: BoxDecoration(
-      color: Colors.white.withOpacity(0.22),
+      color: Colors.white.withValues(alpha:0.22),
       borderRadius: BorderRadius.circular(20),
     ),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -589,257 +594,6 @@ class _HeroBadge extends StatelessWidget {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ONGLET 2 — MEMBRES
-// ═══════════════════════════════════════════════════════════════════════════════
-
-class _MembersTab extends StatelessWidget {
-  final String shopId;
-  final List<Map<String, dynamic>> members;
-  final bool loading;
-  final VoidCallback onRefresh;
-  final void Function(String, {required bool success}) onSnack;
-  const _MembersTab({
-    required this.shopId,
-    required this.members,
-    required this.loading,
-    required this.onRefresh,
-    required this.onSnack,
-  });
-
-  /// Catégorise un membre selon son rôle.
-  /// `owner` = propriétaire boutique (rôle = owner OU shopOwnerId == userId)
-  /// `admin` = rôle admin
-  /// `staff` = manager / cashier / viewer / autre
-  String _category(Map<String, dynamic> m, String? ownerId) {
-    final role = m['role'] as String? ?? 'cashier';
-    if (role == 'owner') return 'owner';
-    final uid = m['user_id'] as String?;
-    if (ownerId != null && uid == ownerId) return 'owner';
-    if (role == 'admin') return 'admin';
-    return 'staff';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l = context.l10n;
-    final currentUserId = LocalStorageService.getCurrentUser()?.id ?? '';
-    final shop = LocalStorageService.getShop(shopId);
-    final ownerId = shop?.ownerId;
-    final owners = members.where((m) => _category(m, ownerId) == 'owner').toList();
-    final admins = members.where((m) => _category(m, ownerId) == 'admin').toList();
-    final staff  = members.where((m) => _category(m, ownerId) == 'staff').toList();
-    final activeCount = members.where((m) {
-      final s = m['status'] as String?;
-      return s == null || s == 'active';
-    }).length;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        // ── Topbar : titre « Membres » + CTA + Nouveau membre ─────────
-        Row(children: [
-          Expanded(child: Text(l.paramEmployes,
-              maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary))),
-          _PrimaryBtn(
-            label: l.shopMembersAddNew,
-            icon: Icons.person_add_rounded,
-            onTap: () => _checkQuotaAndInvite(
-                context, shopId, members.length, onSnack, onRefresh),
-          ),
-        ]),
-        const SizedBox(height: 12),
-
-        // ── Stats 3 colonnes : Total · Actifs · Admins X/3 ───────────
-        // Spec round 9 prompt 3 : gap 5px sur mobile (vs 8 desktop).
-        Builder(builder: (ctx) {
-          final gap = MediaQuery.of(ctx).size.width < 600 ? 5.0 : 8.0;
-          return Row(children: [
-            Expanded(child: _MembersStat(
-                label: l.shopStatTotal,
-                value: '${members.length}')),
-            SizedBox(width: gap),
-            Expanded(child: _MembersStat(
-                label: l.shopStatActive,
-                value: '$activeCount',
-                valueColor: AppColors.secondary)),
-            SizedBox(width: gap),
-            Expanded(child: _MembersStat(
-                label: l.shopStatAdmins,
-                value: '${admins.length}/3',
-                valueColor: AppColors.primary)),
-          ]);
-        }),
-        const SizedBox(height: 14),
-
-        // ── Grille des rôles (4 cards avec icône, nom, description) ──
-        const _RoleGrid(),
-        const SizedBox(height: 14),
-
-        if (loading)
-          const Center(child: Padding(
-              padding: EdgeInsets.all(40),
-              child: CircularProgressIndicator()))
-        else if (members.isEmpty)
-          _EmptyMembers(
-            onInvite: () => _checkQuotaAndInvite(
-                context, shopId, members.length, onSnack, onRefresh),
-          )
-        else ...[
-          // ── Section Propriétaire (liseré gauche 3px primary, pas de
-          // bouton supprimer pour l'owner — protégé spec round 3).
-          if (owners.isNotEmpty) _MembersSection(
-            title: l.shopSectionOwner,
-            members: owners,
-            shopId: shopId,
-            currentUserId: currentUserId,
-            highlighted: true,
-            allowRemove: false,
-            onRefresh: onRefresh,
-          ),
-          if (owners.isNotEmpty) const SizedBox(height: 12),
-          // ── Section Admins ─────────────────────────────────────────
-          _MembersSection(
-            title: l.shopSectionAdmins,
-            members: admins,
-            shopId: shopId,
-            currentUserId: currentUserId,
-            highlighted: false,
-            allowRemove: true,
-            onRefresh: onRefresh,
-          ),
-          const SizedBox(height: 12),
-          // ── Section Personnel ──────────────────────────────────────
-          _MembersSection(
-            title: l.shopSectionStaff,
-            members: staff,
-            shopId: shopId,
-            currentUserId: currentUserId,
-            highlighted: false,
-            allowRemove: true,
-            onRefresh: onRefresh,
-            emptyHint: l.shopSectionStaffEmpty,
-          ),
-        ],
-      ],
-    );
-  }
-
-  Future<bool> _confirmRemove(BuildContext context) async {
-    bool ok = false;
-    await AppConfirmDialog.show(
-      context: context,
-      icon: Icons.person_remove_outlined,
-      iconColor: AppColors.error,
-      title: 'Retirer ce membre ?',
-      body: const Text('Il perdra l\'accès à cette boutique.',
-          style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-      cancelLabel: 'Annuler',
-      confirmLabel: 'Retirer',
-      confirmColor: AppColors.error,
-      onConfirm: () => ok = true,
-    );
-    return ok;
-  }
-
-  /// Pré-check quota utilisateurs : si limite atteinte → UpgradeSheet,
-  /// sinon ouvre le dialog d'invitation.
-  void _checkQuotaAndInvite(BuildContext context, String shopId,
-      int currentMemberCount,
-      void Function(String, {required bool success}) onSnack,
-      VoidCallback onRefresh) {
-    final container = ProviderScope.containerOf(context, listen: false);
-    final plan = container.read(currentPlanProvider);
-    if (!plan.canAddUser(currentMemberCount)) {
-      UpgradeSheet.showQuota(context,
-          label:    context.l10n.paramEmployes,
-          current:  currentMemberCount,
-          max:      plan.maxUsersPerShop);
-      return;
-    }
-    _showInviteDialog(context, shopId, onSnack, onRefresh);
-  }
-
-  void _showInviteDialog(BuildContext context, String shopId,
-      void Function(String, {required bool success}) onSnack,
-      VoidCallback onRefresh) {
-    final emailCtrl = TextEditingController();
-    var selectedRole = UserRole.cashier;
-    showDialog(
-      context: context,
-      builder: (dc) => StatefulBuilder(
-        builder: (ctx, setSt) => AlertDialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-          contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-          actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          title: Row(children: [
-            Container(
-              width: 32, height: 32,
-              decoration: BoxDecoration(
-                color: AppColors.primarySurface,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(Icons.person_add_outlined,
-                  size: 16, color: AppColors.primary),
-            ),
-            const SizedBox(width: 10),
-            const Text('Inviter un membre',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-          ]),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            const SizedBox(height: 4),
-            _FieldLabel('Adresse email'),
-            const SizedBox(height: 6),
-            _InviteField(ctrl: emailCtrl),
-            const SizedBox(height: 14),
-            _FieldLabel('Rôle'),
-            const SizedBox(height: 6),
-            ...UserRole.values.map((r) => _RoleOption(
-              role: r,
-              selected: selectedRole == r,
-              onTap: () => setSt(() => selectedRole = r),
-            )),
-          ]),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dc).pop(),
-              child: const Text('Annuler',
-                  style: TextStyle(color: AppColors.textSecondary)),
-            ),
-            SizedBox(
-              width: 120,
-              child: AppPrimaryButton(
-                label: 'Inviter',
-                icon: Icons.send_rounded,
-                onTap: () async {
-                  final email = emailCtrl.text.trim();
-                  if (email.isEmpty) return;
-                  Navigator.of(dc).pop();
-                  try {
-                    final res = await AppDatabase.inviteMember(
-                        shopId, email, selectedRole);
-                    onRefresh();
-                    final msg = res.outcome == InviteOutcome.addedImmediately
-                        ? 'Membre ajouté : ${res.invitedName ?? res.email}'
-                        : 'Invitation envoyée à ${res.email}';
-                    onSnack(msg, success: true);
-                  } catch (e) {
-                    onSnack(e.toString().replaceAll('Exception: ', ''),
-                        success: false);
-                  }
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 /// Card stat compacte pour la rangée 3 colonnes du _MembersTab.
 class _MembersStat extends StatelessWidget {
@@ -1055,7 +809,7 @@ class _CopyTab extends StatelessWidget {
                               height: 1.3)),
                     ])),
                 Icon(Icons.arrow_forward_ios_rounded,
-                    size: 14, color: AppColors.primary.withOpacity(0.6)),
+                    size: 14, color: AppColors.primary.withValues(alpha:0.6)),
               ]),
             ),
           ),
@@ -1219,7 +973,7 @@ class _InfoRow extends StatelessWidget {
         Container(
           width: 28, height: 28,
           decoration: BoxDecoration(
-            color: iconC.withOpacity(0.12),
+            color: iconC.withValues(alpha:0.12),
             borderRadius: BorderRadius.circular(7),
           ),
           alignment: Alignment.center,
@@ -1277,7 +1031,7 @@ class _SectionHeader extends StatelessWidget {
       Container(
         width: 40, height: 40,
         decoration: BoxDecoration(
-          color: iconColor.withOpacity(0.1),
+          color: iconColor.withValues(alpha:0.1),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(icon, size: 20, color: iconColor),
@@ -1369,7 +1123,7 @@ class _RoleCard extends StatelessWidget {
       Container(
         width: 32, height: 32,
         decoration: BoxDecoration(
-          color: color.withOpacity(0.12),
+          color: color.withValues(alpha:0.12),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(icon, size: 17, color: color),
@@ -1447,14 +1201,14 @@ class _MemberRow extends StatelessWidget {
         padding: EdgeInsets.symmetric(vertical: isMobile ? 8 : 10),
         child: Row(children: [
           // Avatar : sur mobile fond primarySurface fixe (spec) ; sur
-          // desktop fond avatarColor.withOpacity(0.15) (legacy round 3).
+          // desktop fond avatarColor.withValues(alpha:0.15) (legacy round 3).
           Stack(clipBehavior: Clip.none, children: [
             Container(
               width: avatarSize, height: avatarSize,
               decoration: BoxDecoration(
                 color: isMobile
                     ? AppColors.primarySurface
-                    : avatarColor.withOpacity(0.15),
+                    : avatarColor.withValues(alpha:0.15),
                 shape: BoxShape.circle,
               ),
               child: Center(child: Text(initial,
@@ -1721,9 +1475,9 @@ class _InfoBanner extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
-      color: AppColors.info.withOpacity(0.08),
+      color: AppColors.info.withValues(alpha:0.08),
       borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: AppColors.info.withOpacity(0.25)),
+      border: Border.all(color: AppColors.info.withValues(alpha:0.25)),
     ),
     child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Icon(Icons.info_outline, size: 16, color: AppColors.info),
