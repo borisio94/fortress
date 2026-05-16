@@ -344,6 +344,26 @@ class SaleLocalDatasource {
     AppDatabase.bgWriteOrder(supaMap);
   }
 
+  /// Supprime un frais (`orders.fees[feeIndex]`) d'une commande existante.
+  /// Persiste Hive + Supabase et notifie le changement pour que la page
+  /// Dépenses (frais virtuels dérivés de `orders.fees`) se rafraîchisse
+  /// immédiatement. No-op si la commande ou l'index n'existe pas.
+  Future<void> deleteOrderFee(String orderId, int feeIndex) async {
+    final raw = _ordersBox.get(orderId);
+    if (raw == null) return;
+    final map = Map<String, dynamic>.from(raw);
+    final fees = (map['fees'] as List?)?.toList() ?? [];
+    if (feeIndex < 0 || feeIndex >= fees.length) return;
+    fees.removeAt(feeIndex);
+    map['fees'] = fees;
+    await _ordersBox.put(orderId, map);
+    final shopId = map['shop_id'] as String?;
+    if (shopId != null) AppDatabase.notifyOrderChange(shopId);
+    final supaMap = Map<String, dynamic>.from(map);
+    supaMap.remove('image_url');
+    AppDatabase.bgWriteOrder(supaMap);
+  }
+
   /// Marque une commande comme "annulée par le client" : statut → cancelled
   /// + persiste la raison fournie par l'opérateur.
   /// Effets de bord (notifs, métriques client, sync Supabase) délégués à

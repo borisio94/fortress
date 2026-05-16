@@ -13,6 +13,7 @@ import '../../../../shared/widgets/empty_state_widget.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../caisse/domain/entities/sale.dart' show PaymentMethod;
+import '../../../caisse/data/repositories/sale_local_datasource.dart';
 import '../../domain/entities/expense.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -58,6 +59,7 @@ class _ExpenseRow {
   final DateTime paidAt;
   final Expense? source;    // non-null pour les dépenses directes
   final String? orderId;    // non-null pour les frais de commande
+  final int? feeIndex;      // index du frais dans orders.fees (frais cmd)
   /// Emplacement rattaché (cf. dashViewFilterProvider) :
   ///   null = global, '_base' = boutique, <id> = partenaire.
   /// Dépense directe → Expense.locationId. Frais de commande →
@@ -72,6 +74,7 @@ class _ExpenseRow {
     required this.paidAt,
     this.source,
     this.orderId,
+    this.feeIndex,
     this.locationId,
   });
 
@@ -102,6 +105,7 @@ class _ExpenseRow {
     label:    feeLabel.isEmpty ? 'Frais de commande' : feeLabel,
     paidAt:   paidAt,
     orderId:  orderId,
+    feeIndex: feeIndex,
     locationId: deliveryLocationId,
   );
 }
@@ -334,9 +338,44 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
   }
 
   Future<void> _confirmDelete(_ExpenseRow row) async {
+    // Frais de commande (virtuel) : on supprime l'entrée correspondante
+    // dans `orders.fees` de la commande source. La ligne disparaît au
+    // prochain _refresh (listener `orders`).
     if (row.isVirtual) {
-      AppSnack.info(context,
-          'Frais de commande : modifie-le depuis la page Caisse.');
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Supprimer ce frais de commande ?'),
+          content: Text(
+              '${row.label} — ${CurrencyFormatter.format(row.amount)}\n\n'
+              'Le frais sera retiré de la commande. Le prix de revient '
+              'de la commande sera recalculé en conséquence.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Annuler')),
+            FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFEF4444)),
+                child: const Text('Supprimer')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+      final orderId  = row.orderId;
+      final feeIndex = row.feeIndex;
+      if (orderId == null || feeIndex == null) return;
+      await SaleLocalDatasource().deleteOrderFee(orderId, feeIndex);
+      await ActivityLogService.log(
+        action:      'order_fee_deleted',
+        targetType:  'order',
+        targetId:    orderId,
+        targetLabel: row.label,
+        shopId:      widget.shopId,
+        details:     {'amount': row.amount, 'fee_index': feeIndex},
+      );
+      if (mounted) AppSnack.success(context, 'Frais supprimé');
       return;
     }
     final e = row.source!;
@@ -646,7 +685,7 @@ class _ExpenseTile extends StatelessWidget {
                   style: const TextStyle(fontSize: 14,
                       fontWeight: FontWeight.w700,
                       color: Color(0xFFEF4444))),
-              if (!row.isVirtual) ...[
+              ...[
                 const SizedBox(height: 6),
                 InkWell(
                   onTap: onDelete,
@@ -677,8 +716,8 @@ class _ExpenseTile extends StatelessWidget {
       ),
     );
 
-    // Swipe-to-delete uniquement pour les dépenses directes (pas les frais)
-    if (row.isVirtual) return tile;
+    // Swipe-to-delete pour toutes les lignes (dépenses directes ET frais
+    // de commande — la confirmation distingue les deux cas).
     return Dismissible(
       key: ValueKey(row.id),
       direction: DismissDirection.endToStart,
