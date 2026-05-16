@@ -13,6 +13,7 @@ enum ExpenseCategory {
   subscription,  // Abonnements, logiciels, services
   marketing,     // Publicité, promotions, influenceurs
   shipping,      // Expéditions, logistique générale
+  storage,       // Stockage, entrepôt, location de dépôt
   rent,          // Loyer, charges locatives
   utilities,     // Électricité, eau, internet, téléphone
   salaries,      // Salaires, honoraires, primes
@@ -26,6 +27,7 @@ extension ExpenseCategoryX on ExpenseCategory {
     ExpenseCategory.subscription => 'Abonnement',
     ExpenseCategory.marketing    => 'Publicité',
     ExpenseCategory.shipping     => 'Expédition',
+    ExpenseCategory.storage      => 'Stockage',
     ExpenseCategory.rent         => 'Loyer',
     ExpenseCategory.utilities    => 'Services',
     ExpenseCategory.salaries     => 'Salaires',
@@ -38,6 +40,7 @@ extension ExpenseCategoryX on ExpenseCategory {
     ExpenseCategory.subscription => Icons.subscriptions_rounded,
     ExpenseCategory.marketing    => Icons.campaign_rounded,
     ExpenseCategory.shipping     => Icons.local_shipping_rounded,
+    ExpenseCategory.storage      => Icons.warehouse_rounded,
     ExpenseCategory.rent         => Icons.home_work_rounded,
     ExpenseCategory.utilities    => Icons.bolt_rounded,
     ExpenseCategory.salaries     => Icons.payments_rounded,
@@ -50,6 +53,7 @@ extension ExpenseCategoryX on ExpenseCategory {
     ExpenseCategory.subscription => const Color(0xFF3B82F6),
     ExpenseCategory.marketing    => const Color(0xFFEC4899),
     ExpenseCategory.shipping     => const Color(0xFF8B5CF6),
+    ExpenseCategory.storage      => const Color(0xFF0EA5E9),
     ExpenseCategory.rent         => const Color(0xFF6366F1),
     ExpenseCategory.utilities    => const Color(0xFFF59E0B),
     ExpenseCategory.salaries     => const Color(0xFF10B981),
