@@ -30,9 +30,6 @@ dependencies:
   dio: ^5.4.3
   http: ^1.2.1
 
-  # Icônes de marque (logo WhatsApp officiel pour la nav).
-  font_awesome_flutter: ^10.7.0
-
   # ── Local storage (offline-first) ───────────────────────────────
   hive_flutter: ^1.1.0
   path_provider: ^2.1.3

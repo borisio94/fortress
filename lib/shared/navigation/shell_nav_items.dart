@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../core/i18n/app_localizations.dart';
 import '../../core/permisions/app_permissions.dart';
 import '../../core/storage/hive_boxes.dart';
@@ -237,10 +236,11 @@ final List<ShellNavItem> kShellNavItems = [
   // WhatsApp — groupe : modèles de messages + campagnes marketing.
   // Déplacés depuis Paramètres pour un accès direct (owner uniquement).
   ShellNavItem(
-    // Logo WhatsApp officiel (FontAwesome brand, police bundlée par
-    // font_awesome_flutter → glyphe garanti, pas de souci de codepoint).
-    icon:         FontAwesomeIcons.whatsapp,
-    iconSelected: FontAwesomeIcons.whatsapp,
+    // Bulle de message Material (chat_bubble) : prouvée présente (item
+    // Messagerie). Le glyphe FontAwesome Brands "whatsapp" ne se chargeait
+    // pas sur web release (police Brands non embarquée → carré tofu).
+    icon:         Icons.chat_bubble_outline_rounded,
+    iconSelected: Icons.chat_bubble_rounded,
     label:        (_) => 'WhatsApp',
     route:        (id) => '/shop/$id/parametres/whatsapp-templates',
     visibleIf:    (p) => p.isOwner,
