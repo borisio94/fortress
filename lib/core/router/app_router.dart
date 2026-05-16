@@ -584,7 +584,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               builder: (c, s) => SendNotificationPage(shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/finances',
               pageBuilder: (c, s) => _shellPage(s,
-                  FinancesPage(shopId: s.pathParameters['shopId']!))),
+                  FinancesPage(
+                    shopId: s.pathParameters['shopId']!,
+                    initialTab: s.uri.queryParameters['tab'],
+                  ))),
           GoRoute(path: '/shop/:shopId/historique',
               builder: (c, s) => ActivityLogPage(shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/tickets',

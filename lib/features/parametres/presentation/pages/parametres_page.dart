@@ -77,43 +77,11 @@ class ParametresPage extends ConsumerWidget {
                     onTap: () =>
                         context.push('/shop/$shopId/parametres/caisse'),
                   ),
-                // Modèles WhatsApp → owner uniquement (libellés partagés à
-                // la boutique entière, vus par tous les clients).
-                if (perms.isOwner)
-                  _Tile(
-                    icon: Icons.chat_outlined,
-                    label: l.waTemplatesTitle,
-                    subtitle: l.waTemplatesSubtitle,
-                    color: const Color(0xFF25D366),
-                    onTap: () => context.push(
-                        '/shop/$shopId/parametres/whatsapp-templates'),
-                  ),
-                // Campagnes marketing → owner uniquement.
-                if (perms.isOwner)
-                  _Tile(
-                    icon: Icons.campaign_outlined,
-                    label: 'Campagnes marketing',
-                    subtitle: 'Promotions et annonces nouveautés',
-                    color: const Color(0xFFEF4444),
-                    onTap: () => context.push('/shop/$shopId/campaigns'),
-                  ),
-                // Membres : admin (peut inviter) ET owner.
-                // On push directement la cible finale (ShopSettingsPage avec
-                // l'onglet Membres) — `/parametres/users` existe encore mais
-                // redirige vers cette URL ; éviter la redirect en interne
-                // garde un seul match côté GoRouter.
-                if (perms.canManageMembers)
-                  _Tile(
-                    icon: Icons.people_rounded,
-                    label: l.paramEmployes,
-                    subtitle: l.paramEmployesSubtitle,
-                    color: AppColors.primary,
-                    onTap: () => context.push(
-                        '/shop/$shopId/parametres/shop'
-                        '?tab=members&with_overview=1'),
-                  ),
-                // Emplacements de stock retiré — accessible directement
-                // depuis la page Inventaire pour éviter la duplication.
+                // Modèles WhatsApp + Campagnes marketing : déplacés dans
+                // l'item « WhatsApp » du drawer (accès direct).
+                // Membres : déplacé dans l'item « Employés & permissions »
+                // du drawer. Tuiles retirées d'ici pour éviter les doublons.
+                // Emplacements de stock : accessible depuis Inventaire.
               ],
             ),
             const SizedBox(height: 12),

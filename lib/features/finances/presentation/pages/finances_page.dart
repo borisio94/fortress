@@ -30,9 +30,20 @@ import '../widgets/payment_breakdown_widget.dart';
 
 enum _FinancesTab { revenus, depenses, pertes, bilan }
 
+/// Résout le query param `tab` (cf. sous-items du drawer Finances) vers
+/// l'index d'onglet initial. Valeurs : revenus|depenses|pertes|bilan.
+int _tabIndexFromParam(String? p) => switch (p) {
+  'depenses' => 1,
+  'pertes'   => 2,
+  'bilan'    => 3,
+  _          => 0, // revenus (défaut)
+};
+
 class FinancesPage extends ConsumerStatefulWidget {
   final String shopId;
-  const FinancesPage({super.key, required this.shopId});
+  /// Onglet ouvert au montage (piloté par les sous-items du drawer).
+  final String? initialTab;
+  const FinancesPage({super.key, required this.shopId, this.initialTab});
   @override
   ConsumerState<FinancesPage> createState() => _FinancesPageState();
 }
@@ -44,7 +55,11 @@ class _FinancesPageState extends ConsumerState<FinancesPage>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: _FinancesTab.values.length, vsync: this);
+    _tab = TabController(
+      length: _FinancesTab.values.length,
+      initialIndex: _tabIndexFromParam(widget.initialTab),
+      vsync: this,
+    );
     _tab.addListener(() {
       if (mounted) setState(() {}); // rebuild pour la KPI active
     });

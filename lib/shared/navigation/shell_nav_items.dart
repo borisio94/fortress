@@ -157,20 +157,97 @@ final List<ShellNavItem> kShellNavItems = [
       ),
     ],
   ),
+  // CRM — groupe regroupant la relation client. Clients en sous-item
+  // (extensible : segments, relances, etc. à venir).
   ShellNavItem(
-    icon:         Icons.person_outline_rounded,
-    iconSelected: Icons.person_rounded,
-    label:        (l) => l.navClients,
+    icon:         Icons.contacts_outlined,
+    iconSelected: Icons.contacts_rounded,
+    label:        (_) => 'CRM',
     route:        (id) => '/shop/$id/crm',
     visibleIf:    (p) => p.canViewClients,
     primary:      true,
+    children: [
+      ShellNavItem(
+        icon:         Icons.person_outline_rounded,
+        iconSelected: Icons.person_rounded,
+        label:        (l) => l.navClients,
+        route:        (id) => '/shop/$id/crm',
+        visibleIf:    (p) => p.canViewClients,
+      ),
+    ],
   ),
+  // Finances — groupe : chaque sous-item ouvre la page sur l'onglet
+  // correspondant via `?tab=`. Page plus aérée (plus de TabBar à scanner).
   ShellNavItem(
     icon:         Icons.account_balance_wallet_outlined,
     iconSelected: Icons.account_balance_wallet_rounded,
     label:        (l) => l.navFinances,
     route:        (id) => '/shop/$id/finances',
     visibleIf:    (p) => p.canViewFinances,
+    children: [
+      ShellNavItem(
+        icon:         Icons.trending_up_rounded,
+        iconSelected: Icons.trending_up_rounded,
+        label:        (_) => 'Chiffre d\'affaires',
+        route:        (id) => '/shop/$id/finances?tab=revenus',
+        visibleIf:    (p) => p.canViewFinances,
+      ),
+      ShellNavItem(
+        icon:         Icons.account_balance_wallet_outlined,
+        iconSelected: Icons.account_balance_wallet_rounded,
+        label:        (l) => l.financesTabDepenses,
+        route:        (id) => '/shop/$id/finances?tab=depenses',
+        visibleIf:    (p) => p.canViewFinances,
+      ),
+      ShellNavItem(
+        icon:         Icons.trending_down_rounded,
+        iconSelected: Icons.trending_down_rounded,
+        label:        (l) => l.financesTabPertes,
+        route:        (id) => '/shop/$id/finances?tab=pertes',
+        visibleIf:    (p) => p.canViewFinances,
+      ),
+      ShellNavItem(
+        icon:         Icons.savings_outlined,
+        iconSelected: Icons.savings_rounded,
+        label:        (_) => 'Bénéfice net',
+        route:        (id) => '/shop/$id/finances?tab=bilan',
+        visibleIf:    (p) => p.canViewFinances,
+      ),
+    ],
+  ),
+  // WhatsApp — groupe : modèles de messages + campagnes marketing.
+  // Déplacés depuis Paramètres pour un accès direct (owner uniquement).
+  ShellNavItem(
+    icon:         Icons.chat_outlined,
+    iconSelected: Icons.chat_rounded,
+    label:        (_) => 'WhatsApp',
+    route:        (id) => '/shop/$id/parametres/whatsapp-templates',
+    visibleIf:    (p) => p.isOwner,
+    children: [
+      ShellNavItem(
+        icon:         Icons.chat_outlined,
+        iconSelected: Icons.chat_rounded,
+        label:        (l) => l.waTemplatesTitle,
+        route:        (id) => '/shop/$id/parametres/whatsapp-templates',
+        visibleIf:    (p) => p.isOwner,
+      ),
+      ShellNavItem(
+        icon:         Icons.campaign_outlined,
+        iconSelected: Icons.campaign_rounded,
+        label:        (_) => 'Campagnes marketing',
+        route:        (id) => '/shop/$id/campaigns',
+        visibleIf:    (p) => p.isOwner,
+      ),
+    ],
+  ),
+  // Employés & permissions — déplacé depuis Paramètres › Membres.
+  ShellNavItem(
+    icon:         Icons.badge_outlined,
+    iconSelected: Icons.badge_rounded,
+    label:        (_) => 'Employés & permissions',
+    route:        (id) => '/shop/$id/parametres/shop'
+        '?tab=members&with_overview=1',
+    visibleIf:    (p) => p.canManageMembers,
   ),
   // Item « Commandes » supprimé du drawer (round 14) — les sous-pages
   // Fournisseurs / Réceptions / Retours restent accessibles via les
