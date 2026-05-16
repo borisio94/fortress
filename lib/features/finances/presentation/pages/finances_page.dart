@@ -147,18 +147,24 @@ class _FinancesBody extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final data     = ref.watch(dashDataProvider(shopId));
     final previous = ref.watch(financesPreviousSnapshotProvider(shopId));
-    final l        = context.l10n;
 
+    // Layout compact : filtres condensés en haut, les 4 cartes KPI font
+    // OFFICE de sélecteur d'onglets (elles appellent déjà onSelect), le
+    // TabBar redondant est supprimé → la zone de contenu (TabBarView)
+    // récupère ~110px et devient l'élément dominant de la page.
     return Column(children: [
+      // Zone filtres compacte (période + emplacement collés, sans gros
+      // espacements). Chacun scrolle horizontalement indépendamment.
       Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
         child: const PeriodSelector(),
       ),
-      const SizedBox(height: 8),
+      const SizedBox(height: 2),
       // Filtre emplacement global : pilote dashViewFilterProvider →
       // KPI, graphiques (dashDataProvider) ET l'onglet Dépenses suivent.
       ViewFilterChipBar(shopId: shopId, useTabs: true),
-      const SizedBox(height: 12),
+      const SizedBox(height: 8),
+      // Cartes KPI = onglets cliquables (active = onglet courant).
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: _FinancesKpiGrid(
@@ -169,26 +175,15 @@ class _FinancesBody extends ConsumerWidget {
           onSelect: onSelect,
         ),
       ),
-      const SizedBox(height: 12),
-      TabBar(
-        controller: tab,
-        labelColor:   _colorForTab(current),
-        unselectedLabelColor: AppColors.textSecondary,
-        indicatorColor: _colorForTab(current),
-        indicatorWeight: 2.5,
-        labelStyle: const TextStyle(
-            fontSize: 12, fontWeight: FontWeight.w700),
-        unselectedLabelStyle: const TextStyle(
-            fontSize: 12, fontWeight: FontWeight.w600),
-        tabs: [
-          Tab(text: l.financesTabRevenus),
-          Tab(text: l.financesTabDepenses),
-          Tab(text: l.financesTabPertes),
-          Tab(text: l.financesTabBilan),
-        ],
-      ),
+      const SizedBox(height: 8),
+      // Fin liseré couleur de l'onglet actif → repère visuel discret
+      // remplaçant le TabBar (continuité card → contenu).
+      Container(height: 3, color: _colorForTab(current)),
       Expanded(child: TabBarView(
         controller: tab,
+        // Le contenu change via les cartes KPI ; on bloque le swipe
+        // horizontal pour éviter une navigation fantôme sans repère.
+        physics: const NeverScrollableScrollPhysics(),
         children: [
           _RevenusTab(data: data),
           ExpensesView(shopId: shopId),
