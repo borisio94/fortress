@@ -236,10 +236,12 @@ final List<ShellNavItem> kShellNavItems = [
   // WhatsApp — groupe : modèles de messages + campagnes marketing.
   // Déplacés depuis Paramètres pour un accès direct (owner uniquement).
   ShellNavItem(
-    // send_rounded (avion папier) : prouvée présente (bouton « Envoyer
-    // facture WhatsApp »). Distincte de Messagerie (chat_bubble) pour
-    // lever la confusion. FA Brands "whatsapp" ne se chargeait pas (tofu).
-    icon:         Icons.send_outlined,
+    // send_rounded pour les 2 états : send_outlined (variante récente)
+    // est absente de la police bundlée → invisible en état inactif (d'où
+    // l'icône qui n'apparaissait que sélectionnée). send_rounded est
+    // prouvée (bouton « Envoyer facture WhatsApp »). Distincte de
+    // Messagerie (chat_bubble) pour lever la confusion.
+    icon:         Icons.send_rounded,
     iconSelected: Icons.send_rounded,
     label:        (_) => 'WhatsApp',
     route:        (id) => '/shop/$id/parametres/whatsapp-templates',
