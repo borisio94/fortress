@@ -24,6 +24,7 @@ import '../../../../features/inventaire/domain/entities/product.dart';
 import 'product_form_page.dart' show ProductFormExtra;
 import '../../../../core/services/document_service.dart';
 import '../../../../core/services/external_launcher.dart';
+import '../../../../core/services/short_link_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
 import '../../../../core/services/whatsapp/message_templates.dart';
 import '../../../../core/services/whatsapp_service.dart';
@@ -635,9 +636,19 @@ class _InventairePageState extends ConsumerState<InventairePage>
     // avant la prochaine interaction utilisateur (clic recipient), qui
     // fournit alors un user gesture frais pour `openExternal` côté web
     // (anti popup-blocker). Si shortening échoue → fallback URL longue.
+    // 1. Raccourcisseur maison (Supabase `r`) — même pipeline fiable que le
+    //    dialog 3 étapes et les campagnes promo, et le SEUL qui fonctionne
+    //    sur web (tinyurl/is.gd y sont bloqués par CORS → URL longue).
+    // 2. Repli tinyurl/is.gd si la DB/réseau Supabase est indisponible.
+    // 3. Dernier recours : l'URL longue (l'envoi n'est jamais bloqué).
     String url;
     try {
-      url = await UrlShortenerService.shorten(longUrl);
+      final maison = await ShortLinkService.createShortLink(
+        longUrl:   longUrl,
+        linkType:  'catalogue',
+        expiresIn: const Duration(days: 90),
+      );
+      url = maison ?? await UrlShortenerService.shorten(longUrl);
     } catch (_) {
       url = longUrl;
     }
