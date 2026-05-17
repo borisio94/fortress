@@ -78,11 +78,12 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
     }
     _selectedProductIds.addAll(
         widget.existing?.products.map((p) => p.productId) ?? []);
-    // Exclut les produits en rupture : une campagne ne doit pas pousser
-    // un article indisponible (le catalogue les masquerait de toute façon).
-    _allProducts = AppDatabase.getProductsForShop(widget.shopId)
-        .where((p) => p.totalStock > 0)
-        .toList();
+    // Zone de sélection : TOUS les produits de la boutique (pas de filtre
+    // rupture ici). L'admin doit pouvoir composer sa campagne librement,
+    // y compris un produit momentanément épuisé qu'il réapprovisionnera.
+    // Le public ne voit pas les ruptures : la page catalogue (cible du
+    // lien de campagne) les masque déjà au rendu via le stock live.
+    _allProducts = AppDatabase.getProductsForShop(widget.shopId).toList();
   }
 
   @override
