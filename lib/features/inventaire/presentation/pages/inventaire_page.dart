@@ -414,6 +414,28 @@ class _InventairePageState extends ConsumerState<InventairePage>
     _load();
   }
 
+  /// Activation/désactivation rapide d'une promo sur le produit, sans
+  /// passer par la page Modifier. Ouvre une feuille légère (prix promo
+  /// par variante + date de fin optionnelle) et persiste via
+  /// `AppDatabase.saveProduct`.
+  Future<void> _openQuickPromo(Product p) async {
+    final perms = ref.read(permissionsProvider(widget.shopId));
+    if (!perms.canEditProduct) {
+      AppSnack.warning(context,
+          'Vous n\'avez pas la permission de modifier ce produit.');
+      return;
+    }
+    final changed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => _QuickPromoDialog(product: p, shopId: widget.shopId),
+    );
+    if (changed == true) {
+      _load();
+      if (mounted) AppSnack.success(context, 'Promotion mise à jour');
+    }
+  }
+
   /// Ouvre le formulaire de transfert pré-rempli pour ce produit.
   ///
   /// La source est alignée sur l'onglet « Vue » actuellement actif :
@@ -1105,6 +1127,7 @@ class _InventairePageState extends ConsumerState<InventairePage>
                   onTransfer: () => _openTransferSheet(p),
                   onShare: () => _openSharePicker(p),
                   onShareWhatsApp: () => _shareProductOnWhatsApp(p),
+                  onPromo: () => _openQuickPromo(p),
                   onEdit: () async {
                     await context.push(
                         '/shop/${widget.shopId}/inventaire/product',
@@ -1119,6 +1142,7 @@ class _InventairePageState extends ConsumerState<InventairePage>
                   onTransfer: () => _openTransferSheet(p),
                   onShare: () => _openSharePicker(p),
                   onShareWhatsApp: () => _shareProductOnWhatsApp(p),
+                  onPromo: () => _openQuickPromo(p),
                   onEdit: () async {
                     await context.push(
                         '/shop/${widget.shopId}/inventaire/product',
@@ -1691,13 +1715,13 @@ class _DesktopRow extends ConsumerStatefulWidget {
   final String shopId;
   final ValueChanged<bool> onToggleActive, onToggleWeb;
   final VoidCallback onDelete, onEdit, onProductChanged, onTransfer, onShare,
-      onShareWhatsApp;
+      onShareWhatsApp, onPromo;
   const _DesktopRow({required this.product, required this.shopId,
     required this.onToggleActive, required this.onToggleWeb,
     required this.onDelete, required this.onEdit,
     required this.onProductChanged, required this.onTransfer,
     required this.onShare,
-    required this.onShareWhatsApp});
+    required this.onShareWhatsApp, required this.onPromo});
   @override ConsumerState<_DesktopRow> createState() => _DesktopRowState();
 }
 
@@ -1800,6 +1824,7 @@ class _DesktopRowState extends ConsumerState<_DesktopRow> {
                 onShareWhatsApp: widget.onShareWhatsApp,
                 onEdit: widget.onEdit,
                 onDelete: widget.onDelete,
+                onPromo: widget.onPromo,
                 iconSize: 16,
                 isPartnerView: isPartnerView,
               ),
@@ -1825,13 +1850,13 @@ class _MobileCard extends ConsumerStatefulWidget {
   final String shopId;
   final ValueChanged<bool> onToggleActive, onToggleWeb;
   final VoidCallback onDelete, onEdit, onProductChanged, onTransfer, onShare,
-      onShareWhatsApp;
+      onShareWhatsApp, onPromo;
   const _MobileCard({required this.product, required this.shopId,
     required this.onToggleActive, required this.onToggleWeb,
     required this.onDelete, required this.onEdit,
     required this.onProductChanged, required this.onTransfer,
     required this.onShare,
-    required this.onShareWhatsApp});
+    required this.onShareWhatsApp, required this.onPromo});
   @override ConsumerState<_MobileCard> createState() => _MobileCardState();
 }
 
@@ -1953,6 +1978,7 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
                       onShareWhatsApp: widget.onShareWhatsApp,
                       onEdit: widget.onEdit,
                       onDelete: widget.onDelete,
+                      onPromo: widget.onPromo,
                       iconSize: 17,
                       isPartnerView: isPartnerView,
                     ),
@@ -3071,7 +3097,8 @@ class _PromoCountdownState extends State<_PromoCountdown> {
 class _ProductActionsMenu extends ConsumerWidget {
   final String shopId;
   final Product product;
-  final VoidCallback onTransfer, onShare, onShareWhatsApp, onEdit, onDelete;
+  final VoidCallback onTransfer, onShare, onShareWhatsApp, onEdit, onDelete,
+      onPromo;
   final double iconSize;
   /// Si vrai, on est en vue Partenaire : Modifier et Supprimer sont masqués
   /// (le produit appartient à la boutique, pas au partenaire — toute édition
@@ -3086,6 +3113,7 @@ class _ProductActionsMenu extends ConsumerWidget {
     required this.onShareWhatsApp,
     required this.onEdit,
     required this.onDelete,
+    required this.onPromo,
     this.iconSize = 16,
     this.isPartnerView = false,
   });
@@ -3129,6 +3157,21 @@ class _ProductActionsMenu extends ConsumerWidget {
       ]),
     ));
     if (perms.canEditProduct && !isPartnerView) {
+      final promoActive = product.variants
+          .any((v) => v.promoEnabled && (v.promoPrice ?? 0) > 0);
+      items.add(PopupMenuItem<String>(
+        value: 'promo',
+        child: Row(children: [
+          Icon(Icons.local_offer_outlined, size: 16,
+              color: promoActive ? AppColors.secondary : AppColors.primary),
+          const SizedBox(width: 8),
+          Text(promoActive ? 'Promotion (active)' : 'Activer une promo',
+              style: TextStyle(fontSize: 13,
+                  fontWeight: promoActive
+                      ? FontWeight.w700 : FontWeight.w400,
+                  color: promoActive ? AppColors.secondary : null)),
+        ]),
+      ));
       items.add(const PopupMenuItem<String>(
         value: 'edit',
         child: Row(children: [
@@ -3162,11 +3205,323 @@ class _ProductActionsMenu extends ConsumerWidget {
           case 'transfer':       onTransfer();       break;
           case 'share':          onShare();          break;
           case 'share_whatsapp': onShareWhatsApp();  break;
+          case 'promo':          onPromo();          break;
           case 'edit':           onEdit();           break;
           case 'delete':         onDelete();         break;
         }
       },
       itemBuilder: (_) => items,
+    );
+  }
+}
+
+// ─── Dialog : activation rapide d'une promo (sans page Modifier) ─────────
+//
+// Promo = champ par variante (promoEnabled / promoPrice / promoStart /
+// promoEnd). Ici on expose l'essentiel : un switch + un prix promo par
+// variante, et une date de fin optionnelle commune. Tout le reste (dates
+// de début fines, etc.) reste dans la page Modifier.
+class _QuickPromoDialog extends StatefulWidget {
+  final Product product;
+  final String  shopId;
+  const _QuickPromoDialog({required this.product, required this.shopId});
+
+  @override
+  State<_QuickPromoDialog> createState() => _QuickPromoDialogState();
+}
+
+class _QuickPromoRow {
+  bool enabled;
+  final TextEditingController price;
+  _QuickPromoRow({required this.enabled, required this.price});
+}
+
+class _QuickPromoDialogState extends State<_QuickPromoDialog> {
+  late final List<_QuickPromoRow> _rows;
+  DateTime? _end;
+  String?   _error;
+  bool      _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _rows = widget.product.variants.map((v) => _QuickPromoRow(
+      enabled: v.promoEnabled,
+      price: TextEditingController(
+          text: (v.promoPrice ?? 0) > 0
+              ? v.promoPrice!.toStringAsFixed(0) : ''),
+    )).toList();
+    // Date de fin commune : la plus tardive déjà posée sur une variante.
+    for (final v in widget.product.variants) {
+      if (v.promoEnd != null
+          && (_end == null || v.promoEnd!.isAfter(_end!))) {
+        _end = v.promoEnd;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final r in _rows) {
+      r.price.dispose();
+    }
+    super.dispose();
+  }
+
+  String _fmtDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/'
+      '${d.month.toString().padLeft(2, '0')}/${d.year}';
+
+  Future<void> _pickEnd() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _end ?? now.add(const Duration(days: 7)),
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365 * 2)),
+    );
+    if (picked != null) setState(() => _end = picked);
+  }
+
+  Future<void> _save() async {
+    final variants = widget.product.variants;
+    final newVariants = <ProductVariant>[];
+    for (var i = 0; i < variants.length; i++) {
+      final v = variants[i];
+      final row = _rows[i];
+      if (row.enabled) {
+        final price = double.tryParse(row.price.text.trim().replaceAll(',', '.'));
+        if (price == null || price <= 0) {
+          setState(() => _error =
+              'Prix promo invalide pour « ${v.name} ».');
+          return;
+        }
+        if (price >= v.priceSellPos && v.priceSellPos > 0) {
+          setState(() => _error =
+              'Le prix promo doit être inférieur au prix normal '
+              '(${CurrencyFormatter.format(v.priceSellPos)}) pour '
+              '« ${v.name} ».');
+          return;
+        }
+        newVariants.add(v.copyWith(
+          promoEnabled: true,
+          promoPrice:   price,
+          promoStart:   v.promoStart ?? DateTime.now(),
+          promoEnd:     _end ?? v.promoEnd,
+        ));
+      } else {
+        newVariants.add(v.copyWith(promoEnabled: false));
+      }
+    }
+
+    setState(() { _saving = true; _error = null; });
+    try {
+      final updated = widget.product.copyWith(variants: newVariants);
+      await AppDatabase.saveProduct(updated);
+      final activeCount = newVariants.where((v) => v.promoEnabled).length;
+      await ActivityLogService.log(
+        action:      'product_promo_quick',
+        targetType:  'product',
+        targetId:    widget.product.id,
+        targetLabel: widget.product.name,
+        shopId:      widget.shopId,
+        details: {
+          'variants_en_promo': activeCount,
+          'fin': _end?.toIso8601String(),
+        },
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = 'Échec de l\'enregistrement : $e';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final variants = widget.product.variants;
+    final single = variants.length == 1;
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      title: Row(children: [
+        Container(
+          width: 32, height: 32,
+          decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(8)),
+          child: const Icon(Icons.local_offer_outlined,
+              size: 16, color: AppColors.primary),
+        ),
+        const SizedBox(width: 10),
+        const Expanded(
+          child: Text('Promotion',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+        ),
+      ]),
+      content: SizedBox(
+        width: 400,
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(widget.product.name,
+                style: const TextStyle(fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 10),
+            for (var i = 0; i < variants.length; i++)
+              _buildVariantTile(variants[i], _rows[i], single),
+            const SizedBox(height: 6),
+            // Date de fin commune (optionnelle).
+            InkWell(
+              onTap: _pickEnd,
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 12),
+                decoration: BoxDecoration(
+                  color: AppColors.inputFill,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.inputBorder),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.event_outlined,
+                      size: 16, color: AppColors.textSecondary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _end == null
+                          ? 'Fin de promo (optionnel)'
+                          : 'Fin : ${_fmtDate(_end!)}',
+                      style: TextStyle(fontSize: 12,
+                          color: _end == null
+                              ? AppColors.textSecondary
+                              : AppColors.textPrimary,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  if (_end != null)
+                    InkWell(
+                      onTap: () => setState(() => _end = null),
+                      child: const Icon(Icons.close_rounded,
+                          size: 16, color: AppColors.textSecondary),
+                    ),
+                ]),
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Text(_error!,
+                  style: const TextStyle(fontSize: 12,
+                      color: AppColors.error, fontWeight: FontWeight.w600)),
+            ],
+          ]),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+          child: const Text('Annuler'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          style: FilledButton.styleFrom(
+              backgroundColor: AppColors.primary),
+          child: _saving
+              ? const SizedBox(width: 16, height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : const Text('Enregistrer'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVariantTile(
+      ProductVariant v, _QuickPromoRow row, bool single) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: row.enabled
+            ? AppColors.primary.withValues(alpha: 0.05)
+            : AppColors.inputFill,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+            color: row.enabled
+                ? AppColors.primary.withValues(alpha: 0.35)
+                : AppColors.inputBorder),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Text(single ? 'Activer la promo' : v.name,
+                style: const TextStyle(fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+          ),
+          AppSwitch(
+            value: row.enabled,
+            onChanged: (val) => setState(() {
+              row.enabled = val;
+              _error = null;
+            }),
+          ),
+        ]),
+        if (!single)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+                'Prix normal : ${CurrencyFormatter.format(v.priceSellPos)}',
+                style: const TextStyle(fontSize: 11,
+                    color: AppColors.textSecondary)),
+          ),
+        if (row.enabled) ...[
+          const SizedBox(height: 10),
+          if (single)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                  'Prix normal : ${CurrencyFormatter.format(v.priceSellPos)}',
+                  style: const TextStyle(fontSize: 11,
+                      color: AppColors.textSecondary)),
+            ),
+          TextField(
+            controller: row.price,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            style: const TextStyle(fontSize: 14,
+                fontWeight: FontWeight.w700),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: 'Prix promo',
+              suffixText: 'FCFA',
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 10),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: AppColors.inputBorder),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: AppColors.primary, width: 1.5),
+              ),
+            ),
+            onChanged: (_) {
+              if (_error != null) setState(() => _error = null);
+            },
+          ),
+        ],
+      ]),
     );
   }
 }
