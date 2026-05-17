@@ -3357,7 +3357,7 @@ class _QuickPromoDialogState extends State<_QuickPromoDialog> {
           decoration: BoxDecoration(
               color: AppColors.primary.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(8)),
-          child: const Icon(Icons.local_offer_outlined,
+          child: Icon(Icons.local_offer_outlined,
               size: 16, color: AppColors.primary),
         ),
         const SizedBox(width: 10),
