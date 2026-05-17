@@ -732,6 +732,17 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                 completedAt = fres.completedAt;
               }
 
+              // Livraison refusée par le client : le partenaire-livreur a
+              // tout de même effectué la course → la boutique lui doit les
+              // frais. On le propose à l'opérateur (transition vers refused
+              // uniquement, livraison partenaire).
+              if (status == SaleStatus.refused
+                  && order.status != SaleStatus.refused
+                  && order.deliveryMode == DeliveryMode.partner
+                  && (order.deliveryLocationId ?? '').isNotEmpty) {
+                await _chargeRefusedDeliveryFee(order);
+              }
+
               await _ds.updateOrderStatus(order.id!, status,
                   completedAt: completedAt);
               if (mounted) setState(() {});
@@ -885,6 +896,96 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
         orderId:           order.id,
         note:              'Frais de livraison à verser au partenaire',
       );
+    }
+  }
+
+  /// Livraison refusée par le client alors que le partenaire-livreur s'est
+  /// déplacé. Propose à l'opérateur d'enregistrer les frais de course dus
+  /// au partenaire en `partnerCharge` / `failedDelivery` (négatif). Le
+  /// montant est pré-rempli avec les frais déjà saisis sur la commande
+  /// (souvent 0 si elle n'a jamais été complétée) puis ajustable.
+  Future<void> _chargeRefusedDeliveryFee(Sale order) async {
+    final partnerId = order.deliveryLocationId;
+    if (partnerId == null || partnerId.isEmpty) return;
+    StockLocation? loc;
+    try {
+      final raw = HiveBoxes.stockLocationsBox.get(partnerId);
+      if (raw != null) {
+        loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+      }
+    } catch (_) {}
+    if (loc?.type != StockLocationType.partner) return;
+
+    final defaultFee = order.fees
+        .fold<double>(0, (s, f) => s + ((f['amount'] as num?)?.toDouble() ?? 0));
+    final ctrl = TextEditingController(
+        text: defaultFee > 0 ? defaultFee.toStringAsFixed(0) : '');
+
+    final amount = await showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
+        title: const Text('Livraison refusée',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(
+              'Le client a refusé mais ${loc?.name ?? 'le partenaire'} '
+              's\'est déplacé. Frais de course à lui devoir ?',
+              style: TextStyle(fontSize: 12.5, color: AppColors.textHint)),
+          const SizedBox(height: 14),
+          TextField(
+            controller: ctrl,
+            autofocus: true,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+            ],
+            decoration: InputDecoration(
+              isDense: true,
+              suffixText: 'FCFA',
+              hintText: 'Montant',
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ]),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(0.0),
+            child: const Text('Aucun frais'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final v = double.tryParse(
+                  ctrl.text.trim().replaceAll(',', '.'));
+              Navigator.of(ctx).pop(v ?? 0.0);
+            },
+            style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primary),
+            child: const Text('Enregistrer la charge'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (amount == null || amount <= 0) return;
+
+    await PartnerLedgerService.addEntry(
+      shopId:            order.shopId,
+      partnerLocationId: partnerId,
+      type:              PartnerLedgerEntryType.partnerCharge,
+      category:          PartnerChargeCategory.failedDelivery,
+      amount:            -amount,
+      orderId:           order.id,
+      note:              'Livraison refusée par le client',
+    );
+    if (mounted) {
+      AppSnack.success(context,
+          'Frais de course (${CurrencyFormatter.format(amount)}) '
+          'enregistrés en dette partenaire.');
     }
   }
 }

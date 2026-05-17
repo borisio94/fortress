@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/database/app_database.dart';
 import '../../../../core/i18n/app_localizations.dart';
-import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/permisions/subscription_provider.dart';
@@ -21,11 +20,10 @@ import '../widgets/payment_breakdown_widget.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // FINANCES — vue comptable.
-// 4 KPI cliquables (CA · Dépenses · Pertes · Bénéfice net) au-dessus de
-// 4 onglets correspondants (Revenus · Dépenses · Pertes · Bilan). Un tap
-// sur une KPI active l'onglet correspondant.
-// Consomme uniquement `dashDataProvider` + `financesPreviousSnapshotProvider`
-// déjà existants — aucun nouveau state dédié.
+// La navigation entre sous-vues (Chiffre d'affaires · Dépenses · Pertes ·
+// Bénéfice net) se fait via les sous-items du drawer Finances ; la page
+// n'affiche QUE le contenu du sous-menu sélectionné (`?tab=`). Consomme
+// `dashDataProvider` déjà existant — aucun nouveau state dédié.
 // ═════════════════════════════════════════════════════════════════════════════
 
 enum _FinancesTab { revenus, depenses, pertes, bilan }
@@ -82,8 +80,6 @@ class _FinancesPageState extends ConsumerState<FinancesPage>
     ref.read(dashSignalProvider.notifier).state++;
   }
 
-  void _selectTab(_FinancesTab t) => _tab.animateTo(t.index);
-
   @override
   Widget build(BuildContext context) {
     final plan  = ref.watch(currentPlanProvider);
@@ -102,9 +98,7 @@ class _FinancesPageState extends ConsumerState<FinancesPage>
     }
     return _FinancesBody(
       shopId: widget.shopId,
-      tab: _tab,
       current: _FinancesTab.values[_tab.index],
-      onSelect: _selectTab,
     );
   }
 }
@@ -152,21 +146,13 @@ class _LockedFeaturePlaceholder extends StatelessWidget {
 
 class _FinancesBody extends ConsumerWidget {
   final String shopId;
-  final TabController tab;
   final _FinancesTab current;
-  final ValueChanged<_FinancesTab> onSelect;
-  const _FinancesBody({required this.shopId, required this.tab,
-      required this.current, required this.onSelect});
+  const _FinancesBody({required this.shopId, required this.current});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final data     = ref.watch(dashDataProvider(shopId));
-    final previous = ref.watch(financesPreviousSnapshotProvider(shopId));
+    final data = ref.watch(dashDataProvider(shopId));
 
-    // Layout compact : filtres condensés en haut, les 4 cartes KPI font
-    // OFFICE de sélecteur d'onglets (elles appellent déjà onSelect), le
-    // TabBar redondant est supprimé → la zone de contenu (TabBarView)
-    // récupère ~110px et devient l'élément dominant de la page.
     return Column(children: [
       // Zone filtres compacte (période + emplacement collés, sans gros
       // espacements). Chacun scrolle horizontalement indépendamment.
@@ -178,34 +164,19 @@ class _FinancesBody extends ConsumerWidget {
       // Filtre emplacement global : pilote dashViewFilterProvider →
       // KPI, graphiques (dashDataProvider) ET l'onglet Dépenses suivent.
       ViewFilterChipBar(shopId: shopId, useTabs: true),
-      const SizedBox(height: 8),
-      // Cartes KPI = onglets cliquables (active = onglet courant).
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: _FinancesKpiGrid(
-          shopId:   shopId,
-          data:     data,
-          previous: previous,
-          current:  current,
-          onSelect: onSelect,
-        ),
-      ),
-      const SizedBox(height: 8),
-      // Fin liseré couleur de l'onglet actif → repère visuel discret
-      // remplaçant le TabBar (continuité card → contenu).
+      const SizedBox(height: 6),
+      // Plus de rangée de cartes-onglets : la navigation entre sous-vues
+      // se fait désormais via les sous-items du drawer Finances
+      // (Chiffre d'affaires / Dépenses / Pertes / Bénéfice net). La page
+      // n'affiche QUE le contenu du sous-menu sélectionné. Liseré couleur
+      // = repère visuel discret de la vue active.
       Container(height: 3, color: _colorForTab(current)),
-      Expanded(child: TabBarView(
-        controller: tab,
-        // Le contenu change via les cartes KPI ; on bloque le swipe
-        // horizontal pour éviter une navigation fantôme sans repère.
-        physics: const NeverScrollableScrollPhysics(),
-        children: [
-          _RevenusTab(data: data),
-          ExpensesView(shopId: shopId),
-          _PertesTab(shopId: shopId, data: data),
-          _BilanTab(data: data),
-        ],
-      )),
+      Expanded(child: switch (current) {
+        _FinancesTab.revenus  => _RevenusTab(data: data),
+        _FinancesTab.depenses => ExpensesView(shopId: shopId),
+        _FinancesTab.pertes   => _PertesTab(shopId: shopId, data: data),
+        _FinancesTab.bilan    => _BilanTab(data: data),
+      }),
     ]);
   }
 }
@@ -217,136 +188,6 @@ Color _colorForTab(_FinancesTab t) => switch (t) {
   _FinancesTab.bilan    => AppColors.primary,
 };
 
-// ═════════════════════════════════════════════════════════════════════════════
-// GRID 4 KPI CARDS — chacune cliquable, active l'onglet correspondant.
-// Pill tendance vs période précédente alimenté par
-// `financesPreviousSnapshotProvider`.
-// ═════════════════════════════════════════════════════════════════════════════
-
-class _FinancesKpiGrid extends ConsumerWidget {
-  final String shopId;
-  final DashData data;
-  final FinancialSnapshot previous;
-  final _FinancesTab current;
-  final ValueChanged<_FinancesTab> onSelect;
-  const _FinancesKpiGrid({required this.shopId, required this.data,
-      required this.previous, required this.current, required this.onSelect});
-
-  static String _fmt(double v) {
-    if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(1)}M';
-    if (v >= 1000)    return '${(v / 1000).toStringAsFixed(1)}k';
-    return v.toStringAsFixed(0);
-  }
-
-  /// Variation en pourcentage, formatée en pill. Retourne ('', true) si
-  /// impossible à calculer (division par zéro).
-  static ({String delta, bool positive}) _trend(double now, double prev) {
-    if (prev == 0) {
-      if (now == 0) return (delta: '', positive: true);
-      return (delta: '', positive: now >= 0);
-    }
-    final pct = ((now - prev) / prev.abs()) * 100;
-    final sign = pct >= 0 ? '+' : '';
-    return (delta: '$sign${pct.toStringAsFixed(1)}%', positive: pct >= 0);
-  }
-
-  int _countExpenseEntries() {
-    var count = 0;
-    for (final raw in HiveBoxes.expensesBox.values) {
-      try {
-        final m = Map<String, dynamic>.from(raw);
-        if (m['shop_id'] == shopId) count++;
-      } catch (_) {}
-    }
-    return count;
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final l = context.l10n;
-    final salesT    = _trend(data.totalSales,        previous.totalSales);
-    final expensesT = _trend(data.operatingExpenses, previous.operatingExpenses);
-    final lossesCurrent  = data.totalLoss + data.scrappedLoss + data.repairCost;
-    final lossesPrevious = previous.totalLoss +
-        previous.scrappedLoss + previous.repairCost;
-    final lossesT   = _trend(lossesCurrent, lossesPrevious);
-    final netT      = _trend(data.netProfit,         previous.netProfit);
-
-    final scrapEntriesCount =
-        ref.watch(scrapJournalProvider(shopId)).length;
-    final expenseEntries = _countExpenseEntries();
-
-    KpiData card({
-      required _FinancesTab tab,
-      required String label,
-      required double value,
-      required IconData icon,
-      required Color color,
-      required ({String delta, bool positive}) trend,
-      required String subtext,
-      bool errorIndicator = false,
-    }) => KpiData(
-      label: label,
-      value: _fmt(value),
-      unit: CurrencyFormatter.currentSymbol,
-      icon: icon,
-      color: color,
-      delta: trend.delta,
-      // Dépenses et pertes : "+X%" signifie ça a **augmenté** → mauvais signe
-      positive: (tab == _FinancesTab.depenses || tab == _FinancesTab.pertes)
-          ? !trend.positive
-          : trend.positive,
-      subtext: subtext,
-      active: current == tab,
-      errorIndicator: errorIndicator,
-      onTap: () => onSelect(tab),
-    );
-
-    final kpis = <KpiData>[
-      card(
-        tab:   _FinancesTab.revenus,
-        label: l.financesKpiSales,
-        value: data.totalSales,
-        icon:  Icons.trending_up_rounded,
-        color: AppColors.secondary,
-        trend: salesT,
-        subtext: l.financesSubTransactions
-            .replaceAll('%d', data.orderCount.toString()),
-      ),
-      card(
-        tab:   _FinancesTab.depenses,
-        label: l.financesKpiExpenses,
-        value: data.operatingExpenses,
-        icon:  Icons.account_balance_wallet_outlined,
-        color: AppColors.warning,
-        trend: expensesT,
-        subtext: l.financesSubEntries
-            .replaceAll('%d', expenseEntries.toString()),
-      ),
-      card(
-        tab:   _FinancesTab.pertes,
-        label: l.financesKpiLosses,
-        value: lossesCurrent,
-        icon:  Icons.trending_down_rounded,
-        color: AppColors.error,
-        trend: lossesT,
-        subtext: l.financesSubIncidents
-            .replaceAll('%d', scrapEntriesCount.toString()),
-      ),
-      card(
-        tab:   _FinancesTab.bilan,
-        label: l.financesKpiNet,
-        value: data.netProfit,
-        icon:  Icons.account_balance_rounded,
-        color: data.netProfit >= 0 ? AppColors.primary : AppColors.error,
-        trend: netT,
-        subtext: l.financesVsPrevious,
-      ),
-    ];
-
-    return KpiGrid(kpis: kpis, minCardWidth: 150);
-  }
-}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ONGLET REVENUS — graphique courbes + transactions + panier moyen
@@ -385,11 +226,7 @@ class _RevenueSubKpis extends StatelessWidget {
   final DashData data;
   const _RevenueSubKpis({required this.data});
 
-  static String _fmt(double v) {
-    if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(1)}M';
-    if (v >= 1000)    return '${(v / 1000).toStringAsFixed(1)}k';
-    return v.toStringAsFixed(0);
-  }
+  static String _fmt(double v) => CurrencyFormatter.compact(v);
 
   @override
   Widget build(BuildContext context) {
@@ -424,11 +261,7 @@ class _PertesTab extends ConsumerWidget {
   final DashData data;
   const _PertesTab({required this.shopId, required this.data});
 
-  static String _fmt(double v) {
-    if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(1)}M';
-    if (v >= 1000)    return '${(v / 1000).toStringAsFixed(1)}k';
-    return v.toStringAsFixed(0);
-  }
+  static String _fmt(double v) => CurrencyFormatter.compact(v);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -501,11 +334,7 @@ class _FinancialRecap extends StatelessWidget {
   final DashData data;
   const _FinancialRecap({required this.data});
 
-  static String _fmt(double v) {
-    if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(1)}M';
-    if (v >= 1000)    return '${(v / 1000).toStringAsFixed(1)}k';
-    return v.toStringAsFixed(0);
-  }
+  static String _fmt(double v) => CurrencyFormatter.compact(v);
 
   @override
   Widget build(BuildContext context) {
@@ -635,11 +464,7 @@ class _SalesBarChart extends StatelessWidget {
     required this.labels,
   });
 
-  static String _compact(double v) {
-    if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(1)}M';
-    if (v >= 1000)    return '${(v / 1000).toStringAsFixed(1)}k';
-    return v.toStringAsFixed(0);
-  }
+  static String _compact(double v) => CurrencyFormatter.compact(v);
 
   @override
   Widget build(BuildContext context) {

@@ -188,6 +188,30 @@ class _PartnerLedgerDetailPageState
     }
   }
 
+  /// Enregistre une charge que la boutique doit au partenaire (hors
+  /// livraison réussie) : course refusée, stockage, commission, etc.
+  /// amount NÉGATIF (la boutique doit) → augmente la dette dans le ledger.
+  /// Le cash ne sortira des Finances qu'au `remittance` négatif réel.
+  Future<void> _registerCharge() async {
+    final res = await showFormSheet<_ChargeResult>(
+      context: context,
+      builder: (_) => _ChargeSheet(partnerName: _partnerName),
+    );
+    if (res == null || !mounted) return;
+    await PartnerLedgerService.addEntry(
+      shopId:            widget.shopId,
+      partnerLocationId: widget.partnerLocationId,
+      type:              PartnerLedgerEntryType.partnerCharge,
+      category:          res.category,
+      amount:            -res.amount.abs(),
+      note:              res.note?.isEmpty == true ? null : res.note,
+      createdAt:         res.createdAt,
+    );
+    if (mounted) {
+      AppSnack.success(context, 'Charge enregistrée.');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final entries = PartnerLedgerService.entriesForShop(widget.shopId,
@@ -238,22 +262,39 @@ class _PartnerLedgerDetailPageState
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: Row(children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: _registerRemittance,
-                icon: const Icon(Icons.payments_outlined, size: 18),
-                label: const Text('Versement'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(0, 44),
+          child: Column(children: [
+            Row(children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _registerRemittance,
+                  icon: const Icon(Icons.payments_outlined, size: 18),
+                  label: const Text('Versement'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(0, 44),
+                  ),
                 ),
               ),
-            ),
-            if (balance != 0) ...[
               const SizedBox(width: 8),
               Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _registerCharge,
+                  icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                  label: const Text('Charge'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    side: BorderSide(
+                        color: AppColors.primary.withValues(alpha: 0.5)),
+                    minimumSize: const Size(0, 44),
+                  ),
+                ),
+              ),
+            ]),
+            if (balance != 0) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: () => _settleDebt(balance),
                   icon: const Icon(Icons.task_alt_rounded, size: 18),
@@ -314,7 +355,11 @@ class _MovementTile extends StatelessWidget {
         Expanded(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min, children: [
-          Text(entry.type.labelFr,
+          Text(
+              entry.type == PartnerLedgerEntryType.partnerCharge
+                  && entry.category != null
+                  ? '${entry.type.labelFr} · ${entry.category!.labelFr}'
+                  : entry.type.labelFr,
               style: const TextStyle(
                   fontSize: 13, fontWeight: FontWeight.w600,
                   color: Color(0xFF111827))),
@@ -370,6 +415,7 @@ class _MovementTile extends StatelessWidget {
         PartnerLedgerEntryType.saleCollected => Icons.shopping_bag_outlined,
         PartnerLedgerEntryType.deliveryOwed  => Icons.local_shipping_outlined,
         PartnerLedgerEntryType.remittance    => Icons.payments_outlined,
+        PartnerLedgerEntryType.partnerCharge => Icons.receipt_long_outlined,
       };
 
   String _fmtDate(DateTime d) {
@@ -535,6 +581,240 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
                   style: const TextStyle(fontSize: 13),
                   decoration: InputDecoration(
                     hintText: 'N° de reçu, motif…',
+                    hintStyle: const TextStyle(
+                        fontSize: 12, color: Color(0xFFBBBBBB)),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 11),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide:
+                            const BorderSide(color: AppColors.divider)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                            color: AppColors.primary, width: 1.5)),
+                  ),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_error!,
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: Theme.of(context).semantic.danger)),
+                ],
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
+            child: Row(children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 44)),
+                  child: const Text('Annuler'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _confirm,
+                  icon: const Icon(Icons.check_rounded, size: 18),
+                  label: const Text('Enregistrer'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(0, 44),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Sheet de charge (boutique doit au partenaire) ─────────────────────────
+
+class _ChargeResult {
+  final double amount;
+  final PartnerChargeCategory category;
+  final String? note;
+  final DateTime? createdAt;
+  const _ChargeResult({
+    required this.amount, required this.category, this.note, this.createdAt,
+  });
+}
+
+class _ChargeSheet extends StatefulWidget {
+  final String partnerName;
+  const _ChargeSheet({required this.partnerName});
+  @override
+  State<_ChargeSheet> createState() => _ChargeSheetState();
+}
+
+class _ChargeSheetState extends State<_ChargeSheet> {
+  PartnerChargeCategory _category = PartnerChargeCategory.failedDelivery;
+  final _amountCtrl = TextEditingController();
+  final _noteCtrl   = TextEditingController();
+  String? _error;
+  DateTime _date = DateTime.now();
+
+  @override
+  void dispose() {
+    _amountCtrl.dispose();
+    _noteCtrl.dispose();
+    super.dispose();
+  }
+
+  void _confirm() {
+    final amt = double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.'));
+    if (amt == null || amt <= 0) {
+      setState(() => _error = 'Montant invalide.');
+      return;
+    }
+    Navigator.of(context).pop(_ChargeResult(
+      amount:    amt,
+      category:  _category,
+      note:      _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
+      createdAt: _date,
+    ));
+  }
+
+  Future<void> _pickDate() async {
+    final d = await pickBackDate(
+      context: context,
+      initial: _date,
+      helpText: 'Date de la charge',
+    );
+    if (d != null) setState(() => _date = d);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return AdaptiveFormFrame(
+      title: 'Enregistrer une charge',
+      icon:  Icons.receipt_long_outlined,
+      body: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                    'Montant que la boutique doit à ${widget.partnerName} '
+                    '(hors livraison réussie).',
+                    style: TextStyle(
+                        fontSize: 11.5, color: AppColors.textHint)),
+                const SizedBox(height: 14),
+                _SectionLabel('Catégorie'),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final c in PartnerChargeCategory.values)
+                      InkWell(
+                        onTap: () => setState(() => _category = c),
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: _category == c
+                                ? sem.brandSurface
+                                : const Color(0xFFF9FAFB),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                                color: _category == c
+                                    ? sem.brand.withValues(alpha: 0.5)
+                                    : sem.borderSubtle),
+                          ),
+                          child: Text(c.labelFr,
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: _category == c
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                  color: _category == c
+                                      ? sem.brandText
+                                      : const Color(0xFF111827))),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                _SectionLabel('Montant (FCFA)'),
+                TextField(
+                  controller: _amountCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                  ],
+                  style: const TextStyle(fontSize: 14),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 12),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide:
+                            const BorderSide(color: AppColors.divider)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                            color: AppColors.primary, width: 1.5)),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _SectionLabel('Date de la charge'),
+                InkWell(
+                  onTap: _pickDate,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF9FAFB),
+                      borderRadius: BorderRadius.circular(8),
+                      border: const Border.fromBorderSide(
+                          BorderSide(color: AppColors.divider)),
+                    ),
+                    child: Row(children: [
+                      Icon(Icons.event_rounded,
+                          size: 14, color: AppColors.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                            DateFormat('d MMMM yyyy', 'fr_FR')
+                                .format(_date),
+                            style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                      Icon(Icons.edit_calendar_outlined,
+                          size: 12,
+                          color: Theme.of(context).colorScheme.onSurface
+                              .withValues(alpha: 0.4)),
+                    ]),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _SectionLabel('Note (optionnel)'),
+                TextField(
+                  controller: _noteCtrl,
+                  maxLines: 2,
+                  style: const TextStyle(fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: 'Motif, n° de commande refusée…',
                     hintStyle: const TextStyle(
                         fontSize: 12, color: Color(0xFFBBBBBB)),
                     isDense: true,

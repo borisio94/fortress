@@ -243,7 +243,7 @@ final List<ShellNavItem> kShellNavItems = [
     // Messagerie (chat_bubble) pour lever la confusion.
     icon:         Icons.send_rounded,
     iconSelected: Icons.send_rounded,
-    label:        (_) => 'WhatsApp',
+    label:        (_) => 'WhatsApp et marketing',
     route:        (id) => '/shop/$id/parametres/whatsapp-templates',
     visibleIf:    (p) => p.isOwner,
     children: [

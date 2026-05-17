@@ -53,6 +53,15 @@ bool _useDesktopLayout(BuildContext context) {
 String? _shellParentRoute(String location) {
   final segments = Uri.parse(location).pathSegments;
   if (segments.length <= 3 || segments[0] != 'shop') return null;
+  // Cas Membres : la page est `/shop/<id>/parametres/shop` (vue Membres,
+  // sous-item de CRM). Son « parent » par trim de segment serait
+  // Paramètres, ce qui est faux : on y entre depuis le drawer, pas depuis
+  // Paramètres. Le retour doit ramener à l'accueil (dashboard).
+  if (segments.length == 4
+      && segments[2] == 'parametres'
+      && segments[3] == 'shop') {
+    return '/shop/${segments[1]}/dashboard';
+  }
   return '/${segments.take(segments.length - 1).join('/')}';
 }
 
