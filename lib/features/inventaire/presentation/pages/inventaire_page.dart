@@ -4130,9 +4130,9 @@ class _StockAuditReportDialogState extends State<_StockAuditReportDialog> {
             if (!ok) ...[
               const SizedBox(height: 8),
               Text(
-                '« Corriger » aligne le stock sur la valeur attendue '
-                '(et plafonne au stock physique). N\'utilise ce bouton que si '
-                'tu fais confiance au journal — sinon, fais un ajustement '
+                '« Corriger » aligne disponible sur (physique − bloqué) '
+                'pour restaurer la cohérence interne et le journal. Si le '
+                'bon chiffre est différent, fais plutôt un ajustement '
                 'manuel depuis la fiche produit.',
                 style: AppTextStyles.caption.copyWith(
                   color: AppColors.textSecondary,
@@ -4150,7 +4150,6 @@ class _StockAuditReportDialogState extends State<_StockAuditReportDialog> {
                     separatorBuilder: (_, __) => const Divider(height: 16),
                     itemBuilder: (_, i) {
                       final d = _drifts[i];
-                      final sign = d.drift > 0 ? '+' : '';
                       final busy = _correcting.contains(d.variantId);
                       // Layout vertical : texte plein largeur en haut,
                       // bouton aligné à droite en bas. Évite tout risque
@@ -4168,11 +4167,20 @@ class _StockAuditReportDialogState extends State<_StockAuditReportDialog> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Attendu ${d.expected} · Actuel ${d.actual} · '
-                            'Drift $sign${d.drift} '
-                            '(${d.movementsAnalyzed} mvt)',
+                            'Physique ${d.physical} · Dispo ${d.actual} · '
+                            'Bloqué ${d.blocked} '
+                            '→ cohérent ${d.coherentAvailable}',
                             style: AppTextStyles.caption.copyWith(
                               color: AppColors.warning,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            d.diagnostic,
+                            style: AppTextStyles.caption.copyWith(
+                              color: AppColors.textSecondary,
                             ),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,

@@ -1542,6 +1542,8 @@ class StockService {
           variantName:       v.name,
           expected:          expected ?? 0,
           actual:            v.stockAvailable,
+          physical:          v.stockPhysical,
+          blocked:           v.stockBlocked,
           movementsAnalyzed: entries.length,
           lastMovementAt:    lastAt,
         );
@@ -1595,7 +1597,10 @@ class StockService {
     }
 
     final user = LocalStorageService.getCurrentUser();
-    final sign = r.drift > 0 ? '+' : '';
+    // Quantité à reporter : delta d'écart (drift) si non nul, sinon
+    // l'amplitude de l'invariant cassé (physical - actual - blocked).
+    final invariantDelta = r.physical - r.actual - r.blocked;
+    final reportedQty = r.drift != 0 ? r.drift.abs() : invariantDelta.abs();
     final incident = Incident(
       id:          id,
       shopId:      r.shopId,
@@ -1603,11 +1608,14 @@ class StockService {
       variantId:   r.variantId,
       productName: '${r.productName} — ${r.variantName}',
       type:        IncidentType.scrapped, // type existant le + proche d'« anomalie »
-      quantity:    r.drift.abs(),
-      notes:       'Audit stock — divergence détectée : '
-                   'attendu ${r.expected}, actuel ${r.actual} '
-                   '(drift $sign${r.drift}). '
-                   'Mouvements analysés : ${r.movementsAnalyzed}.',
+      quantity:    reportedQty,
+      notes:       'Audit stock — ${r.diagnostic}. '
+                   'État : physique ${r.physical}, '
+                   'disponible ${r.actual}, '
+                   'bloqué ${r.blocked} '
+                   '(cohérent → disponible = ${r.coherentAvailable}). '
+                   'Log : dernier after_available = ${r.expected} '
+                   '(${r.movementsAnalyzed} mvt).',
       createdBy:   user?.name,
       createdAt:   DateTime.now(),
     );
@@ -1620,27 +1628,37 @@ class StockService {
       targetLabel: '${r.productName} — ${r.variantName}',
       shopId:      r.shopId,
       details: {
-        'expected':    r.expected,
-        'actual':      r.actual,
-        'drift':       r.drift,
-        'movements':   r.movementsAnalyzed,
-        'incident_id': id,
+        'expected':           r.expected,
+        'actual':             r.actual,
+        'physical':           r.physical,
+        'blocked':            r.blocked,
+        'coherent_available': r.coherentAvailable,
+        'drift':              r.drift,
+        'invariant_ok':       r.invariantOk,
+        'movements':          r.movementsAnalyzed,
+        'incident_id':        id,
       },
     );
     return true;
   }
 
-  /// Applique la correction d'un drift détecté par l'audit.
+  /// Applique la correction d'une incohérence détectée par l'audit.
   ///
-  /// Aligne `variant.stockAvailable` sur la valeur attendue par le log
-  /// (`r.expected`), avec garde-fou d'invariant :
-  ///   `newAvail = expected.clamp(0, max(physical, 0))`
-  /// — on ne crée jamais de phantom physical (si le log dit "8 dispos"
-  /// mais qu'il n'y a que 5 unités physiques, on cap à 5).
+  /// La cible est **la réalité physique** : `available = physical - blocked`
+  /// (clampé à 0 minimum). Cela restaure l'invariant interne
+  /// `physical = available + blocked` ET ré-aligne le log au passage (le
+  /// nouveau mouvement émis devient le `after_available` de référence).
+  ///
+  /// Cas typiques résolus :
+  /// 1. `physical=0, available=1, blocked=0` → newAvail = 0 (l'unité fantôme
+  ///    disparaît du compteur vendable)
+  /// 2. `physical=1, available=0, blocked=0` → newAvail = 1 (l'unité oubliée
+  ///    redevient vendable)
+  /// 3. `physical=5, available=2, blocked=1` → newAvail = 4 (rétablit
+  ///    l'invariant : 5 = 4 + 1)
   ///
   /// Émet un mouvement `adjustment, cause=audit_correction` propre,
-  /// puis marque l'incident `audit_drift` du jour comme résolu pour
-  /// que la fiche disparaisse de la page Incidents.
+  /// puis marque l'incident `audit_drift` du jour comme résolu.
   static Future<bool> applyAuditCorrection(ReconciliationResult r) async {
     final result = _findVariant(r.shopId, r.productId, r.variantId);
     if (result == null) {
@@ -1653,8 +1671,10 @@ class StockService {
     final v = product.variants[vIdx];
 
     final physClamped = v.stockPhysical < 0 ? 0 : v.stockPhysical;
-    final newAvail = r.expected.clamp(0, physClamped);
-    final newPhys  = physClamped;
+    final blkClamped  = v.stockBlocked  < 0 ? 0 : v.stockBlocked;
+    final coherent    = physClamped - blkClamped;
+    final newAvail    = coherent < 0 ? 0 : coherent;
+    final newPhys     = physClamped;
 
     if (newAvail == v.stockAvailable && newPhys == v.stockPhysical) {
       // Rien à faire : la variante est déjà alignée (audit obsolète).
@@ -1683,8 +1703,9 @@ class StockService {
       beforePhys:  beforePhys,
       afterPhys:   newPhys,
       cause:       'audit_correction',
-      notes:       'Correction drift audit : actual $beforeAvail → '
-                   'expected ${r.expected} (cap physique $physClamped)',
+      notes:       'Correction audit : disponible $beforeAvail → $newAvail '
+                   '(physique $physClamped − bloqué $blkClamped). '
+                   'Log précédent attendait ${r.expected}.',
     );
 
     // Marque l'incident d'aujourd'hui comme résolu pour le retirer du
@@ -1736,6 +1757,8 @@ class ReconciliationResult {
   final String   variantName;
   final int      expected;          // dernier after_available du log
   final int      actual;            // variant.stockAvailable courant
+  final int      physical;          // variant.stockPhysical courant
+  final int      blocked;           // variant.stockBlocked courant
   final int      movementsAnalyzed;
   final DateTime? lastMovementAt;
 
@@ -1747,13 +1770,46 @@ class ReconciliationResult {
     required this.variantName,
     required this.expected,
     required this.actual,
+    required this.physical,
+    required this.blocked,
     required this.movementsAnalyzed,
     this.lastMovementAt,
   });
 
-  int  get drift        => actual - expected;
-  bool get isOk         => drift == 0;
+  /// Drift `available` vs log (signé).
+  int  get drift => actual - expected;
+
+  /// Cible cohérente de `available` selon la réalité physique :
+  /// `max(0, physical - blocked)`. Sert de référence pour la correction.
+  int  get coherentAvailable {
+    final p = physical < 0 ? 0 : physical;
+    final b = blocked  < 0 ? 0 : blocked;
+    final v = p - b;
+    return v < 0 ? 0 : v;
+  }
+
+  /// Vrai si la donnée respecte `physical = available + blocked`.
+  bool get invariantOk => actual == coherentAvailable;
+
+  /// Vrai si la variante est totalement cohérente :
+  ///   1) `actual == expected` (pas de drift vs log)
+  ///   2) `physical == available + blocked` (invariant interne)
+  bool get isOk => drift == 0 && invariantOk;
+
   bool get hasMovements => movementsAnalyzed > 0;
+
+  /// Diagnostic court pour log/UI : précise quelle(s) condition(s) sont
+  /// cassées (drift, invariant, ou les deux).
+  String get diagnostic {
+    if (isOk) return 'OK';
+    final parts = <String>[];
+    if (drift != 0) parts.add('drift log ${drift > 0 ? '+' : ''}$drift');
+    if (!invariantOk) {
+      parts.add('invariant rompu (phys $physical, '
+          'dispo $actual, blq $blocked → attendu $coherentAvailable)');
+    }
+    return parts.join(' · ');
+  }
 }
 
 class ReconciliationReport {
