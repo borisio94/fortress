@@ -791,7 +791,30 @@ class _InventairePageState extends ConsumerState<InventairePage>
     final p = _products.where((p) => p.id == id).firstOrNull;
     try {
       await AppDatabase.deleteProduct(id);
+    } on ProductNotDeletableException catch (e) {
+      // GF-8 — dialog enrichi : message multi-ligne listant stock /
+      // ventes ouvertes / commandes historiques avec compteurs.
+      if (!mounted) return;
+      if (p == null) return;
+      final choice = await showBlockedDeleteDialog(
+        context,
+        itemLabel: p.name,
+        reason: '${e.message}\n\nSupprime/annule les commandes concernées '
+                'et vide le stock avant de réessayer, ou archive le produit.',
+        archiveDescription:
+            'Le produit sera désactivé : plus visible à la caisse, dans '
+            'les listes ni à la vente. L\'historique de ses ventes passées '
+            'reste intact.',
+      );
+      if (choice == BlockedDeleteChoice.archive) {
+        await AppDatabase.saveProduct(
+            p.copyWith(isActive: false), skipValidation: true);
+        if (mounted) AppSnack.success(context, 'Produit archivé');
+        _load();
+      }
+      return;
     } catch (e) {
+      // Filet pour les autres exceptions (DB freeze, sync, etc.).
       if (!mounted) return;
       if (p == null) return;
       final choice = await showBlockedDeleteDialog(

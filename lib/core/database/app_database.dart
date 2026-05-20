@@ -1997,33 +1997,77 @@ end \$\$;""",
     final shopId = raw is Map ? raw['store_id'] as String? : null;
     final prodName = raw is Map ? (raw['name'] as String? ?? '') : '';
 
-    // Règle métier : refuser la suppression si le produit ou une de ses
-    // variantes est référencé dans une commande. On préserve l'historique.
+    // GF-8 — Blocage suppression produit en stock.
+    // Trois critères examinés AVANT toute écriture :
+    //   1. Stock disponible/physique > 0 sur n'importe quelle variante.
+    //   2. Présence de ventes OUVERTES (status scheduled/processing).
+    //   3. Présence dans des commandes passées (préserve l'historique).
+    // Les détails (sommes, comptes) sont rapportés dans `ProductNotDeletableException`
+    // → la dialog UI affiche un message actionnable au lieu d'un texte générique.
     final variantIds = <String>{};
+    int totalAvailable = 0;
+    int totalPhysical  = 0;
     if (raw is Map) {
       final vars = (raw['variants'] as List?) ?? [];
       for (final v in vars) {
-        final vid = (v as Map)['id'] as String?;
+        final vm = Map<String, dynamic>.from(v as Map);
+        final vid = vm['id'] as String?;
         if (vid != null && vid.isNotEmpty) variantIds.add(vid);
+        totalAvailable += (vm['stockAvailable'] as num?)?.toInt() ?? 0;
+        totalPhysical  += (vm['stockPhysical']  as num?)?.toInt() ?? 0;
       }
     }
-    bool usedInOrders = false;
+    // Stock indexé via stock_levels (sources de vérité partenaire/warehouse).
+    // Le scan inclut TOUTES les locations — on n'autorise pas la suppression
+    // tant qu'il reste du stock vendable n'importe où.
+    for (final raw in HiveBoxes.stockLevelsBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw);
+        final vid = m['variant_id'] as String?;
+        if (vid == null || !variantIds.contains(vid)) continue;
+        final avail = (m['stock_available'] as num?)?.toInt() ?? 0;
+        final phys  = (m['stock_physical']  as num?)?.toInt() ?? 0;
+        // Les variantes de boutique sont déjà comptées via products.variants —
+        // on ne les double-compte que pour les locations distinctes (partenaire,
+        // warehouse). Heuristique conservative : on prend le max sur cette
+        // variante pour éviter de manquer un stock partenaire non répliqué.
+        if (avail > totalAvailable) totalAvailable = avail;
+        if (phys  > totalPhysical)  totalPhysical  = phys;
+      } catch (_) {}
+    }
+
+    int openSalesCount = 0;
+    int totalOrdersCount = 0;
+    const openStatuses = {'scheduled', 'processing'};
     for (final orderRaw in HiveBoxes.ordersBox.values) {
       final om = Map<String, dynamic>.from(orderRaw);
       final items = (om['items'] as List?) ?? [];
+      bool referenced = false;
       for (final it in items) {
         final pid = (it as Map)['product_id']?.toString();
         if (pid == productId || variantIds.contains(pid)) {
-          usedInOrders = true; break;
+          referenced = true; break;
         }
       }
-      if (usedInOrders) break;
+      if (!referenced) continue;
+      totalOrdersCount++;
+      final st = om['status'] as String? ?? '';
+      if (openStatuses.contains(st)) openSalesCount++;
     }
-    if (usedInOrders) {
-      throw Exception(
-          'Impossible de supprimer "${prodName.isEmpty ? 'ce produit' : prodName}" : '
-          'il est référencé dans au moins une commande. Supprime/annule les '
-          'commandes concernées d\'abord, ou désactive ce produit à la place.');
+
+    final blocked = totalAvailable > 0
+        || totalPhysical > 0
+        || openSalesCount > 0
+        || totalOrdersCount > 0;
+
+    if (blocked) {
+      throw ProductNotDeletableException(
+        productName:      prodName.isEmpty ? 'ce produit' : prodName,
+        totalAvailable:   totalAvailable,
+        totalPhysical:    totalPhysical,
+        openSalesCount:   openSalesCount,
+        totalOrdersCount: totalOrdersCount,
+      );
     }
 
     LocalStorageService.invalidateProductsCache();

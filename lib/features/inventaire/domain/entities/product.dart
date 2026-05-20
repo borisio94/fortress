@@ -30,6 +30,60 @@ void _startFeaturedRotationTicker() {
   });
 }
 
+// ─── Exception suppression produit (GF-8) ─────────────────────────────────
+
+/// GF-8 — Levée par `AppDatabase.deleteProduct` quand le produit ne peut
+/// pas être supprimé. Détaille pourquoi (stock restant, ventes ouvertes,
+/// commandes historiques) pour que la dialog UI affiche un message
+/// actionnable. Code lisible : `produit_en_stock`.
+class ProductNotDeletableException implements Exception {
+  final String productName;
+  /// Stock disponible total sommé sur toutes les variantes (boutique).
+  final int totalAvailable;
+  /// Stock physique total sommé sur toutes les variantes.
+  final int totalPhysical;
+  /// Nombre de commandes OUVERTES (status scheduled/processing) qui
+  /// référencent ce produit ou une de ses variantes.
+  final int openSalesCount;
+  /// Nombre de commandes TOTALES (tous statuts) qui référencent.
+  final int totalOrdersCount;
+
+  const ProductNotDeletableException({
+    required this.productName,
+    this.totalAvailable = 0,
+    this.totalPhysical = 0,
+    this.openSalesCount = 0,
+    this.totalOrdersCount = 0,
+  });
+
+  String get code => 'produit_en_stock';
+
+  /// Texte multi-ligne prêt à afficher dans la dialog "Suppression impossible".
+  String get message {
+    final lines = <String>[];
+    if (totalAvailable > 0 || totalPhysical > 0) {
+      lines.add('• Stock restant : $totalAvailable disponible '
+          '(physique $totalPhysical)');
+    }
+    if (openSalesCount > 0) {
+      lines.add('• Ventes ouvertes : $openSalesCount commande(s) '
+          'en attente ou en cours');
+    }
+    if (totalOrdersCount > 0 && openSalesCount == 0) {
+      lines.add('• Historique : référencé dans $totalOrdersCount '
+          'commande(s) passée(s)');
+    }
+    if (lines.isEmpty) {
+      return 'Impossible de supprimer pour une raison inconnue.';
+    }
+    return lines.join('\n');
+  }
+
+  @override
+  String toString() =>
+      'ProductNotDeletableException($productName, $message)';
+}
+
 // ─── Variante de produit ──────────────────────────────────────────────────────
 
 class ProductVariant extends Equatable {
