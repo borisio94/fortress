@@ -1387,4 +1387,255 @@ class StockService {
     );
     return (newProductId, newVariant.id!);
   }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // 10. RÉCONCILIATION — Audit stock (Couche 3 du plan « sécurise le stock »)
+  //
+  // Compare le `stockAvailable` courant de chaque variante avec le DERNIER
+  // `after_available` enregistré dans `stock_movements` (filtré shop+variant,
+  // trié chronologiquement). Tout écart = écriture qui a bypassé StockService
+  // (sync conflict, modif directe du box Hive, purge sélective, bug).
+  //
+  // Si divergence → crée un Incident `audit_drift` (déduplique par jour pour
+  // éviter le spam) + log ActivityLogService `stock_audit_drift`. Le run
+  // global lui-même est tracé via `stock_audit_run`, drift ou pas.
+  //
+  // ⚠ Limite PR1 : ne réconcilie QUE `variant.stockAvailable` (périmètre
+  // boutique principale). Les `StockLevel` partenaire/warehouse ne sont pas
+  // audités tant que `stock_movements` n'expose pas `location_id`. À traiter
+  // dans la PR3 (RPC Supabase) avec la schema migration.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  static bool _bootReconciliationDone = false;
+
+  /// Lance l'audit sur toutes les boutiques de l'utilisateur courant
+  /// UNE SEULE FOIS par session. Silencieux (logs debugPrint, incidents
+  /// créés en arrière-plan). Appelé depuis `app.dart` au boot après auth.
+  static Future<void> runBootReconciliation() async {
+    if (_bootReconciliationDone) return;
+    _bootReconciliationDone = true;
+
+    final user = LocalStorageService.getCurrentUser();
+    if (user == null) return;
+    final shops = LocalStorageService.getShopsForUser(user.id);
+    if (shops.isEmpty) return;
+
+    debugPrint('[Stock] runBootReconciliation : ${shops.length} boutique(s)');
+    for (final s in shops) {
+      try {
+        final report = await reconcileShop(
+          shopId: s.id, createIncidents: true);
+        if (report.driftCount > 0) {
+          debugPrint('[Stock] ⚠ ${report.driftCount} drift(s) dans '
+              '"${s.name}" (incidents créés : ${report.incidentsCreated})');
+        } else {
+          debugPrint('[Stock] ✓ "${s.name}" cohérent '
+              '(${report.totalVariants} variantes)');
+        }
+      } catch (e) {
+        debugPrint('[Stock] runBootReconciliation "${s.name}" erreur : $e');
+      }
+    }
+  }
+
+  /// Réconcilie toutes les variantes d'une boutique.
+  /// [createIncidents] = true → émet un Incident par variante en drift,
+  /// dédupliqué par (variantId, jour). Toujours émet un log
+  /// `stock_audit_run` à la fin (drift ou pas).
+  static Future<ReconciliationReport> reconcileShop({
+    required String shopId,
+    bool createIncidents = true,
+  }) async {
+    final start = DateTime.now();
+
+    // Pré-indexation : variant_id → liste des couples (ts, after_available)
+    // Évite un scan O(N) du box pour chaque variante.
+    final indexByVariant = <String, List<({DateTime ts, int after})>>{};
+    for (final raw in HiveBoxes.stockMovementsBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw);
+        if (m['shop_id'] != shopId) continue;
+        final vid = m['variant_id'] as String?;
+        if (vid == null || vid.isEmpty) continue;
+        final after = m['after_available'];
+        if (after == null) continue;
+        final ts = DateTime.tryParse(m['created_at']?.toString() ?? '');
+        if (ts == null) continue;
+        indexByVariant
+            .putIfAbsent(vid, () => <({DateTime ts, int after})>[])
+            .add((ts: ts, after: (after as num).toInt()));
+      } catch (_) {}
+    }
+
+    final products = AppDatabase.getProductsForShop(shopId);
+    final results = <ReconciliationResult>[];
+    int incidents = 0;
+
+    for (final p in products) {
+      for (final v in p.variants) {
+        final vid = v.id;
+        if (vid == null) continue;
+        final entries = indexByVariant[vid] ?? const [];
+
+        // Le DERNIER mouvement chronologique = `after_available` attendu.
+        DateTime? lastAt;
+        int? expected;
+        for (final e in entries) {
+          if (lastAt == null || e.ts.isAfter(lastAt)) {
+            lastAt = e.ts;
+            expected = e.after;
+          }
+        }
+
+        final r = ReconciliationResult(
+          shopId:            shopId,
+          productId:         p.id ?? '',
+          productName:       p.name,
+          variantId:         vid,
+          variantName:       v.name,
+          expected:          expected ?? 0,
+          actual:            v.stockAvailable,
+          movementsAnalyzed: entries.length,
+          lastMovementAt:    lastAt,
+        );
+        results.add(r);
+
+        if (!r.isOk && createIncidents) {
+          final created = await _emitDriftIncident(r);
+          if (created) incidents++;
+        }
+      }
+    }
+
+    final report = ReconciliationReport(
+      shopId:           shopId,
+      results:          results,
+      startedAt:        start,
+      duration:         DateTime.now().difference(start),
+      incidentsCreated: incidents,
+    );
+
+    // Trace l'audit lui-même (drift ou pas) — historique vérifiable.
+    await ActivityLogService.log(
+      action:      'stock_audit_run',
+      targetType:  'shop',
+      targetId:    shopId,
+      targetLabel: 'Audit stock',
+      shopId:      shopId,
+      details: {
+        'variants_checked':   report.totalVariants,
+        'drifts_found':       report.driftCount,
+        'incidents_created':  incidents,
+        'total_drift_abs':    report.totalDriftAbs,
+        'duration_ms':        report.duration.inMilliseconds,
+      },
+    );
+
+    return report;
+  }
+
+  /// Crée un Incident pour une variante en drift. Dédupliqué par jour :
+  /// l'ID inclut la date → un seul incident par variante par 24h, même si
+  /// l'audit est relancé plusieurs fois. Retourne `false` si déjà déclaré.
+  static Future<bool> _emitDriftIncident(ReconciliationResult r) async {
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final id = 'inc_audit_${r.variantId}_$today';
+
+    if (HiveBoxes.incidentsBox.get(id) != null) {
+      debugPrint('[Stock] audit drift déjà déclaré aujourd\'hui : '
+          'variant=${r.variantId} (skip)');
+      return false;
+    }
+
+    final user = LocalStorageService.getCurrentUser();
+    final sign = r.drift > 0 ? '+' : '';
+    final incident = Incident(
+      id:          id,
+      shopId:      r.shopId,
+      productId:   r.productId,
+      variantId:   r.variantId,
+      productName: '${r.productName} — ${r.variantName}',
+      type:        IncidentType.scrapped, // type existant le + proche d'« anomalie »
+      quantity:    r.drift.abs(),
+      notes:       'Audit stock — divergence détectée : '
+                   'attendu ${r.expected}, actuel ${r.actual} '
+                   '(drift $sign${r.drift}). '
+                   'Mouvements analysés : ${r.movementsAnalyzed}.',
+      createdBy:   user?.name,
+      createdAt:   DateTime.now(),
+    );
+    HiveBoxes.incidentsBox.put(incident.id, incident.toMap());
+
+    await ActivityLogService.log(
+      action:      'stock_audit_drift',
+      targetType:  'product',
+      targetId:    r.productId,
+      targetLabel: '${r.productName} — ${r.variantName}',
+      shopId:      r.shopId,
+      details: {
+        'expected':    r.expected,
+        'actual':      r.actual,
+        'drift':       r.drift,
+        'movements':   r.movementsAnalyzed,
+        'incident_id': id,
+      },
+    );
+    return true;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Résultat d'audit pour une variante : « expected » vs « actual ».
+// `drift = actual - expected` > 0 → stock apparu hors-log, < 0 → stock
+// disparu hors-log. == 0 → variante cohérente.
+// ════════════════════════════════════════════════════════════════════════════
+class ReconciliationResult {
+  final String   shopId;
+  final String   productId;
+  final String   productName;
+  final String   variantId;
+  final String   variantName;
+  final int      expected;          // dernier after_available du log
+  final int      actual;            // variant.stockAvailable courant
+  final int      movementsAnalyzed;
+  final DateTime? lastMovementAt;
+
+  const ReconciliationResult({
+    required this.shopId,
+    required this.productId,
+    required this.productName,
+    required this.variantId,
+    required this.variantName,
+    required this.expected,
+    required this.actual,
+    required this.movementsAnalyzed,
+    this.lastMovementAt,
+  });
+
+  int  get drift        => actual - expected;
+  bool get isOk         => drift == 0;
+  bool get hasMovements => movementsAnalyzed > 0;
+}
+
+class ReconciliationReport {
+  final String                      shopId;
+  final List<ReconciliationResult>  results;
+  final DateTime                    startedAt;
+  final Duration                    duration;
+  final int                         incidentsCreated;
+
+  const ReconciliationReport({
+    required this.shopId,
+    required this.results,
+    required this.startedAt,
+    required this.duration,
+    required this.incidentsCreated,
+  });
+
+  List<ReconciliationResult> get drifts =>
+      results.where((r) => !r.isOk).toList();
+  int get driftCount    => drifts.length;
+  int get totalVariants => results.length;
+  int get totalDriftAbs =>
+      drifts.fold(0, (s, r) => s + r.drift.abs());
 }

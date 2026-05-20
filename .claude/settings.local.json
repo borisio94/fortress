@@ -121,7 +121,10 @@
       "PowerShell(flutter analyze *)",
       "PowerShell(flutter test *)",
       "Bash(cd *)",
-      "Bash(Select-String -Pattern \"^\\\\?\\\\? \\(lien|C|supabase/\\\\.temp\\)\")"
+      "Bash(Select-String -Pattern \"^\\\\?\\\\? \\(lien|C|supabase/\\\\.temp\\)\")",
+      "Bash(Select-String -NotMatch \"^.. .claude\")",
+      "Bash(Measure-Object)",
+      "Bash(Select-Object Count)"
     ]
   }
 }

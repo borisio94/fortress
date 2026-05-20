@@ -21,6 +21,7 @@ import '../../../../features/dashboard/data/dashboard_providers.dart';
 import '../../domain/entities/stock_location.dart';
 import '../../domain/stock_at_location.dart' as stock_loc;
 import '../../../../core/services/activity_log_service.dart';
+import '../../../../core/services/stock_service.dart';
 import '../../../../features/inventaire/domain/entities/product.dart';
 import 'product_form_page.dart' show ProductFormExtra;
 import '../../../../core/services/document_service.dart';
@@ -403,6 +404,48 @@ class _InventairePageState extends ConsumerState<InventairePage>
     if (!mounted) return;
     await context.push('/shop/${widget.shopId}/inventaire/product');
     _load(); _syncFromSupabase();
+  }
+
+  /// Audit stock — Couche 3 du plan « sécurise le stock ».
+  /// Lance la réconciliation manuelle, affiche un dialog récapitulatif,
+  /// et propose la navigation vers la page Incidents si des drifts sont
+  /// détectés (les incidents sont créés automatiquement par
+  /// `StockService.reconcileShop`).
+  Future<void> _runStockAudit() async {
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: SizedBox(
+          width: 56, height: 56,
+          child: CircularProgressIndicator(strokeWidth: 3),
+        ),
+      ),
+    );
+    ReconciliationReport? report;
+    try {
+      report = await StockService.reconcileShop(
+        shopId: widget.shopId,
+        createIncidents: true,
+      );
+    } catch (e) {
+      debugPrint('[Inventaire] audit stock erreur : $e');
+    }
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop(); // ferme le loader
+    if (report == null) {
+      AppSnack.error(context, 'Audit échoué — réessaie.');
+      return;
+    }
+    // Recharge les produits pour que tout incident affecte les compteurs
+    // (la chip "Incidents" est visible ailleurs dans l'app).
+    _load();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) =>
+          _StockAuditReportDialog(report: report!, shopId: widget.shopId),
+    );
   }
 
   void _toggleActive(String id, bool v) {
@@ -953,6 +996,12 @@ class _InventairePageState extends ConsumerState<InventairePage>
                   const SizedBox(width: 6),
                   _SortBtn(key: _sortKey, active: _sort != 'name',
                       onTap: () => _showSortMenu(context, _sortKey)),
+                  const SizedBox(width: 6),
+                  // Audit stock — bouton manuel Couche 3 : compare le
+                  // `stockAvailable` de chaque variante au dernier
+                  // `after_available` enregistré dans stock_movements.
+                  // Crée un Incident `audit_drift` par variante divergente.
+                  _AuditStockBtn(onTap: _runStockAudit),
                 ]),
               ),
             ),
@@ -3940,6 +3989,155 @@ class _CatalogueShareDialogState extends State<_CatalogueShareDialog> {
                 borderRadius: BorderRadius.circular(8)),
           ),
           child: const Text('Continuer'),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDIT STOCK (Couche 3) — bouton + dialog rapport
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Bouton 38×38 cohérent avec « + produit » / boutons popup de la topbar.
+/// Tooltip explicite : la fonctionnalité est exotique (utilisateur la voit
+/// rarement) — sans le tooltip, l'icône reste opaque.
+class _AuditStockBtn extends StatelessWidget {
+  final VoidCallback onTap;
+  const _AuditStockBtn({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Audit stock — détecte les divergences et crée des incidents',
+      child: SizedBox(
+        width: 38, height: 38,
+        child: Material(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: onTap,
+            child: Icon(Icons.fact_check_outlined,
+                size: 18, color: AppColors.primary),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Dialog récapitulatif du `ReconciliationReport`.
+/// - Aucune divergence → état succès (vert).
+/// - Drifts détectés → liste compacte (produit, attendu, actuel, drift signé)
+///   + lien direct vers la page Incidents (les incidents `audit_drift`
+///   ont été créés par `StockService.reconcileShop`).
+class _StockAuditReportDialog extends StatelessWidget {
+  final ReconciliationReport report;
+  final String shopId;
+  const _StockAuditReportDialog({required this.report, required this.shopId});
+
+  @override
+  Widget build(BuildContext context) {
+    final drifts = report.drifts;
+    final ok = drifts.isEmpty;
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      title: Row(children: [
+        Container(
+          width: 32, height: 32,
+          decoration: BoxDecoration(
+            color: (ok ? AppColors.secondary : AppColors.warning)
+                .withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            ok ? Icons.check_circle_outline : Icons.warning_amber_rounded,
+            size: 18,
+            color: ok ? AppColors.secondary : AppColors.warning,
+          ),
+        ),
+        const SizedBox(width: 10),
+        const Expanded(
+          child: Text('Audit stock', style: AppTextStyles.subtitleBold),
+        ),
+      ]),
+      content: SizedBox(
+        width: 480,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              ok
+                  ? '${report.totalVariants} variante(s) vérifiée(s) — '
+                      'aucune divergence détectée.'
+                  : '${report.totalVariants} variante(s) vérifiée(s) — '
+                      '${report.driftCount} divergence(s), '
+                      '${report.incidentsCreated} incident(s) créé(s).',
+              style: AppTextStyles.body,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Durée : ${report.duration.inMilliseconds} ms',
+              style: AppTextStyles.caption,
+            ),
+            if (!ok) ...[
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
+              Flexible(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 320),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: drifts.length,
+                    separatorBuilder: (_, __) => const Divider(height: 12),
+                    itemBuilder: (_, i) {
+                      final d = drifts[i];
+                      final sign = d.drift > 0 ? '+' : '';
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${d.productName} — ${d.variantName}',
+                            style: AppTextStyles.bodyBold,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Attendu ${d.expected} · Actuel ${d.actual} · '
+                            'Drift $sign${d.drift} '
+                            '(${d.movementsAnalyzed} mvt)',
+                            style: AppTextStyles.caption.copyWith(
+                              color: AppColors.warning,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        if (!ok)
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              context.push('/shop/$shopId/inventaire/incidents');
+            },
+            child: const Text('Voir incidents'),
+          ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Fermer'),
         ),
       ],
     );

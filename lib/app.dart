@@ -20,6 +20,7 @@ import 'features/shop_selector/presentation/bloc/shop_selector_bloc.dart';
 import 'features/caisse/presentation/bloc/caisse_bloc.dart';
 import 'features/hub_central/presentation/bloc/hub_bloc.dart';
 import 'shared/widgets/alerts/scheduled_alerts_overlay.dart';
+import 'core/services/stock_service.dart';
 
 // ConsumerStatefulWidget — les blocs sont créés UNE SEULE FOIS dans initState
 // évite la recréation de BlocProvider à chaque rebuild → plus de Duplicate GlobalKey
@@ -100,6 +101,12 @@ class _PosAppState extends ConsumerState<PosApp> {
                 ref.read(appRouterProvider).go(RouteNames.login);
               } catch (_) {}
             });
+            // Audit stock au boot (Couche 3) — silent + idempotent (1×/session).
+            // Délai 10s : laisse Hive monter en cache et la 1re vague de sync
+            // Supabase Realtime s'absorber, sinon les pushes remote ressemblent
+            // à des "écritures externes" et produisent des faux drifts.
+            Future.delayed(const Duration(seconds: 10),
+                StockService.runBootReconciliation);
           } else if (state is AuthUnauthenticated) {
             SessionService.stop();
           }
