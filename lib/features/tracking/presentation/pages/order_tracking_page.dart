@@ -143,6 +143,12 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        if (order.clientName != null
+                            || order.clientPhone != null
+                            || order.clientAddress != null) ...[
+                          _ClientCoordinatesCard(order: order),
+                          const SizedBox(height: 16),
+                        ],
                         _StatusCard(order: order),
                         const SizedBox(height: 16),
                         _ItemsCard(order: order),
@@ -179,11 +185,17 @@ class _TrackedOrder {
   final String status;
   final String shopName;
   final String? clientName;
+  final String? clientPhone;
+  /// Adresse extraite des notes (ligne « Adresse : ... » écrite par
+  /// `place_public_order`). Si pas de ligne adresse → null.
+  final String? clientAddress;
   final List<_OrderItem> items;
   final double discountAmount;
   final double taxRate;
   final DateTime? scheduledAt;
   final DateTime createdAt;
+  /// Notes RESTANTES (après extraction de la ligne adresse) — affichage
+  /// libre du client si jamais il a ajouté un commentaire à la commande.
   final String? notes;
 
   _TrackedOrder({
@@ -192,6 +204,8 @@ class _TrackedOrder {
     required this.status,
     required this.shopName,
     required this.clientName,
+    required this.clientPhone,
+    required this.clientAddress,
     required this.items,
     required this.discountAmount,
     required this.taxRate,
@@ -216,18 +230,22 @@ class _TrackedOrder {
             .map((e) => _OrderItem.fromMap(Map<String, dynamic>.from(e)))
             .toList()
         : <_OrderItem>[];
+    final rawNotes = m['notes']?.toString();
+    final (address, restNotes) = _splitAddressFromNotes(rawNotes);
     return _TrackedOrder(
-      id:        m['id']?.toString() ?? '',
-      shopId:    m['shop_id']?.toString() ?? '',
-      status:    m['status']?.toString() ?? 'scheduled',
-      shopName:  m['shop_name']?.toString() ?? '',
-      clientName: m['client_name']?.toString(),
-      items:     itemsList,
+      id:           m['id']?.toString() ?? '',
+      shopId:       m['shop_id']?.toString() ?? '',
+      status:       m['status']?.toString() ?? 'scheduled',
+      shopName:     m['shop_name']?.toString() ?? '',
+      clientName:   m['client_name']?.toString(),
+      clientPhone:  m['client_phone']?.toString(),
+      clientAddress: address,
+      items:        itemsList,
       discountAmount: (m['discount_amount'] as num?)?.toDouble() ?? 0,
       taxRate:        (m['tax_rate'] as num?)?.toDouble() ?? 0,
       scheduledAt: _parseDate(m['scheduled_at']),
       createdAt:   _parseDate(m['created_at']) ?? DateTime.now(),
-      notes:       m['notes']?.toString(),
+      notes:       restNotes,
     );
   }
 
@@ -235,6 +253,35 @@ class _TrackedOrder {
     if (v == null) return null;
     if (v is DateTime) return v;
     return DateTime.tryParse(v.toString());
+  }
+
+  /// Sépare la ligne « Adresse : ... » des autres notes. `place_public_order`
+  /// (hotfix_079) injecte cette ligne quand le client a saisi ville/quartier
+  /// au moment de la commande. On la remonte en coordonnée structurée pour
+  /// l'afficher dans la carte « Vos coordonnées », et on garde le reste
+  /// comme « note libre ».
+  static (String? address, String? rest) _splitAddressFromNotes(
+      String? notes) {
+    if (notes == null) return (null, null);
+    final lines = notes.split('\n');
+    final addrLines = <String>[];
+    final restLines = <String>[];
+    for (final l in lines) {
+      final trimmed = l.trim();
+      if (trimmed.startsWith('Adresse :') || trimmed.startsWith('Adresse:')) {
+        addrLines.add(trimmed.replaceFirst(RegExp(r'^Adresse\s*:\s*'), ''));
+      } else {
+        restLines.add(l);
+      }
+    }
+    final addr = addrLines.isEmpty
+        ? null
+        : addrLines.join(' · ').trim();
+    final rest = restLines.join('\n').trim();
+    return (
+      (addr?.isEmpty ?? true) ? null : addr,
+      rest.isEmpty ? null : rest,
+    );
   }
 }
 
@@ -313,6 +360,100 @@ class _Header extends StatelessWidget {
 
 // ─── Cards ─────────────────────────────────────────────────────────────────
 
+/// Carte « Vos coordonnées » — affiche EXACTEMENT ce que le client a saisi
+/// au moment de passer la commande (nom + téléphone + adresse). Permet
+/// au client d'ouvrir le lien et de vérifier d'un coup d'œil que la
+/// boutique a bien enregistré ses bonnes coordonnées avant de valider
+/// la commande.
+class _ClientCoordinatesCard extends StatelessWidget {
+  final _TrackedOrder order;
+  const _ClientCoordinatesCard({required this.order});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final fields = <(IconData, String, String)>[];
+    if ((order.clientName ?? '').isNotEmpty) {
+      fields.add((Icons.person_outline_rounded, 'Nom', order.clientName!));
+    }
+    if ((order.clientPhone ?? '').isNotEmpty) {
+      fields.add((Icons.phone_outlined, 'Téléphone', order.clientPhone!));
+    }
+    if ((order.clientAddress ?? '').isNotEmpty) {
+      fields.add((Icons.location_on_outlined, 'Adresse',
+          order.clientAddress!));
+    }
+    if (fields.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+            color: theme.colorScheme.outline.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Vos coordonnées',
+            style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: theme.colorScheme.onSurface),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Vérifiez que ces informations correspondent à ce que vous '
+            'avez saisi. Si une erreur, contactez la boutique avant de '
+            'valider la commande.',
+            style: TextStyle(
+                fontSize: 11,
+                color: theme.colorScheme.onSurface
+                    .withValues(alpha: 0.6)),
+          ),
+          const SizedBox(height: 12),
+          for (int i = 0; i < fields.length; i++) ...[
+            if (i > 0) const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(fields[i].$1, size: 16, color: AppColors.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        fields[i].$2,
+                        style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.4,
+                            color: theme.colorScheme.onSurface
+                                .withValues(alpha: 0.55)),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        fields[i].$3,
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: theme.colorScheme.onSurface),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _StatusCard extends StatelessWidget {
   final _TrackedOrder order;
   const _StatusCard({required this.order});
@@ -332,17 +473,8 @@ class _StatusCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (order.clientName != null && order.clientName!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                'Bonjour ${order.clientName}',
-                style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: theme.colorScheme.onSurface),
-              ),
-            ),
+          // Nom déplacé dans `_ClientCoordinatesCard` (rendu juste au-dessus
+          // quand au moins une coordonnée est connue) — évite le doublon.
           Row(children: [
             Icon(icon, size: 20, color: color),
             const SizedBox(width: 8),
