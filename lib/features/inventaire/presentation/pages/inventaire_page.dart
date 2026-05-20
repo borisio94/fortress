@@ -4117,14 +4117,18 @@ class _StockAuditReportDialogState extends State<_StockAuditReportDialog> {
             Text(
               ok
                   ? '${widget.report.totalVariants} variante(s) vérifiée(s) — '
-                      'aucune divergence (ou toutes corrigées).'
+                      'aucune divergence à corriger.'
                   : '${widget.report.totalVariants} variante(s) vérifiée(s) — '
-                      '${_drifts.length} divergence(s) restantes.',
+                      '${_drifts.length} invariant(s) à corriger.',
               style: AppTextStyles.body,
             ),
             const SizedBox(height: 4),
             Text(
-              'Durée : ${widget.report.duration.inMilliseconds} ms',
+              widget.report.autoHealedCount > 0
+                  ? 'Durée : ${widget.report.duration.inMilliseconds} ms · '
+                      '${widget.report.autoHealedCount} drift(s) log auto-réalignés '
+                      'en silence (invariant déjà cohérent).'
+                  : 'Durée : ${widget.report.duration.inMilliseconds} ms',
               style: AppTextStyles.caption,
             ),
             if (!ok) ...[

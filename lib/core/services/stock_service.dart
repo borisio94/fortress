@@ -1549,7 +1549,43 @@ class StockService {
         );
         results.add(r);
 
-        if (!r.isOk && createIncidents) {
+        if (r.invariantOk && r.drift != 0) {
+          // ── Auto-heal : log seul stale, invariant interne cohérent ──
+          // Aucune action utilisateur nécessaire : on écrit une baseline
+          // (mouvement quantity=0) pour réaligner le log + on auto-résout
+          // l'éventuel incident `audit_drift` du jour qui aurait été créé
+          // sur un run précédent (avant cette logique).
+          _log(
+            shopId:      shopId,
+            productId:   r.productId,
+            variantId:   vid,
+            type:        'adjustment',
+            quantity:    0,
+            beforeAvail: v.stockAvailable,
+            afterAvail:  v.stockAvailable,
+            beforePhys:  v.stockPhysical,
+            afterPhys:   v.stockPhysical,
+            cause:       'audit_baseline',
+            notes:       'Re-baseline log (auto) : log était à '
+                         '${r.expected}, data actuelle dispo='
+                         '${v.stockAvailable} (invariant cohérent).',
+          );
+          final today = DateTime.now()
+              .toIso8601String().substring(0, 10);
+          final id = 'inc_audit_${vid}_$today';
+          final raw = HiveBoxes.incidentsBox.get(id);
+          if (raw is Map) {
+            final m = Map<String, dynamic>.from(raw);
+            if (m['status'] != 'resolved') {
+              m['status']      = 'resolved';
+              m['resolved_at'] = DateTime.now().toIso8601String();
+              m['notes']       = '${m['notes'] ?? ''}\n\n'
+                                 'Résolu automatiquement : invariant '
+                                 'interne cohérent, log re-baseliné.';
+              await HiveBoxes.incidentsBox.put(id, m);
+            }
+          }
+        } else if (!r.isOk && createIncidents) {
           final created = await _emitDriftIncident(r);
           if (created) incidents++;
         }
@@ -1574,6 +1610,7 @@ class StockService {
       details: {
         'variants_checked':   report.totalVariants,
         'drifts_found':       report.driftCount,
+        'auto_healed':        report.autoHealedCount,
         'incidents_created':  incidents,
         'total_drift_abs':    report.totalDriftAbs,
         'duration_ms':        report.duration.inMilliseconds,
@@ -1796,6 +1833,11 @@ class ReconciliationResult {
   ///   2) `physical == available + blocked` (invariant interne)
   bool get isOk => drift == 0 && invariantOk;
 
+  /// Vrai si la divergence demande une action utilisateur (invariant interne
+  /// cassé). Un simple drift vs log avec invariant cohérent est auto-healé
+  /// silencieusement par `reconcileShop` — l'utilisateur n'a rien à faire.
+  bool get requiresUserAction => !invariantOk;
+
   bool get hasMovements => movementsAnalyzed > 0;
 
   /// Diagnostic court pour log/UI : précise quelle(s) condition(s) sont
@@ -1827,10 +1869,17 @@ class ReconciliationReport {
     required this.incidentsCreated,
   });
 
+  /// Variantes à présenter à l'utilisateur (invariant interne cassé).
+  /// Les drifts "log seul" sont auto-healés et n'apparaissent pas ici.
   List<ReconciliationResult> get drifts =>
-      results.where((r) => !r.isOk).toList();
+      results.where((r) => r.requiresUserAction).toList();
   int get driftCount    => drifts.length;
   int get totalVariants => results.length;
   int get totalDriftAbs =>
       drifts.fold(0, (s, r) => s + r.drift.abs());
+
+  /// Nombre de log-only drifts auto-healés (informatif, pas affiché en
+  /// principal mais utile en logs/debug).
+  int get autoHealedCount =>
+      results.where((r) => r.invariantOk && r.drift != 0).length;
 }
