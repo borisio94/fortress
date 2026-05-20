@@ -6,7 +6,10 @@ abstract class ProductRemoteDataSource {
   Future<List<ProductModel>> getProducts(String shopId);
   Future<ProductModel> addProduct(AddProductParams params, String shopId);
   Future<ProductModel> updateProduct(ProductModel product, String shopId);
-  Future<void> deleteProduct(String productId, String shopId);
+  Future<void> deleteProduct(String productId, String shopId, {
+    required String reason,
+    required String userId,
+  });
   Future<void> updateStock(String productId, String shopId, int newStock);
 }
 
@@ -37,8 +40,11 @@ class ProductRemoteDataSourceImpl implements ProductRemoteDataSource {
   }
 
   @override
-  Future<void> deleteProduct(String productId, String shopId) =>
-      AppDatabase.deleteProduct(productId);
+  Future<void> deleteProduct(String productId, String shopId, {
+    required String reason,
+    required String userId,
+  }) =>
+      AppDatabase.deleteProduct(productId, reason: reason, userId: userId);
 
   @override
   Future<void> updateStock(String productId, String shopId, int newStock) async {

@@ -285,6 +285,22 @@ class Product extends Equatable {
   /// Optionnel pour rester compatible avec les produits locaux non-sync.
   final DateTime? createdAt;
 
+  /// Soft-delete (hotfix_085). Quand non-null, le produit est masqué
+  /// des listes membres et n'est plus visible qu'aux super-admins via
+  /// l'écran « Produits supprimés ». L'UPDATE est exécuté par la RPC
+  /// `delete_product` côté serveur, et propagé en local par realtime +
+  /// par le `DeleteProductUseCase` (qui marque Hive immédiatement, sans
+  /// attendre l'écho serveur). Le soft-delete force aussi `is_active =
+  /// false` et `is_visible_web = false` (la restauration super-admin
+  /// laisse ces 2 flags à false → republication manuelle).
+  final DateTime? deletedAt;
+  final String?   deletedBy;
+  final String?   deleteReason;
+  /// Snapshot JSONB des champs métier au moment de la suppression
+  /// (name, sku, prix, variants…). Lu uniquement par l'écran super-admin
+  /// pour afficher la fiche même si la ligne a été altérée depuis.
+  final Map<String, dynamic>? archivedSnapshot;
+
   const Product({
     this.id,
     this.storeId,
@@ -309,7 +325,14 @@ class Product extends Equatable {
     this.variants      = const [],
     this.expenses      = const [],
     this.createdAt,
+    this.deletedAt,
+    this.deletedBy,
+    this.deleteReason,
+    this.archivedSnapshot,
   });
+
+  /// True si le produit est soft-deleted (cf. hotfix_085).
+  bool get isDeleted => deletedAt != null;
 
   // ── Propriétés calculées ───────────────────────────────────────────────────
 
@@ -423,6 +446,11 @@ class Product extends Equatable {
     List<ProductVariant>? variants,
     List<Map<String, dynamic>>? expenses,
     DateTime? createdAt,
+    DateTime?              deletedAt,
+    String?                deletedBy,
+    String?                deleteReason,
+    Map<String, dynamic>?  archivedSnapshot,
+    bool                   clearDeleted = false,
   }) => Product(
     id:           id           ?? this.id,
     storeId:      storeId      ?? this.storeId,
@@ -447,6 +475,12 @@ class Product extends Equatable {
     variants:     variants     ?? this.variants,
     expenses:     expenses     ?? this.expenses,
     createdAt:    createdAt    ?? this.createdAt,
+    deletedAt:        clearDeleted ? null : (deletedAt    ?? this.deletedAt),
+    deletedBy:        clearDeleted ? null : (deletedBy    ?? this.deletedBy),
+    deleteReason:     clearDeleted ? null : (deleteReason ?? this.deleteReason),
+    // archivedSnapshot reste TOUJOURS préservé (même au restore) pour
+    // traçabilité — c'est le pendant historique de l'audit.
+    archivedSnapshot: archivedSnapshot ?? this.archivedSnapshot,
   );
 
   @override

@@ -175,18 +175,27 @@ class SaleLocalDatasource {
   /// Récupérer une commande par son id (cross-shop).
   /// Utile pour lire l'état d'une commande avant/après un changement de
   /// statut, sans avoir à connaître son shopId.
-  Sale? getOrderById(String orderId) {
+  ///
+  /// Les commandes soft-deleted (hotfix_084) sont MASQUÉES par défaut.
+  /// Passer [includeDeleted] = true pour les inclure (utile à
+  /// `DeleteSaleUseCase` qui doit relire l'ordre pour faire un rollback
+  /// précis ou à l'écran super-admin de restauration).
+  Sale? getOrderById(String orderId, {bool includeDeleted = false}) {
     try {
       if (!Hive.isBoxOpen(HiveBoxes.orders)) return null;
       final raw = _ordersBox.get(orderId);
       if (raw == null) return null;
-      return _mapToSaleWithStatus(Map<String, dynamic>.from(raw));
+      final sale = _mapToSaleWithStatus(Map<String, dynamic>.from(raw));
+      if (!includeDeleted && sale.isDeleted) return null;
+      return sale;
     } catch (_) {
       return null;
     }
   }
 
-  /// Récupérer toutes les commandes d'une boutique
+  /// Récupérer toutes les commandes d'une boutique.
+  /// Filtre les commandes soft-deleted (hotfix_084) — symétrique avec la
+  /// RLS Supabase qui les cache aux membres non super-admin.
   List<Sale> getOrders(String shopId) {
     try {
       if (!Hive.isBoxOpen(HiveBoxes.orders)) return [];
@@ -198,7 +207,7 @@ class SaleLocalDatasource {
         } catch (_) { return null; }
       })
           .whereType<Sale>()
-          .where((s) => s.shopId == shopId)
+          .where((s) => s.shopId == shopId && !s.isDeleted)
           .toList()
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     } catch (_) { return []; }
@@ -614,32 +623,71 @@ class SaleLocalDatasource {
     return (pid, vid);
   }
 
-  /// Supprimer une commande (Hive + Supabase via offline queue).
-  /// Si la commande était liée à un client, on recalcule immédiatement ses
-  /// métriques (totalSpent / totalOrders / lastVisitAt) pour que la
-  /// suppression se reflète côté CRM sans attendre.
-  /// Si la commande était `completed`, le stock doit être restauré : sinon
-  /// les unités vendues restent décomptées alors que la commande disparaît.
-  Future<void> deleteOrder(String orderId) async {
+  /// Soft-delete une commande (hotfix_084).
+  ///
+  /// Garde-fous appelants (`DeleteSaleUseCase`) :
+  ///   • statut ∈ {scheduled, processing, refused},
+  ///   • `amount_paid == 0`,
+  ///   • motif ≥ 10 caractères.
+  ///
+  /// Effets de bord :
+  ///   1. Restauration de stock : par construction, les statuts éligibles
+  ///      ne sont JAMAIS `completed` → en théorie le stock n'a pas été
+  ///      décrémenté. On appelle quand même `_restoreOrderStock` si la
+  ///      commande est dans un état où le stock a été pris (defensive ;
+  ///      gère les commandes legacy mal sourcées).
+  ///   2. Marquage Hive : la ligne est CONSERVÉE (pas de `box.delete`)
+  ///      avec `deleted_at / deleted_by / delete_reason` peuplés.
+  ///      `getOrders` la filtrera dès le prochain appel.
+  ///   3. RPC Supabase via [AppDatabase.bgSoftDeleteSale] (online → call
+  ///      direct, offline → enqueue + replay au retour réseau).
+  ///   4. Notification listeners + recompute métriques client.
+  ///
+  /// Idempotente : un 2ᵉ appel sur une commande déjà supprimée écrase
+  /// `deleted_at` à NOW() (acceptable — la RPC SQL est aussi idempotente
+  /// et retournera `already:true`).
+  Future<void> softDeleteOrder(String orderId, {
+    required String reason,
+    required String userId,
+  }) async {
     final raw = _ordersBox.get(orderId);
-    final shopId   = raw is Map ? raw['shop_id']   as String? : null;
-    final clientId = raw is Map ? raw['client_id'] as String? : null;
-    // Restauration de stock si la commande était completed.
-    if (raw is Map) {
-      final map = Map<String, dynamic>.from(raw);
-      final wasCompleted = (map['status'] as String?) == 'completed';
-      if (wasCompleted) {
-        final order = _mapToSaleWithStatus(map);
-        await _restoreOrderStock(order);
-      }
+    if (raw == null) return;
+    final map = Map<String, dynamic>.from(raw);
+    final shopId   = map['shop_id']   as String?;
+    final clientId = map['client_id'] as String?;
+
+    // Defensive : si l'état actuel est `completed`, on restaure quand
+    // même le stock avant de marquer supprimé. Ne devrait pas se produire
+    // (le use case bloque en amont) mais protège contre les rejeux et
+    // les commandes legacy.
+    final wasCompleted = (map['status'] as String?) == 'completed';
+    if (wasCompleted) {
+      final order = _mapToSaleWithStatus(map);
+      await _restoreOrderStock(order);
     }
-    await _ordersBox.delete(orderId);
+
+    // Marquer le soft-delete dans Hive.
+    final now = DateTime.now().toUtc().toIso8601String();
+    map['deleted_at']    = now;
+    map['deleted_by']    = userId;
+    map['delete_reason'] = reason;
+    await _ordersBox.put(orderId, map);
+
     if (shopId != null) AppDatabase.notifyOrderChange(shopId);
     if (shopId != null && clientId != null && clientId.isNotEmpty) {
       await AppDatabase.refreshClientMetrics(clientId, shopId);
     }
-    // Supprimer sur Supabase (immédiat si online, sinon queued)
-    AppDatabase.bgDeleteOrder(orderId);
+
+    // Annuler les notifications de livraison programmées.
+    await DeliveryReminderService.cancelFor(orderId);
+
+    // Pousser à Supabase via la RPC `delete_sale` (online direct ou
+    // enqueue offline).
+    await AppDatabase.bgSoftDeleteSale(
+      orderId:  orderId,
+      userId:   userId,
+      reason:   reason,
+    );
   }
 
   // ── helpers privés ────────────────────────────────────────────────────────
@@ -813,6 +861,13 @@ class SaleLocalDatasource {
                           m['delivery_mode'] as String?),
       deliveryLocationId: m['delivery_location_id'] as String?,
       deliveryPersonName: m['delivery_person_name'] as String?,
+      // Soft-delete (hotfix_084). Lecture tolérante : Supabase et Hive
+      // peuvent ne pas exposer ces colonnes sur les commandes legacy.
+      deletedAt: m['deleted_at'] != null
+          ? DateTime.tryParse(m['deleted_at'].toString())
+          : null,
+      deletedBy:    m['deleted_by']    as String?,
+      deleteReason: m['delete_reason'] as String?,
     );
   }
 }

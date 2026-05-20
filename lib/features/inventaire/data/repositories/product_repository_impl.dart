@@ -28,8 +28,11 @@ class ProductRepositoryImpl implements ProductRepository {
   }
 
   @override
-  Future<void> deleteProduct(String productId, String shopId) =>
-      AppDatabase.deleteProduct(productId);
+  Future<void> deleteProduct(String productId, String shopId, {
+    required String reason,
+    required String userId,
+  }) =>
+      AppDatabase.deleteProduct(productId, reason: reason, userId: userId);
 
   @override
   Future<void> updateStock(String productId, String shopId, int newStock) async {

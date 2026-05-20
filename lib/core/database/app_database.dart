@@ -1171,6 +1171,18 @@ class AppDatabase {
         case 'delete': await _db.from(table).delete()
             .eq(op['col'] as String, op['val']);
         case 'insert': await _db.from(table).insert(data);
+        // RPC offline-queued (hotfix_084 : delete_sale / restore_sale).
+        // Le `name` est porté par `op['name']`, les params par `op['data']`.
+        // La signature unique `{name, data}` permet à n'importe quelle RPC
+        // future d'être enqueable sans changer ce switch. Les erreurs
+        // P0001 (logique métier) sont considérées comme permanentes et
+        // droppées de la queue après log — réessayer ne marchera pas.
+        case 'rpc':
+          final name = op['name'] as String? ?? '';
+          if (name.isEmpty) {
+            throw Exception('rpc_name_missing');
+          }
+          await _db.rpc(name, params: data);
       }
       return true;
     } catch (e) {
@@ -1235,7 +1247,13 @@ class AppDatabase {
           err.contains('23503') || // FK violation
           err.contains('42501') || // permission denied
           err.contains('42502') || // insufficient privilege
-          err.contains('23502');   // not null violation
+          err.contains('23502') || // not null violation
+          // RAISE EXCEPTION métier (PL/pgSQL) — codes émis intentionnellement
+          // par les RPC pour signaler une règle de domaine violée
+          // (delete_sale → suppression_statut_invalide, motif_required, …).
+          // Réessayer la même charge utile ne changera jamais la réponse.
+          err.contains('P0001') || // raise_exception
+          err.contains('P0002');   // no_data_found
 
   /// Émet un bip + vibration pour signaler une erreur de sync à l'utilisateur
   /// (sans UI). Best-effort : si la plateforme ne supporte pas, on ignore.
@@ -1990,63 +2008,89 @@ end \$\$;""",
     if (nr != null) throw Exception('Un produit nommé "${p.name}" existe déjà');
   }
 
-  static Future<void> deleteProduct(String productId) async {
+  /// Soft-delete d'un produit (hotfix_085).
+  ///
+  /// Garde-fous (en miroir de la RPC SQL `delete_product`) :
+  ///   1. Stock résiduel > 0 (somme sur variants + stock_levels) → throw
+  ///      [ProductNotDeletableException] (compat existant) avec compteurs.
+  ///   2. ≥ 1 commande ouverte référence le produit → throw idem.
+  ///   3. Motif < 10 caractères → throw [ArgumentError] (le caller — UI
+  ///      dialog ou use case — doit valider AVANT d'appeler cette méthode).
+  ///
+  /// Effets :
+  ///   • Hive immédiat : marque `deleted_at / deleted_by / delete_reason`
+  ///     + force `is_active = false` et `is_visible_web = false`. La
+  ///     ligne reste dans la box (filtrée par `getProductsForShop`).
+  ///   • RPC `delete_product` via `bgSoftDeleteProduct` (online direct
+  ///     ou enqueue offline + replay au retour réseau).
+  ///   • Notifie listeners + invalide le cache produits.
+  ///
+  /// La RPC serveur capture un `archived_snapshot` que realtime redescend
+  /// ensuite dans Hive — la lecture super-admin l'utilise pour l'affichage.
+  static Future<void> deleteProduct(String productId, {
+    required String reason,
+    required String userId,
+  }) async {
     _assertNotFrozen();
-    // Lire le shopId AVANT delete pour pouvoir notifier ensuite
-    final raw = HiveBoxes.productsBox.get(productId);
-    final shopId = raw is Map ? raw['store_id'] as String? : null;
-    final prodName = raw is Map ? (raw['name'] as String? ?? '') : '';
 
-    // GF-8 — Blocage suppression produit en stock.
-    // Trois critères examinés AVANT toute écriture :
-    //   1. Stock disponible/physique > 0 sur n'importe quelle variante.
-    //   2. Présence de ventes OUVERTES (status scheduled/processing).
-    //   3. Présence dans des commandes passées (préserve l'historique).
-    // Les détails (sommes, comptes) sont rapportés dans `ProductNotDeletableException`
-    // → la dialog UI affiche un message actionnable au lieu d'un texte générique.
+    // ── 1. Lecture produit + extraction variants (depuis Hive). ───────
+    final raw = HiveBoxes.productsBox.get(productId);
+    final shopId   = raw is Map ? raw['store_id'] as String? : null;
+    final prodName = raw is Map ? (raw['name'] as String? ?? '') : '';
+    if (raw is! Map) {
+      throw ProductNotDeletableException(
+        productName: prodName.isEmpty ? 'ce produit' : prodName);
+    }
+
+    final trimmed = reason.trim();
+    if (trimmed.length < 10) {
+      // Le caller (DeleteProductUseCase / DeleteProductDialog) doit
+      // valider le motif AVANT. Cette garde est défensive.
+      throw ArgumentError(
+          'Motif obligatoire (10 caractères minimum) pour supprimer.');
+    }
+
     final variantIds = <String>{};
     int totalAvailable = 0;
     int totalPhysical  = 0;
-    if (raw is Map) {
-      final vars = (raw['variants'] as List?) ?? [];
-      for (final v in vars) {
-        final vm = Map<String, dynamic>.from(v as Map);
-        final vid = vm['id'] as String?;
-        if (vid != null && vid.isNotEmpty) variantIds.add(vid);
-        totalAvailable += (vm['stockAvailable'] as num?)?.toInt() ?? 0;
-        totalPhysical  += (vm['stockPhysical']  as num?)?.toInt() ?? 0;
-      }
+    final vars = (raw['variants'] as List?) ?? [];
+    for (final v in vars) {
+      final vm = Map<String, dynamic>.from(v as Map);
+      final vid = vm['id'] as String?;
+      if (vid != null && vid.isNotEmpty) variantIds.add(vid);
+      totalAvailable += (vm['stockAvailable'] as num?)?.toInt() ?? 0;
+      totalPhysical  += (vm['stockPhysical']  as num?)?.toInt() ?? 0;
     }
-    // Stock indexé via stock_levels (sources de vérité partenaire/warehouse).
-    // Le scan inclut TOUTES les locations — on n'autorise pas la suppression
-    // tant qu'il reste du stock vendable n'importe où.
-    for (final raw in HiveBoxes.stockLevelsBox.values) {
+    // Stock_levels distincts (partenaires / warehouse) — pris en max
+    // pour ne pas masquer un stock résiduel non encore répliqué.
+    for (final lvlRaw in HiveBoxes.stockLevelsBox.values) {
       try {
-        final m = Map<String, dynamic>.from(raw);
+        final m = Map<String, dynamic>.from(lvlRaw);
         final vid = m['variant_id'] as String?;
         if (vid == null || !variantIds.contains(vid)) continue;
         final avail = (m['stock_available'] as num?)?.toInt() ?? 0;
         final phys  = (m['stock_physical']  as num?)?.toInt() ?? 0;
-        // Les variantes de boutique sont déjà comptées via products.variants —
-        // on ne les double-compte que pour les locations distinctes (partenaire,
-        // warehouse). Heuristique conservative : on prend le max sur cette
-        // variante pour éviter de manquer un stock partenaire non répliqué.
         if (avail > totalAvailable) totalAvailable = avail;
         if (phys  > totalPhysical)  totalPhysical  = phys;
       } catch (_) {}
     }
 
-    int openSalesCount = 0;
+    // ── 2. Commandes ouvertes référençant ce produit ou ses variants.
+    //       On EXCLUT les commandes soft-deleted (hotfix_084) — symétrique
+    //       avec la RPC SQL.
+    int openSalesCount   = 0;
     int totalOrdersCount = 0;
     const openStatuses = {'scheduled', 'processing'};
     for (final orderRaw in HiveBoxes.ordersBox.values) {
       final om = Map<String, dynamic>.from(orderRaw);
+      if (om['deleted_at'] != null) continue;
       final items = (om['items'] as List?) ?? [];
       bool referenced = false;
       for (final it in items) {
         final pid = (it as Map)['product_id']?.toString();
         if (pid == productId || variantIds.contains(pid)) {
-          referenced = true; break;
+          referenced = true;
+          break;
         }
       }
       if (!referenced) continue;
@@ -2057,8 +2101,7 @@ end \$\$;""",
 
     final blocked = totalAvailable > 0
         || totalPhysical > 0
-        || openSalesCount > 0
-        || totalOrdersCount > 0;
+        || openSalesCount > 0;
 
     if (blocked) {
       throw ProductNotDeletableException(
@@ -2070,15 +2113,73 @@ end \$\$;""",
       );
     }
 
+    // ── 3. Marquage Hive — soft-delete + force is_active / is_visible_web
+    //       à false. La ligne reste dans la box (filtrée par les readers).
+    final map = Map<String, dynamic>.from(raw);
+    map['deleted_at']     = DateTime.now().toUtc().toIso8601String();
+    map['deleted_by']     = userId;
+    map['delete_reason']  = trimmed;
+    map['is_active']      = false;
+    map['is_visible_web'] = false;
     LocalStorageService.invalidateProductsCache();
-    await HiveBoxes.productsBox.delete(productId);
-    // Tombstone persistant : empêche les sync/realtime futurs de
-    // ressusciter ce produit si la propagation Supabase a un retard ou
-    // si un autre device pousse en parallèle un snapshot pré-suppression.
-    await _markProductDeletionPending(productId);
+    await HiveBoxes.productsBox.put(productId, map);
     if (shopId != null) _notify('products', shopId);
-    _bgWrite({'table': 'products', 'op': 'delete',
-      'col': 'id', 'val': productId, 'data': {'id': productId}});
+
+    // ── 4. Push RPC delete_product (online direct ou enqueue offline).
+    await bgSoftDeleteProduct(
+      productId: productId,
+      userId:    userId,
+      reason:    trimmed,
+    );
+  }
+
+  /// Push de la RPC `delete_product` (hotfix_085). Online → call direct +
+  /// rethrow des erreurs métier serveur (P0001/P0002) pour que le caller
+  /// puisse rollback Hive ou afficher. Offline → enqueue + retry au
+  /// retour réseau. Voir `bgSoftDeleteSale` (hotfix_084) pour la même
+  /// philosophie sur les commandes.
+  static Future<void> bgSoftDeleteProduct({
+    required String productId,
+    required String userId,
+    required String reason,
+  }) async {
+    final params = <String, dynamic>{
+      'p_product_id': productId,
+      'p_user_id':    userId,
+      'p_reason':     reason,
+    };
+    if (_i._isOnline) {
+      try {
+        await _db.rpc('delete_product', params: params);
+      } catch (e) {
+        final err = e.toString();
+        if (err.contains('P0001') || err.contains('P0002')
+            || err.contains('42501')) {
+          rethrow;
+        }
+        _enqueue({'table': 'rpc', 'op': 'rpc', 'name': 'delete_product',
+                  'data': params});
+      }
+    } else {
+      _enqueue({'table': 'rpc', 'op': 'rpc', 'name': 'delete_product',
+                'data': params});
+    }
+  }
+
+  /// Restauration d'un produit soft-deleted via la RPC `restore_product`
+  /// (hotfix_085). Réservée super-admin (vérification côté SQL). Online
+  /// uniquement — pas d'enqueue offline (l'écran restore est super-admin
+  /// → suppose une session active). Ne re-publie pas le produit :
+  /// `is_active` et `is_visible_web` restent à false côté serveur, le
+  /// manager doit republier manuellement.
+  static Future<void> bgRestoreProduct({
+    required String productId,
+    required String userId,
+  }) async {
+    await _db.rpc('restore_product', params: <String, dynamic>{
+      'p_product_id': productId,
+      'p_user_id':    userId,
+    });
   }
 
   static List<Product> getProductsForShop(String shopId) =>
@@ -4502,6 +4603,8 @@ end \$\$;""",
         .map((v) => LocalStorageService.variantFromMap(Map<String, dynamic>.from(v as Map)))
         .toList();
     final createdRaw = r['created_at'];
+    final deletedRaw = r['deleted_at'];
+    final snapshot   = r['archived_snapshot'];
     return Product(
       id: r['id'], storeId: r['store_id'], categoryId: r['category_id'],
       brand: r['brand'], name: r['name'], description: r['description'],
@@ -4528,6 +4631,15 @@ end \$\$;""",
           : r['expenses'] is num
               ? [{'description': 'Dépenses', 'amount': (r['expenses'] as num).toDouble()}]
               : [],
+      // hotfix_085 — soft-delete fields propagés par realtime.
+      deletedAt: deletedRaw is String
+          ? DateTime.tryParse(deletedRaw)
+          : (deletedRaw is DateTime ? deletedRaw : null),
+      deletedBy:    r['deleted_by']    as String?,
+      deleteReason: r['delete_reason'] as String?,
+      archivedSnapshot: snapshot is Map
+          ? Map<String, dynamic>.from(snapshot)
+          : null,
     );
   }
 
@@ -4615,10 +4727,66 @@ end \$\$;""",
     _bgWrite({'table': 'orders', 'op': 'upsert', 'data': orderMap});
   }
 
-  /// Supprimer une commande sur Supabase (immédiat si online, sinon queued)
-  static void bgDeleteOrder(String orderId) {
-    _bgWrite({'table': 'orders', 'op': 'delete',
-      'col': 'id', 'val': orderId, 'data': {}});
+  /// Soft-delete d'une commande via la RPC `delete_sale` (hotfix_084).
+  ///
+  /// Comportement :
+  ///   • Online → call direct. Lève si la RPC retourne une erreur métier
+  ///     (suppression_statut_invalide, suppression_commande_payee,
+  ///     motif_required) — l'appelant (`DeleteSaleUseCase`) doit catcher
+  ///     pour rollback le marquage Hive local le cas échéant. Les erreurs
+  ///     transitoires (réseau, 5xx) sont silencieusement enqueued.
+  ///   • Offline → enqueue. L'op sera rejouée par `_flushQueue` au
+  ///     retour réseau. Si le serveur refuse alors (statut/paiement),
+  ///     l'erreur P0001 marquera l'op permanente et la droppera après
+  ///     log — incohérence visible dans la bannière « Synchro incomplète ».
+  ///
+  /// La signature retourne `Future<void>` mais ne fait pas d'`await` sur
+  /// l'enqueue : la caller a déjà marqué Hive avant d'appeler cette
+  /// méthode (cf. `SaleLocalDatasource.softDeleteOrder`), donc l'UI est
+  /// déjà cohérente côté offline.
+  static Future<void> bgSoftDeleteSale({
+    required String orderId,
+    required String userId,
+    required String reason,
+  }) async {
+    final params = <String, dynamic>{
+      'p_sale_id': orderId,
+      'p_user_id': userId,
+      'p_reason':  reason,
+    };
+    if (_i._isOnline) {
+      try {
+        await _db.rpc('delete_sale', params: params);
+      } catch (e) {
+        final err = e.toString();
+        // Erreurs métier explicites → propager au caller (UI dialog).
+        // Ne PAS enqueue : réessayer ne marchera pas et masquerait le
+        // problème (Hive marqué supprimé alors que SQL refuse).
+        if (err.contains('P0001') || err.contains('P0002')) {
+          rethrow;
+        }
+        // Erreur transitoire (réseau / 5xx) → enqueue pour réessai.
+        _enqueue({'table': 'rpc', 'op': 'rpc', 'name': 'delete_sale',
+                  'data': params});
+      }
+    } else {
+      _enqueue({'table': 'rpc', 'op': 'rpc', 'name': 'delete_sale',
+                'data': params});
+    }
+  }
+
+  /// Restauration d'une commande soft-deleted via la RPC `restore_sale`
+  /// (hotfix_084). Réservée super-admin (vérification côté SQL).
+  /// Online uniquement — pas d'enqueue offline (l'écran de restauration
+  /// est super-admin → suppose une session active).
+  static Future<void> bgRestoreSale({
+    required String orderId,
+    required String userId,
+  }) async {
+    await _db.rpc('restore_sale', params: <String, dynamic>{
+      'p_sale_id': orderId,
+      'p_user_id': userId,
+    });
   }
 
   /// Archive un client (soft-delete) : le masque des listes par défaut

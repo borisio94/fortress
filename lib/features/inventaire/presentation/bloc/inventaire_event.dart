@@ -23,8 +23,16 @@ class UpdateProduct extends InventaireEvent {
 class DeleteProduct extends InventaireEvent {
   final String productId;
   final String shopId;
-  DeleteProduct(this.productId, this.shopId);
-  @override List<Object> get props => [productId, shopId];
+  /// hotfix_085 — motif obligatoire (≥ 10 caractères). Vérifié par la
+  /// RPC SQL ET par le `DeleteProductUseCase` côté Flutter.
+  final String reason;
+  /// auth.users.id de l'auteur (pour audit + RPC params).
+  final String userId;
+  DeleteProduct(this.productId, this.shopId, {
+    required this.reason,
+    required this.userId,
+  });
+  @override List<Object> get props => [productId, shopId, reason, userId];
 }
 class UpdateStock extends InventaireEvent {
   final String productId;

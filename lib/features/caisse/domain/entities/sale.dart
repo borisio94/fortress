@@ -267,6 +267,22 @@ class Sale extends Equatable {
   /// Null pour les commandes legacy pré-PR-A.
   final String? idempotencyKey;
 
+  /// Soft-delete (hotfix_084). Quand non-null, la commande est masquée
+  /// des listes membres et n'est plus visible qu'aux super-admins via
+  /// l'écran « Commandes supprimées ». L'UPDATE est exécuté par la RPC
+  /// `delete_sale` côté serveur, et propagé en local par realtime + par
+  /// le `DeleteSaleUseCase` (qui marque Hive immédiatement, sans attendre
+  /// l'écho serveur). Le rollback de stock est appliqué en parallèle via
+  /// `StockService.reverseSale(...)`.
+  final DateTime? deletedAt;
+  /// `auth.users.id` de l'utilisateur qui a supprimé. Null si non
+  /// supprimée. Persisté pour audit (visible dans `activity_logs` aussi).
+  final String?   deletedBy;
+  /// Motif fourni par l'opérateur (min 10 caractères, vérifié côté
+  /// dialog Flutter ET côté RPC SQL). Toujours non-vide si `deletedAt`
+  /// est non-null. Null si non supprimée.
+  final String?   deleteReason;
+
   const Sale({
     this.id,
     required this.shopId,
@@ -298,7 +314,13 @@ class Sale extends Equatable {
     this.amountPaid = 0,
     this.paymentStatus = PaymentStatus.unpaid,
     this.idempotencyKey,
+    this.deletedAt,
+    this.deletedBy,
+    this.deleteReason,
   });
+
+  /// True si la commande est soft-deleted (cf. hotfix_084).
+  bool get isDeleted => deletedAt != null;
 
   double get subtotal  => items.fold(0, (s, i) => s + i.subtotal);
   /// Somme des frais de commande (livraison, emballage…). Ces frais sont
@@ -348,6 +370,10 @@ class Sale extends Equatable {
     double? amountPaid,
     PaymentStatus? paymentStatus,
     String? idempotencyKey,
+    DateTime? deletedAt,
+    String?   deletedBy,
+    String?   deleteReason,
+    bool      clearDeleted = false,
   }) => Sale(
     id:                 id             ?? this.id,
     shopId:             shopId         ?? this.shopId,
@@ -379,6 +405,9 @@ class Sale extends Equatable {
     amountPaid:         amountPaid         ?? this.amountPaid,
     paymentStatus:      paymentStatus      ?? this.paymentStatus,
     idempotencyKey:     idempotencyKey     ?? this.idempotencyKey,
+    deletedAt:    clearDeleted ? null : (deletedAt    ?? this.deletedAt),
+    deletedBy:    clearDeleted ? null : (deletedBy    ?? this.deletedBy),
+    deleteReason: clearDeleted ? null : (deleteReason ?? this.deleteReason),
   );
 
   @override

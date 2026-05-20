@@ -13,6 +13,8 @@ import '../widgets/add_order_expense_dialog.dart';
 import '../widgets/order_processing_sheet.dart';
 import '../widgets/order_completion_sheet.dart';
 import '../widgets/record_acompte_dialog.dart';
+import '../widgets/delete_sale_dialog.dart';
+import '../../domain/usecases/delete_sale_usecase.dart';
 import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../domain/usecases/order_receipt_usecase.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
@@ -44,7 +46,6 @@ import '../../../../core/services/url_shortener_service.dart';
 import '../../../../core/services/whatsapp/whatsapp_template_renderer.dart';
 import '../../../parametres/domain/entities/whatsapp_template.dart';
 import '../../../parametres/presentation/providers/whatsapp_template_provider.dart';
-import '../../../../core/services/danger_action_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/utils/phone_formatter.dart';
@@ -769,12 +770,16 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               await _ds.rescheduleOrder(_orders[i].id!, newDate, reason);
               if (mounted) setState(() {});
             },
-            onDelete: () async {
-              // Garde défensive : ne supprimer que si réellement annulée,
-              // même si l'UI était contournée.
-              if (_orders[i].status != SaleStatus.cancelled) return;
-              await _ds.deleteOrder(_orders[i].id!);
-              setState(() {});
+            onDelete: (reason) async {
+              // hotfix_084 : soft-delete sécurisé via DeleteSaleUseCase.
+              // Le use case valide statut + amountPaid + motif côté Hive,
+              // marque Hive immédiatement, restaure le stock localement et
+              // pousse la RPC `delete_sale` (online direct ou queue offline).
+              // Les exceptions DeleteSaleException sont propagées au dialog
+              // qui les affiche en place.
+              await DeleteSaleUseCase()
+                  .call(orderId: _orders[i].id!, reason: reason);
+              if (mounted) setState(() {});
             },
             // Rebuild parent → `_orders` relit Hive → card reçoit une Sale
             // fraîche (bandeau « Reste à payer » disparaît une fois soldé).
@@ -1021,7 +1026,11 @@ class _OrderCard extends ConsumerStatefulWidget {
   final Future<void> Function(String reason) onCancelWithReason;
   /// Reprogramme une commande "en cours" vers une nouvelle date avec raison.
   final Future<void> Function(DateTime newDate, String reason) onReschedule;
-  final VoidCallback onDelete;
+  /// Callback de suppression sécurisée. Reçoit le motif validé par
+  /// l'utilisateur (≥ 10 caractères) et doit appeler `DeleteSaleUseCase`.
+  /// Peut lever une [DeleteSaleException] — le dialog l'affiche en place
+  /// sans se fermer.
+  final Future<void> Function(String reason) onDelete;
   /// Appelé après une mutation interne de la card qui ne passe pas par
   /// onUpdate/onDelete (ex: enregistrement d'un acompte/solde). Le parent
   /// fait alors un setState → le getter `_orders` relit Hive et la card
@@ -1604,7 +1613,15 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       ),
                       const SizedBox(width: 6),
                     ],
-                    if (widget.canDelete)
+                    // hotfix_084 : le bouton n'apparaît que si la commande
+                    // est éligible (statut ouvert non-payé). Évite à
+                    // l'opérateur de cliquer pour se voir refuser dans le
+                    // dialog — sécurise aussi par construction puisque le
+                    // use case et la RPC enforce les mêmes règles.
+                    if (widget.canDelete
+                        && DeleteSaleUseCase.allowedStatuses
+                            .contains(widget.order.status)
+                        && widget.order.amountPaid <= 0)
                       _ActionBtn(
                         icon: Icons.delete_outline_rounded,
                         color: AppColors.error,
@@ -2160,30 +2177,14 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   }
 
   Future<void> _confirmDelete(BuildContext context) async {
-    final id = widget.order.id ?? '';
-    final saleRef = id.length >= 6
-        ? id.substring(id.length - 6)
-        : (id.isEmpty ? 'commande' : id);
-    final clientName = widget.order.clientName;
-    await DangerActionService.execute(
-      context:      context,
-      perms:        ref.read(permissionsProvider(widget.order.shopId)),
-      action:       DangerAction.cancelSale,
-      shopId:       widget.order.shopId,
-      targetId:     id,
-      targetLabel:  clientName != null && clientName.isNotEmpty
-          ? '$clientName · $saleRef'
-          : saleRef,
-      title:        'Supprimer cette commande',
-      description:  clientName != null && clientName.isNotEmpty
-          ? 'Commande de $clientName · réf. $saleRef'
-          : 'Réf. $saleRef',
-      consequences: const [
-        'La commande est définitivement supprimée.',
-        'Le stock réservé sera libéré.',
-      ],
-      confirmText:  saleRef,
-      onConfirmed:  () async => widget.onDelete(),
+    // Dialog dédié (hotfix_084) : motif obligatoire ≥ 10 caractères,
+    // checkbox de confirmation, bouton danger désactivé tant que les 2
+    // conditions ne sont pas réunies. Remplace l'ancien DangerActionService
+    // pour cette action précise (qui demandait un confirmText par recopie).
+    await showDeleteSaleDialog(
+      context,
+      order: widget.order,
+      onConfirm: widget.onDelete,
     );
   }
 }

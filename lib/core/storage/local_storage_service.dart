@@ -174,16 +174,26 @@ class LocalStorageService {
     if (cached != null) return cached;
     final list = HiveBoxes.productsBox.values
         .map((m) => _productFromMap(Map<String, dynamic>.from(m)))
-        .where((p) => p.storeId == shopId)
+        // hotfix_085 : on filtre les soft-deleted dès la lecture Hive,
+        // symétrique avec la RLS Supabase qui les cache aux membres.
+        // L'écran super-admin lit directement Supabase (pas via cette
+        // fonction) pour les voir.
+        .where((p) => p.storeId == shopId && !p.isDeleted)
         .toList()
       ..sort((a, b) => a.name.compareTo(b.name));
     _productsCache[shopId] = list;
     return list;
   }
 
-  static Product? getProduct(String id) {
+  /// Lit un produit par id. Filtre les soft-deleted par défaut. Passer
+  /// [includeDeleted] = true pour les inclure (utile au `DeleteProductUseCase`
+  /// qui doit relire l'état pré-suppression, ou aux écrans super-admin).
+  static Product? getProduct(String id, {bool includeDeleted = false}) {
     final m = HiveBoxes.productsBox.get(id);
-    return m != null ? _productFromMap(Map<String, dynamic>.from(m)) : null;
+    if (m == null) return null;
+    final p = _productFromMap(Map<String, dynamic>.from(m));
+    if (!includeDeleted && p.isDeleted) return null;
+    return p;
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -321,6 +331,13 @@ class LocalStorageService {
     'variants': p.variants.map(_variantToMap).toList(),
     'expenses': p.expenses,
     'created_at': p.createdAt?.toIso8601String(),
+    // Soft-delete (hotfix_085). archived_snapshot reste null pour les
+    // produits vivants — il est rempli uniquement par la RPC delete_product
+    // côté serveur et redescendu via realtime.
+    'deleted_at':        p.deletedAt?.toUtc().toIso8601String(),
+    'deleted_by':        p.deletedBy,
+    'delete_reason':     p.deleteReason,
+    'archived_snapshot': p.archivedSnapshot,
   };
 
   static Product _productFromMap(Map<String, dynamic> m) {
@@ -383,6 +400,18 @@ class LocalStorageService {
           : (m['created_at'] is DateTime
               ? m['created_at'] as DateTime
               : null),
+      // Soft-delete (hotfix_085). Lecture tolérante : les produits legacy
+      // n'ont pas ces colonnes → null par défaut.
+      deletedAt: m['deleted_at'] is String
+          ? DateTime.tryParse(m['deleted_at'] as String)
+          : (m['deleted_at'] is DateTime
+              ? m['deleted_at'] as DateTime
+              : null),
+      deletedBy:        m['deleted_by']    as String?,
+      deleteReason:     m['delete_reason'] as String?,
+      archivedSnapshot: m['archived_snapshot'] is Map
+          ? Map<String, dynamic>.from(m['archived_snapshot'] as Map)
+          : null,
     );
   }
 

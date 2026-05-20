@@ -33,6 +33,8 @@ import '../../../../core/services/whatsapp_service.dart';
 import '../widgets/recipient_picker_sheet.dart';
 import '../widgets/share_catalog_dialog.dart';
 import '../widgets/adjust_stock_dialog.dart';
+import '../widgets/delete_product_dialog.dart';
+import '../../domain/usecases/delete_product_usecase.dart';
 import '../../../../shared/widgets/blocked_delete_dialog.dart';
 import '../../../parametres/presentation/widgets/transfer_form_sheet.dart';
 import '../../../../shared/widgets/form_sheet.dart';
@@ -789,42 +791,26 @@ class _InventairePageState extends ConsumerState<InventairePage>
   }
   Future<void> _delete(String id) async {
     final p = _products.where((p) => p.id == id).firstOrNull;
-    try {
-      await AppDatabase.deleteProduct(id);
-    } on ProductNotDeletableException catch (e) {
-      // GF-8 — dialog enrichi : message multi-ligne listant stock /
-      // ventes ouvertes / commandes historiques avec compteurs.
+    if (p == null) return;
+
+    // hotfix_085 — pré-check léger : si le produit a manifestement du
+    // stock, on saute directement le dialog motif et on propose
+    // l'archivage (UX : pas la peine de demander un motif si on sait
+    // que l'opération échouera).
+    final blocker = DeleteProductUseCase().peekBlocker(p);
+    if (blocker != null) {
       if (!mounted) return;
-      if (p == null) return;
       final choice = await showBlockedDeleteDialog(
         context,
         itemLabel: p.name,
-        reason: '${e.message}\n\nSupprime/annule les commandes concernées '
-                'et vide le stock avant de réessayer, ou archive le produit.',
+        reason:
+            '${blocker.message}\n\nVide le stock ou supprime les commandes '
+            'concernées avant de réessayer, ou archive le produit.',
         archiveDescription:
             'Le produit sera désactivé : plus visible à la caisse, dans '
             'les listes ni à la vente. L\'historique de ses ventes passées '
-            'reste intact.',
-      );
-      if (choice == BlockedDeleteChoice.archive) {
-        await AppDatabase.saveProduct(
-            p.copyWith(isActive: false), skipValidation: true);
-        if (mounted) AppSnack.success(context, 'Produit archivé');
-        _load();
-      }
-      return;
-    } catch (e) {
-      // Filet pour les autres exceptions (DB freeze, sync, etc.).
-      if (!mounted) return;
-      if (p == null) return;
-      final choice = await showBlockedDeleteDialog(
-        context,
-        itemLabel: p.name,
-        reason: e.toString().replaceAll('Exception: ', ''),
-        archiveDescription:
-            'Le produit sera désactivé : plus visible à la caisse, dans '
-            'les listes ni à la vente. L\'historique de ses ventes passées '
-            'reste intact.',
+            'reste intact. Aucune trace centralisée n\'est créée — '
+            'utilise la suppression pour un audit complet.',
       );
       if (choice == BlockedDeleteChoice.archive) {
         await AppDatabase.saveProduct(
@@ -834,15 +820,23 @@ class _InventairePageState extends ConsumerState<InventairePage>
       }
       return;
     }
-    if (p != null) {
-      ActivityLogService.log(
-        action:      'product_deleted',
-        targetType:  'product',
-        targetId:    id,
-        targetLabel: p.name,
-        shopId:      p.storeId,
-      );
-    }
+
+    // Pas de blocker visible → dialog motif + checkbox. Le use case fait
+    // les checks complets (stock_levels, commandes ouvertes) côté
+    // AppDatabase + push la RPC. Les exceptions sont catched par le
+    // dialog et affichées en place.
+    final ok = await showDeleteProductDialog(
+      context,
+      product: p,
+      onConfirm: (reason) =>
+          DeleteProductUseCase().call(productId: id, reason: reason),
+    );
+    if (ok != true) return;
+    // L'audit `product_deleted` est désormais émis SIDE serveur par la
+    // RPC `delete_product` (cf. hotfix_085). `_load()` rafraîchit la
+    // liste — `LocalStorageService.getProductsForShop` filtre déjà les
+    // produits soft-deleted.
+    if (mounted) AppSnack.success(context, 'Produit supprimé');
     _load();
   }
 

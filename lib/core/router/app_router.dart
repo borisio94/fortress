@@ -13,6 +13,7 @@ import '../../features/dashboard/presentattion/pages/dashboard_page.dart';
 import '../../features/super_admin/presentation/pages/super_admin_page.dart';
 import '../../features/super_admin/presentation/pages/admin_subscriptions_page.dart';
 import '../../features/super_admin/presentation/pages/plans_page.dart';
+import '../../features/super_admin/presentation/pages/super_admin_deleted_hub_page.dart';
 import '../../features/catalogue/presentation/pages/catalogue_page.dart';
 import '../../features/marketing/presentation/pages/landing_page.dart';
 import '../../features/promo_campaigns/presentation/pages/campaign_send_page.dart';
@@ -474,6 +475,30 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           builder: (c, s) => const AdminSubscriptionsPage()),
       GoRoute(path: '/super-admin/plans',
           builder: (c, s) => const PlansPage()),
+      // Hub « Éléments supprimés » (super-admin) — tabs Commandes/Produits.
+      // Les 3 paths pointent vers le même hub, seul l'onglet initial diffère.
+      // Le guard d'accès est porté par la page elle-même (currentPlanProvider)
+      // + la RLS Supabase qui ne renvoie 0 ligne à tout non super-admin.
+      GoRoute(path: RouteNames.superAdminDeletedHub,
+          builder: (c, s) => const SuperAdminDeletedHubPage()),
+      GoRoute(path: RouteNames.superAdminDeletedOrders,
+          builder: (c, s) =>
+              const SuperAdminDeletedHubPage(initialTab: 0)),
+      GoRoute(path: RouteNames.superAdminDeletedProducts,
+          builder: (c, s) =>
+              const SuperAdminDeletedHubPage(initialTab: 1)),
+      // Anciennes routes — redirigent vers le hub pour ne pas casser les
+      // bookmarks éventuels (un onglet est forcé pour préserver l'intention).
+      GoRoute(path: RouteNames.superAdminDeletedOrdersLegacy,
+          redirect: (_, __) => RouteNames.superAdminDeletedOrders),
+      GoRoute(path: RouteNames.superAdminDeletedProductsLegacy,
+          redirect: (_, __) => RouteNames.superAdminDeletedProducts),
+      // Note : `DeletedOrdersPage` et `DeletedProductsPage` (les
+      // standalone Scaffold) ne sont plus exposées en route, mais leurs
+      // widgets `DeletedOrdersBody` / `DeletedProductsBody` sont
+      // utilisés directement par le hub. Les imports restent pour
+      // documenter la disponibilité des pages standalone si un futur
+      // contexte (deeplink direct sans hub) en a besoin.
       GoRoute(path: RouteNames.subscription,    builder: (c, s) => const SubscriptionPage()),
       GoRoute(path: RouteNames.forgotPassword,  builder: (c, s) => const ForgotPasswordPage()),
       GoRoute(path: RouteNames.acceptInvite,

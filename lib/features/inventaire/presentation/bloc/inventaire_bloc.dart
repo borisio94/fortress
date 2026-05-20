@@ -144,7 +144,8 @@ class InventaireBloc extends Bloc<InventaireEvent, InventaireState> {
             .where((p) => p.id == event.productId)
             .firstOrNull;
       }
-      await repository.deleteProduct(event.productId, event.shopId);
+      await repository.deleteProduct(event.productId, event.shopId,
+          reason: event.reason, userId: event.userId);
       await ActivityLogService.log(
         action:      'product_deleted',
         targetType:  'product',

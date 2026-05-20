@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import '../../../../core/router/route_names.dart';
+import 'super_admin_deleted_hub_page.dart' show superAdminDeletedTotalProvider;
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/services/activity_log_service.dart';
@@ -692,6 +695,11 @@ class _DashboardSection extends ConsumerWidget {
                           () => onNavigate(_SASection.payments)),
                   _QuickAction('Plans', Icons.card_membership_rounded, const Color(0xFF7C3AED),
                           () => onNavigate(_SASection.plans)),
+                  // Accès rapide unique au hub « Éléments supprimés »
+                  // (commandes + produits sous tabs, hotfix_084 + 085).
+                  // Le badge sur l'icône affiche le total — le hub
+                  // décompose par catégorie.
+                  _DeletedQuickAction(),
                 ],
               ),
             ),
@@ -1432,6 +1440,83 @@ class _QuickAction extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// Variante de [_QuickAction] dédiée au hub « Éléments supprimés ».
+/// Affiche un badge sur l'icône avec le total commandes+produits
+/// supprimés (lu via [superAdminDeletedTotalProvider]). Si total = 0,
+/// pas de badge.
+class _DeletedQuickAction extends ConsumerWidget {
+  const _DeletedQuickAction();
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final total = ref.watch(superAdminDeletedTotalProvider);
+    return GestureDetector(
+      onTap: () => context.go(RouteNames.superAdminDeletedHub),
+      child: Container(
+        width: 130,
+        height: 48,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.error.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.start,
+          children: [
+            // Icône + badge superposé via Stack.
+            SizedBox(
+              width: 18, height: 18,
+              child: Stack(clipBehavior: Clip.none, children: [
+                const Icon(Icons.delete_outline_rounded,
+                    size: 18, color: AppColors.error),
+                if (total > 0)
+                  Positioned(
+                    right: -8, top: -6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: AppColors.error,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      constraints: const BoxConstraints(minWidth: 14),
+                      child: Text(
+                        total >= 1000 ? '999+' : '$total',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          height: 1.1,
+                        ),
+                      ),
+                    ),
+                  ),
+              ]),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                'Éléments supprimés',
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.bodyBold
+                    .copyWith(color: AppColors.error),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _Alert extends StatelessWidget {

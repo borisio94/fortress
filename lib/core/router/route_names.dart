@@ -51,4 +51,15 @@ class RouteNames {
   static const subscription    = '/subscription';
   static const superAdminHome  = '/super-admin';
   static const adminSubscriptions = '/admin/subscriptions';
+  /// Hub super-admin « Éléments supprimés » (commandes + produits).
+  /// Onglet par défaut : Commandes.
+  static const superAdminDeletedHub = '/super-admin/deleted';
+  /// Hub avec onglet « Commandes » forcé (deeplink direct).
+  static const superAdminDeletedOrders   = '/super-admin/deleted/orders';
+  /// Hub avec onglet « Produits » forcé (deeplink direct).
+  static const superAdminDeletedProducts = '/super-admin/deleted/products';
+  /// Anciennes routes legacy (pré-hub) conservées comme alias pour ne
+  /// pas casser d'éventuels bookmarks ou liens externes.
+  static const superAdminDeletedOrdersLegacy   = '/super-admin/orders/deleted';
+  static const superAdminDeletedProductsLegacy = '/super-admin/products/deleted';
 }
