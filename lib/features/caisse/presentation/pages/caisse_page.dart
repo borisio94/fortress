@@ -15,6 +15,7 @@ import '../widgets/order_completion_sheet.dart';
 import '../widgets/record_acompte_dialog.dart';
 import '../widgets/delete_sale_dialog.dart';
 import '../../domain/usecases/delete_sale_usecase.dart';
+import '../../../onboarding/presentation/widgets/first_sale_tooltip.dart';
 import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../domain/usecases/order_receipt_usecase.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
@@ -238,24 +239,39 @@ class _PrincipalTab extends StatelessWidget {
     // chaleur vient des cards (ombre tintée primary sur ProductGridCard),
     // pas d'un dégradé global.
     final bg = theme.scaffoldBackgroundColor;
+    // Bannière tooltip 1ʳᵉ vente (PR-3 onboarding) — self-gated : se rend
+    // SizedBox.shrink() si déjà vue OU si une vente complétée existe déjà
+    // pour cette boutique. Insérée en haut sans toucher au CaisseBloc.
+    final tooltip = FirstSaleTooltipBanner(shopId: shopId);
     if (isWide) {
-      return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      return Column(children: [
+        tooltip,
         Expanded(
-          child: ColoredBox(
-              color: bg,
-              child: PosProductPanel(shopId: shopId)),
-        ),
-        Container(width: 1, color: theme.semantic.borderSubtle),
-        SizedBox(
-          width: 380,
-          child: CartWidget(shopId: shopId, isEcommerce: isEcommerce),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+            Expanded(
+              child: ColoredBox(
+                  color: bg,
+                  child: PosProductPanel(shopId: shopId)),
+            ),
+            Container(width: 1, color: theme.semantic.borderSubtle),
+            SizedBox(
+              width: 380,
+              child: CartWidget(shopId: shopId, isEcommerce: isEcommerce),
+            ),
+          ]),
         ),
       ]);
     }
-    return ColoredBox(
-      color: bg,
-      child: PosProductPanel(shopId: shopId),
-    );
+    return Column(children: [
+      tooltip,
+      Expanded(
+        child: ColoredBox(
+          color: bg,
+          child: PosProductPanel(shopId: shopId),
+        ),
+      ),
+    ]);
   }
 }
 

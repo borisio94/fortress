@@ -46,6 +46,18 @@ class RouteNames {
   static const paymentsPage      = '/shop/:shopId/parametres/payments';
   static const pinDeletePage     = '/shop/:shopId/parametres/pin/delete';
 
+  // Onboarding (PR-1 + PR-2) — flow nouveau utilisateur.
+  /// Slides marketing 1ʳᵉ ouverture (3 cartes).
+  static const onboardingSlides     = '/onboarding/slides';
+  /// Choix « créer un compte » / « j'ai déjà un compte ».
+  static const onboardingAuthChoice = '/onboarding/auth-choice';
+  /// Inscription minimale 3 champs (nom · email · password).
+  static const onboardingRegister   = '/onboarding/register';
+  /// Wizard boutique 3 étapes (PR-2) — appelle CreateShopUseCase à la fin.
+  static const onboardingShop       = '/onboarding/shop';
+  /// Ajout produit éclair 3 champs (PR-2). Utilisé par la checklist.
+  static const quickAddProduct      = '/shop/:shopId/inventaire/quick-add';
+
   // Super Admin
   static const adminPanel    = '/admin';
   static const subscription    = '/subscription';

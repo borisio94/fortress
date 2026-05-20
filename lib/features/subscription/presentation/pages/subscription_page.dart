@@ -8,8 +8,12 @@ import '../../../../core/utils/date_formatter.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/permisions/user_plan.dart';
 import '../../../../core/router/route_names.dart';
+import '../../../../core/storage/hive_boxes.dart';
+import '../../../../core/storage/local_storage_service.dart';
+import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../domain/models/plan_type.dart';
 
@@ -135,6 +139,11 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
           children: [
             _Topbar(onBack: _back, title: l.subTitle),
             const SizedBox(height: 18),
+            // Section 0 — Résumé d'essai (point 10 onboarding) :
+            // visible si l'essai est expiré (daysLeft <= 0 ET plan
+            // non actif), pour célébrer ce que l'utilisateur a fait
+            // avant de l'inviter à souscrire. Self-gated.
+            const _TrialSummaryCard(),
             // Section 1 — Statut actuel + barre de progression
             _CurrentStatusCard(plan: plan),
             const SizedBox(height: 20),
@@ -655,6 +664,116 @@ class _ContactAdminCard extends StatelessWidget {
                   color: cs.onSurface.withValues(alpha:0.7))),
         ])),
       ]),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// _TrialSummaryCard — résumé essai en haut de page (point 10 onboarding).
+//
+// Affichée uniquement si :
+//   • L'utilisateur N'A PAS de plan actif (`!plan.isActive`).
+//   • Il a effectivement utilisé l'app : ≥ 1 commande complétée toutes
+//     boutiques confondues (sinon le résumé serait vide et décourageant).
+//
+// Calcule sur toutes les boutiques de l'user, en récupérant les ventes
+// complétées dans les 30 derniers jours (large filet pour englober la
+// trial typique 14j + marge). Évite de scanner l'historique complet sur
+// les comptes qui auraient laissé l'app dormir longtemps.
+// ═════════════════════════════════════════════════════════════════════════
+class _TrialSummaryCard extends ConsumerWidget {
+  const _TrialSummaryCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final plan = ref.watch(currentPlanProvider);
+    // Pas afficher si l'utilisateur a déjà un plan actif (trial ou payant)
+    // — c'est uniquement un "wrap-up" post-expiration.
+    if (plan.isActive) return const SizedBox.shrink();
+
+    final uid = Supabase.instance.client.auth.currentUser?.id ?? '';
+    if (uid.isEmpty) return const SizedBox.shrink();
+    final shopIds = LocalStorageService.getShopsForUser(uid)
+        .map((s) => s.id).toSet();
+    if (shopIds.isEmpty) return const SizedBox.shrink();
+
+    final cutoff = DateTime.now().subtract(const Duration(days: 30));
+    int    count   = 0;
+    double revenue = 0;
+    try {
+      for (final raw in HiveBoxes.ordersBox.values) {
+        final m = Map<String, dynamic>.from(raw);
+        if (!shopIds.contains(m['shop_id'] as String?)) continue;
+        if (m['deleted_at'] != null)                    continue;
+        if ((m['status'] as String?) != 'completed')    continue;
+        final completedStr =
+            (m['completed_at'] ?? m['created_at']) as String?;
+        if (completedStr == null) continue;
+        final completedAt = DateTime.tryParse(completedStr);
+        if (completedAt == null || completedAt.isBefore(cutoff)) continue;
+        count++;
+        // Recalcul du total à partir des items (orders n'a pas de col total).
+        final items   = (m['items'] as List?) ?? const [];
+        double subtotal = 0;
+        for (final it in items) {
+          try {
+            final mm    = Map<String, dynamic>.from(it as Map);
+            final qty   = (mm['quantity'] as num?)?.toInt() ?? 0;
+            final price = (mm['custom_price'] as num?)?.toDouble()
+                ?? (mm['unit_price'] as num?)?.toDouble() ?? 0;
+            subtotal += qty * price;
+          } catch (_) {}
+        }
+        final discount = (m['discount_amount'] as num?)?.toDouble() ?? 0;
+        final taxRate  = (m['tax_rate']        as num?)?.toDouble() ?? 0;
+        final taxable  = (subtotal - discount).clamp(0, double.infinity);
+        revenue += subtotal - discount + taxable * (taxRate / 100);
+      }
+    } catch (_) {/* hive pas prêt → masque */}
+
+    if (count == 0) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end:   Alignment.bottomRight,
+          colors: [
+            AppColors.primary.withValues(alpha: 0.15),
+            AppColors.primary.withValues(alpha: 0.06),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+            color: AppColors.primary.withValues(alpha: 0.30)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(Icons.celebration_rounded,
+                color: AppColors.primary, size: 22),
+            const SizedBox(width: 8),
+            const Text('Votre essai en chiffres',
+                style: AppTextStyles.subtitleBold),
+          ]),
+          const SizedBox(height: 8),
+          Text(
+            'Vous avez fait $count vente${count > 1 ? "s" : ""} '
+            'et ${CurrencyFormatter.format(revenue)} '
+            'de chiffre d\'affaires.',
+            style: AppTextStyles.body.copyWith(height: 1.45),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Souscrivez pour continuer à enregistrer vos ventes et '
+            'garder l\'accès complet à vos données.',
+            style: AppTextStyles.bodySmSecondary,
+          ),
+        ],
+      ),
     );
   }
 }

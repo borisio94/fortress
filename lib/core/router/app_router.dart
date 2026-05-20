@@ -14,6 +14,12 @@ import '../../features/super_admin/presentation/pages/super_admin_page.dart';
 import '../../features/super_admin/presentation/pages/admin_subscriptions_page.dart';
 import '../../features/super_admin/presentation/pages/plans_page.dart';
 import '../../features/super_admin/presentation/pages/super_admin_deleted_hub_page.dart';
+import '../../features/onboarding/presentation/pages/onboarding_slides_page.dart';
+import '../../features/onboarding/presentation/pages/auth_choice_page.dart';
+import '../../features/onboarding/presentation/pages/register_simplified_page.dart';
+import '../../features/onboarding/presentation/pages/shop_onboarding_wizard.dart';
+import '../../features/onboarding/presentation/pages/product_quick_add_page.dart';
+import '../../features/onboarding/presentation/providers/onboarding_seen_provider.dart';
 import '../../features/catalogue/presentation/pages/catalogue_page.dart';
 import '../../features/marketing/presentation/pages/landing_page.dart';
 import '../../features/promo_campaigns/presentation/pages/campaign_send_page.dart';
@@ -284,6 +290,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final isLandingRoute       = loc == RouteNames.landing;
       final isPricingRoute       = loc == RouteNames.pricing;
       final isPublicMarketing    = isLandingRoute || isPricingRoute;
+      // Onboarding routes (PR-1) : slides marketing + auth choice +
+      // register simplifié + wizard boutique. Toutes accessibles sans
+      // auth — un visiteur 1ʳᵉ ouverture est explicitement envoyé ici
+      // par le redirect ci-dessous quand `onboarding_seen` est absent.
+      final isOnboardingRoute    = loc.startsWith('/onboarding');
 
       // ── /accept-invite : page publique, jamais rediriger ───────────
       // Gère elle-même l'état (invité/connecté/mauvais compte)
@@ -310,7 +321,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       // ── Non connecté ───────────────────────────────────────────────
       if (!isLoggedIn) {
-        return isAuthRoute ? null : RouteNames.login;
+        // /onboarding/* et /auth/* sont publics par construction.
+        if (isOnboardingRoute) return null;
+        if (isAuthRoute)       return null;
+        // 1ʳᵉ ouverture (flag absent) → slides marketing avant le login.
+        // Lecture du cache synchrone alimenté au boot par `app.dart`
+        // (cf. primeOnboardingSeenCache). Si `null` (cache pas encore
+        // prêt), on n'introduit AUCUN redirect prématuré pour éviter un
+        // flash visuel sur le 1er frame.
+        final seen = ref.read(onboardingSeenCacheProvider);
+        if (seen == null) return null;
+        if (!seen)        return RouteNames.onboardingSlides;
+        return RouteNames.login;
       }
 
       // ── Connecté : lire le plan (peut être null pendant le chargement) ─
@@ -469,6 +491,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             builder: (c, s) => const AlertDemoPage()),
       GoRoute(path: RouteNames.login,          builder: (c, s) => const LoginPage()),
       GoRoute(path: RouteNames.register,        builder: (c, s) => const RegisterPage()),
+      // Onboarding 1ʳᵉ ouverture (PR-1).
+      GoRoute(path: RouteNames.onboardingSlides,
+          builder: (c, s) => const OnboardingSlidesPage()),
+      GoRoute(path: RouteNames.onboardingAuthChoice,
+          builder: (c, s) => const AuthChoicePage()),
+      GoRoute(path: RouteNames.onboardingRegister,
+          builder: (c, s) => const RegisterSimplifiedPage()),
+      // Wizard boutique (PR-2) — 3 étapes + sélecteur palette.
+      GoRoute(path: RouteNames.onboardingShop,
+          builder: (c, s) => const ShopOnboardingWizard()),
       GoRoute(path: RouteNames.adminPanel,      builder: (c, s) => const AdminPanelPage()),
       GoRoute(path: RouteNames.superAdminHome,  builder: (c, s) => const SuperAdminPage()),
       GoRoute(path: RouteNames.adminSubscriptions,
@@ -583,6 +615,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               builder: (c, s) => ProductFormPage(
                   shopId: s.pathParameters['shopId']!,
                   extra: s.extra)),
+          // Quick-add produit 3 champs (PR-2 onboarding). Builder direct
+          // (pas pageBuilder) car la page utilise son propre Scaffold +
+          // AppBar et ne doit pas être imbriquée dans le shell.
+          GoRoute(path: '/shop/:shopId/inventaire/quick-add',
+              builder: (c, s) => ProductQuickAddPage(
+                  shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/inventaire/receptions',
               builder: (c, s) => ReceptionPage(
                   shopId: s.pathParameters['shopId']!)),

@@ -23,6 +23,10 @@ import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/services/document_service.dart';
 import '../../../inventaire/presentation/widgets/share_catalog_dialog.dart';
 import '../widgets/partner_debts_banner.dart';
+import '../../../onboarding/presentation/widgets/email_confirm_banner.dart';
+import '../../../onboarding/presentation/widgets/activation_checklist_card.dart';
+import '../../../onboarding/presentation/widgets/j1_resume_banner.dart';
+import '../../../onboarding/presentation/widgets/trial_end_banner.dart';
 
 
 // ─── Page principale ──────────────────────────────────────────────────────────
@@ -254,6 +258,19 @@ class _DashBodyState extends ConsumerState<_DashBody> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // ── Onboarding bannières (PR-1 / PR-2 / PR-3) ────────────────────
+        // Toutes les widgets sont self-gated (SizedBox.shrink() s'ils ne
+        // doivent pas s'afficher) → safe à inclure inconditionnellement.
+        //   • EmailConfirmBanner : tant que email_confirmed_at est null.
+        //   • TrialEndBanner     : si plan=trial && daysLeft<=2.
+        //   • J1ResumeBanner     : 1×/jour si ventes hier.
+        //   • ActivationChecklistCard : 4 étapes onboarding (disparaît
+        //     quand tout coché).
+        const EmailConfirmBanner(margin: EdgeInsets.only(bottom: 12)),
+        const TrialEndBanner(),
+        J1ResumeBanner(shopId: widget.shopId),
+        ActivationChecklistCard(shopId: widget.shopId),
+        const SizedBox(height: 12),
 
         // ── Sélecteur de vue (Global / Boutique seule / Par partenaire) ───
         // Le switch entre boutiques principales se fait désormais depuis le

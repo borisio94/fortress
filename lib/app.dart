@@ -21,6 +21,7 @@ import 'features/caisse/presentation/bloc/caisse_bloc.dart';
 import 'features/hub_central/presentation/bloc/hub_bloc.dart';
 import 'shared/widgets/alerts/scheduled_alerts_overlay.dart';
 import 'core/services/stock_service.dart';
+import 'features/onboarding/presentation/providers/onboarding_seen_provider.dart';
 
 // ConsumerStatefulWidget — les blocs sont créés UNE SEULE FOIS dans initState
 // évite la recréation de BlocProvider à chaque rebuild → plus de Duplicate GlobalKey
@@ -46,6 +47,13 @@ class _PosAppState extends ConsumerState<PosApp> {
     );
     _caisseBloc = CaisseBloc();
     _hubBloc    = ref.read(hubBlocProvider);
+
+    // Amorçage du cache `onboarding_seen` (PR-1). Lu en async depuis
+    // SharedPreferences puis rendu disponible synchroniquement au
+    // `redirect` GoRouter pour décider d'afficher les slides marketing
+    // au tout premier lancement.
+    // ignore: discarded_futures
+    primeOnboardingSeenCache(ref);
 
     // Écoute les deep-links (fortress://reset-password, universal links)
     // une fois le router construit — ref.read est sûr dans addPostFrameCallback.
