@@ -440,6 +440,20 @@ class SaleLocalDatasource {
     final oldStatus = SaleStatus.values.firstWhere(
         (s) => s.name == oldStatusStr, orElse: () => SaleStatus.scheduled);
 
+    // GF-4 — verrou de transitions. Le contrôle se fait AVANT toute
+    // écriture (ni Hive ni Supabase ne reçoivent un état illégal). Les
+    // exceptions sont remontées telles quelles aux appelants (CaisseBloc,
+    // _processReturn, …) qui montrent un dialog au user.
+    if (!SaleStatusTransitions.canTransition(oldStatus, status)) {
+      throw TransitionInterditeException(oldStatus, status);
+    }
+    if (SaleStatusTransitions.requiresMotif(status)) {
+      final reason = (map['cancellation_reason'] as String?)?.trim() ?? '';
+      if (reason.isEmpty) {
+        throw MotifRequiredException(status);
+      }
+    }
+
     map['status'] = status.name;
     // Stamp completed_at à la transition → completed. Si l'opérateur a
     // saisi une date custom (antidatage), on l'utilise même si déjà stampé.
@@ -651,6 +665,61 @@ class SaleLocalDatasource {
     'discount':     i.discount,
     'variant_name': i.variantName,
   };
+
+  /// GF-5 — Anti-doublon retour. Retourne `true` si au moins un mouvement
+  /// `return_client_good` ou `return_defective` existe avec
+  /// `reference_id = orderId` dans `stock_movements`. Si [variantId] est
+  /// fourni, le check est restreint à cette variante précise (utile pour
+  /// gérer les retours partiels article-par-article).
+  ///
+  /// Lecture Hive uniquement → fonctionne 100% offline. Côté SQL, la
+  /// même règle pourra être ré-imposée via une RPC `create_return`
+  /// dans une future migration si besoin (pas pertinent ici : pas de
+  /// table `stock_returns`, le journal est `stock_movements`).
+  bool hasExistingReturn(String orderId, {String? variantId}) {
+    if (!Hive.isBoxOpen(HiveBoxes.stockMovements)) return false;
+    for (final raw in HiveBoxes.stockMovementsBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw);
+        if (m['reference_id'] != orderId) continue;
+        if (variantId != null && m['variant_id'] != variantId) continue;
+        final type = m['type'] as String? ?? '';
+        if (type == 'return_client_good' || type == 'return_defective') {
+          return true;
+        }
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  /// Détail du retour existant pour `orderId` : id du 1er mouvement de
+  /// retour + sa date. Utilisé pour afficher une référence parlante dans
+  /// le dialog d'anti-doublon (« Retour déjà enregistré le 18/05 à 14:32 »).
+  /// Retourne null si aucun retour n'existe.
+  ({String movementId, DateTime createdAt})? existingReturnInfo(
+      String orderId) {
+    if (!Hive.isBoxOpen(HiveBoxes.stockMovements)) return null;
+    DateTime? bestAt;
+    String? bestId;
+    for (final raw in HiveBoxes.stockMovementsBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw);
+        if (m['reference_id'] != orderId) continue;
+        final type = m['type'] as String? ?? '';
+        if (type != 'return_client_good' && type != 'return_defective') {
+          continue;
+        }
+        final ts = DateTime.tryParse(m['created_at']?.toString() ?? '');
+        if (ts == null) continue;
+        if (bestAt == null || ts.isBefore(bestAt)) {
+          bestAt = ts;
+          bestId = m['id'] as String?;
+        }
+      } catch (_) {}
+    }
+    if (bestId == null || bestAt == null) return null;
+    return (movementId: bestId, createdAt: bestAt);
+  }
 
   /// Compatible avec les clés Hive courtes ET Supabase longues
   Sale _mapToSale(Map<String, dynamic> m) {

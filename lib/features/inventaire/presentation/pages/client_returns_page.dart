@@ -52,6 +52,14 @@ class _ClientReturnsPageState extends State<ClientReturnsPage> {
   }
 
   void _showReturnSheet(Sale order) {
+    // GF-5 : anti-doublon retour. On lit Hive avant d'ouvrir le sheet —
+    // si un mouvement `return_client_*` existe déjà pour cette commande,
+    // on affiche un dialog explicatif au lieu de re-saisir un retour.
+    final info = SaleLocalDatasource().existingReturnInfo(order.id ?? '');
+    if (info != null) {
+      _showAlreadyReturnedDialog(order, info);
+      return;
+    }
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -64,6 +72,48 @@ class _ClientReturnsPageState extends State<ClientReturnsPage> {
         onDone: _load,
       ),
     );
+  }
+
+  void _showAlreadyReturnedDialog(
+      Sale order, ({String movementId, DateTime createdAt}) info) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(children: [
+          Container(
+            width: 32, height: 32,
+            decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(8)),
+            child: const Icon(Icons.warning_amber_rounded,
+                size: 18, color: AppColors.warning),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(child: Text('Retour déjà enregistré',
+              style: AppTextStyles.subtitleBold)),
+        ]),
+        content: Text(
+          'Un retour a déjà été enregistré pour la commande de '
+          '« ${order.clientName ?? 'client anonyme'} » le '
+          '${_fmtDateTime(info.createdAt)}.\n\nRéférence mouvement : '
+          '${info.movementId}.',
+          style: AppTextStyles.body,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Fermer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _fmtDateTime(DateTime d) {
+    String pad(int n) => n.toString().padLeft(2, '0');
+    return '${pad(d.day)}/${pad(d.month)} à ${pad(d.hour)}:${pad(d.minute)}';
   }
 }
 
@@ -269,6 +319,19 @@ class _ReturnSheetState extends State<_ReturnSheet> {
 
   void _processReturn() async {
     final ds = SaleLocalDatasource();
+
+    // GF-5 — re-check à la dernière seconde : si un retour a été créé en
+    // parallèle (autre onglet, autre device synchronisé entre l'ouverture
+    // du sheet et la validation), on aborte AVANT toute écriture stock.
+    if (ds.hasExistingReturn(widget.order.id ?? '')) {
+      Navigator.of(context).pop();
+      if (mounted) {
+        AppSnack.warning(context,
+            'Un retour a déjà été enregistré pour cette commande.');
+      }
+      return;
+    }
+
     final products = AppDatabase.getProductsForShop(widget.shopId);
 
     for (final ri in _items) {
@@ -296,12 +359,22 @@ class _ReturnSheetState extends State<_ReturnSheet> {
       }
     }
 
-    ds.updateOrderStatus(widget.order.id!, SaleStatus.refunded);
+    // GF-4 — `updateOrderStatus` peut lever si le statut a changé entre-
+    // temps (ex : déjà refunded). On capture pour ne pas laisser une
+    // exception non gérée bloquer le flow stock.
+    try {
+      await ds.updateOrderStatus(widget.order.id!, SaleStatus.refunded);
+    } on TransitionInterditeException catch (e) {
+      if (!mounted) return;
+      AppSnack.error(context, e.message);
+      return;
+    }
     AppDatabase.notifyOrderChange(widget.shopId);
 
+    if (!mounted) return;
     Navigator.of(context).pop();
     widget.onDone();
-    if (mounted) AppSnack.success(context, 'Retour enregistré — stock mis à jour');
+    AppSnack.success(context, 'Retour enregistré — stock mis à jour');
   }
 }
 

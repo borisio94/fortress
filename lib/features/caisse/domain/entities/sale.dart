@@ -85,6 +85,80 @@ extension DeliveryModeX on DeliveryMode {
   };
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// GF-4 — Automate de transitions d'état (verrou anti erreurs humaines).
+//
+// Règle générale : completed / cancelled / refused / refunded sont
+// (quasi-)terminaux. Une commande complétée ne repart PAS « en cours » ou
+// « programmée » — seul `refunded` est accessible depuis `completed` (et
+// strictement via le flow Retour). Toute tentative de re-modifier un état
+// terminal lève `TransitionInterditeException`.
+//
+// `→ cancelled` exige un motif (`cancellation_reason` non vide) — sinon
+// `MotifRequiredException`. Code d'erreur lisible : `transition_interdite`
+// / `motif_required` (cohérent avec la spec PR-B).
+// ════════════════════════════════════════════════════════════════════════════
+
+class SaleStatusTransitions {
+  SaleStatusTransitions._();
+
+  /// `from → toAllowed` : ensembles autorisés.
+  /// La transition `from == to` est toujours acceptée (no-op).
+  static const _allowed = <SaleStatus, Set<SaleStatus>>{
+    SaleStatus.scheduled:  {
+      SaleStatus.processing,
+      SaleStatus.completed,
+      SaleStatus.cancelled,
+      SaleStatus.refused,
+    },
+    SaleStatus.processing: {
+      SaleStatus.completed,
+      SaleStatus.scheduled, // reprogrammation
+      SaleStatus.cancelled,
+      SaleStatus.refused,
+    },
+    SaleStatus.completed:  {
+      SaleStatus.refunded, // retour client — UNIQUE sortie de completed
+    },
+    SaleStatus.cancelled:  {},
+    SaleStatus.refused:    {},
+    SaleStatus.refunded:   {},
+  };
+
+  /// Statuts qui exigent `cancellation_reason` non vide.
+  static const _motifRequired = <SaleStatus>{
+    SaleStatus.cancelled,
+  };
+
+  static bool canTransition(SaleStatus from, SaleStatus to) {
+    if (from == to) return true;
+    return _allowed[from]?.contains(to) ?? false;
+  }
+
+  static bool requiresMotif(SaleStatus to) => _motifRequired.contains(to);
+}
+
+class TransitionInterditeException implements Exception {
+  final SaleStatus from;
+  final SaleStatus to;
+  const TransitionInterditeException(this.from, this.to);
+  String get code => 'transition_interdite';
+  String get message =>
+      'Transition interdite : « ${from.label} » → « ${to.label} ».';
+  @override
+  String toString() => 'TransitionInterditeException($from → $to)';
+}
+
+class MotifRequiredException implements Exception {
+  final SaleStatus to;
+  const MotifRequiredException(this.to);
+  String get code => 'motif_required';
+  String get message =>
+      'Motif obligatoire pour passer le statut à « ${to.label} ».';
+  @override
+  String toString() => 'MotifRequiredException($to)';
+}
+
 extension SaleStatusX on SaleStatus {
   String get label => switch (this) {
     SaleStatus.completed  => 'Complétée',

@@ -1158,6 +1158,19 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
     // décrément si autre → completed) est centralisée dans
     // SaleLocalDatasource.updateOrderStatus pour couvrir tous les chemins
     // de l'app qui modifient le statut d'une commande.
-    await SaleLocalDatasource().updateOrderStatus(event.orderId, event.status);
+    //
+    // GF-4 : updateOrderStatus peut lever TransitionInterditeException ou
+    // MotifRequiredException — on remonte le message dans state.error pour
+    // que le widget appelant l'affiche en dialog explicite.
+    try {
+      await SaleLocalDatasource()
+          .updateOrderStatus(event.orderId, event.status);
+    } on TransitionInterditeException catch (e) {
+      emit(state.copyWith(error: e.message));
+    } on MotifRequiredException catch (e) {
+      emit(state.copyWith(error: e.message));
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
+    }
   }
 }
