@@ -41,7 +41,10 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
     super.initState();
     _stockCtrl = TextEditingController(
         text: widget.variant.stockAvailable.toString());
-    _notesCtrl = TextEditingController(text: 'Correction d\'erreur de saisie');
+    // GF-7 : raison désormais obligatoire — on laisse le champ VIDE pour
+    // forcer l'utilisateur à saisir un motif explicite et éviter le copier
+    // automatique d'une raison générique non réfléchie.
+    _notesCtrl = TextEditingController();
   }
 
   @override
@@ -65,25 +68,39 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
       Navigator.of(context).pop(false);
       return;
     }
-    setState(() { _submitting = true; _error = null; });
-    final ok = await StockService.adjustment(
-      shopId:    widget.shopId,
-      productId: widget.productId,
-      variantId: widget.variant.id ?? '',
-      delta:     parsed - _current,
-      notes:     _notesCtrl.text.trim().isEmpty
-          ? 'Correction d\'erreur de saisie'
-          : _notesCtrl.text.trim(),
-    );
-    if (!mounted) return;
-    if (!ok) {
-      setState(() {
-        _submitting = false;
-        _error = 'Impossible d\'appliquer cette correction (stock négatif ?)';
-      });
+    // GF-7 : validation Flutter de la raison AVANT toute écriture.
+    final reason = _notesCtrl.text.trim();
+    if (reason.isEmpty) {
+      setState(() => _error = 'Indique une raison pour cet ajustement.');
       return;
     }
-    Navigator.of(context).pop(true);
+    setState(() { _submitting = true; _error = null; });
+    try {
+      final ok = await StockService.adjustment(
+        shopId:    widget.shopId,
+        productId: widget.productId,
+        variantId: widget.variant.id ?? '',
+        delta:     parsed - _current,
+        reason:    reason,
+      );
+      if (!mounted) return;
+      if (!ok) {
+        setState(() {
+          _submitting = false;
+          _error = 'Impossible d\'appliquer cette correction (stock négatif ?)';
+        });
+        return;
+      }
+      Navigator.of(context).pop(true);
+    } on AdjustmentReasonRequiredException catch (e) {
+      // Filet de sécurité : ne devrait pas se déclencher (déjà validé
+      // ci-dessus) — au cas où.
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = e.message;
+      });
+    }
   }
 
   @override
@@ -174,11 +191,19 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
                   ]),
                 ],
                 const SizedBox(height: 12),
-                const Text('Raison (optionnel)',
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        color: AppColors.textSecondary)),
+                const Row(children: [
+                  Text('Raison',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.textSecondary)),
+                  SizedBox(width: 4),
+                  Text('*',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.error)),
+                ]),
                 const SizedBox(height: 4),
                 TextField(
                   controller: _notesCtrl,

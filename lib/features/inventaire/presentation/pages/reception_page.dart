@@ -9,6 +9,8 @@ import '../../../../core/database/app_database.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/widgets/danger_confirm_dialog.dart';
+import '../../../../core/services/stock_service.dart';
+import '../../../../core/services/activity_log_service.dart';
 import '../../domain/entities/reception.dart';
 import '../../domain/entities/stock_movement.dart';
 
@@ -433,10 +435,52 @@ class _ValidateSheetState extends State<_ValidateSheet> {
     );
   }
 
-  void _onValidate() {
+  Future<void> _onValidate() async {
     final now = DateTime.now();
     final user = LocalStorageService.getCurrentUser();
     final updatedItems = <ReceptionItem>[];
+
+    // GF-6 — Plausibilité réceptions. Détecte les lignes saisies à
+    // > 3× la moyenne historique (10 derniers entrées de la variante).
+    // L'utilisateur doit confirmer explicitement avant l'écriture stock.
+    // Log `reception_anormale` pour chaque ligne confirmée hors norme.
+    final anomalies = <({_ItemState item, double avg, int qty})>[];
+    for (final s in _items) {
+      final received = int.tryParse(s.receivedCtrl.text) ?? 0;
+      if (received <= 0) continue;
+      final vid = s.item.variantId;
+      if (vid == null || vid.isEmpty) continue;
+      final avg = StockService.avgReceptionQty(
+        shopId: widget.shopId,
+        variantId: vid,
+      );
+      if (avg > 0 && received > avg * 3) {
+        anomalies.add((item: s, avg: avg, qty: received));
+      }
+    }
+    if (anomalies.isNotEmpty) {
+      final confirmed = await _showAnomalyConfirmDialog(anomalies);
+      if (confirmed != true) return;
+      // Trace les anomalies confirmées AVANT d'appliquer les écritures.
+      for (final a in anomalies) {
+        await ActivityLogService.log(
+          action:      'reception_anormale',
+          targetType:  'product',
+          targetId:    a.item.item.productId ?? '',
+          targetLabel: a.item.item.productName,
+          shopId:      widget.shopId,
+          details: {
+            'variant_id':       a.item.item.variantId,
+            'received_qty':     a.qty,
+            'avg_historic':     a.avg,
+            'ratio':            a.qty / a.avg,
+            'reception_id':     widget.reception.id,
+            'supervisor_id':    user?.id,
+            'supervisor_name':  user?.name,
+          },
+        );
+      }
+    }
 
     for (final s in _items) {
       final received = int.tryParse(s.receivedCtrl.text) ?? 0;
@@ -469,9 +513,79 @@ class _ValidateSheetState extends State<_ValidateSheet> {
     HiveBoxes.receptionsBox.put(validated.id, validated.toMap());
     AppDatabase.notifyProductChange(widget.shopId);
 
+    if (!mounted) return;
     Navigator.of(context).pop();
     widget.onValidated();
-    if (mounted) AppSnack.success(context, 'Réception validée — stock mis à jour');
+    AppSnack.success(context, 'Réception validée — stock mis à jour');
+  }
+
+  Future<bool?> _showAnomalyConfirmDialog(
+      List<({_ItemState item, double avg, int qty})> anomalies) {
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
+        title: const Row(children: [
+          Icon(Icons.warning_amber_rounded,
+              size: 20, color: AppColors.warning),
+          SizedBox(width: 10),
+          Expanded(child: Text('Quantité inhabituelle',
+              style: AppTextStyles.subtitleBold)),
+        ]),
+        content: SizedBox(
+          width: 460,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Une ou plusieurs lignes dépassent 3× la moyenne historique '
+                'de réception de cette variante. Vérifie les quantités '
+                'saisies avant de valider.',
+                style: AppTextStyles.bodySm,
+              ),
+              const SizedBox(height: 12),
+              for (final a in anomalies) Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(a.item.item.productName,
+                        style: AppTextStyles.bodyBold),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Saisi ${a.qty} · moyenne ${a.avg.toStringAsFixed(1)} · '
+                      'ratio ${(a.qty / a.avg).toStringAsFixed(1)}×',
+                      style: AppTextStyles.caption.copyWith(
+                          color: AppColors.warning),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Corriger'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.warning,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Valider quand même'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _addStock(String productId, String? variantId, int qty,

@@ -29,6 +29,17 @@ class InsufficientStockException implements Exception {
   String toString() => 'InsufficientStockException: $message';
 }
 
+/// GF-7 — Tout ajustement manuel doit être motivé. Levée par
+/// `StockService.adjustment` quand la `reason` est vide.
+/// Code lisible : `motif_required`.
+class AdjustmentReasonRequiredException implements Exception {
+  final String code = 'motif_required';
+  final String message = 'Raison obligatoire pour ajuster le stock.';
+  const AdjustmentReasonRequiredException();
+  @override
+  String toString() => 'AdjustmentReasonRequiredException: $message';
+}
+
 /// Service centralisé pour toutes les opérations de stock.
 /// Chaque opération :
 ///   1. Vérifie les pré-conditions (stock_available >= 0)
@@ -511,8 +522,15 @@ class StockService {
     required String productId,
     required String variantId,
     required int delta, // positif = entrée, négatif = sortie
-    String? notes,
+    /// GF-7 : motif obligatoire (non vide après trim). Levée
+    /// `AdjustmentReasonRequiredException` sinon — bloque AVANT toute
+    /// écriture stock pour que le caller affiche l'erreur dans l'UI.
+    required String reason,
   }) async {
+    final r = reason.trim();
+    if (r.isEmpty) {
+      throw const AdjustmentReasonRequiredException();
+    }
     final result = _findVariant(shopId, productId, variantId);
     if (result == null) return false;
     final (product, vIdx) = result;
@@ -533,7 +551,23 @@ class StockService {
       type: 'adjustment', quantity: delta,
       beforeAvail: v.stockAvailable, afterAvail: updated.stockAvailable,
       beforePhys: v.stockPhysical, afterPhys: updated.stockPhysical,
-      notes: notes);
+      cause:  'manual_adjustment',
+      notes:  r);
+    // GF-7 : trace dans activity_logs pour audit (userId, variant, delta, reason).
+    await ActivityLogService.log(
+      action:      'stock_adjusted',
+      targetType:  'product',
+      targetId:    productId,
+      targetLabel: '${product.name} — ${v.name}',
+      shopId:      shopId,
+      details: {
+        'variant_id':       variantId,
+        'delta':            delta,
+        'before_available': v.stockAvailable,
+        'after_available':  updated.stockAvailable,
+        'reason':           r,
+      },
+    );
     return true;
   }
 
@@ -820,6 +854,10 @@ class StockService {
       'reference_id': referenceId,
       'created_by': user?.name,
       'created_at': now.toIso8601String(),
+      // GF-7 : pour les mouvements `adjustment`, on duplique notes dans
+      // `reason` — c'est la colonne contrainte par le CHECK Supabase
+      // (hotfix_082). Pour les autres types, reason reste null.
+      if (type == 'adjustment') 'reason': notes,
     };
     HiveBoxes.stockMovementsBox.put(map['id'], map);
   }
@@ -1439,6 +1477,46 @@ class StockService {
       cause:       'initial_stock',
       notes:       'Stock initial à la création du produit',
     );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // 1c. PLAUSIBILITÉ RÉCEPTIONS — GF-6 (« seuil 3× moyenne »)
+  //
+  // Retourne la moyenne des `last` derniers mouvements de type entry /
+  // arrival_available pour la variante donnée. Permet aux flows de
+  // réception (reception_page validation, product_form initial) de
+  // détecter une saisie anormalement haute (`qty > avg * 3 && avg > 0`)
+  // → demande confirmation au superviseur avant écriture stock.
+  //
+  // Lecture Hive seule → 100% offline.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  static double avgReceptionQty({
+    required String shopId,
+    required String variantId,
+    int last = 10,
+  }) {
+    final entries = <(DateTime, int)>[];
+    for (final raw in HiveBoxes.stockMovementsBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw);
+        if (m['shop_id'] != shopId) continue;
+        if (m['variant_id'] != variantId) continue;
+        final type = m['type'] as String? ?? '';
+        if (type != 'entry' && type != 'arrival_available') continue;
+        final qty = (m['quantity'] as num?)?.toInt() ?? 0;
+        if (qty <= 0) continue;
+        final ts = DateTime.tryParse(m['created_at']?.toString() ?? '');
+        if (ts == null) continue;
+        entries.add((ts, qty));
+      } catch (_) {}
+    }
+    // Tri décroissant par date → garde les `last` plus récents.
+    entries.sort((a, b) => b.$1.compareTo(a.$1));
+    final pool = entries.take(last).toList();
+    if (pool.isEmpty) return 0;
+    final sum = pool.fold<int>(0, (s, e) => s + e.$2);
+    return sum / pool.length;
   }
 
   // ════════════════════════════════════════════════════════════════════════════
