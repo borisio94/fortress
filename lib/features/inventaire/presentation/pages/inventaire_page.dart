@@ -4108,8 +4108,8 @@ class _StockAuditReportDialogState extends State<_StockAuditReportDialog> {
           child: Text('Audit stock', style: AppTextStyles.subtitleBold),
         ),
       ]),
-      content: SizedBox(
-        width: 520,
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -4147,46 +4147,44 @@ class _StockAuditReportDialogState extends State<_StockAuditReportDialog> {
                   child: ListView.separated(
                     shrinkWrap: true,
                     itemCount: _drifts.length,
-                    separatorBuilder: (_, __) => const Divider(height: 12),
+                    separatorBuilder: (_, __) => const Divider(height: 16),
                     itemBuilder: (_, i) {
                       final d = _drifts[i];
                       final sign = d.drift > 0 ? '+' : '';
                       final busy = _correcting.contains(d.variantId);
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
+                      // Layout vertical : texte plein largeur en haut,
+                      // bouton aligné à droite en bas. Évite tout risque
+                      // d'Expanded à 0px sur viewport étroit qui ferait
+                      // wrapper le texte caractère par caractère.
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${d.productName} — ${d.variantName}',
-                                  style: AppTextStyles.bodyBold,
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Attendu ${d.expected} · Actuel ${d.actual} · '
-                                  'Drift $sign${d.drift} '
-                                  '(${d.movementsAnalyzed} mvt)',
-                                  style: AppTextStyles.caption.copyWith(
-                                    color: AppColors.warning,
-                                  ),
-                                ),
-                              ],
-                            ),
+                          Text(
+                            '${d.productName} — ${d.variantName}',
+                            style: AppTextStyles.bodyBold,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          const SizedBox(width: 8),
-                          SizedBox(
-                            height: 32,
+                          const SizedBox(height: 2),
+                          Text(
+                            'Attendu ${d.expected} · Actuel ${d.actual} · '
+                            'Drift $sign${d.drift} '
+                            '(${d.movementsAnalyzed} mvt)',
+                            style: AppTextStyles.caption.copyWith(
+                              color: AppColors.warning,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerRight,
                             child: busy
-                                ? const Padding(
-                                    padding: EdgeInsets.symmetric(
-                                        horizontal: 8),
-                                    child: SizedBox(
-                                      width: 16, height: 16,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2),
-                                    ),
+                                ? const SizedBox(
+                                    width: 18, height: 18,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
                                   )
                                 : OutlinedButton.icon(
                                     icon: const Icon(
@@ -4197,7 +4195,8 @@ class _StockAuditReportDialogState extends State<_StockAuditReportDialog> {
                                     onPressed: () => _correct(d),
                                     style: OutlinedButton.styleFrom(
                                       padding: const EdgeInsets.symmetric(
-                                          horizontal: 10),
+                                          horizontal: 12, vertical: 4),
+                                      minimumSize: const Size(0, 32),
                                       foregroundColor: AppColors.primary,
                                       side: BorderSide(
                                           color: AppColors.primary
