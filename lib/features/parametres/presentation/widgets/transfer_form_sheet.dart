@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/stock_service.dart';
+import '../../../../core/utils/uuid.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -61,9 +62,16 @@ class _TransferFormSheetState extends State<TransferFormSheet> {
   /// historique.
   DateTime _transferDate = DateTime.now();
 
+  /// GF-2 : clé d'idempotence générée à l'OUVERTURE de la sheet et
+  /// figée pour toute la session. Si l'opérateur double-tap « Valider »
+  /// ou si le sync queue rejoue après reconnexion, la contrainte UNIQUE
+  /// `stock_transfers.idempotency_key` côté Supabase évite le doublon.
+  late final String _idempotencyKey;
+
   @override
   void initState() {
     super.initState();
+    _idempotencyKey = Uuid.v4();
     // Filet défensif : on exclut les StockLocation type=shop dont la
     // boutique parente n'existe plus (locations orphelines suite à une
     // suppression incomplète — cascade Supabase ratée, race offline, etc.).
@@ -164,6 +172,7 @@ class _TransferFormSheetState extends State<TransferFormSheet> {
         notes:           _notesCtrl.text.trim().isEmpty
                          ? null : _notesCtrl.text.trim(),
         createdAt:       _transferDate,
+        idempotencyKey:  _idempotencyKey, // GF-2
       );
       if (!mounted) return;
       if (transfer == null) {

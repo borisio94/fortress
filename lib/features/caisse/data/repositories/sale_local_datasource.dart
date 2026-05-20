@@ -101,6 +101,9 @@ class SaleLocalDatasource {
       'created_at':     order.createdAt.toUtc().toIso8601String(),
       'completed_at':   completedAt,
       'fees':           order.fees,
+      // GF-1 : clé d'idempotence du panier — persistée en Hive ET pushée
+      // à Supabase pour bénéficier de l'UNIQUE constraint (hotfix_080).
+      'idempotency_key': order.idempotencyKey,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
         'product_name': i.productName,
@@ -143,6 +146,7 @@ class SaleLocalDatasource {
       'created_at':     order.createdAt.toUtc().toIso8601String(),
       'completed_at':   completedAt,
       'synced_to_cloud': false,
+      'idempotency_key': order.idempotencyKey, // GF-1
       'fees':           order.fees,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
@@ -711,6 +715,7 @@ class SaleLocalDatasource {
       amountPaid:         (m['amount_paid'] as num?)?.toDouble() ?? 0,
       paymentStatus:      PaymentStatusX.fromKey(
                               m['payment_status'] as String?),
+      idempotencyKey:     m['idempotency_key'] as String?, // GF-1
     );
   }
 

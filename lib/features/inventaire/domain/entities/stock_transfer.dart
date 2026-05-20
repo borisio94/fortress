@@ -80,6 +80,13 @@ class StockTransfer extends Equatable {
   final DateTime? receivedAt;
   final DateTime? cancelledAt;
 
+  /// Clé d'idempotence (UUID v4) générée à l'ouverture du `TransferFormSheet`
+  /// — garde-fou GF-2. Côté Supabase, contrainte `UNIQUE` sur la colonne
+  /// `idempotency_key` → un double-tap "Valider" ou un replay du sync queue
+  /// après reconnexion n'écrit qu'UN SEUL transfert.
+  /// Null pour les transferts legacy pré-PR-A.
+  final String? idempotencyKey;
+
   const StockTransfer({
     required this.id,
     required this.ownerId,
@@ -93,6 +100,7 @@ class StockTransfer extends Equatable {
     this.shippedAt,
     this.receivedAt,
     this.cancelledAt,
+    this.idempotencyKey,
   });
 
   StockTransfer copyWith({
@@ -133,6 +141,7 @@ class StockTransfer extends Equatable {
     'shipped_at':   shippedAt?.toIso8601String(),
     'received_at':  receivedAt?.toIso8601String(),
     'cancelled_at': cancelledAt?.toIso8601String(),
+    'idempotency_key': idempotencyKey,
   };
 
   factory StockTransfer.fromMap(Map<String, dynamic> m) {
@@ -156,6 +165,7 @@ class StockTransfer extends Equatable {
                       ? DateTime.tryParse(m['received_at'].toString()) : null,
       cancelledAt:    m['cancelled_at'] != null
                       ? DateTime.tryParse(m['cancelled_at'].toString()) : null,
+      idempotencyKey: m['idempotency_key'] as String?,
     );
   }
 

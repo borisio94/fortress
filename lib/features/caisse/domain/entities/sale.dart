@@ -185,6 +185,14 @@ class Sale extends Equatable {
   /// Cf. [PaymentStatus] et hotfix_065_orders_payment_tracking.sql.
   final PaymentStatus paymentStatus;
 
+  /// Clé d'idempotence (UUID v4) générée à l'OUVERTURE du panier dans
+  /// `CaisseBloc` — garde-fou GF-1. Empêche les doublons de vente quand
+  /// le sync queue rejoue plusieurs fois la même création (perte réseau,
+  /// double-tap, etc.). Côté Supabase, contrainte `UNIQUE` sur la colonne
+  /// `idempotency_key` → l'INSERT en doublon échoue silencieusement.
+  /// Null pour les commandes legacy pré-PR-A.
+  final String? idempotencyKey;
+
   const Sale({
     this.id,
     required this.shopId,
@@ -215,6 +223,7 @@ class Sale extends Equatable {
     this.source = 'pos',
     this.amountPaid = 0,
     this.paymentStatus = PaymentStatus.unpaid,
+    this.idempotencyKey,
   });
 
   double get subtotal  => items.fold(0, (s, i) => s + i.subtotal);
@@ -264,6 +273,7 @@ class Sale extends Equatable {
     String? source,
     double? amountPaid,
     PaymentStatus? paymentStatus,
+    String? idempotencyKey,
   }) => Sale(
     id:                 id             ?? this.id,
     shopId:             shopId         ?? this.shopId,
@@ -294,6 +304,7 @@ class Sale extends Equatable {
     source:             source             ?? this.source,
     amountPaid:         amountPaid         ?? this.amountPaid,
     paymentStatus:      paymentStatus      ?? this.paymentStatus,
+    idempotencyKey:     idempotencyKey     ?? this.idempotencyKey,
   );
 
   @override

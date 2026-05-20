@@ -891,6 +891,11 @@ class StockService {
     required List<StockTransferLine> lines,
     String? notes,
     DateTime? createdAt,
+    /// GF-2 : clé d'idempotence (UUID v4) générée par le formulaire à
+    /// l'ouverture. Persistée sur le `StockTransfer` (Hive + Supabase).
+    /// Sans clé fournie (callers legacy), reste null — le garde-fou ne
+    /// s'applique pas à ces appels.
+    String? idempotencyKey,
   }) async {
     if (fromLocationId == toLocationId) return null;
     if (lines.isEmpty) return null;
@@ -960,6 +965,7 @@ class StockService {
       createdAt:      effectiveDate,
       shippedAt:      effectiveDate,
       receivedAt:     effectiveDate,
+      idempotencyKey: idempotencyKey, // GF-2
     );
     await AppDatabase.saveStockTransfer(transfer);
 

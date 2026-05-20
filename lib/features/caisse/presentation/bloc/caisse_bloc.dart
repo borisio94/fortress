@@ -10,6 +10,7 @@ import '../../../../core/services/activity_log_service.dart';
 import '../../../inventaire/domain/entities/product.dart';
 import '../../../../core/services/stock_service.dart';
 import '../../../../core/services/delivery_reminder_service.dart';
+import '../../../../core/utils/uuid.dart';
 
 // ─── Frais de commande (livraison, expédition…) ───────────────────────────────
 class OrderFee {
@@ -244,7 +245,15 @@ class CaisseState extends Equatable {
   final String?        shipmentAgency;
   final String?        shipmentHandler;
 
-  const CaisseState({
+  /// Clé d'idempotence (UUID v4) du panier en cours — garde-fou GF-1.
+  /// Générée à l'ouverture du panier ET à chaque `ClearCart`. Propagée
+  /// sur `Sale.idempotencyKey` à `CompleteSale`/`SaveOrder`. Côté Supabase,
+  /// la contrainte UNIQUE sur `orders.idempotency_key` empêche les
+  /// doublons si le sync queue rejoue le même panier (double-tap caisse,
+  /// reconnexion réseau).
+  final String         idempotencyKey;
+
+  CaisseState({
     this.items          = const [],
     this.discountAmount = 0,
     this.fees           = const [],
@@ -266,7 +275,8 @@ class CaisseState extends Equatable {
     this.shipmentCity,
     this.shipmentAgency,
     this.shipmentHandler,
-  });
+    String? idempotencyKey,
+  }) : idempotencyKey = idempotencyKey ?? Uuid.v4();
 
   double get subtotal    => items.fold(0.0, (s, i) => s + i.subtotal);
   /// Somme des frais (livraison, emballage…). Absorbés par la boutique :
@@ -310,6 +320,12 @@ class CaisseState extends Equatable {
     bool clearDelivery = false,
     bool clearDeliveryDate = false,
   }) => CaisseState(
+    // CRITIQUE GF-1 : la clé d'idempotence est PRÉSERVÉE à travers tous
+    // les copyWith — mutations panier, sélection client, livraison, etc.
+    // Seul un ClearCart explicite (ou la création initiale du Bloc) en
+    // génère une nouvelle. Sans ça, chaque setState() régénérerait la
+    // clé et l'idempotence côté Supabase serait inopérante.
+    idempotencyKey: idempotencyKey,
     items:          items          ?? this.items,
     discountAmount: discountAmount ?? this.discountAmount,
     fees:           fees           ?? this.fees,
@@ -351,7 +367,7 @@ class CaisseState extends Equatable {
   List<Object?> get props =>
       [items, discountAmount, fees, paymentMethod, isProcessing, error,
        saleCompleted, taxRate, selectedClient, orderSaved, editingOrderId,
-       lastCompletedSale,
+       lastCompletedSale, idempotencyKey,
        deliveryMode, deliveryLocationId, deliveryPersonName, deliveryDate,
        deliveryCity, deliveryAddress,
        shipmentCity, shipmentAgency, shipmentHandler];
@@ -359,7 +375,7 @@ class CaisseState extends Equatable {
 
 // ─── Bloc ─────────────────────────────────────────────────────────────────────
 class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
-  CaisseBloc() : super(const CaisseState()) {
+  CaisseBloc() : super(CaisseState()) {
     on<AddItemToCart>(_onAdd);
     on<RemoveItemFromCart>(_onRemove);
     on<UpdateItemQuantity>(_onUpdate);
@@ -390,6 +406,7 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
       final isPartner = event.mode == DeliveryMode.partner;
       final isInHouse = event.mode == DeliveryMode.inHouse;
       emit(CaisseState(
+        idempotencyKey:     state.idempotencyKey, // GF-1 : préserve la clé panier
         items:              state.items,
         discountAmount:     state.discountAmount,
         fees:               state.fees,
@@ -440,6 +457,7 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
       final isPickup   = newMode == DeliveryMode.pickup;
 
       emit(CaisseState(
+        idempotencyKey:    state.idempotencyKey, // GF-1 : préserve la clé panier
         items:             state.items,
         discountAmount:    state.discountAmount,
         fees:              state.fees,
@@ -628,6 +646,9 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
         // Trace l'auteur de la vente : un vendeur (role=user) ne verra que
         // ses propres ventes dans le dashboard (cf. dashDataProvider filter).
         createdByUserId: Supabase.instance.client.auth.currentUser?.id,
+        // GF-1 : clé d'idempotence du panier — protège contre les doublons
+        // de vente côté Supabase (UNIQUE constraint sur orders.idempotency_key).
+        idempotencyKey: state.idempotencyKey,
       );
       await ds.saveOrder(sale);
 
@@ -744,6 +765,12 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
   }
 
   /// Valide que le stock disponible suffit pour satisfaire tous les items.
+  ///
+  /// **GF-3 — Validation stock 100% offline** (1er verrou avant la
+  /// couche atomique RPC à venir). Lit toujours depuis Hive
+  /// (`AppDatabase.getStockLevel` ou `variant.stockAvailable`), jamais
+  /// depuis Supabase → fonctionne sans connexion. Appelé en début de
+  /// `_onCompleteSale` et `_onSaveOrder` avant toute écriture.
   ///
   /// - [locationId] non-null → mode livraison partenaire : on vérifie le
   ///   stock_level à cette location.
@@ -889,7 +916,10 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
   }
 
   void _onClear(ClearCart event, Emitter<CaisseState> emit) =>
-      emit(const CaisseState());
+      // Nouvelle CaisseState ⇒ nouvelle idempotencyKey (Uuid.v4() au
+      // constructeur). Chaque ClearCart démarre un nouveau panier idempotent
+      // et coupe le lien avec l'éventuelle tentative précédente (GF-1).
+      emit(CaisseState());
 
   void _onSetTaxRate(SetTaxRate event, Emitter<CaisseState> emit) =>
       emit(state.copyWith(taxRate: event.rate));
@@ -1090,6 +1120,9 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
           shipmentHandler:    state.shipmentHandler,
           // Trace l'auteur (vendeur) de la commande pour le filtre dashboard.
           createdByUserId: Supabase.instance.client.auth.currentUser?.id,
+          // GF-1 : clé d'idempotence du panier — protège contre les doublons
+          // côté Supabase (UNIQUE constraint sur orders.idempotency_key).
+          idempotencyKey: state.idempotencyKey,
         );
         await ds.saveOrder(order);
         // Programmer la notification de rappel à la date de livraison
