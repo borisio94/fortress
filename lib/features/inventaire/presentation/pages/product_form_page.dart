@@ -382,6 +382,11 @@ class _ProductFormPageState extends State<ProductFormPage> {
     }
     final baseTs = DateTime.now().microsecondsSinceEpoch;
     final List<ProductVariant> variants = [];
+    // Indices des variantes NOUVELLES (création / variante ajoutée à un
+    // produit existant) avec stock initial > 0. Après save, on baseline
+    // `stock_movements` pour chacune → l'audit de réconciliation ne
+    // détectera pas de faux drift.
+    final List<int> newVariantsToBaseline = [];
 
     // Relire le produit frais depuis Hive (widget.extra est un snapshot du
     // moment où le form a été ouvert ; entre-temps le stock a pu être modifié
@@ -451,6 +456,10 @@ class _ProductFormPageState extends State<ProductFormPage> {
         promoStart:           v.promoStart,
         promoEnd:             v.promoEnd,
       ));
+
+      if (!isEditing && formStock > 0) {
+        newVariantsToBaseline.add(i);
+      }
     }
 
     final expensesList = _expenses.map((e) => {
@@ -501,6 +510,23 @@ class _ProductFormPageState extends State<ProductFormPage> {
         AppSnack.error(context, e.toString().replaceAll('Exception: ', ''));
       }
       return;
+    }
+
+    // 1bis-pré. Baseline stock_movements pour les variantes nouvellement
+    // créées — sans ça, l'audit réconciliation détectera un faux drift
+    // ("attendu 0, actuel N") parce que ProductFormPage écrit
+    // stockAvailable=N direct sans passer par StockService.arrival.
+    // `logInitialBaseline` log SEUL (pas d'incrément) → idempotent et safe.
+    for (final idx in newVariantsToBaseline) {
+      if (idx >= variants.length) continue;
+      final vid = variants[idx].id;
+      if (vid == null || vid.isEmpty) continue;
+      await StockService.logInitialBaseline(
+        shopId:         widget.shopId,
+        productId:      product.id ?? '',
+        variantId:      vid,
+        stockAvailable: variants[idx].stockAvailable,
+      );
     }
 
     // 1bis. Journal d'activité (création ou édition).

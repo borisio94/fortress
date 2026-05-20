@@ -1389,6 +1389,53 @@ class StockService {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
+  // 1b. BASELINE STOCK INITIAL — log seul, pas de mutation
+  //
+  // Inscrit un mouvement « arrival_available » SANS modifier le stock.
+  // Utilisé à la CRÉATION d'une variante avec stock initial > 0 dans
+  // ProductFormPage : `AppDatabase.saveProduct` fixe déjà
+  // `stockAvailable = stockInitial`, on a seulement besoin de baseliner le
+  // journal pour que l'audit de réconciliation ne détecte pas de faux drift.
+  //
+  // Idempotent : ne fait rien si la variante a déjà au moins un mouvement
+  // (i.e. on est en édition ou la baseline a déjà été écrite).
+  // ════════════════════════════════════════════════════════════════════════════
+
+  static Future<void> logInitialBaseline({
+    required String shopId,
+    required String productId,
+    required String variantId,
+    required int stockAvailable,
+  }) async {
+    if (stockAvailable <= 0) return;
+
+    // Garde-fou : si un mouvement existe déjà pour cette variante, on
+    // n'écrit rien (variante éditée, ou baseline déjà posée).
+    for (final raw in HiveBoxes.stockMovementsBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw);
+        if (m['shop_id'] == shopId && m['variant_id'] == variantId) {
+          return;
+        }
+      } catch (_) {}
+    }
+
+    _log(
+      shopId:      shopId,
+      productId:   productId,
+      variantId:   variantId,
+      type:        'arrival_available',
+      quantity:    stockAvailable,
+      beforeAvail: 0,
+      afterAvail:  stockAvailable,
+      beforePhys:  0,
+      afterPhys:   stockAvailable,
+      cause:       'initial_stock',
+      notes:       'Stock initial à la création du produit',
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
   // 10. RÉCONCILIATION — Audit stock (Couche 3 du plan « sécurise le stock »)
   //
   // Compare le `stockAvailable` courant de chaque variante avec le DERNIER
