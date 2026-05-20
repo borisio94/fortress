@@ -4037,18 +4037,52 @@ class _AuditStockBtn extends StatelessWidget {
 
 /// Dialog récapitulatif du `ReconciliationReport`.
 /// - Aucune divergence → état succès (vert).
-/// - Drifts détectés → liste compacte (produit, attendu, actuel, drift signé)
-///   + lien direct vers la page Incidents (les incidents `audit_drift`
-///   ont été créés par `StockService.reconcileShop`).
-class _StockAuditReportDialog extends StatelessWidget {
+/// - Drifts détectés → liste compacte avec bouton « Corriger » par ligne
+///   qui appelle `StockService.applyAuditCorrection` (réaligne le stock sur
+///   la valeur attendue + ferme l'incident automatiquement). La ligne
+///   disparaît immédiatement de la liste après correction.
+/// - Lien « Voir incidents » pour investigation manuelle.
+class _StockAuditReportDialog extends StatefulWidget {
   final ReconciliationReport report;
   final String shopId;
   const _StockAuditReportDialog({required this.report, required this.shopId});
 
   @override
+  State<_StockAuditReportDialog> createState() =>
+      _StockAuditReportDialogState();
+}
+
+class _StockAuditReportDialogState extends State<_StockAuditReportDialog> {
+  late List<ReconciliationResult> _drifts;
+  final Set<String> _correcting = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _drifts = List.from(widget.report.drifts);
+  }
+
+  Future<void> _correct(ReconciliationResult d) async {
+    if (_correcting.contains(d.variantId)) return;
+    setState(() => _correcting.add(d.variantId));
+    final ok = await StockService.applyAuditCorrection(d);
+    if (!mounted) return;
+    setState(() {
+      _correcting.remove(d.variantId);
+      if (ok) _drifts.removeWhere((x) => x.variantId == d.variantId);
+    });
+    if (ok) {
+      AppSnack.success(context,
+          'Stock corrigé pour ${d.productName} — ${d.variantName}');
+    } else {
+      AppSnack.error(context,
+          'Correction échouée pour ${d.productName} — ${d.variantName}');
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final drifts = report.drifts;
-    final ok = drifts.isEmpty;
+    final ok = _drifts.isEmpty;
     return AlertDialog(
       backgroundColor: Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -4075,54 +4109,104 @@ class _StockAuditReportDialog extends StatelessWidget {
         ),
       ]),
       content: SizedBox(
-        width: 480,
+        width: 520,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               ok
-                  ? '${report.totalVariants} variante(s) vérifiée(s) — '
-                      'aucune divergence détectée.'
-                  : '${report.totalVariants} variante(s) vérifiée(s) — '
-                      '${report.driftCount} divergence(s), '
-                      '${report.incidentsCreated} incident(s) créé(s).',
+                  ? '${widget.report.totalVariants} variante(s) vérifiée(s) — '
+                      'aucune divergence (ou toutes corrigées).'
+                  : '${widget.report.totalVariants} variante(s) vérifiée(s) — '
+                      '${_drifts.length} divergence(s) restantes.',
               style: AppTextStyles.body,
             ),
             const SizedBox(height: 4),
             Text(
-              'Durée : ${report.duration.inMilliseconds} ms',
+              'Durée : ${widget.report.duration.inMilliseconds} ms',
               style: AppTextStyles.caption,
             ),
             if (!ok) ...[
+              const SizedBox(height: 8),
+              Text(
+                '« Corriger » aligne le stock sur la valeur attendue '
+                '(et plafonne au stock physique). N\'utilise ce bouton que si '
+                'tu fais confiance au journal — sinon, fais un ajustement '
+                'manuel depuis la fiche produit.',
+                style: AppTextStyles.caption.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
               const SizedBox(height: 12),
               const Divider(height: 1),
               const SizedBox(height: 8),
               Flexible(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 320),
+                  constraints: const BoxConstraints(maxHeight: 360),
                   child: ListView.separated(
                     shrinkWrap: true,
-                    itemCount: drifts.length,
+                    itemCount: _drifts.length,
                     separatorBuilder: (_, __) => const Divider(height: 12),
                     itemBuilder: (_, i) {
-                      final d = drifts[i];
+                      final d = _drifts[i];
                       final sign = d.drift > 0 ? '+' : '';
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      final busy = _correcting.contains(d.variantId);
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          Text(
-                            '${d.productName} — ${d.variantName}',
-                            style: AppTextStyles.bodyBold,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Attendu ${d.expected} · Actuel ${d.actual} · '
-                            'Drift $sign${d.drift} '
-                            '(${d.movementsAnalyzed} mvt)',
-                            style: AppTextStyles.caption.copyWith(
-                              color: AppColors.warning,
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${d.productName} — ${d.variantName}',
+                                  style: AppTextStyles.bodyBold,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Attendu ${d.expected} · Actuel ${d.actual} · '
+                                  'Drift $sign${d.drift} '
+                                  '(${d.movementsAnalyzed} mvt)',
+                                  style: AppTextStyles.caption.copyWith(
+                                    color: AppColors.warning,
+                                  ),
+                                ),
+                              ],
                             ),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            height: 32,
+                            child: busy
+                                ? const Padding(
+                                    padding: EdgeInsets.symmetric(
+                                        horizontal: 8),
+                                    child: SizedBox(
+                                      width: 16, height: 16,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    ),
+                                  )
+                                : OutlinedButton.icon(
+                                    icon: const Icon(
+                                        Icons.settings_backup_restore_rounded,
+                                        size: 14),
+                                    label: const Text('Corriger',
+                                        style: AppTextStyles.captionBold),
+                                    onPressed: () => _correct(d),
+                                    style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10),
+                                      foregroundColor: AppColors.primary,
+                                      side: BorderSide(
+                                          color: AppColors.primary
+                                              .withValues(alpha: 0.4)),
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(8)),
+                                    ),
+                                  ),
                           ),
                         ],
                       );
@@ -4139,7 +4223,7 @@ class _StockAuditReportDialog extends StatelessWidget {
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
-              context.push('/shop/$shopId/inventaire/incidents');
+              context.push('/shop/${widget.shopId}/inventaire/incidents');
             },
             child: const Text('Voir incidents'),
           ),

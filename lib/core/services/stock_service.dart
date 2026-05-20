@@ -1629,6 +1629,98 @@ class StockService {
     );
     return true;
   }
+
+  /// Applique la correction d'un drift détecté par l'audit.
+  ///
+  /// Aligne `variant.stockAvailable` sur la valeur attendue par le log
+  /// (`r.expected`), avec garde-fou d'invariant :
+  ///   `newAvail = expected.clamp(0, max(physical, 0))`
+  /// — on ne crée jamais de phantom physical (si le log dit "8 dispos"
+  /// mais qu'il n'y a que 5 unités physiques, on cap à 5).
+  ///
+  /// Émet un mouvement `adjustment, cause=audit_correction` propre,
+  /// puis marque l'incident `audit_drift` du jour comme résolu pour
+  /// que la fiche disparaisse de la page Incidents.
+  static Future<bool> applyAuditCorrection(ReconciliationResult r) async {
+    final result = _findVariant(r.shopId, r.productId, r.variantId);
+    if (result == null) {
+      debugPrint('[Stock] applyAuditCorrection : variante introuvable '
+          '(shop=${r.shopId}, productId=${r.productId}, '
+          'variantId=${r.variantId})');
+      return false;
+    }
+    final (product, vIdx) = result;
+    final v = product.variants[vIdx];
+
+    final physClamped = v.stockPhysical < 0 ? 0 : v.stockPhysical;
+    final newAvail = r.expected.clamp(0, physClamped);
+    final newPhys  = physClamped;
+
+    if (newAvail == v.stockAvailable && newPhys == v.stockPhysical) {
+      // Rien à faire : la variante est déjà alignée (audit obsolète).
+      return true;
+    }
+
+    final beforeAvail = v.stockAvailable;
+    final beforePhys  = v.stockPhysical;
+
+    final updated = v.copyWith(
+      stockAvailable: newAvail,
+      stockPhysical:  newPhys,
+    );
+    await _saveVariant(product, vIdx, updated, r.shopId,
+        forceStockLevelSync: true);
+
+    final delta = newAvail - beforeAvail;
+    _log(
+      shopId:      r.shopId,
+      productId:   r.productId,
+      variantId:   r.variantId,
+      type:        'adjustment',
+      quantity:    delta,
+      beforeAvail: beforeAvail,
+      afterAvail:  newAvail,
+      beforePhys:  beforePhys,
+      afterPhys:   newPhys,
+      cause:       'audit_correction',
+      notes:       'Correction drift audit : actual $beforeAvail → '
+                   'expected ${r.expected} (cap physique $physClamped)',
+    );
+
+    // Marque l'incident d'aujourd'hui comme résolu pour le retirer du
+    // dashboard Incidents. Sans ça, l'utilisateur voit l'incident
+    // ancien + la donnée corrigée → confusion.
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final id = 'inc_audit_${r.variantId}_$today';
+    final raw = HiveBoxes.incidentsBox.get(id);
+    if (raw is Map) {
+      final m = Map<String, dynamic>.from(raw);
+      m['status']      = 'resolved';
+      m['resolved_at'] = DateTime.now().toIso8601String();
+      m['notes']       = '${m['notes'] ?? ''}\n\n'
+                         'Résolu automatiquement par correction audit '
+                         '(stockAvailable : $beforeAvail → $newAvail)';
+      await HiveBoxes.incidentsBox.put(id, m);
+    }
+
+    await ActivityLogService.log(
+      action:      'stock_audit_corrected',
+      targetType:  'product',
+      targetId:    r.productId,
+      targetLabel: '${r.productName} — ${r.variantName}',
+      shopId:      r.shopId,
+      details: {
+        'before_available': beforeAvail,
+        'after_available':  newAvail,
+        'before_physical':  beforePhys,
+        'after_physical':   newPhys,
+        'expected':         r.expected,
+        'delta':            delta,
+        'incident_id':      id,
+      },
+    );
+    return true;
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
