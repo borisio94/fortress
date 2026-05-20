@@ -4025,7 +4025,7 @@ class _AuditStockBtn extends StatelessWidget {
               border: Border.all(color: sem.borderSubtle),
             ),
             child: Center(
-              child: Icon(Icons.fact_check_outlined, size: 15,
+              child: Icon(Icons.fact_check_rounded, size: 15,
                   color: cs.onSurface.withValues(alpha: 0.7)),
             ),
           ),
