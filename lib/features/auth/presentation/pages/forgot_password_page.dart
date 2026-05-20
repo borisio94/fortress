@@ -7,6 +7,7 @@ import '../../data/datasources/auth_supabase_datasource.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/widgets/fortress_logo.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
@@ -230,7 +231,7 @@ class _ForgotPasswordPageState extends ConsumerState<ForgotPasswordPage> {
           top: 12, right: 16,
           child: SafeArea(
             child: LanguageSwitcher(
-              backgroundColor: Colors.white.withOpacity(0.92),
+              backgroundColor: Colors.white.withValues(alpha:0.92),
             ),
           ),
         ),
@@ -317,12 +318,12 @@ class _EmailStep extends StatelessWidget {
               color: const Color(0xFF0F172A), letterSpacing: 0.3,
             )),
         const SizedBox(height: 8),
-        const Text(
+        Text(
           'Saisissez votre email. Nous vous enverrons un code à usage '
           'unique pour réinitialiser votre mot de passe.',
           textAlign: TextAlign.center,
-          style: TextStyle(
-              fontSize: 12, color: Color(0xFF6B7280), height: 1.6),
+          style: AppTextStyles.bodySm
+              .copyWith(color: const Color(0xFF6B7280), height: 1.6),
         ),
         const SizedBox(height: 28),
         EmailField(
@@ -348,9 +349,9 @@ class _EmailStep extends StatelessWidget {
                   size: 14, color: AppColors.primary),
               const SizedBox(width: 6),
               Text(l.registerSignIn,
-                  style: TextStyle(
-                    color: AppColors.primary, fontSize: 13,
-                    fontWeight: FontWeight.w500)),
+                  style: AppTextStyles.body.copyWith(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w500)),
             ],
           ),
         ),
@@ -398,13 +399,14 @@ class _OtpStep extends StatelessWidget {
             border: Border.all(color: const Color(0xFFFBBF24)),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: const [
-            Icon(Icons.shield_outlined, size: 14, color: Color(0xFFF59E0B)),
-            SizedBox(width: 6),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.shield_outlined,
+                size: 14, color: Color(0xFFF59E0B)),
+            const SizedBox(width: 6),
             Flexible(child: Text(
               'Compte Administrateur — Vérification renforcée requise',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                  color: Color(0xFF92400E)),
+              style: AppTextStyles.captionBold
+                  .copyWith(color: const Color(0xFF92400E)),
             )),
           ]),
         ),
@@ -426,8 +428,8 @@ class _OtpStep extends StatelessWidget {
         'Un code à $otpLength chiffres a été envoyé à $email. '
         'Vérifiez aussi vos spams.',
         textAlign: TextAlign.center,
-        style: const TextStyle(
-            fontSize: 12, color: Color(0xFF6B7280), height: 1.5),
+        style: AppTextStyles.bodySm
+            .copyWith(color: const Color(0xFF6B7280), height: 1.5),
       ),
       const SizedBox(height: 22),
 
@@ -435,8 +437,8 @@ class _OtpStep extends StatelessWidget {
       if (error != null) ...[
         const SizedBox(height: 6),
         Text(error!,
-            style: const TextStyle(
-                fontSize: 11, color: Color(0xFFEF4444))),
+            style: AppTextStyles.caption
+                .copyWith(color: const Color(0xFFEF4444))),
       ],
 
       const SizedBox(height: 20),
@@ -454,8 +456,8 @@ class _OtpStep extends StatelessWidget {
           resendCooldown > 0
               ? 'Renvoyer le code dans ${resendCooldown}s'
               : 'Renvoyer le code',
-          style: TextStyle(
-            fontSize: 12, fontWeight: FontWeight.w600,
+          style: AppTextStyles.bodySm.copyWith(
+            fontWeight: FontWeight.w600,
             color: resendCooldown > 0
                 ? const Color(0xFF9CA3AF)
                 : AppColors.primary,
@@ -469,11 +471,12 @@ class _OtpStep extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.arrow_back_rounded, size: 14,
-                color: const Color(0xFF6B7280)),
+            const Icon(Icons.arrow_back_rounded, size: 14,
+                color: Color(0xFF6B7280)),
             const SizedBox(width: 6),
-            const Text('Changer d\'email',
-                style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+            Text('Changer d\'email',
+                style: AppTextStyles.bodySm
+                    .copyWith(color: const Color(0xFF6B7280))),
           ],
         ),
       ),
@@ -516,13 +519,13 @@ class _NewPasswordStep extends StatelessWidget {
             border: Border.all(color: const Color(0xFF10B981)),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: const [
-            Icon(Icons.verified_user_outlined, size: 14,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.verified_user_outlined, size: 14,
                 color: Color(0xFF10B981)),
-            SizedBox(width: 6),
+            const SizedBox(width: 6),
             Text('Identité vérifiée ✓',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                    color: Color(0xFF065F46))),
+                style: AppTextStyles.captionBold
+                    .copyWith(color: const Color(0xFF065F46))),
           ]),
         ),
         const SizedBox(height: 20),
@@ -539,8 +542,8 @@ class _NewPasswordStep extends StatelessWidget {
               : 'Minimum 8 caractères. Mélangez majuscule, chiffre et '
                 'caractère spécial pour un mot de passe BON.',
           textAlign: TextAlign.center,
-          style: const TextStyle(
-              fontSize: 11, color: Color(0xFF6B7280), height: 1.5),
+          style: AppTextStyles.caption
+              .copyWith(color: const Color(0xFF6B7280), height: 1.5),
         ),
         const SizedBox(height: 18),
 

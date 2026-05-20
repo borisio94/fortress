@@ -3,7 +3,6 @@ export '../services/supabase_service.dart' show SupabaseService;
 
 // Alias de compatibilité pour les fichiers qui utilisent SupabaseClientService
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'supabase_config.dart';
 
 class SupabaseClientService {
   static get client  => Supabase.instance.client;

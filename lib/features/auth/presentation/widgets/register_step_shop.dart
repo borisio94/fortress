@@ -16,16 +16,11 @@ class _StepShop extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Votre première boutique',
-              style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary)),
+          Text('Votre première boutique', style: AppTextStyles.display),
           const SizedBox(height: 4),
           Text('Vous pourrez en ajouter d\'autres plus tard '
               '(plan Business).',
-              style: TextStyle(
-                  fontSize: 12, color: AppColors.textSecondary)),
+              style: AppTextStyles.bodySmSecondary),
           const SizedBox(height: 20),
           // Nom boutique
           const AppFieldLabel('Nom de la boutique', required: true),
@@ -44,8 +39,7 @@ class _StepShop extends StatelessWidget {
             items: _kSectors
                 .map((o) => DropdownMenuItem(
                     value: o.value,
-                    child: Text(o.label,
-                        style: const TextStyle(fontSize: 13))))
+                    child: Text(o.label, style: AppTextStyles.body)))
                 .toList(),
             onChanged: (v) {
               if (v != null) {

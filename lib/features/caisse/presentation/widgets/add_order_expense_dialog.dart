@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../domain/entities/sale.dart';
 
@@ -95,8 +96,7 @@ class _AddOrderExpenseDialogState extends State<AddOrderExpenseDialog> {
         const SizedBox(width: 10),
         Expanded(
           child: Text('Ajouter une dépense',
-              style: TextStyle(
-                  fontSize: 16,
+              style: AppTextStyles.subtitleBold.copyWith(
                   fontWeight: FontWeight.w800,
                   color: theme.colorScheme.onSurface)),
         ),
@@ -127,8 +127,7 @@ class _AddOrderExpenseDialogState extends State<AddOrderExpenseDialog> {
                       'Ce montant sera enregistré comme dette envers le '
                       'partenaire et déduit automatiquement de son '
                       'prochain versement.',
-                      style: TextStyle(
-                          fontSize: 11,
+                      style: AppTextStyles.captionHint.copyWith(
                           height: 1.4,
                           color: theme.colorScheme.onSurface
                               .withValues(alpha: 0.8))),
@@ -138,16 +137,13 @@ class _AddOrderExpenseDialogState extends State<AddOrderExpenseDialog> {
           ),
           const SizedBox(height: 14),
           Text('Total commande : ${fmt.format(widget.order.total)} $sym',
-              style: TextStyle(
-                  fontSize: 12,
+              style: AppTextStyles.bodySm.copyWith(
                   color: theme.colorScheme.onSurface
                       .withValues(alpha: 0.7))),
           const SizedBox(height: 14),
           // Montant
           Text('Montant de la dépense',
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
+              style: AppTextStyles.captionBold.copyWith(
                   letterSpacing: 0.5,
                   color: theme.colorScheme.onSurface
                       .withValues(alpha: 0.6))),
@@ -177,15 +173,12 @@ class _AddOrderExpenseDialogState extends State<AddOrderExpenseDialog> {
                   borderSide:
                       BorderSide(color: AppColors.warning, width: 1.5)),
             ),
-            style: const TextStyle(
-                fontSize: 18, fontWeight: FontWeight.w700),
+            style: AppTextStyles.title,
           ),
           const SizedBox(height: 12),
           // Motif
           Text('Motif',
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
+              style: AppTextStyles.captionBold.copyWith(
                   letterSpacing: 0.5,
                   color: theme.colorScheme.onSurface
                       .withValues(alpha: 0.6))),
@@ -208,13 +201,13 @@ class _AddOrderExpenseDialogState extends State<AddOrderExpenseDialog> {
                   borderSide:
                       BorderSide(color: AppColors.primary, width: 1.5)),
             ),
-            style: const TextStyle(fontSize: 13),
+            style: AppTextStyles.body,
           ),
           if (_error != null) ...[
             const SizedBox(height: 8),
             Text(_error!,
-                style: TextStyle(
-                    fontSize: 11, color: theme.colorScheme.error)),
+                style: AppTextStyles.captionHint
+                    .copyWith(color: theme.colorScheme.error)),
           ],
         ],
       ),
@@ -237,9 +230,9 @@ class _AddOrderExpenseDialogState extends State<AddOrderExpenseDialog> {
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8)),
           ),
-          child: const Text('Enregistrer en dette',
-              style: TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w700)),
+          child: Text('Enregistrer en dette',
+              style: AppTextStyles.bodyBold
+                  .copyWith(color: Colors.white)),
         ),
       ],
     );

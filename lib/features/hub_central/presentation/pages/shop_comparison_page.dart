@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/router/route_names.dart';
 
@@ -17,8 +18,7 @@ class ShopComparisonPage extends StatelessWidget {
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
           onPressed: () => context.canPop() ? context.pop() : context.go(RouteNames.hub),
         ),
-        title: Text(l.hubCompare,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+        title: Text(l.hubCompare, style: AppTextStyles.subtitleBold),
         centerTitle: true,
         bottom: PreferredSize(preferredSize: const Size.fromHeight(1),
             child: Container(height: 1, color: const Color(0xFFF0F0F0))),

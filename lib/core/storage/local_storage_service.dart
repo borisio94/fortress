@@ -1,8 +1,6 @@
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 import 'hive_boxes.dart';
-import '../config/supabase_client.dart';
 import '../../features/auth/domain/entities/user.dart';
 import '../../features/shop_selector/domain/entities/shop_summary.dart';
 import '../../features/inventaire/domain/entities/product.dart';
@@ -290,17 +288,23 @@ class LocalStorageService {
     'id': s.id, 'name': s.name, 'logo_url': s.logoUrl,
     'currency': s.currency, 'country': s.country, 'sector': s.sector,
     'is_active': s.isActive, 'today_sales': s.todaySales,
-    'owner_id': s.ownerId, 'phone': s.phone, 'email': s.email,
+    'owner_id': s.ownerId, 'phone': s.phone,
+    'whatsapp_phone': s.whatsappPhone, 'email': s.email,
     'created_at': s.createdAt?.toIso8601String(),
+    'kind':           s.kind.key,
+    'parent_shop_id': s.parentShopId,
   };
 
   static ShopSummary _shopFromMap(Map<String, dynamic> m) => ShopSummary(
     id: m['id'], name: m['name'], logoUrl: m['logo_url'],
     currency: m['currency'], country: m['country'], sector: m['sector'],
     isActive: m['is_active'] ?? true, todaySales: m['today_sales'],
-    ownerId: m['owner_id'], phone: m['phone'], email: m['email'],
+    ownerId: m['owner_id'], phone: m['phone'],
+    whatsappPhone: m['whatsapp_phone'] as String?, email: m['email'],
     createdAt: m['created_at'] != null
         ? DateTime.parse(m['created_at']) : null,
+    kind:         ShopKindX.fromKey(m['kind'] as String?),
+    parentShopId: m['parent_shop_id'] as String?,
   );
 
   static Map<String, dynamic> _productToMap(Product p) => {
@@ -459,7 +463,7 @@ class LocalStorageService {
     try {
       final raw = HiveBoxes.shopsBox.get(shopId);
       if (raw == null) return false;
-      final m = Map<String, dynamic>.from(raw as Map);
+      final m = Map<String, dynamic>.from(raw);
       return m['owner_id']?.toString() == userId;
     } catch (_) {
       return false;

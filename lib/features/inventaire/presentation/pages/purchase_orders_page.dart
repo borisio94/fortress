@@ -6,13 +6,12 @@ import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/utils/currency_formatter.dart';
-import '../../../../shared/widgets/app_scaffold.dart';
+import '../../../../core/utils/date_formatter.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
 import '../../../../core/widgets/danger_confirm_dialog.dart';
 import '../../domain/entities/purchase_order.dart';
 import '../../domain/entities/supplier.dart';
-import '../../domain/entities/product.dart';
 import '../../domain/entities/reception.dart';
 
 class PurchaseOrdersPage extends StatefulWidget {
@@ -86,8 +85,8 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                             color: AppColors.primary),
                         const SizedBox(width: 6),
                         Text('Fournisseurs (${_suppliers.length})',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                                color: AppColors.primary)),
+                            style: AppTextStyles.bodySmBold
+                                .copyWith(color: AppColors.primary)),
                       ]),
                     ),
                   ),
@@ -98,11 +97,11 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                       decoration: BoxDecoration(
                           color: AppColors.primary, borderRadius: BorderRadius.circular(8)),
-                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.add_rounded, size: 15, color: Colors.white),
-                        SizedBox(width: 6),
-                        Text('Nouvelle commande', style: TextStyle(fontSize: 12,
-                            fontWeight: FontWeight.w600, color: Colors.white)),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        const Icon(Icons.add_rounded, size: 15, color: Colors.white),
+                        const SizedBox(width: 6),
+                        Text('Nouvelle commande', style: AppTextStyles.bodySmBold
+                            .copyWith(color: Colors.white)),
                       ]),
                     ),
                   ),
@@ -152,7 +151,7 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                         size: 17, color: AppColors.primary)),
                 const SizedBox(width: 10),
                 const Expanded(child: Text('Nouvelle commande fournisseur',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+                    style: AppTextStyles.subtitleBold)),
               ]),
             ),
             const SizedBox(height: 12),
@@ -171,7 +170,7 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                   ),
                   items: _suppliers.map((s) => DropdownMenuItem(
                       value: s.id, child: Text(s.name,
-                          style: const TextStyle(fontSize: 13)))).toList(),
+                          style: AppTextStyles.body))).toList(),
                   onChanged: (v) => setSt(() => selectedSupplier = v),
                 ),
               ),
@@ -192,15 +191,14 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                     color: qty > 0 ? AppColors.primarySurface : const Color(0xFFF9FAFB),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: qty > 0
-                        ? AppColors.primary.withOpacity(0.3) : AppColors.divider)),
+                        ? AppColors.primary.withValues(alpha:0.3) : AppColors.divider)),
                   child: Row(children: [
                     Expanded(child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(p.name, style: const TextStyle(fontSize: 13,
-                          fontWeight: FontWeight.w600), maxLines: 1,
+                      Text(p.name, style: AppTextStyles.bodyBold, maxLines: 1,
                           overflow: TextOverflow.ellipsis),
                       Text('Achat : ${CurrencyFormatter.format(p.priceBuy)} · Stock : ${p.totalStock}',
-                          style: const TextStyle(fontSize: 10, color: AppColors.textHint)),
+                          style: AppTextStyles.micro),
                     ])),
                     Row(mainAxisSize: MainAxisSize.min, children: [
                       IconButton(
@@ -213,7 +211,8 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                         constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                         color: AppColors.primary),
                       SizedBox(width: 28, child: Center(child: Text('$qty',
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)))),
+                          style: AppTextStyles.label
+                              .copyWith(fontWeight: FontWeight.w700)))),
                       IconButton(
                         onPressed: () => setSt(() =>
                             items[p.id!] = _NewItem(qty + 1, p.priceBuy)),
@@ -235,10 +234,11 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                       const Text('Total estimé',
-                          style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                          style: AppTextStyles.bodySmSecondary),
                       Text(CurrencyFormatter.format(
                           items.values.fold(0.0, (s, i) => s + i.qty * i.price)),
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800,
+                          style: AppTextStyles.label.copyWith(
+                              fontWeight: FontWeight.w800,
                               color: AppColors.primary)),
                     ]),
                   ),
@@ -378,23 +378,24 @@ class _POCard extends StatelessWidget {
         Row(children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(color: color.withOpacity(0.1),
+            decoration: BoxDecoration(color: color.withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(6)),
-            child: Text(order.status.label, style: TextStyle(fontSize: 10,
-                fontWeight: FontWeight.w700, color: color)),
+            child: Text(order.status.label, style: AppTextStyles.microBold
+                .copyWith(color: color)),
           ),
           const SizedBox(width: 8),
-          Expanded(child: Text(supplierName, style: const TextStyle(fontSize: 12,
-              fontWeight: FontWeight.w600, color: Color(0xFF374151)),
+          Expanded(child: Text(supplierName, style: AppTextStyles.bodySmBold
+              .copyWith(color: const Color(0xFF374151)),
               overflow: TextOverflow.ellipsis)),
           Text(CurrencyFormatter.format(order.computedTotal),
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800,
+              style: AppTextStyles.bodyBold.copyWith(
+                  fontWeight: FontWeight.w800,
                   color: AppColors.primary)),
         ]),
         const SizedBox(height: 6),
         Text('${order.items.length} produit${order.items.length > 1 ? 's' : ''} · '
             '${_fmtDate(order.createdAt)}',
-            style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
+            style: AppTextStyles.captionHint),
         // Actions
         const SizedBox(height: 8),
         Wrap(spacing: 6, runSpacing: 6, children: [
@@ -420,8 +421,7 @@ class _POCard extends StatelessWidget {
     );
   }
 
-  static String _fmtDate(DateTime d) =>
-      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  static String _fmtDate(DateTime d) => DateFormatter.dayMonthYear(d);
 }
 
 class _SmallBtn extends StatelessWidget {
@@ -434,13 +434,13 @@ class _SmallBtn extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-          color: color.withOpacity(0.08), borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: color.withOpacity(0.25))),
+          color: color.withValues(alpha:0.08), borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: color.withValues(alpha:0.25))),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, size: 13, color: color),
         const SizedBox(width: 4),
-        Text(label, style: TextStyle(fontSize: 10,
-            fontWeight: FontWeight.w600, color: color)),
+        Text(label, style: AppTextStyles.micro
+            .copyWith(fontWeight: FontWeight.w600, color: color)),
       ]),
     ),
   );

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/i18n/app_localizations.dart';
@@ -101,11 +102,7 @@ class _DashBodyState extends ConsumerState<_DashBody> {
   String _fmt(DateTime d) =>
       '${d.day.toString().padLeft(2,'0')}/${d.month.toString().padLeft(2,'0')}';
 
-  String _fmtNum(double v) {
-    if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(1)}M';
-    if (v >= 1000)    return '${(v / 1000).toStringAsFixed(1)}k';
-    return v.toStringAsFixed(0);
-  }
+  String _fmtNum(double v) => CurrencyFormatter.compact(v);
 
   void _showPeriodPicker(BuildContext context) {
     showModalBottomSheet(
@@ -403,8 +400,7 @@ class _AlertsSection extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(child: Text(l.dashAlertsTitle,
               maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 13,
-                  fontWeight: FontWeight.w700,
+              style: AppTextStyles.bodyBold.copyWith(
                   color: theme.colorScheme.onSurface))),
         ]),
         const SizedBox(height: 10),
@@ -483,14 +479,12 @@ class _DashboardHeader extends StatelessWidget {
               children: [
                 Text(greeting,
                     maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: greetSize,
-                        fontWeight: greetWeight,
-                        color: AppColors.textPrimary)),
+                    style: AppTextStyles.body.copyWith(fontSize: greetSize,
+                        fontWeight: greetWeight)),
                 const SizedBox(height: 2),
                 Text(subText,
                     maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: subSize,
-                        color: AppColors.textSecondary)),
+                    style: AppTextStyles.caption.copyWith(fontSize: subSize)),
               ],
             )),
             const SizedBox(width: 10),
@@ -510,7 +504,7 @@ class _DashboardHeader extends StatelessWidget {
                       color: AppColors.primary),
                   const SizedBox(width: 5),
                   Text(periodLabel,
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                      style: AppTextStyles.captionBold.copyWith(
                           color: AppColors.primary)),
                   const SizedBox(width: 3),
                   Icon(Icons.keyboard_arrow_down_rounded, size: 14,
@@ -615,7 +609,7 @@ class _HeaderQuickBtnState extends State<_HeaderQuickBtn> {
             Text(widget.label.replaceAll('\n', ' '),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                style: AppTextStyles.captionBold.copyWith(
                     color: widget.color)),
           ]),
         ),
@@ -662,7 +656,7 @@ class _PeriodPickerState extends State<_PeriodPicker> {
                 borderRadius: BorderRadius.circular(2))),
         const SizedBox(height: 16),
         Text(l.periodCustomTitle,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            style: AppTextStyles.subtitleBold),
         const SizedBox(height: 16),
         Wrap(spacing: 8, runSpacing: 8, children: periods.map((p) {
           final active = widget.current == p.$1;
@@ -681,7 +675,7 @@ class _PeriodPickerState extends State<_PeriodPicker> {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(p.$2,
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
+                  style: AppTextStyles.bodyBold.copyWith(
                       color: active ? Colors.white : AppColors.textSecondary)),
             ),
           );
@@ -767,10 +761,9 @@ class _DateBtn extends StatelessWidget {
         Icon(Icons.calendar_today_outlined, size: 14, color: AppColors.primary),
         const SizedBox(width: 6),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: const TextStyle(fontSize: 9, color: AppColors.textHint)),
+          Text(label, style: AppTextStyles.micro),
           Text('${date.day}/${date.month}/${date.year}',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary)),
+              style: AppTextStyles.bodySmBold),
         ])),
       ]),
     ),
@@ -785,11 +778,7 @@ class _FinancialSummaryCard extends StatelessWidget {
   final DashData data;
   const _FinancialSummaryCard({required this.data});
 
-  static String _fmt(double v) {
-    if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(1)}M';
-    if (v >= 1000)    return '${(v / 1000).toStringAsFixed(1)}k';
-    return v.toStringAsFixed(0);
-  }
+  static String _fmt(double v) => CurrencyFormatter.compact(v);
 
   @override
   Widget build(BuildContext context) {
@@ -827,9 +816,7 @@ class _FinancialSummaryCard extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(child: Text(l.dashFinancialSummary,
               maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary))),
+              style: AppTextStyles.bodyBold)),
         ]),
         const SizedBox(height: 12),
         _row(l.financesCA, '+${_fmt(data.totalSales)} ${CurrencyFormatter.currentSymbol}',
@@ -852,13 +839,13 @@ class _FinancialSummaryCard extends StatelessWidget {
       Row(children: [
     Expanded(child: Text(label,
         maxLines: 1, overflow: TextOverflow.ellipsis,
-        style: TextStyle(
+        style: AppTextStyles.bodySm.copyWith(
             fontSize: bold ? 12 : 10,
             fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
             color: bold ? AppColors.textPrimary : AppColors.textSecondary))),
     Text(value,
         maxLines: 1, overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: bold ? 13 : 10,
+        style: AppTextStyles.body.copyWith(fontSize: bold ? 13 : 10,
             fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
             color: valueColor)),
   ]);
@@ -909,8 +896,7 @@ class _SalesBarChart extends StatelessWidget {
       children: [
         Row(children: [
           Expanded(child: Text(l.dashSalesOverview,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary))),
+              style: AppTextStyles.bodyBold)),
           GestureDetector(
             onTap: onPeriodTap,
             child: Container(
@@ -927,8 +913,8 @@ class _SalesBarChart extends StatelessWidget {
                       : period == 'year' ? l.periodYear
                       : period == 'yesterday' ? l.periodYesterday
                       : l.periodCustom,
-                  style: const TextStyle(fontSize: 10, color: Colors.white,
-                      fontWeight: FontWeight.w600),
+                  style: AppTextStyles.microBold.copyWith(
+                      color: Colors.white),
                 ),
                 const SizedBox(width: 4),
                 const Icon(Icons.keyboard_arrow_down_rounded,
@@ -979,8 +965,7 @@ class _SalesBarChart extends StatelessWidget {
                           interval: chartMax / 4,
                           getTitlesWidget: (v, _) => Text(
                             _compact(v),
-                            style: const TextStyle(
-                                fontSize: 9, color: AppColors.textHint),
+                            style: AppTextStyles.micro,
                           ),
                         ),
                       ),
@@ -998,9 +983,7 @@ class _SalesBarChart extends StatelessWidget {
                             return Padding(
                               padding: const EdgeInsets.only(top: 6),
                               child: Text(labels[i],
-                                  style: const TextStyle(
-                                      fontSize: 9,
-                                      color: AppColors.textHint)),
+                                  style: AppTextStyles.micro),
                             );
                           },
                         ),
@@ -1066,11 +1049,7 @@ class _SalesBarChart extends StatelessWidget {
     ));
   }
 
-  static String _compact(double v) {
-    if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(1)}M';
-    if (v >= 1000)    return '${(v / 1000).toStringAsFixed(1)}k';
-    return v.toStringAsFixed(0);
-  }
+  static String _compact(double v) => CurrencyFormatter.compact(v);
 }
 
 class _LegendDot extends StatelessWidget {
@@ -1088,9 +1067,7 @@ class _LegendDot extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           Text(label,
-              style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
+              style: AppTextStyles.captionBold.copyWith(
                   color: AppColors.textPrimary)),
         ],
       );
@@ -1108,8 +1085,7 @@ class _EmptyChart extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               context.l10n.dashNoSalesYet,
-              style: const TextStyle(
-                  fontSize: 11, color: AppColors.textHint),
+              style: AppTextStyles.captionHint,
             ),
           ],
         ),
@@ -1170,9 +1146,7 @@ class _TopProductsCard extends StatelessWidget {
                   ),
                   alignment: Alignment.center,
                   child: Text('${i + 1}',
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
+                      style: AppTextStyles.captionBold.copyWith(
                           color: medalColor)),
                 ),
                 const SizedBox(width: 8),
@@ -1186,10 +1160,7 @@ class _TopProductsCard extends StatelessWidget {
                       Text(p.name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary)),
+                          style: AppTextStyles.bodySmBold),
                       const SizedBox(height: 3),
                       ClipRRect(
                         borderRadius: BorderRadius.circular(2),
@@ -1209,14 +1180,9 @@ class _TopProductsCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text('${p.qty}',
-                        style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.textPrimary)),
+                        style: AppTextStyles.bodySmBold),
                     Text('${p.revenue.toStringAsFixed(0)} ${CurrencyFormatter.currentSymbol}',
-                        style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
+                        style: AppTextStyles.microBold.copyWith(
                             color: AppColors.primary)),
                   ],
                 ),
@@ -1337,8 +1303,7 @@ class _RecentTxCard extends StatelessWidget {
                   ),
                   alignment: Alignment.center,
                   child: Text(_initials(t.clientName),
-                      style: TextStyle(fontSize: 12,
-                          fontWeight: FontWeight.w800,
+                      style: AppTextStyles.bodySmBold.copyWith(
                           color: AppColors.primary)),
                 ),
                 const SizedBox(width: 10),
@@ -1351,10 +1316,7 @@ class _RecentTxCard extends StatelessWidget {
                         Expanded(child: Text(
                             t.clientName ?? l.dashUnknownClient,
                             maxLines: 1, overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.textPrimary))),
+                            style: AppTextStyles.bodySmBold)),
                         const SizedBox(width: 4),
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -1364,8 +1326,7 @@ class _RecentTxCard extends StatelessWidget {
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(s.label,
-                              style: TextStyle(fontSize: 9,
-                                  fontWeight: FontWeight.w700,
+                              style: AppTextStyles.microBold.copyWith(
                                   color: s.color)),
                         ),
                       ]),
@@ -1380,17 +1341,14 @@ class _RecentTxCard extends StatelessWidget {
                                     '· ${_timeAgo(t.createdAt)}')
                             : _timeAgo(t.createdAt),
                         maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 10, color: AppColors.textHint),
+                        style: AppTextStyles.micro,
                       ),
                     ],
                   ),
                 ),
                 // Montant à droite
                 Text('${t.amount.toStringAsFixed(0)} ${CurrencyFormatter.currentSymbol}',
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
+                    style: AppTextStyles.bodySmBold.copyWith(
                         color: isLoss
                             ? AppColors.error
                             : AppColors.primary)),
@@ -1458,15 +1416,10 @@ class _InventoryAlertsCard extends StatelessWidget {
                         Text(p.name,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.textPrimary)),
+                            style: AppTextStyles.bodySmBold),
                         Text(
                           '$stock / $threshold ${l.dashUnitsLeft}',
-                          style: const TextStyle(
-                              fontSize: 10,
-                              color: AppColors.textSecondary),
+                          style: AppTextStyles.microSecondary,
                         ),
                       ],
                     ),
@@ -1483,10 +1436,8 @@ class _InventoryAlertsCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(l.dashReorderNow,
-                          style: const TextStyle(
-                              fontSize: 9,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700)),
+                          style: AppTextStyles.microBold.copyWith(
+                              color: Colors.white)),
                     ),
                   ),
                 ]),
@@ -1504,9 +1455,7 @@ class _InventoryAlertsCard extends StatelessWidget {
                   )),
                   const SizedBox(width: 6),
                   Text('${pct.toStringAsFixed(0)}%',
-                      style: TextStyle(fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: color)),
+                      style: AppTextStyles.microBold.copyWith(color: color)),
                 ]),
               ]),
             );
@@ -1530,8 +1479,7 @@ class _DashEmpty extends StatelessWidget {
           Icon(icon, size: 28, color: AppColors.textHint),
           const SizedBox(height: 6),
           Text(label,
-              style: const TextStyle(
-                  fontSize: 11, color: AppColors.textHint)),
+              style: AppTextStyles.captionHint),
         ]),
       );
 }
@@ -1603,11 +1551,10 @@ class _CardHeader extends StatelessWidget {
     required this.onAction});
   @override
   Widget build(BuildContext context) => Row(children: [
-    Expanded(child: Text(title, style: const TextStyle(fontSize: 13,
-        fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
+    Expanded(child: Text(title, style: AppTextStyles.bodyBold)),
     GestureDetector(onTap: onAction,
-        child: Text(action, style: TextStyle(fontSize: 11,
-            fontWeight: FontWeight.w600, color: AppColors.primary))),
+        child: Text(action, style: AppTextStyles.captionBold.copyWith(
+            color: AppColors.primary))),
   ]);
 }
 
@@ -1644,13 +1591,9 @@ class _NewProductsCard extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(l.dashNewProducts,
-                      style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary)),
+                      style: AppTextStyles.bodyBold),
                   Text(l.dashNewProductsHint,
-                      style: const TextStyle(
-                          fontSize: 10, color: AppColors.textHint)),
+                      style: AppTextStyles.micro),
                 ],
               ),
             ),
@@ -1707,8 +1650,7 @@ class _NewProductsCard extends ConsumerWidget {
                         color: AppColors.primary),
                     const SizedBox(width: 5),
                     Text('${l.dashShareAction} (${products.length})',
-                        style: TextStyle(fontSize: 11,
-                            fontWeight: FontWeight.w700,
+                        style: AppTextStyles.captionBold.copyWith(
                             color: AppColors.primary)),
                   ]),
                 ),
@@ -1726,9 +1668,7 @@ class _NewProductsCard extends ConsumerWidget {
               child: GestureDetector(
                 onTap: () => context.push('/shop/$shopId/inventaire'),
                 child: Text(l.dashViewAll,
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
+                    style: AppTextStyles.captionBold.copyWith(
                         color: AppColors.primary)),
               ),
             ),
@@ -1753,8 +1693,7 @@ class _NewProductsEmpty extends StatelessWidget {
                 size: 28, color: AppColors.textHint),
             const SizedBox(height: 6),
             Text(message,
-                style: const TextStyle(
-                    fontSize: 11, color: AppColors.textHint)),
+                style: AppTextStyles.captionHint),
           ],
         ),
       );
@@ -1809,10 +1748,7 @@ class _NewProductRow extends ConsumerWidget {
               Text(product.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
+                  style: AppTextStyles.bodySmBold),
               const SizedBox(height: 1),
               Row(children: [
                 // Nombre de variantes si > 1
@@ -1821,8 +1757,7 @@ class _NewProductRow extends ConsumerWidget {
                       color: AppColors.primary.withValues(alpha:0.7)),
                   const SizedBox(width: 3),
                   Text(l.dashVariantCount(variantCount),
-                      style: TextStyle(fontSize: 10,
-                          fontWeight: FontWeight.w600,
+                      style: AppTextStyles.microBold.copyWith(
                           color: AppColors.primary.withValues(alpha:0.8))),
                   const SizedBox(width: 6),
                   Container(width: 2, height: 2,
@@ -1836,17 +1771,14 @@ class _NewProductRow extends ConsumerWidget {
                   product.createdAt != null
                       ? _ago(context, product.createdAt!)
                       : '',
-                  style: const TextStyle(
-                      fontSize: 10, color: AppColors.textHint),
+                  style: AppTextStyles.micro,
                 ),
               ]),
             ],
           ),
         ),
         Text('${product.priceSellPos.toStringAsFixed(0)} ${CurrencyFormatter.currentSymbol}',
-            style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+            style: AppTextStyles.bodySmBold.copyWith(
                 color: AppColors.secondary)),
         const SizedBox(width: 6),
         // Bouton partager individuel — stock filtré sur la vue active du

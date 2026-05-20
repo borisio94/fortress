@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/services/export_service.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
@@ -53,7 +54,7 @@ class LossesJournalWidget extends ConsumerWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFFE5E7EB)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 4, offset: const Offset(0, 2))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -62,7 +63,7 @@ class LossesJournalWidget extends ConsumerWidget {
               size: 16, color: Color(0xFFEF4444)),
           const SizedBox(width: 8),
           const Expanded(child: Text('Journal des pertes',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700))),
+              style: AppTextStyles.label)),
           // Guard CSV export — feature premium. L'utilisateur sans la
           // feature voit le bouton mais le tap ouvre l'UpgradeSheet.
           TextButton.icon(
@@ -76,7 +77,8 @@ class LossesJournalWidget extends ConsumerWidget {
               _export(context, entries);
             },
             icon: const Icon(Icons.file_download_rounded, size: 16),
-            label: const Text('CSV', style: TextStyle(fontSize: 12)),
+            label: Text('CSV', style: AppTextStyles.bodySm.copyWith(
+                color: AppColors.primary)),
             style: TextButton.styleFrom(
               foregroundColor: AppColors.primary,
               padding: const EdgeInsets.symmetric(
@@ -92,7 +94,7 @@ class LossesJournalWidget extends ConsumerWidget {
               ? 'Aucun rebut résolu sur la période'
               : '${entries.length} entrée${entries.length > 1 ? "s" : ""} · '
                 'Total : ${CurrencyFormatter.format(total)}',
-          style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+          style: AppTextStyles.caption,
         ),
         if (entries.isNotEmpty) ...[
           const SizedBox(height: 10),
@@ -105,25 +107,23 @@ class LossesJournalWidget extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(e.productName,
                     maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12,
-                        fontWeight: FontWeight.w600)),
+                    style: AppTextStyles.bodySmBold),
                 Text('${_fmtDate(e.resolvedAt)} · ×${e.quantity}',
-                    style: const TextStyle(fontSize: 10,
-                        color: Color(0xFF9CA3AF))),
+                    style: AppTextStyles.micro.copyWith(
+                        color: const Color(0xFF9CA3AF))),
               ])),
               const SizedBox(width: 8),
               Text(CurrencyFormatter.format(e.totalLoss),
-                  style: const TextStyle(fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFFEF4444))),
+                  style: AppTextStyles.bodySmBold.copyWith(
+                      color: const Color(0xFFEF4444))),
             ]),
           )),
           if (entries.length > 8) ...[
             const SizedBox(height: 4),
             Text('+${entries.length - 8} autre'
                 '${entries.length - 8 > 1 ? "s" : ""}',
-                style: const TextStyle(fontSize: 10,
-                    color: Color(0xFF9CA3AF))),
+                style: AppTextStyles.micro.copyWith(
+                    color: const Color(0xFF9CA3AF))),
           ],
         ],
       ]),

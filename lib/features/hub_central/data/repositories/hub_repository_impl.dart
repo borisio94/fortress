@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 
 import '../../domain/entities/global_stats.dart';
 import '../../domain/usecases/get_all_shops_stats_usecase.dart';
-import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
 
@@ -39,7 +38,7 @@ class HubRepositoryImpl implements HubRepository {
     final bucketLabels = _labelsFor(period, current);
 
     final orders = HiveBoxes.ordersBox.values
-        .map((m) => Map<String, dynamic>.from(m as Map))
+        .map((m) => Map<String, dynamic>.from(m))
         .toList();
 
     final shopStats = <ShopStats>[];

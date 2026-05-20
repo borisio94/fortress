@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // LandingWaitlistSection — encadré "Bientôt Q3 2026" + capture email pour
@@ -88,26 +89,22 @@ class _LandingWaitlistSectionState extends State<LandingWaitlistSection> {
                   decoration: BoxDecoration(
                       color: AppColors.primary,
                       borderRadius: BorderRadius.circular(4)),
-                  child: const Text('BIENTÔT — Q3 2026',
-                      style: TextStyle(
-                          fontSize: 10,
+                  child: Text('BIENTÔT — Q3 2026',
+                      style: AppTextStyles.micro.copyWith(
                           fontWeight: FontWeight.w800,
                           letterSpacing: 1.2,
                           color: Colors.white)),
                 ),
                 const SizedBox(height: 14),
                 Text('Automatisation WhatsApp Pro',
-                    style: TextStyle(
-                        fontSize: 20,
+                    style: AppTextStyles.title.copyWith(
                         fontWeight: FontWeight.w800,
                         color: theme.colorScheme.onSurface)),
                 const SizedBox(height: 6),
                 Text(
                     'Confirmations, rappels et factures envoyés '
                     'automatiquement à vos clients via WhatsApp Business API.',
-                    style: TextStyle(
-                        fontSize: 13,
-                        height: 1.5,
+                    style: AppTextStyles.body.copyWith(
                         color: theme.colorScheme.onSurface
                             .withValues(alpha: 0.7))),
                 const SizedBox(height: 16),
@@ -119,8 +116,7 @@ class _LandingWaitlistSectionState extends State<LandingWaitlistSection> {
                     Expanded(
                       child: Text(
                           'Inscrit ! Vous serez prévenu dès l\'ouverture.',
-                          style: TextStyle(
-                              fontSize: 13,
+                          style: AppTextStyles.body.copyWith(
                               fontWeight: FontWeight.w600,
                               color: AppColors.secondary)),
                     ),
@@ -143,7 +139,7 @@ class _LandingWaitlistSectionState extends State<LandingWaitlistSection> {
                                   color: theme.colorScheme.outline
                                       .withValues(alpha: 0.3))),
                         ),
-                        style: const TextStyle(fontSize: 14),
+                        style: AppTextStyles.input,
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -163,17 +159,17 @@ class _LandingWaitlistSectionState extends State<LandingWaitlistSection> {
                               width: 16, height: 16,
                               child: CircularProgressIndicator(
                                   strokeWidth: 2, color: Colors.white))
-                          : const Text('Être notifié',
-                              style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w700)),
+                          : Text('Être notifié',
+                              style: AppTextStyles.body.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white)),
                     ),
                   ]),
                 if (_error != null) ...[
                   const SizedBox(height: 8),
                   Text(_error!,
-                      style: TextStyle(
-                          fontSize: 11, color: theme.colorScheme.error)),
+                      style: AppTextStyles.caption
+                          .copyWith(color: theme.colorScheme.error)),
                 ],
               ],
             ),

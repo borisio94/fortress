@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../../../core/database/app_database.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
@@ -340,7 +341,7 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
                   'Pré-rempli depuis la fiche client. Si modifié, la fiche '
                   'sera mise à jour ; cette commande conservera l\'adresse '
                   'exacte saisie ici.',
-                  style: TextStyle(fontSize: 11,
+                  style: AppTextStyles.captionHint.copyWith(
                       color: Theme.of(context).colorScheme.onSurface
                           .withValues(alpha: 0.55)),
                 ),
@@ -367,8 +368,8 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
                         FilteringTextInputFormatter.allow(
                             RegExp(r'[0-9.,]')),
                       ],
-                      style: const TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w700),
+                      style: AppTextStyles.input
+                          .copyWith(fontWeight: FontWeight.w700),
                       decoration: InputDecoration(
                         hintText: 'Montant de l\'acompte',
                         suffixText: CurrencyFormatter.currentSymbol,
@@ -387,7 +388,8 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
                 if (_error != null) ...[
                   const SizedBox(height: 8),
                   Text(_error!,
-                      style: TextStyle(fontSize: 11, color: sem.danger)),
+                      style: AppTextStyles.captionHint
+                          .copyWith(color: sem.danger)),
                 ],
               ],
             ),
@@ -434,8 +436,8 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
         child: Text(label.toUpperCase(),
-            style: TextStyle(
-                fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.5,
+            style: AppTextStyles.microBold.copyWith(
+                fontWeight: FontWeight.w800, letterSpacing: 0.5,
                 color: Theme.of(context).colorScheme.onSurface
                     .withValues(alpha: 0.55))),
       );
@@ -477,16 +479,15 @@ class _PickerTile extends StatelessWidget {
               mainAxisSize: MainAxisSize.min, children: [
             Text(label,
                 maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 13,
+                style: AppTextStyles.body.copyWith(
                     fontWeight: highlight ? FontWeight.w700 : FontWeight.w500,
                     color: highlight ? sem.brandText : const Color(0xFF111827))),
             if (hint != null && hint!.isNotEmpty) ...[
               const SizedBox(height: 1),
               Text(hint!,
                   maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 11, color: Color(0xFF6B7280))),
+                  style: AppTextStyles.captionHint
+                      .copyWith(color: const Color(0xFF6B7280))),
             ],
           ])),
           if (trailing != null) trailing!
@@ -509,12 +510,14 @@ class _LabeledField extends StatelessWidget {
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
-      style: const TextStyle(fontSize: 13, color: Color(0xFF111827)),
+      style: AppTextStyles.body.copyWith(color: const Color(0xFF111827)),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+        labelStyle: AppTextStyles.bodySm
+            .copyWith(color: const Color(0xFF6B7280)),
         hintText: hint,
-        hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
+        hintStyle: AppTextStyles.bodySm
+            .copyWith(color: const Color(0xFFBBBBBB)),
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
             horizontal: 12, vertical: 11),
@@ -598,9 +601,7 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
           padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
           child: Align(alignment: Alignment.centerLeft,
             child: Text('Sélectionner un client',
-                style: TextStyle(fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF111827))),
+                style: AppTextStyles.subtitleBold),
           ),
         ),
         // Recherche + bouton + sur la MÊME LIGNE
@@ -610,11 +611,11 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
             Expanded(child: TextField(
               onChanged: (v) => setState(() => _query = v),
               keyboardType: TextInputType.phone,
-              style: const TextStyle(fontSize: 13),
+              style: AppTextStyles.body,
               decoration: InputDecoration(
                 hintText: 'Rechercher par numéro ou nom…',
-                hintStyle: const TextStyle(
-                    color: Color(0xFFBBBBBB), fontSize: 12),
+                hintStyle: AppTextStyles.bodySm
+                    .copyWith(color: const Color(0xFFBBBBBB)),
                 prefixIcon: const Icon(Icons.search_rounded,
                     size: 16, color: AppColors.textHint),
                 filled: true, fillColor: const Color(0xFFF9FAFB),
@@ -656,8 +657,9 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
         // Liste clients (scroll vertical sur cette zone uniquement)
         Expanded(
           child: _filtered.isEmpty
-              ? const Center(child: Text('Aucun client',
-                  style: TextStyle(fontSize: 12, color: AppColors.textHint)))
+              ? Center(child: Text('Aucun client',
+                  style: AppTextStyles.bodySm
+                      .copyWith(color: AppColors.textHint)))
               : ListView.separated(
                   controller: sc,
                   itemCount: _filtered.length,
@@ -668,15 +670,14 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
                     return ListTile(
                       onTap: () => Navigator.of(context).pop(c),
                       title: Text(c.name,
-                          style: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w600)),
+                          style: AppTextStyles.bodyBold),
                       subtitle: Text(
                           [c.phone, c.city, c.district]
                               .whereType<String>()
                               .where((s) => s.isNotEmpty)
                               .join(' · '),
-                          style: const TextStyle(fontSize: 11,
-                              color: Color(0xFF6B7280))),
+                          style: AppTextStyles.captionHint
+                              .copyWith(color: const Color(0xFF6B7280))),
                     );
                   },
                 ),
@@ -766,8 +767,7 @@ class _PaymentChip extends StatelessWidget {
               color: active ? sem.brandText : const Color(0xFF6B7280)),
           const SizedBox(width: 6),
           Text(label,
-              style: TextStyle(
-                  fontSize: 12,
+              style: AppTextStyles.bodySm.copyWith(
                   fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                   color: active ? sem.brandText : const Color(0xFF111827))),
         ]),

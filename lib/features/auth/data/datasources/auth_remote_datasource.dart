@@ -58,10 +58,10 @@ class AuthRemoteDataSourceMock implements AuthRemoteDataSource {
   /// Si l'appareil est en avion / Wi-Fi sans accès, retourne false en <2s.
   Future<bool> _hasNetwork() async {
     try {
-      final r = await SupabaseService.client
+      await SupabaseService.client
           .from('plans').select('id').limit(1)
           .timeout(const Duration(seconds: 3));
-      return r is List;
+      return true;
     } catch (_) {
       return false;
     }

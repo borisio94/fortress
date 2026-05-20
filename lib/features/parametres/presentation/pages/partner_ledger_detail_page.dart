@@ -7,6 +7,7 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/services/partner_ledger_service.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/widgets/back_dated_picker.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -75,25 +76,22 @@ class _PartnerLedgerDetailPageState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(entry.type.labelFr,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w700)),
+                style: AppTextStyles.bodyBold),
             const SizedBox(height: 6),
             Text('Montant : '
                 '${entry.amount >= 0 ? '+' : '−'}'
                 '${CurrencyFormatter.format(entry.amount.abs())}',
-                style: const TextStyle(fontSize: 12)),
+                style: AppTextStyles.bodySm),
             if ((entry.note ?? '').isNotEmpty) ...[
               const SizedBox(height: 4),
               Text(entry.note!,
-                  style: TextStyle(
-                      fontSize: 11, color: AppColors.textHint)),
+                  style: AppTextStyles.captionHint),
             ],
             const SizedBox(height: 10),
             Text(
                 'Cette suppression est irréversible et impactera '
                 'directement le solde du partenaire.',
-                style: TextStyle(
-                    fontSize: 11, color: AppColors.error)),
+                style: AppTextStyles.caption.copyWith(color: AppColors.error)),
           ],
         ),
         actions: [
@@ -116,6 +114,30 @@ class _PartnerLedgerDetailPageState
     await PartnerLedgerService.deleteEntry(entry.id, widget.shopId);
     if (mounted) {
       AppSnack.success(context, 'Mouvement supprimé');
+    }
+  }
+
+  /// Modifie un mouvement existant (montant / note / date, + catégorie si
+  /// c'est une charge). Le SIGNE du montant d'origine est conservé pour ne
+  /// pas inverser le sens comptable du mouvement (un versement reste un
+  /// versement, une charge reste négative, etc.).
+  Future<void> _editEntry(PartnerLedgerEntry entry) async {
+    final res = await showFormSheet<_EditResult>(
+      context: context,
+      builder: (_) => _EditEntrySheet(entry: entry),
+    );
+    if (res == null || !mounted) return;
+    final sign = entry.amount < 0 ? -1.0 : 1.0;
+    await PartnerLedgerService.updateEntry(
+      entryId:   entry.id,
+      shopId:    widget.shopId,
+      amount:    res.amount.abs() * sign,
+      note:      (res.note?.isEmpty ?? true) ? null : res.note,
+      createdAt: res.createdAt,
+      category:  res.category,
+    );
+    if (mounted) {
+      AppSnack.success(context, 'Mouvement modifié');
     }
   }
 
@@ -246,16 +268,13 @@ class _PartnerLedgerDetailPageState
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(tag,
-                  style: TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.w700,
+                  style: AppTextStyles.captionBold.copyWith(
                       letterSpacing: 0.4,
                       color: color.withValues(alpha: 0.85))),
               const SizedBox(height: 4),
               Text(
                 CurrencyFormatter.format(balance.abs()),
-                style: TextStyle(
-                    fontSize: 24, fontWeight: FontWeight.w800,
-                    color: color),
+                style: AppTextStyles.display.copyWith(color: color),
               ),
             ],
           ),
@@ -267,7 +286,7 @@ class _PartnerLedgerDetailPageState
               Expanded(
                 child: ElevatedButton.icon(
                   onPressed: _registerRemittance,
-                  icon: const Icon(Icons.payments_outlined, size: 18),
+                  icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text('Versement'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
@@ -280,7 +299,7 @@ class _PartnerLedgerDetailPageState
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: _registerCharge,
-                  icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                  icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text('Charge'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.primary,
@@ -297,7 +316,7 @@ class _PartnerLedgerDetailPageState
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: () => _settleDebt(balance),
-                  icon: const Icon(Icons.task_alt_rounded, size: 18),
+                  icon: const Icon(Icons.check_circle_rounded, size: 18),
                   label: const Text('Marquer réglée'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.primary,
@@ -322,7 +341,10 @@ class _PartnerLedgerDetailPageState
                       height: 1, color: Color(0xFFF0F0F0)),
                   itemBuilder: (_, i) => _MovementTile(
                     entry: entries[i],
-                    onDelete: () => _confirmDeleteEntry(entries[i]),
+                    onEdit: AppDatabase.isSubscriptionFrozen
+                        ? null : () => _editEntry(entries[i]),
+                    onDelete: AppDatabase.isSubscriptionFrozen
+                        ? null : () => _confirmDeleteEntry(entries[i]),
                   ),
                 ),
         ),
@@ -333,8 +355,9 @@ class _PartnerLedgerDetailPageState
 
 class _MovementTile extends StatelessWidget {
   final PartnerLedgerEntry entry;
+  final VoidCallback?      onEdit;
   final VoidCallback?      onDelete;
-  const _MovementTile({required this.entry, this.onDelete});
+  const _MovementTile({required this.entry, this.onEdit, this.onDelete});
   @override
   Widget build(BuildContext context) {
     final sem = Theme.of(context).semantic;
@@ -360,28 +383,25 @@ class _MovementTile extends StatelessWidget {
                   && entry.category != null
                   ? '${entry.type.labelFr} · ${entry.category!.labelFr}'
                   : entry.type.labelFr,
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w600,
-                  color: Color(0xFF111827))),
+              style: AppTextStyles.bodyBold),
           if ((entry.note ?? '').isNotEmpty) ...[
             const SizedBox(height: 2),
             Text(entry.note!,
                 maxLines: 2, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 11, color: AppColors.textHint)),
+                style: AppTextStyles.captionHint),
           ],
           const SizedBox(height: 2),
           Text(_fmtDate(entry.createdAt),
-              style: TextStyle(fontSize: 10.5, color: AppColors.textHint)),
+              style: AppTextStyles.micro),
         ])),
         const SizedBox(width: 8),
         Text(
           (isPositive ? '+' : '−')
               + CurrencyFormatter.format(entry.amount.abs()),
-          style: TextStyle(
-              fontSize: 13, fontWeight: FontWeight.w800, color: color),
+          style: AppTextStyles.bodyBold.copyWith(color: color),
         ),
-        // Menu suppression — discret (3 points). Visible si onDelete fourni.
-        if (onDelete != null) ...[
+        // Menu options — discret (3 points). Modifier + Supprimer.
+        if (onEdit != null || onDelete != null) ...[
           const SizedBox(width: 4),
           PopupMenuButton<String>(
             tooltip: 'Options',
@@ -390,20 +410,34 @@ class _MovementTile extends StatelessWidget {
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
             onSelected: (v) {
-              if (v == 'delete') onDelete!();
+              if (v == 'edit') onEdit?.call();
+              if (v == 'delete') onDelete?.call();
             },
             itemBuilder: (_) => [
-              PopupMenuItem(
-                value: 'delete',
-                child: Row(children: [
-                  Icon(Icons.delete_outline_rounded,
-                      size: 16, color: AppColors.error),
-                  const SizedBox(width: 8),
-                  Text('Supprimer',
-                      style: TextStyle(
-                          fontSize: 13, color: AppColors.error)),
-                ]),
-              ),
+              if (onEdit != null)
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Row(children: [
+                    Icon(Icons.edit_outlined,
+                        size: 16, color: AppColors.primary),
+                    const SizedBox(width: 8),
+                    Text('Modifier',
+                        style: AppTextStyles.body
+                            .copyWith(color: AppColors.primary)),
+                  ]),
+                ),
+              if (onDelete != null)
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Row(children: [
+                    Icon(Icons.delete_outline_rounded,
+                        size: 16, color: AppColors.error),
+                    const SizedBox(width: 8),
+                    Text('Supprimer',
+                        style: AppTextStyles.body
+                            .copyWith(color: AppColors.error)),
+                  ]),
+                ),
             ],
           ),
         ],
@@ -525,7 +559,7 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
                   ],
-                  style: const TextStyle(fontSize: 14),
+                  style: AppTextStyles.input,
                   decoration: InputDecoration(
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
@@ -562,9 +596,7 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
                         child: Text(
                             DateFormat('d MMMM yyyy', 'fr_FR')
                                 .format(_date),
-                            style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600)),
+                            style: AppTextStyles.bodyBold),
                       ),
                       Icon(Icons.edit_calendar_outlined,
                           size: 12,
@@ -578,11 +610,11 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
                 TextField(
                   controller: _noteCtrl,
                   maxLines: 2,
-                  style: const TextStyle(fontSize: 13),
+                  style: AppTextStyles.body,
                   decoration: InputDecoration(
                     hintText: 'N° de reçu, motif…',
-                    hintStyle: const TextStyle(
-                        fontSize: 12, color: Color(0xFFBBBBBB)),
+                    hintStyle: AppTextStyles.bodySm.copyWith(
+                        color: const Color(0xFFBBBBBB)),
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 11),
@@ -599,8 +631,7 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
                 if (_error != null) ...[
                   const SizedBox(height: 8),
                   Text(_error!,
-                      style: TextStyle(
-                          fontSize: 11,
+                      style: AppTextStyles.caption.copyWith(
                           color: Theme.of(context).semantic.danger)),
                 ],
               ],
@@ -759,7 +790,7 @@ class _ChargeSheetState extends State<_ChargeSheet> {
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
                   ],
-                  style: const TextStyle(fontSize: 14),
+                  style: AppTextStyles.input,
                   decoration: InputDecoration(
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
@@ -796,9 +827,7 @@ class _ChargeSheetState extends State<_ChargeSheet> {
                         child: Text(
                             DateFormat('d MMMM yyyy', 'fr_FR')
                                 .format(_date),
-                            style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600)),
+                            style: AppTextStyles.bodyBold),
                       ),
                       Icon(Icons.edit_calendar_outlined,
                           size: 12,
@@ -812,11 +841,11 @@ class _ChargeSheetState extends State<_ChargeSheet> {
                 TextField(
                   controller: _noteCtrl,
                   maxLines: 2,
-                  style: const TextStyle(fontSize: 13),
+                  style: AppTextStyles.body,
                   decoration: InputDecoration(
                     hintText: 'Motif, n° de commande refusée…',
-                    hintStyle: const TextStyle(
-                        fontSize: 12, color: Color(0xFFBBBBBB)),
+                    hintStyle: AppTextStyles.bodySm.copyWith(
+                        color: const Color(0xFFBBBBBB)),
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 11),
@@ -833,8 +862,7 @@ class _ChargeSheetState extends State<_ChargeSheet> {
                 if (_error != null) ...[
                   const SizedBox(height: 8),
                   Text(_error!,
-                      style: TextStyle(
-                          fontSize: 11,
+                      style: AppTextStyles.caption.copyWith(
                           color: Theme.of(context).semantic.danger)),
                 ],
               ],
@@ -879,8 +907,8 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
         child: Text(label.toUpperCase(),
-            style: TextStyle(
-                fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.5,
+            style: AppTextStyles.microBold.copyWith(
+                letterSpacing: 0.5,
                 color: Theme.of(context).colorScheme.onSurface
                     .withValues(alpha: 0.55))),
       );
@@ -922,16 +950,261 @@ class _DirRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min, children: [
             Text(label,
-                style: TextStyle(
-                    fontSize: 13,
+                style: AppTextStyles.body.copyWith(
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                     color: selected ? sem.brandText
                                     : const Color(0xFF111827))),
             const SizedBox(height: 1),
             Text(hint,
-                style: TextStyle(fontSize: 11, color: AppColors.textHint)),
+                style: AppTextStyles.captionHint),
           ])),
         ]),
+      ),
+    );
+  }
+}
+
+// ─── Sheet d'édition d'un mouvement existant ───────────────────────────────
+
+class _EditResult {
+  final double amount;
+  final String? note;
+  final DateTime createdAt;
+  final PartnerChargeCategory? category;
+  const _EditResult({
+    required this.amount, this.note, required this.createdAt, this.category,
+  });
+}
+
+class _EditEntrySheet extends StatefulWidget {
+  final PartnerLedgerEntry entry;
+  const _EditEntrySheet({required this.entry});
+  @override
+  State<_EditEntrySheet> createState() => _EditEntrySheetState();
+}
+
+class _EditEntrySheetState extends State<_EditEntrySheet> {
+  late final TextEditingController _amountCtrl;
+  late final TextEditingController _noteCtrl;
+  late DateTime _date;
+  late PartnerChargeCategory? _category;
+  String? _error;
+
+  bool get _isCharge =>
+      widget.entry.type == PartnerLedgerEntryType.partnerCharge;
+
+  @override
+  void initState() {
+    super.initState();
+    final a = widget.entry.amount.abs();
+    _amountCtrl = TextEditingController(
+        text: a == a.roundToDouble() ? a.toStringAsFixed(0) : a.toString());
+    _noteCtrl = TextEditingController(text: widget.entry.note ?? '');
+    _date     = widget.entry.createdAt;
+    _category = widget.entry.category;
+  }
+
+  @override
+  void dispose() {
+    _amountCtrl.dispose();
+    _noteCtrl.dispose();
+    super.dispose();
+  }
+
+  void _confirm() {
+    final amt =
+        double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.'));
+    if (amt == null || amt <= 0) {
+      setState(() => _error = 'Montant invalide.');
+      return;
+    }
+    Navigator.of(context).pop(_EditResult(
+      amount:    amt,
+      note:      _noteCtrl.text.trim(),
+      createdAt: _date,
+      category:  _isCharge ? _category : null,
+    ));
+  }
+
+  Future<void> _pickDate() async {
+    final d = await pickBackDate(
+      context: context,
+      initial: _date,
+      helpText: 'Date du mouvement',
+    );
+    if (d != null) setState(() => _date = d);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return AdaptiveFormFrame(
+      title: 'Modifier le mouvement',
+      icon:  Icons.edit_outlined,
+      body: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                    'Type : ${widget.entry.type.labelFr} '
+                    '(non modifiable)',
+                    style: AppTextStyles.caption),
+                const SizedBox(height: 14),
+                if (_isCharge) ...[
+                  _SectionLabel('Catégorie'),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final c in PartnerChargeCategory.values)
+                        InkWell(
+                          onTap: () => setState(() => _category = c),
+                          borderRadius: BorderRadius.circular(20),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: _category == c
+                                  ? sem.brandSurface
+                                  : const Color(0xFFF9FAFB),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                  color: _category == c
+                                      ? sem.brand.withValues(alpha: 0.5)
+                                      : sem.borderSubtle),
+                            ),
+                            child: Text(c.labelFr,
+                                style: AppTextStyles.bodySm.copyWith(
+                                    fontWeight: _category == c
+                                        ? FontWeight.w700
+                                        : FontWeight.w500,
+                                    color: _category == c
+                                        ? sem.brandText
+                                        : const Color(0xFF111827))),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                ],
+                _SectionLabel('Montant (FCFA)'),
+                TextField(
+                  controller: _amountCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                  ],
+                  style: AppTextStyles.input,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 12),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide:
+                            const BorderSide(color: AppColors.divider)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                            color: AppColors.primary, width: 1.5)),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _SectionLabel('Date du mouvement'),
+                InkWell(
+                  onTap: _pickDate,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF9FAFB),
+                      borderRadius: BorderRadius.circular(8),
+                      border: const Border.fromBorderSide(
+                          BorderSide(color: AppColors.divider)),
+                    ),
+                    child: Row(children: [
+                      Icon(Icons.event_rounded,
+                          size: 14, color: AppColors.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                            DateFormat('d MMMM yyyy', 'fr_FR')
+                                .format(_date),
+                            style: AppTextStyles.bodyBold),
+                      ),
+                      Icon(Icons.edit_calendar_outlined,
+                          size: 12,
+                          color: Theme.of(context).colorScheme.onSurface
+                              .withValues(alpha: 0.4)),
+                    ]),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                _SectionLabel('Note (optionnel)'),
+                TextField(
+                  controller: _noteCtrl,
+                  maxLines: 2,
+                  style: AppTextStyles.body,
+                  decoration: InputDecoration(
+                    hintText: 'Motif, n° de reçu…',
+                    hintStyle: AppTextStyles.bodySm.copyWith(
+                        color: const Color(0xFFBBBBBB)),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 11),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide:
+                            const BorderSide(color: AppColors.divider)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                            color: AppColors.primary, width: 1.5)),
+                  ),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_error!,
+                      style: AppTextStyles.caption.copyWith(
+                          color: Theme.of(context).semantic.danger)),
+                ],
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
+            child: Row(children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 44)),
+                  child: const Text('Annuler'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _confirm,
+                  icon: const Icon(Icons.check_rounded, size: 18),
+                  label: const Text('Enregistrer'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(0, 44),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+        ],
       ),
     );
   }

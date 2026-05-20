@@ -1,20 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_snack.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../features/inventaire/domain/entities/stock_location.dart';
+import '../providers/delivery_template_provider.dart';
 
 /// Sheet bottom pour créer ou modifier un emplacement de stock
 /// (warehouse ou partner). Les locations type='shop' ne passent pas par ici.
 class LocationFormSheet extends StatefulWidget {
   final StockLocation? existing;
   final StockLocationType defaultType;
+  /// Shop courant. Si fourni ET type=partner, expose un dropdown
+  /// "Template de livraison utilisé" listant les templates du shop
+  /// (cf. hotfix_049).
+  final String? shopId;
   const LocationFormSheet({
     super.key,
     this.existing,
     this.defaultType = StockLocationType.warehouse,
+    this.shopId,
   });
 
   @override
@@ -24,6 +33,11 @@ class LocationFormSheet extends StatefulWidget {
 class _LocationFormSheetState extends State<LocationFormSheet> {
   late TextEditingController _name;
   late TextEditingController _address;
+  /// Ville du dépôt (séparé d'`address` depuis hotfix_051). Affiché
+  /// uniquement pour les partenaires — les warehouses gardent `_address`.
+  late TextEditingController _city;
+  /// Quartier ou zone précise dans la ville.
+  late TextEditingController _district;
   late TextEditingController _phone;
   late TextEditingController _contact;
   late TextEditingController _notes;
@@ -31,6 +45,14 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
   late bool _active;
   String? _nameError;
   bool _submitting = false;
+  /// `null` = utilise le défaut du shop (cf. hotfix_049). Sinon id d'un
+  /// template attribué spécifiquement à ce partenaire.
+  String? _deliveryTemplateId;
+  /// Mode de communication WhatsApp avec le partenaire (cf. hotfix_050) :
+  /// `false` = numéro 1-à-1 (champ phone), `true` = groupe (lien d'invitation).
+  bool _useGroup = false;
+  late TextEditingController _groupUrl;
+  String? _groupUrlError;
 
   bool get _isEdit => widget.existing != null;
 
@@ -40,21 +62,42 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
     final e = widget.existing;
     _name    = TextEditingController(text: e?.name ?? '');
     _address = TextEditingController(text: e?.address ?? '');
+    _city    = TextEditingController(text: e?.city ?? '');
+    _district= TextEditingController(text: e?.district ?? '');
     _phone   = TextEditingController(text: e?.phone ?? '');
     _contact = TextEditingController(text: e?.contactName ?? '');
     _notes   = TextEditingController(text: e?.notes ?? '');
     _type    = e?.type ?? widget.defaultType;
     _active  = e?.isActive ?? true;
+    _deliveryTemplateId = e?.deliveryTemplateId;
+    _groupUrl = TextEditingController(text: e?.whatsappGroupUrl ?? '');
+    _useGroup = (e?.whatsappGroupUrl ?? '').isNotEmpty;
   }
 
   @override
   void dispose() {
     _name.dispose();
     _address.dispose();
+    _city.dispose();
+    _district.dispose();
     _phone.dispose();
     _contact.dispose();
     _notes.dispose();
+    _groupUrl.dispose();
     super.dispose();
+  }
+
+  /// Validation lien WhatsApp : `https://chat.whatsapp.com/<code>` avec
+  /// éventuellement un query string (`?mode=gi_t`, `?mode=ac_t`…) ajouté
+  /// par WhatsApp lui-même sur les liens d'invitation modernes. Vide
+  /// accepté (le champ est optionnel quand le toggle est sur "Numéro").
+  String? _validateGroupUrl(String v) {
+    final s = v.trim();
+    if (s.isEmpty) return null;
+    final ok = RegExp(
+            r'^https://chat\.whatsapp\.com/[A-Za-z0-9]+(\?[A-Za-z0-9_=&\-]*)?$')
+        .hasMatch(s);
+    return ok ? null : 'Lien invalide (attendu : https://chat.whatsapp.com/…)';
   }
 
   String? _validateName(String v) {
@@ -86,7 +129,19 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
       setState(() => _nameError = err);
       return;
     }
-    setState(() { _submitting = true; _nameError = null; });
+    // Valide l'URL du groupe si le toggle est sur "Groupe".
+    if (_type == StockLocationType.partner && _useGroup) {
+      final ge = _validateGroupUrl(_groupUrl.text);
+      if (ge != null) {
+        setState(() => _groupUrlError = ge);
+        return;
+      }
+    }
+    setState(() {
+      _submitting = true;
+      _nameError = null;
+      _groupUrlError = null;
+    });
 
     final userId = LocalStorageService.getCurrentUser()?.id ?? '';
     if (userId.isEmpty) {
@@ -94,6 +149,19 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
       return;
     }
 
+    // En mode "groupe", on efface le phone (et inversement) pour garder
+    // un canal de contact unique et explicite.
+    final isPartner = _type == StockLocationType.partner;
+    final groupUrl  = isPartner && _useGroup
+        ? _groupUrl.text.trim()
+        : '';
+    final phone     = isPartner && _useGroup
+        ? ''
+        : _phone.text.trim();
+    // Pour les partenaires : ville/quartier séparés. Les warehouses
+    // continuent à utiliser le champ `address` legacy.
+    final cityVal     = isPartner ? _city.text.trim() : '';
+    final districtVal = isPartner ? _district.text.trim() : '';
     final loc = (widget.existing ?? StockLocation(
           id: 'loc_${DateTime.now().millisecondsSinceEpoch}_'
               '${_type.key}',
@@ -104,10 +172,18 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
         )).copyWith(
           name:        _name.text.trim(),
           address:     _address.text.trim().isEmpty ? null : _address.text.trim(),
-          phone:       _phone.text.trim().isEmpty ? null : _phone.text.trim(),
+          city:        cityVal.isEmpty ? null : cityVal,
+          clearCity:   isPartner && cityVal.isEmpty,
+          district:    districtVal.isEmpty ? null : districtVal,
+          clearDistrict: isPartner && districtVal.isEmpty,
+          phone:       phone.isEmpty ? null : phone,
+          clearPhone:  phone.isEmpty,
           contactName: _contact.text.trim().isEmpty ? null : _contact.text.trim(),
           notes:       _notes.text.trim().isEmpty ? null : _notes.text.trim(),
           isActive:    _active,
+          deliveryTemplateId: _deliveryTemplateId,
+          whatsappGroupUrl: groupUrl.isEmpty ? null : groupUrl,
+          clearWhatsappGroupUrl: groupUrl.isEmpty,
         );
 
     try {
@@ -124,33 +200,24 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: Container(
-          constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.85),
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(child: Container(width: 36, height: 4,
-                    decoration: BoxDecoration(
-                        color: const Color(0xFFE5E7EB),
-                        borderRadius: BorderRadius.circular(2)))),
-                const SizedBox(height: 14),
-                Text(_isEdit
-                        ? 'Modifier l\'emplacement'
-                        : (_type == StockLocationType.warehouse
-                            ? 'Nouveau magasin'
-                            : 'Nouveau dépôt partenaire'),
-                    style: const TextStyle(fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF0F172A))),
-                const SizedBox(height: 16),
+    final headerTitle = _isEdit
+        ? 'Modifier l\'emplacement'
+        : (_type == StockLocationType.warehouse
+            ? 'Nouveau magasin'
+            : 'Nouveau dépôt partenaire');
+    return AdaptiveFormFrame(
+      title: headerTitle,
+      icon: _isEdit
+          ? Icons.edit_outlined
+          : (_type == StockLocationType.warehouse
+              ? Icons.warehouse_outlined
+              : Icons.store_outlined),
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
 
                 // Type (verrouillé en édition pour éviter confusion)
                 if (!_isEdit) ...[
@@ -178,24 +245,84 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
                 ),
                 const SizedBox(height: 12),
 
-                const _Label('Adresse'),
-                const SizedBox(height: 4),
-                _Field(
-                  controller: _address,
-                  hint: 'Rue, quartier, ville',
-                  icon: Icons.location_on_outlined,
-                ),
-                const SizedBox(height: 12),
+                // Pour les partenaires : ville et quartier séparés
+                // (cf. hotfix_051). Les warehouses gardent l'adresse libre.
+                if (_type == StockLocationType.partner) ...[
+                  const _Label('Ville'),
+                  const SizedBox(height: 4),
+                  _Field(
+                    controller: _city,
+                    hint: 'Ex: Yaoundé',
+                    icon: Icons.location_city_outlined,
+                  ),
+                  const SizedBox(height: 12),
+                  const _Label('Quartier'),
+                  const SizedBox(height: 4),
+                  _Field(
+                    controller: _district,
+                    hint: 'Ex: Bastos',
+                    icon: Icons.maps_home_work_outlined,
+                  ),
+                  const SizedBox(height: 12),
+                ] else ...[
+                  const _Label('Adresse'),
+                  const SizedBox(height: 4),
+                  _Field(
+                    controller: _address,
+                    hint: 'Rue, quartier, ville',
+                    icon: Icons.location_on_outlined,
+                  ),
+                  const SizedBox(height: 12),
+                ],
 
-                const _Label('Téléphone'),
-                const SizedBox(height: 4),
-                // Même composant que CreateShopPage : sélecteur pays + E.164
-                AppField(
-                  controller: _phone,
-                  isPhone: true,
-                  style: AppFieldStyle.filled,
-                ),
-                const SizedBox(height: 12),
+                // Pour les partenaires : toggle "Numéro / Groupe WhatsApp"
+                // (cf. hotfix_050). Les warehouses gardent juste le téléphone.
+                if (_type == StockLocationType.partner) ...[
+                  const _Label('Mode de communication'),
+                  const SizedBox(height: 6),
+                  _CommModeToggle(
+                    useGroup: _useGroup,
+                    onChanged: (v) => setState(() {
+                      _useGroup = v;
+                      if (_groupUrlError != null) _groupUrlError = null;
+                    }),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_useGroup) ...[
+                    const _Label('Lien d\'invitation au groupe'),
+                    const SizedBox(height: 4),
+                    _Field(
+                      controller: _groupUrl,
+                      hint: 'https://chat.whatsapp.com/…',
+                      icon: Icons.group_rounded,
+                      errorText: _groupUrlError,
+                      keyboardType: TextInputType.url,
+                      onChanged: (_) {
+                        if (_groupUrlError != null) {
+                          setState(() => _groupUrlError = null);
+                        }
+                      },
+                    ),
+                  ] else ...[
+                    const _Label('Téléphone'),
+                    const SizedBox(height: 4),
+                    AppField(
+                      controller: _phone,
+                      isPhone: true,
+                      style: AppFieldStyle.filled,
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                ] else ...[
+                  const _Label('Téléphone'),
+                  const SizedBox(height: 4),
+                  AppField(
+                    controller: _phone,
+                    isPhone: true,
+                    style: AppFieldStyle.filled,
+                  ),
+                  const SizedBox(height: 12),
+                ],
 
                 const _Label('Personne contact'),
                 const SizedBox(height: 4),
@@ -216,19 +343,33 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
                 ),
                 const SizedBox(height: 12),
 
+                // Dropdown template livraison — uniquement pour les
+                // partenaires d'un shop donné (cf. hotfix_049).
+                if (_type == StockLocationType.partner
+                    && widget.shopId != null) ...[
+                  const _Label('Template de livraison'),
+                  const SizedBox(height: 4),
+                  _DeliveryTemplatePicker(
+                    shopId: widget.shopId!,
+                    selectedId: _deliveryTemplateId,
+                    onChanged: (v) =>
+                        setState(() => _deliveryTemplateId = v),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
                 if (_isEdit)
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     value: _active,
                     onChanged: (v) => setState(() => _active = v),
                     title: const Text('Actif',
-                        style: TextStyle(fontSize: 13,
-                            fontWeight: FontWeight.w600)),
+                        style: AppTextStyles.bodyBold),
                     subtitle: Text(_active
                             ? 'Disponible dans les sélections'
                             : 'Masqué des sélections',
-                        style: const TextStyle(fontSize: 11,
-                            color: Color(0xFF9CA3AF))),
+                        style: AppTextStyles.caption.copyWith(
+                            color: const Color(0xFF9CA3AF))),
                   ),
                 const SizedBox(height: 8),
 
@@ -260,9 +401,7 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
                     ),
                   ),
                 ]),
-              ],
-            ),
-          ),
+          ],
         ),
       ),
     );
@@ -277,8 +416,7 @@ class _Label extends StatelessWidget {
   @override
   Widget build(BuildContext context) => RichText(
     text: TextSpan(
-      style: const TextStyle(fontSize: 11,
-          fontWeight: FontWeight.w500, color: Color(0xFF6B7280)),
+      style: AppTextStyles.caption,
       children: [
         TextSpan(text: text),
         if (required) const TextSpan(text: ' *',
@@ -313,10 +451,10 @@ class _Field extends StatelessWidget {
     maxLines: maxLines,
     keyboardType: keyboardType,
     onChanged: onChanged,
-    style: const TextStyle(fontSize: 13, color: Color(0xFF1A1D2E)),
+    style: AppTextStyles.body,
     decoration: InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 12),
+      hintStyle: AppTextStyles.bodySm.copyWith(color: const Color(0xFFBBBBBB)),
       prefixIcon: Icon(icon, size: 15, color: const Color(0xFFAAAAAA)),
       filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
       contentPadding: const EdgeInsets.symmetric(
@@ -382,7 +520,7 @@ class _TypeOption extends StatelessWidget {
       duration: const Duration(milliseconds: 150),
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
       decoration: BoxDecoration(
-        color: selected ? color.withOpacity(0.10) : const Color(0xFFF9FAFB),
+        color: selected ? color.withValues(alpha:0.10) : const Color(0xFFF9FAFB),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: selected ? color : const Color(0xFFE5E7EB),
@@ -396,11 +534,157 @@ class _TypeOption extends StatelessWidget {
         Flexible(
           child: Text(label,
               maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12,
+              style: AppTextStyles.bodySm.copyWith(
                   fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
                   color: selected ? color : const Color(0xFF6B7280))),
         ),
       ]),
     ),
   );
+}
+
+/// Toggle binaire "Numéro 1-à-1 / Groupe WhatsApp" pour la communication
+/// avec un partenaire (cf. hotfix_050).
+class _CommModeToggle extends StatelessWidget {
+  final bool             useGroup;
+  final ValueChanged<bool> onChanged;
+  const _CommModeToggle({
+    required this.useGroup,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(children: [
+      Expanded(child: _ModeBtn(
+        icon: Icons.phone_rounded,
+        label: 'Numéro',
+        selected: !useGroup,
+        onTap: () => onChanged(false),
+      )),
+      const SizedBox(width: 6),
+      Expanded(child: _ModeBtn(
+        icon: Icons.group_rounded,
+        label: 'Groupe WhatsApp',
+        selected: useGroup,
+        onTap: () => onChanged(true),
+      )),
+    ]);
+  }
+}
+
+class _ModeBtn extends StatelessWidget {
+  final IconData     icon;
+  final String       label;
+  final bool         selected;
+  final VoidCallback onTap;
+  const _ModeBtn({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.primary.withValues(alpha: 0.08)
+              : const Color(0xFFF9FAFB),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+              color: selected
+                  ? AppColors.primary
+                  : const Color(0xFFE5E7EB),
+              width: selected ? 1.4 : 1),
+        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, size: 14,
+              color: selected
+                  ? AppColors.primary
+                  : const Color(0xFF9CA3AF)),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(label,
+                maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.bodySm.copyWith(
+                    fontWeight:
+                        selected ? FontWeight.w700 : FontWeight.w500,
+                    color: selected
+                        ? AppColors.primary
+                        : const Color(0xFF6B7280))),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Dropdown de sélection de template de livraison pour un partenaire.
+/// La valeur `null` correspond à "Template par défaut du shop".
+class _DeliveryTemplatePicker extends ConsumerWidget {
+  final String          shopId;
+  final String?         selectedId;
+  final ValueChanged<String?> onChanged;
+  const _DeliveryTemplatePicker({
+    required this.shopId,
+    required this.selectedId,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final asyncList = ref.watch(deliveryTemplatesProvider(shopId));
+    return asyncList.when(
+      loading: () => const SizedBox(
+        height: 38,
+        child: Center(child: SizedBox(width: 16, height: 16,
+            child: CircularProgressIndicator(strokeWidth: 1.8))),
+      ),
+      error: (e, _) => Text(e.toString(),
+          style: AppTextStyles.caption.copyWith(color: AppColors.error)),
+      data: (list) {
+        // L'item null = "Template par défaut du shop".
+        final items = <DropdownMenuItem<String?>>[
+          const DropdownMenuItem<String?>(
+            value: null,
+            child: Text('Template par défaut du shop',
+                style: AppTextStyles.bodySm),
+          ),
+          for (final t in list)
+            DropdownMenuItem<String?>(
+              value: t.id,
+              child: Text(
+                  '${t.name}${t.isDefault ? " (défaut)" : ""}',
+                  style: AppTextStyles.bodySm),
+            ),
+        ];
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF9FAFB),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFE5E7EB)),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String?>(
+              isExpanded: true,
+              value: list.any((t) => t.id == selectedId)
+                  ? selectedId
+                  : null,
+              icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                  size: 18, color: Color(0xFF9CA3AF)),
+              items: items,
+              onChanged: onChanged,
+            ),
+          ),
+        );
+      },
+    );
+  }
 }

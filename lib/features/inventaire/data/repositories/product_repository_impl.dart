@@ -1,7 +1,6 @@
 import '../../domain/entities/product.dart';
 import '../../domain/repositories/product_repository.dart';
 import '../../domain/usecases/add_product_usecase.dart';
-import '../models/product_model.dart';
 import 'product_local_datasource.dart';
 import 'product_remote_datasource.dart';
 import '../../../../core/database/app_database.dart';

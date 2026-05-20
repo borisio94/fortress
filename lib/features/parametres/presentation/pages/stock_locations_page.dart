@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../features/inventaire/domain/entities/stock_location.dart';
@@ -183,8 +184,10 @@ class _StockLocationsPageState extends ConsumerState<StockLocationsPage> {
                         'plusieurs boutiques',
                     locations: warehouses,
                     onOpen: _openContents,
-                    onEdit: (l) => _openForm(existing: l),
-                    onDelete: _confirmDelete,
+                    onEdit: AppDatabase.isSubscriptionFrozen
+                        ? null : (l) => _openForm(existing: l),
+                    onDelete: AppDatabase.isSubscriptionFrozen
+                        ? null : _confirmDelete,
                     onCreate: () => _openForm(
                         defaultType: StockLocationType.warehouse),
                     createLabel: 'Nouveau magasin',
@@ -198,8 +201,10 @@ class _StockLocationsPageState extends ConsumerState<StockLocationsPage> {
                         'stockent quelques pièces pour accélérer les livraisons',
                     locations: partners,
                     onOpen: _openContents,
-                    onEdit: (l) => _openForm(existing: l),
-                    onDelete: _confirmDelete,
+                    onEdit: AppDatabase.isSubscriptionFrozen
+                        ? null : (l) => _openForm(existing: l),
+                    onDelete: AppDatabase.isSubscriptionFrozen
+                        ? null : _confirmDelete,
                     onCreate: () => _openForm(
                         defaultType: StockLocationType.partner),
                     createLabel: 'Nouveau dépôt partenaire',
@@ -232,9 +237,7 @@ class _Hint extends StatelessWidget {
           'Les emplacements te permettent de savoir où est physiquement ton '
           'stock : boutique, magasin central, ou dépôt partenaire. '
           'Le transfert entre emplacements arrivera dans une prochaine étape.',
-          style: TextStyle(
-              fontSize: 11,
-              height: 1.35,
+          style: AppTextStyles.caption.copyWith(
               color: AppColors.primary.withValues(alpha:0.9)),
         ),
       ),
@@ -298,13 +301,10 @@ class _Section extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title,
-                      style: const TextStyle(fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF0F172A))),
+                      style: AppTextStyles.label),
                   const SizedBox(height: 2),
                   Text(subtitle,
-                      style: const TextStyle(fontSize: 11,
-                          color: Color(0xFF6B7280))),
+                      style: AppTextStyles.caption),
                 ],
               ),
             ),
@@ -316,8 +316,7 @@ class _Section extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text('${locations.length}',
-                    style: TextStyle(fontSize: 11,
-                        fontWeight: FontWeight.w700, color: color)),
+                    style: AppTextStyles.captionBold.copyWith(color: color)),
               ),
           ]),
           const SizedBox(height: 12),
@@ -328,8 +327,8 @@ class _Section extends StatelessWidget {
                   onCreate != null
                       ? 'Aucun $title pour le moment.'
                       : 'Aucun $title.',
-                  style: const TextStyle(
-                      fontSize: 12, color: Color(0xFF9CA3AF))),
+                  style: AppTextStyles.bodySm.copyWith(
+                      color: const Color(0xFF9CA3AF))),
             )
           else
             ...locations.map((l) => _LocationTile(
@@ -362,8 +361,7 @@ class _Section extends StatelessWidget {
                     Icon(Icons.add_rounded, size: 14, color: color),
                     const SizedBox(width: 6),
                     Text(createLabel ?? 'Ajouter',
-                        style: TextStyle(fontSize: 12,
-                            fontWeight: FontWeight.w600, color: color)),
+                        style: AppTextStyles.bodySmBold.copyWith(color: color)),
                   ],
                 ),
               ),
@@ -447,9 +445,7 @@ class _LocationTile extends StatelessWidget {
                   child: Text(location.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF0F172A))),
+                      style: AppTextStyles.bodyBold),
                 ),
                 if (!location.isActive) ...[
                   const SizedBox(width: 6),
@@ -460,10 +456,9 @@ class _LocationTile extends StatelessWidget {
                       color: const Color(0xFFFEE2E2),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: const Text('Inactif',
-                        style: TextStyle(fontSize: 9,
-                            color: Color(0xFFEF4444),
-                            fontWeight: FontWeight.w600)),
+                    child: Text('Inactif',
+                        style: AppTextStyles.microBold.copyWith(
+                            color: const Color(0xFFEF4444))),
                   ),
                 ],
               ]),
@@ -472,8 +467,8 @@ class _LocationTile extends StatelessWidget {
                 Text(subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11,
-                        color: Color(0xFF9CA3AF))),
+                    style: AppTextStyles.caption.copyWith(
+                        color: const Color(0xFF9CA3AF))),
               ],
             ],
           ),
@@ -483,10 +478,10 @@ class _LocationTile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text('$count',
-                style: TextStyle(fontSize: 14,
-                    fontWeight: FontWeight.w800, color: color)),
-            const Text('unités',
-                style: TextStyle(fontSize: 9, color: Color(0xFF9CA3AF))),
+                style: AppTextStyles.label.copyWith(color: color)),
+            Text('unités',
+                style: AppTextStyles.micro.copyWith(
+                    color: const Color(0xFF9CA3AF))),
           ],
         ),
         if (onEdit != null || onDelete != null) ...[

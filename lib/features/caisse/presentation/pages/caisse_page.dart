@@ -23,6 +23,7 @@ import '../widgets/transfer_delivery_sheet.dart';
 import '../widgets/transfer_history_section.dart';
 import '../../data/repositories/delivery_transfer_repository.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/i18n/app_localizations.dart';
@@ -34,6 +35,7 @@ import '../../data/repositories/sale_local_datasource.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/external_launcher.dart';
 import '../../../../core/services/partner_ledger_service.dart';
+import '../../../parametres/domain/entities/partner_debt_info.dart';
 import '../../../parametres/domain/entities/partner_ledger_entry.dart';
 import '../../../../core/services/document_service.dart';
 import '../../../../core/services/invoice_storage_service.dart';
@@ -310,7 +312,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 
   void _onDataChanged(String table, String shopId) {
     if (!mounted) return;
-    if (table == 'orders' && shopId == widget.shopId) {
+    // 'partner_ledger_entries' inclus : un INSERT/UPDATE/DELETE de dette
+    // partenaire (Realtime OU mutation locale) doit recalculer la bannière
+    // « Dette partenaire » sous les commandes (sinon elle reste statique).
+    if ((table == 'orders' || table == 'partner_ledger_entries')
+        && shopId == widget.shopId) {
       setState(() {});
     }
   }
@@ -448,6 +454,12 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 
   @override
   Widget build(BuildContext context) {
+    // Dette partenaire pour TOUTES les commandes visibles, en une seule
+    // passe Hive (offline-first) au build de la liste — pas un calcul par
+    // card. Recalculé quand le ledger change (cf. _onDataChanged écoute
+    // 'partner_ledger_entries').
+    final orderDebts = PartnerLedgerService.debtByOrder(
+        widget.shopId, _orders.map((o) => o.id).whereType<String>());
     return Column(children: [
       // ── Onglets « Vue » : Globale / Boutique / Partenaires ──────────
       // Le filtre s'applique aux lignes via `orderToPartnerLocId` plus haut
@@ -465,8 +477,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
           unselectedLabelColor: AppColors.textHint,
           indicatorColor:       AppColors.primary,
           indicatorWeight:      2,
-          labelStyle: const TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w600),
+          labelStyle: AppTextStyles.bodySmBold,
           tabs: _filters
               .map((f) => Tab(text: f.$2))
               .toList(),
@@ -484,12 +495,12 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
             height: 36,
             child: TextField(
               controller: _searchCtrl,
-              style: const TextStyle(fontSize: 12),
+              style: AppTextStyles.bodySm,
               decoration: InputDecoration(
                 isDense: true,
                 hintText: 'Rechercher (client, téléphone, ville, agence…)',
-                hintStyle: const TextStyle(fontSize: 12,
-                    color: AppColors.textHint),
+                hintStyle: AppTextStyles.bodySm
+                    .copyWith(color: AppColors.textHint),
                 prefixIcon: const Icon(Icons.search_rounded,
                     size: 16, color: AppColors.textHint),
                 suffixIcon: _query.isEmpty ? null : IconButton(
@@ -538,8 +549,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                       _dateRange == null
                           ? 'Filtrer par date'
                           : _formatRange(_dateRange!),
-                      style: TextStyle(fontSize: 11,
-                          fontWeight: FontWeight.w600,
+                      style: AppTextStyles.captionBold.copyWith(
                           color: _dateRange != null
                               ? AppColors.primary
                               : AppColors.textSecondary)),
@@ -559,9 +569,8 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
             ],
             const Spacer(),
             Text('${_orders.length} résultat${_orders.length > 1 ? 's' : ''}',
-                style: const TextStyle(fontSize: 10,
-                    color: AppColors.textHint,
-                    fontWeight: FontWeight.w600)),
+                style: AppTextStyles.micro
+                    .copyWith(fontWeight: FontWeight.w600)),
           ]),
         ]),
       ),
@@ -588,8 +597,13 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
             final perms = ref.watch(permissionsProvider(widget.shopId));
             return _OrderCard(
             order:    _orders[i],
+            debt:     orderDebts[_orders[i].id],
             canCancel: perms.canCancelSale,
-            canDelete: perms.canDeleteOrder,
+            // Suppression autorisée UNIQUEMENT si la commande est annulée
+            // (en plus de la permission). Empêche d'effacer une commande
+            // active/complétée — on l'annule d'abord, puis on supprime.
+            canDelete: perms.canDeleteOrder
+                && _orders[i].status == SaleStatus.cancelled,
             canEdit:   perms.canEditOrder,
             onUpdate: (status) async {
               // Garde défensive : annulation/remboursement requièrent
@@ -756,9 +770,15 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               if (mounted) setState(() {});
             },
             onDelete: () async {
+              // Garde défensive : ne supprimer que si réellement annulée,
+              // même si l'UI était contournée.
+              if (_orders[i].status != SaleStatus.cancelled) return;
               await _ds.deleteOrder(_orders[i].id!);
               setState(() {});
             },
+            // Rebuild parent → `_orders` relit Hive → card reçoit une Sale
+            // fraîche (bandeau « Reste à payer » disparaît une fois soldé).
+            onChanged: () { if (mounted) setState(() {}); },
           );
           },
         ),
@@ -928,12 +948,12 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16)),
         title: const Text('Livraison refusée',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            style: AppTextStyles.subtitleBold),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           Text(
               'Le client a refusé mais ${loc?.name ?? 'le partenaire'} '
               's\'est déplacé. Frais de course à lui devoir ?',
-              style: TextStyle(fontSize: 12.5, color: AppColors.textHint)),
+              style: AppTextStyles.body.copyWith(color: AppColors.textHint)),
           const SizedBox(height: 14),
           TextField(
             controller: ctrl,
@@ -993,12 +1013,21 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 // ─── Carte commande (expandable) ─────────────────────────────────────────────
 class _OrderCard extends ConsumerStatefulWidget {
   final Sale   order;
+  /// Dette partenaire de cette commande, calculée groupée par le parent
+  /// (une passe Hive). Null = aucune entrée ledger pour la commande.
+  final PartnerDebtInfo? debt;
   final void Function(SaleStatus) onUpdate;
   /// Annule la commande avec une raison fournie par l'opérateur.
   final Future<void> Function(String reason) onCancelWithReason;
   /// Reprogramme une commande "en cours" vers une nouvelle date avec raison.
   final Future<void> Function(DateTime newDate, String reason) onReschedule;
   final VoidCallback onDelete;
+  /// Appelé après une mutation interne de la card qui ne passe pas par
+  /// onUpdate/onDelete (ex: enregistrement d'un acompte/solde). Le parent
+  /// fait alors un setState → le getter `_orders` relit Hive et la card
+  /// est reconstruite avec une `Sale` fraîche (sinon le bandeau « Reste à
+  /// payer » garde l'ancien solde et ne disparaît pas une fois soldé).
+  final VoidCallback? onChanged;
   /// True si l'utilisateur peut annuler/rembourser une vente
   /// (permission salesCancel = admin/owner par défaut).
   final bool canCancel;
@@ -1009,10 +1038,12 @@ class _OrderCard extends ConsumerStatefulWidget {
   /// (permission caisseEditOrders).
   final bool canEdit;
   const _OrderCard({required this.order,
+    this.debt,
     required this.onUpdate,
     required this.onCancelWithReason,
     required this.onReschedule,
     required this.onDelete,
+    this.onChanged,
     required this.canCancel,
     required this.canDelete,
     required this.canEdit});
@@ -1033,34 +1064,33 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   String? _invoiceShortUrl;
   bool    _preparingInvoice = false;
 
-  /// Somme absolue des dépenses enregistrées comme dette envers le
-  /// partenaire-livreur pour CETTE commande (entrées `deliveryOwed`
-  /// négatives liées via `orderId`). Lue depuis partner_ledger à chaque
-  /// build (Hive synchrone, coût négligeable pour <quelques milliers
-  /// d'entrées). Retourne 0 si pas de partenaire ou pas de dette.
-  double get _orderDebtToPartner {
-    final partnerId = widget.order.deliveryLocationId;
-    if (partnerId == null || partnerId.isEmpty) return 0;
-    final orderId = widget.order.id;
-    if (orderId == null) return 0;
-    final entries = PartnerLedgerService.entriesForShop(
-        widget.order.shopId, partnerLocationId: partnerId);
-    var sum = 0.0;
-    for (final e in entries) {
-      if (e.orderId != orderId) continue;
-      if (e.type != PartnerLedgerEntryType.deliveryOwed) continue;
-      // deliveryOwed est stockée en négatif (boutique doit). Pour le
-      // bandeau on veut le montant absolu de la dette.
-      if (e.amount < 0) sum += e.amount.abs();
+  @override
+  void initState() {
+    super.initState();
+    // Fiabilise l'envoi de facture : (1) seed les templates WhatsApp si
+    // absents (sinon getDefault renvoie null → ancien message générique),
+    // (2) pré-génère la facture dès qu'une commande terminée avec un
+    // client téléphone est affichée → au clic « Envoyer », on est en
+    // Cas 1 (template + lien) et non sur le fallback sans lien.
+    final o = widget.order;
+    final hasPhone = (o.clientPhone ?? '').trim().isNotEmpty;
+    if (o.status == SaleStatus.completed && hasPhone) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(whatsappTemplateRepositoryProvider)
+            .seedDefaultsIfMissing(o.shopId);
+        _prepareInvoice();
+      });
     }
-    return sum;
   }
+
 
   @override
   Widget build(BuildContext context) {
     final s     = widget.order.status;
     final color = s.color;
     final client = widget.order.clientName;
+    final sem   = Theme.of(context).semantic;
 
     return GestureDetector(
       onTap: () {
@@ -1099,10 +1129,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         borderRadius: BorderRadius.circular(6)),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
                       Text(_statusLabel(s),
-                          style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: color)),
+                          style: AppTextStyles.microBold
+                              .copyWith(color: color)),
                       // Marqueur "reprogrammée" : icône repeat à côté du
                       // libellé pour différencier visuellement les commandes
                       // qui ont été déplacées dans le temps.
@@ -1132,8 +1160,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   Flexible(
                     child: Text(
                       _formatDate(widget.order.createdAt),
-                      style: const TextStyle(
-                          fontSize: 10, color: AppColors.textHint),
+                      style: AppTextStyles.micro,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -1153,8 +1180,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       child: Text('Livré ${_formatDate(widget.order.scheduledAt!)}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 10,
+                          style: AppTextStyles.micro.copyWith(
                               fontWeight: FontWeight.w600,
                               color: AppColors.warning)),
                     ),
@@ -1173,10 +1199,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     const SizedBox(width: 3),
                     Flexible(
                       child: Text(client,
-                          style: const TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF374151),
-                              fontWeight: FontWeight.w600),
+                          style: AppTextStyles.captionBold
+                              .copyWith(color: const Color(0xFF374151)),
                           overflow: TextOverflow.ellipsis,
                           maxLines: 1),
                     ),
@@ -1187,8 +1211,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
               const SizedBox(width: 8),
               Text(
                 CurrencyFormatter.format(widget.order.total),
-                style: TextStyle(
-                    fontSize: 13,
+                style: AppTextStyles.bodyBold.copyWith(
                     fontWeight: FontWeight.w900,
                     color: AppColors.primary),
               ),
@@ -1203,35 +1226,34 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
             ]),
 
             // ── Bandeau dette enregistrée envers le partenaire ────
-            // Affiché si la commande a des dépenses supplémentaires
-            // enregistrées comme dette envers son partenaire-livreur.
-            // Compensée automatiquement au prochain encaissement
-            // (saleCollected) du partenaire via le solde signé du ledger.
-            if (_orderDebtToPartner > 0) ...[
+            // Synchronisé : `widget.debt` est calculé groupé par le parent
+            // (une passe Hive) et recalculé sur tout changement ledger
+            // (Realtime/local via _onDataChanged). Masqué dès que la dette
+            // est compensée (encaissement/versement lié à la commande) ou
+            // nulle — plus jamais statique.
+            if (widget.debt != null && widget.debt!.isOutstanding) ...[
               const SizedBox(height: 6),
               Container(
                 padding: const EdgeInsets.symmetric(
                     horizontal: 8, vertical: 5),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFEF2F2),
+                  color: sem.dangerSurface,
                   borderRadius: BorderRadius.circular(6),
                   border: Border.all(
-                      color: AppColors.error.withValues(alpha: 0.2),
+                      color: sem.danger.withValues(alpha: 0.2),
                       width: 0.5),
                 ),
                 child: Row(children: [
                   Icon(Icons.attach_money_rounded,
-                      size: 12, color: AppColors.error),
+                      size: 12, color: sem.danger),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                         'Dette partenaire : '
-                        '${CurrencyFormatter.format(_orderDebtToPartner)} '
+                        '${CurrencyFormatter.format(widget.debt!.amount)} '
                         '— compensée au prochain versement',
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.error),
+                        style: AppTextStyles.captionBold
+                            .copyWith(color: sem.dangerText),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis),
                   ),
@@ -1271,14 +1293,11 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                                 widget.order.amountDue)} à encaisser'
                             : 'Encaisser ${CurrencyFormatter.format(
                                 widget.order.amountDue)}',
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.warning)),
+                        style: AppTextStyles.captionBold
+                            .copyWith(color: AppColors.warning)),
                     const Spacer(),
                     Text('Enregistrer →',
-                        style: TextStyle(
-                            fontSize: 10,
+                        style: AppTextStyles.microBold.copyWith(
                             fontWeight: FontWeight.w800,
                             color: AppColors.warning
                                 .withValues(alpha: 0.85))),
@@ -1313,8 +1332,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         ),
                         child: Center(
                           child: Text('${i.quantity}',
-                              style: TextStyle(
-                                  fontSize: 9,
+                              style: AppTextStyles.microBold.copyWith(
                                   fontWeight: FontWeight.w800,
                                   color: AppColors.primary)),
                         ),
@@ -1322,9 +1340,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       const SizedBox(width: 7),
                       Expanded(
                         child: Text(i.productName,
-                            style: const TextStyle(
-                                fontSize: 11,
-                                color: Color(0xFF374151)),
+                            style: AppTextStyles.captionHint
+                                .copyWith(color: const Color(0xFF374151)),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis),
                       ),
@@ -1340,9 +1357,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(widget.order.notes!,
-                            style: const TextStyle(
-                                fontSize: 10,
-                                color: AppColors.textHint,
+                            style: AppTextStyles.micro.copyWith(
                                 fontStyle: FontStyle.italic)),
                       ),
                     ]),
@@ -1381,9 +1396,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                             _sendingInvoice
                                 ? 'Préparation du rappel…'
                                 : 'Relancer via WhatsApp',
-                            style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700)),
+                            style: AppTextStyles.bodySmBold
+                                .copyWith(color: const Color(0xFF25D366))),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: const Color(0xFF25D366),
                           side: const BorderSide(color: Color(0xFF25D366)),
@@ -1411,8 +1425,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         icon: const Icon(Icons.local_shipping_rounded,
                             size: 14),
                         label: Text(context.l10n.deliveryTransferBtn,
-                            style: const TextStyle(
-                                fontSize: 11, fontWeight: FontWeight.w700)),
+                            style: AppTextStyles.captionBold
+                                .copyWith(color: const Color(0xFF25D366))),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: const Color(0xFF25D366),
                           side: const BorderSide(
@@ -1437,9 +1451,9 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                           onPressed: () => widget.onUpdate(SaleStatus.processing),
                           icon: const Icon(Icons.check_circle_outline_rounded,
                               size: 14),
-                          label: const Text('Validée par client',
-                              style: TextStyle(fontSize: 11,
-                                  fontWeight: FontWeight.w700)),
+                          label: Text('Validée par client',
+                              style: AppTextStyles.captionBold
+                                  .copyWith(color: AppColors.secondary)),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppColors.secondary,
                             side: BorderSide(
@@ -1455,9 +1469,9 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         child: OutlinedButton.icon(
                           onPressed: () => _askCancelReason(context),
                           icon: const Icon(Icons.cancel_outlined, size: 14),
-                          label: const Text('Annulée par client',
-                              style: TextStyle(fontSize: 11,
-                                  fontWeight: FontWeight.w700)),
+                          label: Text('Annulée par client',
+                              style: AppTextStyles.captionBold
+                                  .copyWith(color: AppColors.error)),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppColors.error,
                             side: BorderSide(
@@ -1480,9 +1494,9 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       child: OutlinedButton.icon(
                         onPressed: () => _askReschedule(context),
                         icon: const Icon(Icons.event_repeat_rounded, size: 14),
-                        label: const Text('Reprogrammer la commande',
-                            style: TextStyle(fontSize: 11,
-                                fontWeight: FontWeight.w700)),
+                        label: Text('Reprogrammer la commande',
+                            style: AppTextStyles.captionBold
+                                .copyWith(color: AppColors.warning)),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.warning,
                           side: BorderSide(
@@ -1730,6 +1744,11 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     if (newAmount == null || !mounted) return;
     await SaleLocalDatasource()
         .recordPayment(widget.order.id!, newAmount);
+    // Rafraîchir via le parent (relit Hive → Sale fraîche → le bandeau
+    // « Reste à payer » disparaît dès que le solde est réglé). Le simple
+    // setState local ne suffit pas : il reconstruit la card avec
+    // `widget.order` encore périmé.
+    widget.onChanged?.call();
     if (mounted) setState(() {});
     if (mounted) {
       AppSnack.success(context,
@@ -1859,15 +1878,30 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     final shop = LocalStorageService.getShop(order.shopId);
     final shopName = shop?.name ?? 'Fortress';
 
-    // Template `invoice` par défaut (seedé automatiquement par le provider
-    // au premier accès à la page Paramètres > Modèles WhatsApp).
+    // Template `invoice` : celui du shop si présent, SINON un fallback
+    // construit depuis le body par défaut du type. Avant, si le template
+    // n'était pas seedé sur cet appareil (seed uniquement au 1er accès à
+    // Paramètres > Modèles WhatsApp), `getDefault` renvoyait null → on
+    // tombait sur un message générique codé en dur SANS lien. Désormais
+    // le message envoyé correspond TOUJOURS au template facture.
     final tplRepo = ref.read(whatsappTemplateRepositoryProvider);
+    final now = DateTime.now();
     final template =
-        tplRepo.getDefault(order.shopId, WhatsappTemplateType.invoice);
+        tplRepo.getDefault(order.shopId, WhatsappTemplateType.invoice)
+        ?? WhatsappTemplate(
+          id:        'fallback_invoice',
+          shopId:    order.shopId,
+          type:      WhatsappTemplateType.invoice,
+          name:      WhatsappTemplateType.invoice.defaultName,
+          body:      WhatsappTemplateType.invoice.defaultBody,
+          isDefault: true,
+          createdAt: now,
+          updatedAt: now,
+        );
 
     // ── Cas 1 : facture déjà pré-générée → render template + ouverture
     //    SYNCHRONE de wa.me dans le tick du clic.
-    if (_invoiceShortUrl != null && template != null) {
+    if (_invoiceShortUrl != null) {
       final msg = WhatsappTemplateRenderer.render(
         template,
         _invoiceContext(
@@ -1886,15 +1920,20 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       return;
     }
 
-    // ── Cas 2 : facture pas encore prête → message d'attente, upload en
-    //    arrière-plan + copie l'URL au presse-papier pour collage manuel.
-    final clientName = order.clientName ?? '';
-    final greeting = clientName.trim().isNotEmpty
-        ? 'Bonjour $clientName 👋'
-        : 'Bonjour 👋';
-    final waitMsg = '$greeting\n\nVotre facture est en cours de préparation, '
-        'le lien arrive dans un instant.';
-    final url = 'https://wa.me/$p?text=${Uri.encodeComponent(waitMsg)}';
+    // ── Cas 2 : facture pas encore prête. On envoie quand même le VRAI
+    //    template facture (placeholder sur le lien), puis on génère/
+    //    upload en arrière-plan et on copie le lien au presse-papier.
+    //    (Contrainte web : wa.me doit s'ouvrir dans le tick du clic, donc
+    //    on ne peut pas attendre l'URL ici.)
+    final msg = WhatsappTemplateRenderer.render(
+      template,
+      _invoiceContext(
+        order:    order,
+        shopName: shopName,
+        shortUrl: '(lien de la facture envoyé dans un instant)',
+      ),
+    );
+    final url = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
 
     openExternal(url).then((ok) {
       if (!ok && context.mounted) {
@@ -2065,13 +2104,13 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
             ),
             const SizedBox(width: 10),
             const Text('Commande complétée',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                style: AppTextStyles.subtitleBold),
           ]),
           content: const Text(
               'Cette commande a déjà été complétée. '
                   'La modifier peut affecter la comptabilité. '
                   'Continuer quand même ?',
-              style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+              style: AppTextStyles.bodySecondary),
           actions: [
             TextButton(
                 onPressed: () => Navigator.of(dc).pop(),
@@ -2207,12 +2246,10 @@ class _FormatPickerSheetState extends State<_FormatPickerSheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text("Format d'impression",
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w800,
-                          color: AppColors.textPrimary)),
+                      style: AppTextStyles.subtitleBold
+                          .copyWith(fontWeight: FontWeight.w800)),
                   const Text('Choisissez le format de votre reçu',
-                      style: TextStyle(
-                          fontSize: 11, color: AppColors.textHint)),
+                      style: AppTextStyles.captionHint),
                 ],
               ),
             ),
@@ -2272,23 +2309,18 @@ class _FormatPickerSheetState extends State<_FormatPickerSheet> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(f.name,
-                                    style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w700,
+                                    style: AppTextStyles.bodySmBold.copyWith(
                                         color: sel
                                             ? AppColors.primary
                                             : AppColors.textPrimary)),
                                 Text(f.description,
-                                    style: const TextStyle(
-                                        fontSize: 9,
-                                        color: AppColors.textHint)),
+                                    style: AppTextStyles.micro),
                               ],
                             ),
                           ),
                           Text(
                             '${f.widthMm}×${f.heightMm}mm',
-                            style: TextStyle(
-                                fontSize: 9,
+                            style: AppTextStyles.micro.copyWith(
                                 color: sel
                                     ? AppColors.primary
                                     : const Color(0xFFBBBBBB),
@@ -2398,7 +2430,7 @@ class _FormatPreview extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 5),
           child: Center(
             child: Text('REÇU',
-                style: TextStyle(
+                style: AppTextStyles.micro.copyWith(
                     fontSize: format.isTicket ? 6 : 7,
                     fontWeight: FontWeight.w900,
                     color: Colors.white,
@@ -2453,9 +2485,8 @@ class _FormatPreview extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 3),
           child: Center(
             child: Text(format.name,
-                style: TextStyle(
+                style: AppTextStyles.microBold.copyWith(
                     fontSize: 7,
-                    fontWeight: FontWeight.w700,
                     color: AppColors.primary)),
           ),
         ),
@@ -2513,10 +2544,7 @@ class _PaymentStatusPill extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.35), width: 0.5),
       ),
       child: Text(status.label,
-          style: TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.w700,
-              color: color)),
+          style: AppTextStyles.microBold.copyWith(color: color)),
     );
   }
 }
@@ -2609,8 +2637,7 @@ class _StatusMenu extends StatelessWidget {
                     shape: BoxShape.circle)),
             const SizedBox(width: 8),
             Text(s.label,
-                style: TextStyle(
-                    fontSize: 13,
+                style: AppTextStyles.body.copyWith(
                     fontWeight: s == current
                         ? FontWeight.w700
                         : FontWeight.normal,
@@ -2644,10 +2671,8 @@ class _StatusMenu extends StatelessWidget {
                         shape: BoxShape.circle)),
                 const SizedBox(width: 6),
                 Text(current.label,
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: current.color)),
+                    style: AppTextStyles.captionBold
+                        .copyWith(color: current.color)),
                 const SizedBox(width: 4),
                 Icon(Icons.keyboard_arrow_down_rounded,
                     size: 14, color: current.color),
@@ -2836,12 +2861,10 @@ class _OrderDetailsBlock extends StatelessWidget {
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(f['label']?.toString() ?? '',
-                      style: const TextStyle(fontSize: 10,
-                          color: AppColors.textHint)),
+                      style: AppTextStyles.micro),
                 ),
                 Text(_money(((f['amount'] as num?)?.toDouble() ?? 0)),
-                    style: const TextStyle(fontSize: 10,
-                        color: AppColors.textHint)),
+                    style: AppTextStyles.micro),
               ]),
             ),
         ],
@@ -2880,8 +2903,7 @@ class _OrderDetailsBlock extends StatelessWidget {
                       size: 10, color: AppColors.primary),
                   const SizedBox(width: 3),
                   Text(order.clientPhone!,
-                      style: TextStyle(
-                          fontSize: 10,
+                      style: AppTextStyles.micro.copyWith(
                           fontWeight: FontWeight.w600,
                           color: AppColors.primary,
                           decoration: TextDecoration.underline,
@@ -2912,13 +2934,12 @@ class _DetailRow extends StatelessWidget {
       SizedBox(
         width: 110,
         child: Text(label,
-            style: const TextStyle(fontSize: 10,
-                color: AppColors.textHint,
-                fontWeight: FontWeight.w500)),
+            style: AppTextStyles.micro
+                .copyWith(fontWeight: FontWeight.w500)),
       ),
       Expanded(
         child: Text(value,
-            style: const TextStyle(fontSize: 11,
+            style: AppTextStyles.captionHint.copyWith(
                 color: AppColors.textPrimary,
                 fontWeight: FontWeight.w600)),
       ),
@@ -2939,14 +2960,14 @@ class _MoneyLine extends StatelessWidget {
     padding: const EdgeInsets.symmetric(vertical: 1),
     child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
       Text(label,
-          style: TextStyle(
+          style: AppTextStyles.bodySm.copyWith(
               fontSize: bold ? 12 : 10,
               fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
               color: color ?? (bold
                   ? AppColors.textPrimary
                   : AppColors.textSecondary))),
       Text(value,
-          style: TextStyle(
+          style: AppTextStyles.body.copyWith(
               fontSize: bold ? 13 : 11,
               fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
               color: color ?? (bold
@@ -2987,11 +3008,11 @@ class _ReasonBanner extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(label,
-                  style: TextStyle(fontSize: 10,
-                      fontWeight: FontWeight.w800, color: color)),
+                  style: AppTextStyles.microBold
+                      .copyWith(fontWeight: FontWeight.w800, color: color)),
               const SizedBox(height: 2),
               Text(text,
-                  style: const TextStyle(fontSize: 11,
+                  style: AppTextStyles.captionHint.copyWith(
                       color: AppColors.textPrimary,
                       fontStyle: FontStyle.italic)),
             ],

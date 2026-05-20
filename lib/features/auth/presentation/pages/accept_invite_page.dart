@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 import '../../../../core/database/app_database.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Page /accept-invite
@@ -204,7 +205,7 @@ class _CenterLoader extends StatelessWidget {
       const CircularProgressIndicator(),
       const SizedBox(height: 18),
       Text(label, textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+          style: AppTextStyles.bodySecondary),
     ],
   );
 }
@@ -237,24 +238,24 @@ class _StatusCard extends StatelessWidget {
       color: Colors.white,
       borderRadius: BorderRadius.circular(16),
       boxShadow: [
-        BoxShadow(color: Colors.black.withOpacity(0.05),
+        BoxShadow(color: Colors.black.withValues(alpha:0.05),
             blurRadius: 14, offset: const Offset(0, 6)),
       ],
     ),
     child: Column(mainAxisSize: MainAxisSize.min, children: [
       Container(width: 56, height: 56,
           decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
+              color: color.withValues(alpha:0.12),
               shape: BoxShape.circle),
           child: Icon(icon, size: 28, color: color)),
       const SizedBox(height: 16),
       Text(title, textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 17,
-              fontWeight: FontWeight.w700, color: Color(0xFF0F172A))),
+          style: AppTextStyles.subtitleBold
+              .copyWith(color: const Color(0xFF0F172A))),
       const SizedBox(height: 8),
       Text(body, textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 13,
-              color: Color(0xFF6B7280), height: 1.5)),
+          style: AppTextStyles.body
+              .copyWith(color: const Color(0xFF6B7280))),
       if (primaryLabel != null) ...[
         const SizedBox(height: 22),
         SizedBox(width: double.infinity, height: 46,
@@ -265,8 +266,8 @@ class _StatusCard extends StatelessWidget {
                 elevation: 0, shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10))),
             child: Text(primaryLabel!,
-                style: const TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.w700)),
+                style: AppTextStyles.label.copyWith(
+                    fontWeight: FontWeight.w700, color: Colors.white)),
           ),
         ),
       ],
@@ -280,9 +281,8 @@ class _StatusCard extends StatelessWidget {
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10))),
             child: Text(secondaryLabel!,
-                style: TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w600,
-                    color: color)),
+                style: AppTextStyles.body.copyWith(
+                    fontWeight: FontWeight.w600, color: color)),
           ),
         ),
       ],

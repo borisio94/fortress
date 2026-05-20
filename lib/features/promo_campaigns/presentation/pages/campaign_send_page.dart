@@ -7,6 +7,7 @@ import '../../../../core/services/short_link_service.dart';
 import '../../../../core/services/whatsapp/whatsapp_template_renderer.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/phone_formatter.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -59,7 +60,7 @@ class _CampaignSendPageState extends ConsumerState<CampaignSendPage> {
         .toList();
     // Par défaut : tous cochés.
     for (final c in _allClients) {
-      if (c.id != null) _selectedIds.add(c.id!);
+      _selectedIds.add(c.id);
     }
     // Charge la campagne.
     () async {
@@ -102,7 +103,6 @@ class _CampaignSendPageState extends ConsumerState<CampaignSendPage> {
 
   Client? get _nextRecipient {
     for (final c in _allClients) {
-      if (c.id == null) continue;
       if (!_selectedIds.contains(c.id)) continue;
       if (_sentIds.contains(c.id)) continue;
       return c;
@@ -170,7 +170,7 @@ class _CampaignSendPageState extends ConsumerState<CampaignSendPage> {
         _selectedIds.clear();
       } else {
         for (final c in _allClients) {
-          if (c.id != null) _selectedIds.add(c.id!);
+          _selectedIds.add(c.id);
         }
       }
     });
@@ -224,7 +224,7 @@ class _CampaignSendPageState extends ConsumerState<CampaignSendPage> {
                           _selectedIds.length == _allClients.length
                               ? 'Tout décocher'
                               : 'Tout cocher',
-                          style: const TextStyle(fontSize: 11))),
+                          style: AppTextStyles.caption)),
                 ]),
               ),
               Container(
@@ -235,8 +235,7 @@ class _CampaignSendPageState extends ConsumerState<CampaignSendPage> {
                   Text('${_selectedIds.length} sélectionné·s · '
                       '${_sentIds.length} envoyé·s · '
                       '$_toSendCount à envoyer',
-                      style: TextStyle(
-                          fontSize: 11, color: AppColors.textSecondary)),
+                      style: AppTextStyles.caption),
                 ]),
               ),
               const Divider(height: 1),
@@ -263,8 +262,8 @@ class _CampaignSendPageState extends ConsumerState<CampaignSendPage> {
                                 setState(() {
                                   if (_selectedIds.contains(c.id)) {
                                     _selectedIds.remove(c.id);
-                                  } else if (c.id != null) {
-                                    _selectedIds.add(c.id!);
+                                  } else {
+                                    _selectedIds.add(c.id);
                                   }
                                 });
                               },
@@ -284,8 +283,9 @@ class _CampaignSendPageState extends ConsumerState<CampaignSendPage> {
                         _nextRecipient == null
                             ? 'Tous les envois sont terminés'
                             : 'Envoyer à ${_nextRecipient!.name}',
-                        style: const TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w800)),
+                        style: AppTextStyles.label.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white)),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF25D366),
                       foregroundColor: Colors.white,
@@ -321,12 +321,11 @@ class _Header extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(campaign.name,
-              style: const TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w800)),
+              style: AppTextStyles.label
+                  .copyWith(fontWeight: FontWeight.w800)),
           const SizedBox(height: 4),
           Text('${campaign.type.label} · ${campaign.products.length} produits',
-              style: TextStyle(
-                  fontSize: 11, color: AppColors.textSecondary)),
+              style: AppTextStyles.caption),
           const SizedBox(height: 8),
           Container(
             padding:
@@ -343,10 +342,8 @@ class _Header extends StatelessWidget {
               Expanded(
                 child: loadingPreview
                     ? Text('Génération du lien court…',
-                        style: TextStyle(
-                            fontSize: 10,
-                            fontStyle: FontStyle.italic,
-                            color: AppColors.textHint))
+                        style: AppTextStyles.micro
+                            .copyWith(fontStyle: FontStyle.italic))
                     : SelectableText(shortUrl,
                         maxLines: 1,
                         style: const TextStyle(
@@ -395,16 +392,13 @@ class _ClientTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(client.name,
-                    style: TextStyle(
-                        fontSize: 12,
+                    style: AppTextStyles.bodySm.copyWith(
                         fontWeight: FontWeight.w700,
                         color: sent
                             ? AppColors.textHint
                             : AppColors.textPrimary)),
                 Text(client.phone ?? '',
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textSecondary)),
+                    style: AppTextStyles.caption),
               ],
             ),
           ),

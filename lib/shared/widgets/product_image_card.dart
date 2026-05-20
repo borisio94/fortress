@@ -70,7 +70,13 @@ class ProductImageCard extends StatelessWidget {
       final logical = c.maxWidth.isFinite && c.maxWidth > 0
           ? c.maxWidth
           : (width ?? height ?? 200.0);
-      // Décodage cible : taille logique × DPR, borné [400, 1600].
+      // Décodage cible sur la SEULE largeur : taille logique × DPR, borné
+      // [400, 1600]. On ne contraint volontairement PAS la hauteur — fournir
+      // width ET height à `ResizeImage` (politique `exact` par défaut)
+      // décoderait le bitmap à un carré strict en ignorant le ratio source,
+      // déformant les photos non carrées AVANT le BoxFit.cover. En ne
+      // passant que la largeur, la hauteur est calculée proportionnellement
+      // → ratio préservé, recadrage propre par cover.
       // < 400 : pixelisation visible sur les cards de catalogue rétina.
       // > 1600 : la source PNG produit fait 1600 px max (cf.
       //   image_validation.dart maxOutputSize), inutile d'allouer
@@ -128,7 +134,6 @@ class ProductImageCard extends StatelessWidget {
         width:         double.infinity,
         height:        double.infinity,
         cacheWidth:    cachePx,
-        cacheHeight:   cachePx,
         filterQuality: FilterQuality.high,
         loadingBuilder: (_, child, p) =>
             p == null ? child : _skeleton(theme),
@@ -139,7 +144,6 @@ class ProductImageCard extends StatelessWidget {
       imageUrl:       url,
       cacheKey:       url,
       memCacheWidth:  cachePx,
-      memCacheHeight: cachePx,
       fit:            BoxFit.cover,
       width:          double.infinity,
       height:         double.infinity,
@@ -158,7 +162,6 @@ class ProductImageCard extends StatelessWidget {
       width:         double.infinity,
       height:        double.infinity,
       cacheWidth:    cachePx,
-      cacheHeight:   cachePx,
       filterQuality: FilterQuality.high,
       errorBuilder:  (_, __, ___) => _placeholder(theme),
     );

@@ -236,7 +236,7 @@ class _MethodRow extends StatelessWidget {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: entry.color.withOpacity(0.12),
+                color: entry.color.withValues(alpha:0.12),
                 borderRadius: BorderRadius.circular(9),
               ),
               child: Icon(entry.icon, color: entry.color, size: 18),

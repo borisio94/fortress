@@ -12,6 +12,7 @@ import '../../core/permisions/permission_guard.dart';
 import '../../core/permisions/subscription_provider.dart';
 import '../../core/router/route_names.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/theme_palette.dart';
 import '../../core/widgets/fortress_logo.dart';
@@ -22,6 +23,7 @@ import '../../features/caisse/presentation/widgets/cart_widget.dart';
 import '../navigation/shell_nav_items.dart';
 import '../providers/current_shop_provider.dart';
 import 'app_primary_button.dart';
+import 'app_overflow_menu.dart';
 import 'offline_banner_widget.dart';
 import 'sync_status_banner.dart';
 import 'order_source_badge.dart';
@@ -284,10 +286,13 @@ class _MobileShell extends StatelessWidget {
     final appBarBg      = isSubPage ? cs.surface : cs.primary;
     final appBarFg      = isSubPage ? cs.onSurface : cs.onPrimary;
     final titleStyle    = isSubPage
-        ? TextStyle(fontSize: isChildSubPage ? 14 : 17,
-            fontWeight: isChildSubPage ? FontWeight.w600 : FontWeight.w800,
-            color: appBarFg)
-        : TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: appBarFg);
+        ? (isChildSubPage
+            ? AppTextStyles.label.copyWith(
+                fontWeight: FontWeight.w600, color: appBarFg)
+            : AppTextStyles.subtitle.copyWith(
+                fontWeight: FontWeight.w800, color: appBarFg))
+        : AppTextStyles.body.copyWith(
+            fontWeight: FontWeight.w500, color: appBarFg);
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -327,6 +332,9 @@ class _MobileShell extends StatelessWidget {
           // n'ont pas accès aux notifs in-app de la boutique).
           if (perms.isMember) const _NotifBtnWithAlertHalo(),
           if (extraActions != null) ...extraActions!,
+          // Menu « 3 points » global (Compte / Aide / À propos) — extrême
+          // droite, présent sur toutes les pages shell.
+          AppOverflowMenu(shopId: shopId),
           const SizedBox(width: 4),
         ],
       ),
@@ -431,12 +439,12 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
                 children: [
                   Text(shop?.name ?? l.hubBrand,
                       maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 14,
+                      style: AppTextStyles.label.copyWith(
                           fontWeight: FontWeight.w700,
                           color: theme.colorScheme.onSurface)),
                   Text(l.hubBrand,
                       maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 10,
+                      style: AppTextStyles.micro.copyWith(
                           letterSpacing: 0.6,
                           color: theme.colorScheme.onSurface.withValues(alpha:0.5))),
                 ],
@@ -500,8 +508,7 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
                 color: theme.colorScheme.error, size: 20),
             title: Text(l.navLogout,
                 maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 13,
+                style: AppTextStyles.body.copyWith(
                     color: theme.colorScheme.error,
                     fontWeight: FontWeight.w600)),
             onTap: () {
@@ -546,8 +553,7 @@ class _DrawerShopAvatar extends StatelessWidget {
       ),
       alignment: Alignment.center,
       child: Text(letter,
-          style: TextStyle(
-              fontSize: 16,
+          style: AppTextStyles.subtitle.copyWith(
               fontWeight: FontWeight.w800,
               color: Theme.of(context).colorScheme.onPrimary)),
     );
@@ -703,8 +709,7 @@ class _MobileDrawerRow extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(child: Text(label,
               maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: 13,
+              style: AppTextStyles.body.copyWith(
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   color: fg))),
           if (badge > 0)
@@ -719,8 +724,7 @@ class _MobileDrawerRow extends StatelessWidget {
               constraints: const BoxConstraints(minWidth: 18),
               child: Text('$badge',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 10,
+                  style: AppTextStyles.micro.copyWith(
                       fontWeight: FontWeight.w700,
                       color: theme.colorScheme.onError)),
             ),
@@ -751,8 +755,7 @@ class _LogoutTile extends StatelessWidget {
           Icon(Icons.logout_rounded, size: 18, color: theme.colorScheme.error),
           const SizedBox(width: 10),
           Expanded(child: Text(l.navLogout,
-              style: TextStyle(
-                  fontSize: 13,
+              style: AppTextStyles.body.copyWith(
                   fontWeight: FontWeight.w500,
                   color: theme.colorScheme.error),
               overflow: TextOverflow.ellipsis)),
@@ -779,7 +782,7 @@ void _confirmLogout(BuildContext context) {
             ? '$pending opération(s) en attente de synchronisation. '
               'Elles seront retentées au prochain démarrage.'
             : l.navLogoutConfirmBody,
-        style: const TextStyle(fontSize: 13),
+        style: AppTextStyles.body,
       ),
       actions: [
         TextButton(
@@ -931,9 +934,7 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
             Expanded(child: Text(
               shop?.name ?? l.hubBrand,
               maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
+              style: AppTextStyles.bodyBold.copyWith(
                   color: theme.colorScheme.onSurface),
             )),
           ]),
@@ -1132,8 +1133,7 @@ class _SidebarRow extends StatelessWidget {
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-                fontSize: 13,
+            style: AppTextStyles.body.copyWith(
                 fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                 color: fg),
           )),
@@ -1148,8 +1148,7 @@ class _SidebarRow extends StatelessWidget {
               constraints: const BoxConstraints(minWidth: 18),
               child: Text('$badgeCount',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 10,
+                  style: AppTextStyles.micro.copyWith(
                       fontWeight: FontWeight.w700,
                       color: theme.colorScheme.onError)),
             ),
@@ -1207,8 +1206,7 @@ class _DesktopTopbar extends StatelessWidget {
           const SizedBox(width: 12),
         // Breadcrumb FORTRESS › <module>
         Text(l.hubBrand,
-            style: TextStyle(
-                fontSize: 12,
+            style: AppTextStyles.bodySm.copyWith(
                 fontWeight: FontWeight.w700,
                 letterSpacing: 1.2,
                 color: theme.colorScheme.onSurface.withValues(alpha:0.6))),
@@ -1220,8 +1218,7 @@ class _DesktopTopbar extends StatelessWidget {
                 color: theme.colorScheme.onSurface.withValues(alpha:0.4)),
           ),
           Text(activeLabel,
-              style: TextStyle(
-                  fontSize: 13,
+              style: AppTextStyles.body.copyWith(
                   fontWeight: FontWeight.w600,
                   color: theme.colorScheme.onSurface)),
         ],
@@ -1230,6 +1227,9 @@ class _DesktopTopbar extends StatelessWidget {
         // Cloche notifications réservée admin + owner.
         if (perms.isShopAdmin) const _NotifBtnWithAlertHalo(),
         if (extraActions != null) ...extraActions!,
+        // Menu « 3 points » global (Compte / Aide / À propos) — extrême
+        // droite, présent sur toutes les pages shell.
+        AppOverflowMenu(shopId: shopId),
         const SizedBox(width: 4),
       ]),
     );
@@ -1515,9 +1515,7 @@ class _NotificationsSheet extends StatelessWidget {
                       child: Text(l.notificationsTitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
+                          style: AppTextStyles.subtitleBold.copyWith(
                               color: theme.colorScheme.onSurface)),
                     ),
                     if (unread > 0)
@@ -1531,9 +1529,7 @@ class _NotificationsSheet extends StatelessWidget {
                         child: Text('Tout marquer lu',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
+                            style: AppTextStyles.captionBold.copyWith(
                                 color: theme.colorScheme.primary)),
                       ),
                   ]),
@@ -1551,16 +1547,14 @@ class _NotificationsSheet extends StatelessWidget {
                                       .withValues(alpha: 0.3)),
                               const SizedBox(height: 12),
                               Text(l.notifEmptyTitle,
-                                  style: TextStyle(
-                                      fontSize: 13,
+                                  style: AppTextStyles.body.copyWith(
                                       fontWeight: FontWeight.w600,
                                       color: theme.colorScheme.onSurface
                                           .withValues(alpha: 0.7))),
                               const SizedBox(height: 4),
                               Text(l.notifEmptyHint,
                                   textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                      fontSize: 11,
+                                  style: AppTextStyles.caption.copyWith(
                                       color: theme.colorScheme.onSurface
                                           .withValues(alpha: 0.5))),
                             ],
@@ -1593,8 +1587,7 @@ class _NotificationsSheet extends StatelessWidget {
                                   child: Text(n.title,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                          fontSize: 13,
+                                      style: AppTextStyles.body.copyWith(
                                           fontWeight: n.read
                                               ? FontWeight.w500
                                               : FontWeight.w700,
@@ -1612,13 +1605,11 @@ class _NotificationsSheet extends StatelessWidget {
                               subtitle: Text(n.message,
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      fontSize: 11,
+                                  style: AppTextStyles.caption.copyWith(
                                       color: theme.colorScheme.onSurface
                                           .withValues(alpha: 0.7))),
                               trailing: Text(_formatTime(n.createdAt),
-                                  style: TextStyle(
-                                      fontSize: 10,
+                                  style: AppTextStyles.micro.copyWith(
                                       color: theme.colorScheme.onSurface
                                           .withValues(alpha: 0.5))),
                               onTap: () {
@@ -1692,9 +1683,7 @@ class _SubscriptionTile extends ConsumerWidget {
             borderRadius: BorderRadius.circular(10),
           ),
           child: Text(badgeText,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
+              style: AppTextStyles.captionBold.copyWith(
                   color: badgeColor)),
         ),
         onTap: () {
@@ -1715,8 +1704,7 @@ class _SubscriptionTile extends ConsumerWidget {
           const SizedBox(width: 10),
           Expanded(child: Text(l.drawerSubscription,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: 13,
+              style: AppTextStyles.body.copyWith(
                   fontWeight: FontWeight.w500,
                   color: theme.colorScheme.onSurface.withValues(alpha:0.85)))),
           const SizedBox(width: 6),
@@ -1727,8 +1715,7 @@ class _SubscriptionTile extends ConsumerWidget {
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(badgeText,
-                style: TextStyle(
-                    fontSize: 10,
+                style: AppTextStyles.micro.copyWith(
                     fontWeight: FontWeight.w700,
                     color: badgeColor)),
           ),

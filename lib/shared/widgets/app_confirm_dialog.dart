@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
+import 'form_sheet.dart';
 
-/// Dialog de confirmation réutilisable
-/// Remplace tous les AlertDialog inline identiques dans l'app
+/// Bottom sheet de confirmation réutilisable.
+/// Remplace tous les AlertDialog Yes/No identiques dans l'app.
+///
+/// Le nom de la classe est conservé (`AppConfirmDialog`) pour ne pas
+/// casser les call sites — mais l'implémentation est désormais un bottom
+/// sheet verrouillé (cf. showFormSheet) avec bouton X intégré.
 class AppConfirmDialog extends StatelessWidget {
   final IconData icon;
   final Color? iconColor;
@@ -35,60 +40,77 @@ class AppConfirmDialog extends StatelessWidget {
     required String confirmLabel,
     Color? confirmColor,
     required dynamic Function() onConfirm,
-  }) => showDialog<bool>(
-    context: context,
-    builder: (_) => AppConfirmDialog(
-      icon: icon, iconColor: iconColor, title: title, body: body,
-      cancelLabel: cancelLabel, confirmLabel: confirmLabel,
-      confirmColor: confirmColor, onConfirm: onConfirm,
-    ),
-  );
+  }) =>
+      showFormSheet<bool>(
+        context: context,
+        builder: (_) => AppConfirmDialog(
+          icon: icon, iconColor: iconColor, title: title, body: body,
+          cancelLabel: cancelLabel, confirmLabel: confirmLabel,
+          confirmColor: confirmColor, onConfirm: onConfirm,
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
     final color = iconColor ?? AppColors.error;
-    return AlertDialog(
-      backgroundColor: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-      titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-      contentPadding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-      actionsPadding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-      title: Row(children: [
-        Container(width: 28, height: 28,
-            decoration: BoxDecoration(
-                color: color.withOpacity(0.1), shape: BoxShape.circle),
-            child: Icon(icon, size: 14, color: color)),
-        const SizedBox(width: 8),
-        Expanded(child: Text(title,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700))),
-      ]),
-      content: body,
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFF6B7280),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
-          child: Text(cancelLabel),
+    final mq = MediaQuery.of(context);
+    return Padding(
+      padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FormSheetHeader(
+              title: title,
+              icon: icon,
+              iconColor: color,
+            ),
+            const Divider(height: 1, color: Color(0xFFF0F0F0)),
+            if (body != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                child: Align(
+                    alignment: Alignment.centerLeft, child: body!),
+              ),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  20, body != null ? 16 : 14, 20, 14),
+              child: Row(children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 44),
+                      foregroundColor: const Color(0xFF6B7280),
+                    ),
+                    child: Text(cancelLabel),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: confirmColor ?? AppColors.error,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      minimumSize: const Size(0, 44),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () async {
+                      Navigator.of(context).pop(true);
+                      final result = onConfirm();
+                      if (result is Future) await result;
+                    },
+                    child: Text(confirmLabel),
+                  ),
+                ),
+              ]),
+            ),
+          ],
         ),
-        ElevatedButton(
-          style: ElevatedButton.styleFrom(
-              backgroundColor: confirmColor ?? AppColors.error,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8)),
-              elevation: 0,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-          onPressed: () async {
-            Navigator.of(context).pop(true);
-            final result = onConfirm();
-            if (result is Future) await result;
-          },
-          child: Text(confirmLabel),
-        ),
-      ],
+      ),
     );
   }
 }

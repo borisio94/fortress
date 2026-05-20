@@ -3,9 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'core/router/app_router.dart';
 import 'core/services/deep_link_service.dart';
+import 'core/services/session_service.dart';
+import 'shared/widgets/app_snack.dart';
+import 'core/router/route_names.dart';
+import 'features/auth/presentation/bloc/auth_event.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/app_colors.dart';
 import 'core/theme/theme_palette.dart';
+import 'core/theme/theme_mode_provider.dart';
 import 'core/di/injection_container.dart';
 import 'core/i18n/app_localizations.dart';
 import 'shared/providers/auth_provider.dart';
@@ -14,6 +19,7 @@ import 'features/auth/presentation/bloc/auth_state.dart';
 import 'features/shop_selector/presentation/bloc/shop_selector_bloc.dart';
 import 'features/caisse/presentation/bloc/caisse_bloc.dart';
 import 'features/hub_central/presentation/bloc/hub_bloc.dart';
+import 'shared/widgets/alerts/scheduled_alerts_overlay.dart';
 
 // ConsumerStatefulWidget — les blocs sont créés UNE SEULE FOIS dans initState
 // évite la recréation de BlocProvider à chaque rebuild → plus de Duplicate GlobalKey
@@ -59,6 +65,7 @@ class _PosAppState extends ConsumerState<PosApp> {
   Widget build(BuildContext context) {
     final locale   = ref.watch(localeProvider);
     final palette  = ref.watch(themePaletteProvider);
+    final themeMode = ref.watch(themeModeProvider);
     // Applique les couleurs primaires globales AVANT de construire l'UI —
     // tous les widgets qui lisent AppColors.primary verront la bonne couleur
     // au prochain build.
@@ -80,29 +87,61 @@ class _PosAppState extends ConsumerState<PosApp> {
         bloc: authBloc,
         listener: (context, state) {
           notifier.update(state);
+          if (state is AuthAuthenticated) {
+            // Démarre heartbeat + listener kick. Le callback `onKicked`
+            // affiche un snack, force le logout et redirige vers /login.
+            SessionService.start(onKicked: () {
+              if (!context.mounted) return;
+              AppSnack.warning(context,
+                  'Vous avez été déconnecté car une nouvelle session a '
+                  'été ouverte sur un autre appareil.');
+              authBloc.add(AuthLogoutRequested());
+              try {
+                ref.read(appRouterProvider).go(RouteNames.login);
+              } catch (_) {}
+            });
+          } else if (state is AuthUnauthenticated) {
+            SessionService.stop();
+          }
         },
         child: MaterialApp.router(
           title: 'Fortress',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.light(palette: palette),
           darkTheme: AppTheme.dark(palette: palette),
-          themeMode: ThemeMode.light,
+          themeMode: themeMode,
           routerConfig: router,
           locale: locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
-          // Échelle du texte : 90% sur mobile / fenêtre étroite (< 900px),
-          // 100% sur desktop large. Densifie l'affichage mobile sans
-          // écraser le rendu desktop qui a la place pour des tailles
-          // standard Material.
+          // Échelle de texte BORNÉE et cohérente :
+          //  - l'échelle typo (AppTextStyles) est calibrée en px réels avec
+          //    la police Inter embarquée → mêmes tailles partout.
+          //  - on respecte le réglage d'accessibilité de l'OS, mais clampé
+          //    entre 1.0 (taille de design, jamais plus petit) et 1.20
+          //    (jamais assez grand pour casser la mise en page / déborder).
+          // Remplace l'ancien gonflage fixe ×1.15 (qui ignorait l'OS et
+          // rendait les textes trop grands vs l'échelle recalibrée).
+          // Wrap : `ScheduledAlertsOverlay` watch le Stream global du
+          // service d'alertes commandes programmées et pousse la modal
+          // automatiquement quand un niveau ≥ CRITICAL est atteint. Placé
+          // ici pour avoir un Navigator/Overlay ancestor disponible (le
+          // builder du MaterialApp.router est juste au-dessus du shell).
           builder: (context, child) {
-            final isCompact =
-                MediaQuery.of(context).size.width < 900;
+            final mq = MediaQuery.of(context);
+            // Plancher 1.10 : sur web/desktop le réglage OS = 1.0, ce qui
+            // rendait le texte un peu petit. On garantit un léger
+            // grossissement uniforme tout en respectant un OS plus grand
+            // jusqu'au plafond 1.30 (au-delà ça casse la mise en page).
+            final clamped = mq.textScaler.clamp(
+              minScaleFactor: 1.10,
+              maxScaleFactor: 1.30,
+            );
             return MediaQuery(
-              data: MediaQuery.of(context).copyWith(
-                textScaler: TextScaler.linear(isCompact ? 0.9 : 1.0),
+              data: mq.copyWith(textScaler: clamped),
+              child: ScheduledAlertsOverlay(
+                child: child ?? const SizedBox.shrink(),
               ),
-              child: child ?? const SizedBox.shrink(),
             );
           },
         ),

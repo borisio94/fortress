@@ -54,6 +54,8 @@ import '../../features/tickets/presentation/pages/tickets_page.dart';
 import '../../features/tickets/presentation/pages/ticket_detail_page.dart';
 import '../../features/parametres/presentation/pages/security_history_page.dart';
 import '../../features/parametres/presentation/pages/user_profile_page.dart';
+import '../../features/parametres/presentation/pages/aide_page.dart';
+import '../../features/parametres/presentation/pages/apropos_page.dart';
 import '../../features/parametres/presentation/pages/language_page.dart';
 import '../../features/parametres/presentation/pages/currency_page.dart';
 import '../../features/parametres/presentation/pages/theme_page.dart';
@@ -443,11 +445,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               }
               if (m.isNotEmpty) stockOverride = m;
             }
+            final loc = qp['loc']?.trim();
             return CataloguePage(
               shopId: s.pathParameters['shopId']!,
               initialCategory: qp['cat'],
               productIds: (ids != null && ids.isNotEmpty) ? ids : null,
               stockOverride: stockOverride,
+              locationId: (loc != null && loc.isNotEmpty) ? loc : null,
             );
           }),
       // Suivi de commande publique — lien envoyé par WhatsApp dans la
@@ -656,6 +660,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/profile',
               builder: (c, s) => UserProfilePage(
+                  shopId: s.pathParameters['shopId'])),
+          // Pages globales accessibles via le menu « 3 points » de la topbar.
+          GoRoute(path: '/shop/:shopId/aide',
+              builder: (c, s) => AidePage(
+                  shopId: s.pathParameters['shopId'])),
+          GoRoute(path: '/shop/:shopId/apropos',
+              builder: (c, s) => AProposPage(
                   shopId: s.pathParameters['shopId'])),
           GoRoute(path: '/shop/:shopId/parametres/language',
               builder: (c, s) => LanguagePage(

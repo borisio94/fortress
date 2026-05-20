@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/i18n/app_localizations.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
 
 /// Chips de navigation Stock. Chips horizontaux scrollables qui pushent
 /// vers les sous-pages d'Inventaire :
@@ -78,8 +79,7 @@ class StockNavChips extends StatelessWidget {
               alignment: Alignment.center,
               child: Text(c.$2,
                   maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 11,
+                  style: AppTextStyles.caption.copyWith(
                       fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                       color: active
                           ? theme.colorScheme.primary

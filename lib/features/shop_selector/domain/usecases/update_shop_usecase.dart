@@ -11,11 +11,11 @@ class UpdateShopUseCase {
 
 class UpdateShopParams extends Equatable {
   final String shopId;
-  final String? name, sector, currency, country, phone, email;
+  final String? name, sector, currency, country, phone, whatsappPhone, email;
   const UpdateShopParams({
     required this.shopId,
     this.name, this.sector, this.currency, this.country,
-    this.phone, this.email,
+    this.phone, this.whatsappPhone, this.email,
   });
 
   /// N'inclut que les champs non-null → update partiel.
@@ -26,10 +26,12 @@ class UpdateShopParams extends Equatable {
     if (currency != null) m['currency'] = currency;
     if (country  != null) m['country']  = country;
     if (phone    != null) m['phone']    = phone;
+    if (whatsappPhone != null) m['whatsapp_phone'] = whatsappPhone;
     if (email    != null) m['email']    = email;
     return m;
   }
 
   @override
-  List<Object?> get props => [shopId, name, sector, currency, country, phone, email];
+  List<Object?> get props =>
+      [shopId, name, sector, currency, country, phone, whatsappPhone, email];
 }

@@ -22,7 +22,6 @@ linter:
   # producing the lint.
   rules:
     prefer_const_constructors: true
-    prefer_const_widgets: true
     use_key_in_widget_constructors: true
     avoid_print: true
 

@@ -270,6 +270,20 @@ final List<ShellNavItem> kShellNavItems = [
   // Item « Commandes » supprimé du drawer (round 14) — les sous-pages
   // Fournisseurs / Réceptions / Retours restent accessibles via les
   // actions inline produits ou directement par leurs routes.
+  // Partenaires — comptes partenaires (soldes, versements, charges).
+  // Déplacé depuis Paramètres vers la nav principale (demande UX).
+  // local_shipping_rounded : `handshake` est ABSENTE de la police
+  // MaterialIcons bundlée (rendu carré vide). local_shipping est une
+  // icône core ancienne, prouvée présente (utilisée dans toute l'app,
+  // dont partner_ledger_detail_page) et sémantiquement juste
+  // (partenaires = partenaires de livraison).
+  ShellNavItem(
+    icon:         Icons.local_shipping_outlined,
+    iconSelected: Icons.local_shipping_rounded,
+    label:        (_) => 'Partenaires',
+    route:        (id) => '/shop/$id/parametres/partner-accounts',
+    visibleIf:    (p) => p.isShopAdmin,
+  ),
   ShellNavItem(
     icon:         Icons.history_outlined,
     iconSelected: Icons.history_rounded,
@@ -307,10 +321,10 @@ final List<ShellNavItem> kShellNavItems = [
     label:        (l) => l.navHub,
     // Hub central est hors ShellRoute : la route est fixe (/hub) et
     // indépendante du shopId courant. Réservée aux owners qui gèrent
-    // potentiellement plusieurs boutiques. Désormais visible aussi dans
-    // le drawer mobile (un owner multi-boutiques en a besoin sur mobile).
+    // EFFECTIVEMENT plusieurs boutiques : masqué tant que l'owner n'a
+    // qu'une seule boutique (le Hub n'a aucun intérêt en mono-boutique).
     route:        (_) => '/hub',
-    visibleIf:    (p) => p.isOwner,
+    visibleIf:    (p) => p.isOwner && p.isMultiStore,
   ),
 ];
 

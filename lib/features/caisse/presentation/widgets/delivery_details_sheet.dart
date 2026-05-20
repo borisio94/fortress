@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/autocomplete_text_field.dart';
 import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../data/repositories/sale_local_datasource.dart';
@@ -411,7 +412,7 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.10),
+              color: AppColors.primary.withValues(alpha:0.10),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(Icons.local_shipping_rounded,
@@ -420,9 +421,7 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
           const SizedBox(width: 10),
           const Expanded(
             child: Text('Détails de livraison',
-                style: TextStyle(fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
+                style: AppTextStyles.subtitleBold),
           ),
           IconButton(
             icon: const Icon(Icons.close_rounded, size: 20),
@@ -436,10 +435,7 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
 
   Widget _section(String label) => Text(
     label.toUpperCase(),
-    style: TextStyle(fontSize: 11,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 0.5,
-        color: AppColors.textSecondary),
+    style: AppTextStyles.captionBold.copyWith(letterSpacing: 0.5),
   );
 
   Widget _paymentTiles() {
@@ -538,7 +534,7 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
           constraints: const BoxConstraints(maxWidth: 240),
           child: Text(p.name,
               maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13)),
+              style: AppTextStyles.body),
         ),
       ]),
     )).toList(),
@@ -549,7 +545,7 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
 
   Widget _personField({String? hint}) => TextField(
     controller: _personCtrl,
-    style: const TextStyle(fontSize: 13),
+    style: AppTextStyles.body,
     decoration: _decoration(
       hint: hint ?? 'Nom du livreur (optionnel)',
       icon: Icons.person_outline,
@@ -567,7 +563,7 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
 
   Widget _addressField() => TextField(
     controller: _addressCtrl,
-    style: const TextStyle(fontSize: 13),
+    style: AppTextStyles.body,
     maxLines: 2,
     minLines: 1,
     textCapitalization: TextCapitalization.sentences,
@@ -612,12 +608,12 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
         decoration: BoxDecoration(
           color: has
-              ? AppColors.primary.withOpacity(0.06)
+              ? AppColors.primary.withValues(alpha:0.06)
               : const Color(0xFFF9FAFB),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: has
-                ? AppColors.primary.withOpacity(0.30)
+                ? AppColors.primary.withValues(alpha:0.30)
                 : AppColors.divider,
           ),
         ),
@@ -630,8 +626,7 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
               has
                   ? _formatDate(_date!)
                   : 'Quand a-t-elle été livrée ? (optionnel)',
-              style: TextStyle(
-                  fontSize: 12,
+              style: AppTextStyles.bodySm.copyWith(
                   fontWeight: has ? FontWeight.w600 : FontWeight.w400,
                   color: has
                       ? AppColors.primary
@@ -656,9 +651,9 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
   Widget _pickupNotice() => Container(
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
-      color: AppColors.primary.withOpacity(0.06),
+      color: AppColors.primary.withValues(alpha:0.06),
       borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: AppColors.primary.withOpacity(0.20)),
+      border: Border.all(color: AppColors.primary.withValues(alpha:0.20)),
     ),
     child: Row(children: [
       Icon(Icons.info_outline_rounded,
@@ -667,7 +662,7 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
       const Expanded(
         child: Text(
           'Aucune adresse ni date à renseigner — le client passe en boutique.',
-          style: TextStyle(fontSize: 12, color: AppColors.textPrimary),
+          style: AppTextStyles.bodySm,
         ),
       ),
     ]),
@@ -713,7 +708,8 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
   InputDecoration _decoration({String? hint, IconData? icon}) =>
       InputDecoration(
         hintText: hint,
-        hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
+        hintStyle: AppTextStyles.bodySm
+            .copyWith(color: const Color(0xFFBBBBBB)),
         prefixIcon: icon != null
             ? Icon(icon, size: 15, color: const Color(0xFFAAAAAA))
             : null,
@@ -751,7 +747,7 @@ class _ModeTile extends StatelessWidget {
       duration: const Duration(milliseconds: 150),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: selected ? color.withOpacity(0.08) : Colors.white,
+        color: selected ? color.withValues(alpha:0.08) : Colors.white,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: selected ? color : const Color(0xFFE5E7EB),
@@ -762,7 +758,7 @@ class _ModeTile extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(7),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.10),
+            color: color.withValues(alpha:0.10),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(icon, size: 16, color: color),
@@ -773,16 +769,15 @@ class _ModeTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(label,
-                  style: TextStyle(fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                  style: AppTextStyles.bodyBold.copyWith(
                       color: onTap == null
                           ? AppColors.textHint
                           : (selected ? color : const Color(0xFF0F172A)))),
               if (subtitle.isNotEmpty) ...[
                 const SizedBox(height: 2),
                 Text(subtitle,
-                    style: const TextStyle(fontSize: 11,
-                        color: Color(0xFF9CA3AF))),
+                    style: AppTextStyles.captionHint
+                        .copyWith(color: const Color(0xFF9CA3AF))),
               ],
             ],
           ),

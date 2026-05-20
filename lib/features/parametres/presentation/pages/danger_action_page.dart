@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/app_switch.dart';
 
 /// Page plein écran générique pour les actions destructives en 3 étapes.
@@ -184,8 +185,7 @@ class _DangerActionPageState extends State<DangerActionPage> {
           const SizedBox(width: 10),
           Expanded(child: Text(widget.title,
               maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 15,
-                  fontWeight: FontWeight.w700))),
+              style: AppTextStyles.label)),
         ]),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(20),
@@ -226,11 +226,10 @@ class _DangerActionPageState extends State<DangerActionPage> {
     padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
     children: [
       const Text('Action destructive — lisez attentivement',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+          style: AppTextStyles.label),
       const SizedBox(height: 8),
       Text(widget.description,
-          style: const TextStyle(fontSize: 13,
-              color: AppColors.textSecondary, height: 1.5)),
+          style: AppTextStyles.bodySecondary),
       const SizedBox(height: 16),
       Container(
         padding: const EdgeInsets.all(12),
@@ -240,8 +239,8 @@ class _DangerActionPageState extends State<DangerActionPage> {
           border: Border.all(color: AppColors.error.withValues(alpha: 0.2)),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Conséquences',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+          Text('Conséquences',
+              style: AppTextStyles.bodySmBold.copyWith(
                   color: AppColors.error)),
           const SizedBox(height: 8),
           ...widget.consequences.map((c) => Padding(
@@ -252,8 +251,7 @@ class _DangerActionPageState extends State<DangerActionPage> {
                   color: AppColors.error),
               const SizedBox(width: 4),
               Expanded(child: Text(c,
-                  style: const TextStyle(fontSize: 12,
-                      color: AppColors.textPrimary, height: 1.4))),
+                  style: AppTextStyles.bodySm.copyWith(height: 1.4))),
             ]),
           )),
         ]),
@@ -265,10 +263,10 @@ class _DangerActionPageState extends State<DangerActionPage> {
     padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
     children: [
       const Text('Avant de continuer',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+          style: AppTextStyles.label),
       const SizedBox(height: 4),
       const Text('Confirmez chaque point pour passer à la dernière étape.',
-          style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          style: AppTextStyles.bodySmSecondary),
       const SizedBox(height: 16),
       for (var i = 0; i < widget.acknowledgments.length; i++) ...[
         _SwitchRow(
@@ -285,12 +283,11 @@ class _DangerActionPageState extends State<DangerActionPage> {
     padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
     children: [
       const Text('Confirmation finale',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+          style: AppTextStyles.label),
       const SizedBox(height: 10),
       RichText(
         text: TextSpan(
-          style: const TextStyle(fontSize: 12,
-              color: AppColors.textSecondary),
+          style: AppTextStyles.bodySmSecondary,
           children: [
             const TextSpan(text: 'Pour confirmer, tapez exactement : '),
             TextSpan(text: widget.confirmText,
@@ -304,10 +301,10 @@ class _DangerActionPageState extends State<DangerActionPage> {
         controller: _confirmCtrl,
         autofocus: true,
         onChanged: (_) => setState(() {}),
-        style: const TextStyle(fontSize: 13),
+        style: AppTextStyles.body,
         decoration: InputDecoration(
           hintText: widget.confirmText,
-          hintStyle: const TextStyle(fontSize: 12, color: AppColors.textHint),
+          hintStyle: AppTextStyles.bodySm.copyWith(color: AppColors.textHint),
           contentPadding: const EdgeInsets.symmetric(
               horizontal: 12, vertical: 12),
           border: OutlineInputBorder(
@@ -323,18 +320,18 @@ class _DangerActionPageState extends State<DangerActionPage> {
       ),
       if (widget.requirePassword) ...[
         const SizedBox(height: 16),
-        const Text('Mot de passe actuel',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                color: Color(0xFF374151))),
+        Text('Mot de passe actuel',
+            style: AppTextStyles.bodySmBold.copyWith(
+                color: const Color(0xFF374151))),
         const SizedBox(height: 6),
         TextField(
           controller: _pwdCtrl,
           obscureText: _obscure,
           onChanged: (_) => setState(() {}),
-          style: const TextStyle(fontSize: 13),
+          style: AppTextStyles.body,
           decoration: InputDecoration(
             hintText: 'Votre mot de passe',
-            hintStyle: const TextStyle(fontSize: 12, color: AppColors.textHint),
+            hintStyle: AppTextStyles.bodySm.copyWith(color: AppColors.textHint),
             contentPadding: const EdgeInsets.symmetric(
                 horizontal: 12, vertical: 12),
             suffixIcon: IconButton(
@@ -361,7 +358,7 @@ class _DangerActionPageState extends State<DangerActionPage> {
           const Icon(Icons.error_outline_rounded, size: 14, color: AppColors.error),
           const SizedBox(width: 6),
           Expanded(child: Text(_error!,
-              style: const TextStyle(fontSize: 12, color: AppColors.error))),
+              style: AppTextStyles.bodySm.copyWith(color: AppColors.error))),
         ]),
       ],
     ],
@@ -407,8 +404,7 @@ class _SwitchRow extends StatelessWidget {
     ),
     child: Row(children: [
       Expanded(child: Text(label,
-          style: const TextStyle(fontSize: 13,
-              color: AppColors.textPrimary, fontWeight: FontWeight.w500))),
+          style: AppTextStyles.body.copyWith(fontWeight: FontWeight.w500))),
       const SizedBox(width: 10),
       AppSwitch(value: value, onChanged: onChanged,
           activeColor: AppColors.error),
@@ -487,8 +483,8 @@ class _Footer extends StatelessWidget {
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: Colors.white))
                     : Text(actionLabel,
-                        style: const TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w700)),
+                        style: AppTextStyles.bodyBold.copyWith(
+                            color: Colors.white)),
               )),
       ]),
     );

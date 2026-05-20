@@ -1,38 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../features/auth/domain/entities/user.dart';
-import '../../core/storage/secure_storage.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Auth state — Riverpod 2.x
-// ─────────────────────────────────────────────────────────────────────────────
-
-class AuthStateData {
-  final bool isAuthenticated;
-  final User? user;
-  const AuthStateData({required this.isAuthenticated, this.user});
-}
-
-final authStateProvider =
-NotifierProvider<AuthNotifier, AuthStateData>(AuthNotifier.new);
-
-class AuthNotifier extends Notifier<AuthStateData> {
-  @override
-  AuthStateData build() {
-    _checkAuth();
-    return const AuthStateData(isAuthenticated: false);
-  }
-
-  Future<void> _checkAuth() async {
-    final token = await SecureStorageService.getAccessToken();
-    state = AuthStateData(isAuthenticated: token != null && token.isNotEmpty);
-  }
-
-  void setUser(User user) =>
-      state = AuthStateData(isAuthenticated: true, user: user);
-  void logout() => state = const AuthStateData(isAuthenticated: false);
-}
+// NOTE : l'ancien `authStateProvider`/`AuthNotifier` a été supprimé — il
+// constituait une source d'état d'authentification parallèle jamais alimentée
+// (setUser() n'était appelé nulle part). La source de vérité est AuthBloc ;
+// l'utilisateur courant se lit via LocalStorageService.getCurrentUser().
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Locale — Riverpod 2.x

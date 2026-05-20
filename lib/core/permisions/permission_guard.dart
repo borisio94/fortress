@@ -4,10 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../i18n/app_localizations.dart';
 import '../router/route_names.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_text_styles.dart';
 import '../theme/app_theme.dart';
 import 'subscription_provider.dart';
 import 'app_permissions.dart';
-import 'user_plan.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../storage/hive_boxes.dart';
 
@@ -64,7 +64,7 @@ class SubscriptionBanner extends ConsumerWidget {
     if (uid != null) {
       final isOwner = HiveBoxes.shopsBox.values.any((raw) {
         try {
-          final m = Map<String, dynamic>.from(raw as Map);
+          final m = Map<String, dynamic>.from(raw);
           return m['owner_id'] == uid;
         } catch (_) { return false; }
       });
@@ -166,13 +166,13 @@ class _Banner extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      color: color.withOpacity(0.12),
+      color: color.withValues(alpha:0.12),
       child: Row(children: [
         Icon(icon, size: 16, color: color),
         const SizedBox(width: 8),
         Expanded(child: Text(message,
-            style: TextStyle(fontSize: 12, color: color,
-                fontWeight: FontWeight.w500))),
+            style: AppTextStyles.bodySm.copyWith(
+                color: color, fontWeight: FontWeight.w500))),
         if (action != null && onAction != null)
           GestureDetector(
             onTap: onAction,
@@ -183,8 +183,8 @@ class _Banner extends StatelessWidget {
                   color: color,
                   borderRadius: BorderRadius.circular(8)),
               child: Text(action!,
-                  style: TextStyle(fontSize: 11,
-                      fontWeight: FontWeight.w700, color: cs.onPrimary)),
+                  style: AppTextStyles.captionBold
+                      .copyWith(color: cs.onPrimary)),
             ),
           ),
       ]),

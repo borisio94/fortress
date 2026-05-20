@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // AutocompleteTextField — champ texte avec menu de suggestions filtrées.
@@ -200,6 +201,7 @@ class _AutocompleteTextFieldState extends State<AutocompleteTextField> {
         keyboardType: widget.keyboardType,
         textCapitalization: widget.textCapitalization,
         onChanged: widget.onChanged,
+        style: AppTextStyles.input,
         validator: widget.validator ?? (v) {
           if (widget.required && (v == null || v.trim().isEmpty)) {
             return '${widget.label} requis';
@@ -214,8 +216,8 @@ class _AutocompleteTextFieldState extends State<AutocompleteTextField> {
               ? Icon(widget.prefixIcon, size: 16,
                   color: const Color(0xFF9CA3AF))
               : null,
-          labelStyle: const TextStyle(fontSize: 12),
-          hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFD1D5DB)),
+          labelStyle: AppTextStyles.caption,
+          hintStyle: AppTextStyles.inputHint,
           contentPadding: const EdgeInsets.symmetric(
               horizontal: 14, vertical: 12),
           border: OutlineInputBorder(

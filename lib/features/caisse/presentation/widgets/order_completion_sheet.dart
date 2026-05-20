@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/widgets/back_dated_picker.dart';
@@ -191,8 +192,8 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
               children: [
                 Text(
                   'Qui a encaissé le client ?',
-                  style: TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.w800,
+                  style: AppTextStyles.captionBold.copyWith(
+                      fontWeight: FontWeight.w800,
                       letterSpacing: 0.5,
                       color: Theme.of(context).colorScheme.onSurface
                           .withValues(alpha: 0.55)),
@@ -226,10 +227,8 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                             'avant la livraison. Les frais de livraison '
                             'seront enregistrés comme dette envers '
                             'le partenaire.',
-                            style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF065F46))),
+                            style: AppTextStyles.captionBold
+                                .copyWith(color: const Color(0xFF065F46))),
                       ),
                     ]),
                   ),
@@ -254,8 +253,8 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                 // (numérisation historique). Bornes via pickBackDateTime
                 // (firstDate=2020, lastDate=now+1j).
                 Text('Date d\'encaissement',
-                    style: TextStyle(
-                        fontSize: 11, fontWeight: FontWeight.w800,
+                    style: AppTextStyles.captionBold.copyWith(
+                        fontWeight: FontWeight.w800,
                         letterSpacing: 0.5,
                         color: Theme.of(context).colorScheme.onSurface
                             .withValues(alpha: 0.55))),
@@ -278,9 +277,7 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(_formatCompletedAt(_completedAt),
-                            style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600)),
+                            style: AppTextStyles.bodyBold),
                       ),
                       Icon(Icons.edit_calendar_outlined,
                           size: 14,
@@ -293,8 +290,7 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                 Text(
                   'Renseigne les frais (livraison, emballage…) inclus dans '
                   'le montant payé par le client.',
-                  style: TextStyle(
-                      fontSize: 12,
+                  style: AppTextStyles.bodySm.copyWith(
                       color: Theme.of(context).colorScheme.onSurface
                           .withValues(alpha: 0.7)),
                 ),
@@ -304,10 +300,10 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                   child: Row(children: [
                     Expanded(flex: 3, child: TextField(
                       controller: r.label,
-                      style: const TextStyle(fontSize: 13),
+                      style: AppTextStyles.body,
                       decoration: const InputDecoration(
                         labelText: 'Libellé',
-                        labelStyle: TextStyle(fontSize: 11),
+                        labelStyle: AppTextStyles.caption,
                         isDense: true,
                         contentPadding: EdgeInsets.symmetric(
                             horizontal: 10, vertical: 10),
@@ -323,10 +319,10 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                             RegExp(r'[0-9.]')),
                       ],
                       onChanged: (_) => setState(() {}),
-                      style: const TextStyle(fontSize: 13),
+                      style: AppTextStyles.body,
                       decoration: const InputDecoration(
                         labelText: 'Montant',
-                        labelStyle: TextStyle(fontSize: 11),
+                        labelStyle: AppTextStyles.caption,
                         isDense: true,
                         contentPadding: EdgeInsets.symmetric(
                             horizontal: 10, vertical: 10),
@@ -358,12 +354,11 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                   const Divider(height: 24),
                   Row(children: [
                     const Text('Total des frais',
-                        style: TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w600)),
+                        style: AppTextStyles.bodyBold),
                     const Spacer(),
                     Text(CurrencyFormatter.format(_total),
-                        style: TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w800,
+                        style: AppTextStyles.label.copyWith(
+                            fontWeight: FontWeight.w800,
                             color: sem.brand)),
                   ]),
                 ],
@@ -480,8 +475,7 @@ class _RadioRow extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Expanded(child: Text(label,
-              style: TextStyle(
-                  fontSize: 12.5,
+              style: AppTextStyles.bodySm.copyWith(
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   color: textColor))),
         ]),
@@ -535,9 +529,7 @@ class _PartnerBalanceHint extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Text(label,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
+              style: AppTextStyles.captionBold.copyWith(
                   color: theme.colorScheme.onSurface
                       .withValues(alpha: 0.85))),
         ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/i18n/app_localizations.dart';
 
 class SendNotificationPage extends StatelessWidget {
@@ -12,8 +13,7 @@ class SendNotificationPage extends StatelessWidget {
     return AppScaffold(
       shopId: shopId, title: l.crmSendNotif, isRootPage: false,
       body: ListView(padding: const EdgeInsets.all(20), children: [
-        Text(l.crmMessage, style: const TextStyle(fontSize: 12,
-            fontWeight: FontWeight.w500, color: Color(0xFF6B7280))),
+        Text(l.crmMessage, style: AppTextStyles.bodySmSecondary),
         const SizedBox(height: 5),
         TextFormField(maxLines: 4,
             decoration: InputDecoration(hintText: l.crmMessageHint,

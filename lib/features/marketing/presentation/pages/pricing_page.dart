@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/router/route_names.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../widgets/pricing_compare_table.dart';
 import '../widgets/pricing_plan_cards.dart';
 import '../widgets/public_footer.dart';
@@ -73,9 +74,7 @@ class _Header extends StatelessWidget {
           child: Column(children: [
             Text('Un plan pour chaque taille de commerce',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w800,
+                style: AppTextStyles.display.copyWith(
                     height: 1.15,
                     color: theme.colorScheme.onSurface)),
             const SizedBox(height: 12),
@@ -83,8 +82,7 @@ class _Header extends StatelessWidget {
                 '14 jours d\'essai gratuit. Toutes les fonctionnalités. '
                 'Sans carte bancaire.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 14,
+                style: AppTextStyles.labelRegular.copyWith(
                     color: theme.colorScheme.onSurface
                         .withValues(alpha: 0.7))),
             const SizedBox(height: 24),
@@ -152,8 +150,7 @@ class _ToggleButton extends StatelessWidget {
             color: active ? AppColors.primary : Colors.transparent,
             borderRadius: BorderRadius.circular(7)),
         child: Text(label,
-            style: TextStyle(
-                fontSize: 13,
+            style: AppTextStyles.body.copyWith(
                 fontWeight: FontWeight.w700,
                 color: active
                     ? Colors.white
@@ -179,10 +176,8 @@ class _FinalCta extends StatelessWidget {
         child: Column(children: [
           Text('Prêt à digitaliser votre boutique ?',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  color: theme.colorScheme.onSurface)),
+              style: AppTextStyles.display
+                  .copyWith(color: theme.colorScheme.onSurface)),
           const SizedBox(height: 18),
           ElevatedButton(
             onPressed: () => context.go(RouteNames.register),
@@ -195,9 +190,9 @@ class _FinalCta extends StatelessWidget {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
             ),
-            child: const Text('Essayer 14 jours gratuit',
-                style: TextStyle(
-                    fontSize: 15, fontWeight: FontWeight.w800)),
+            child: Text('Essayer 14 jours gratuit',
+                style: AppTextStyles.label.copyWith(
+                    fontWeight: FontWeight.w800, color: Colors.white)),
           ),
         ]),
       ),

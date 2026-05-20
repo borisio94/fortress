@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/router/route_names.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/widgets/fortress_logo.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -52,8 +53,7 @@ class PublicTopBar extends StatelessWidget implements PreferredSizeWidget {
                 const FortressLogo.light(size: 32),
                 const SizedBox(width: 10),
                 Text('Fortress',
-                    style: TextStyle(
-                        fontSize: 18,
+                    style: AppTextStyles.title.copyWith(
                         fontWeight: FontWeight.w800,
                         color: theme.colorScheme.onSurface)),
               ]),
@@ -81,9 +81,10 @@ class PublicTopBar extends StatelessWidget implements PreferredSizeWidget {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8)),
             ),
-            child: const Text('Connexion',
-                style: TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w700)),
+            child: Text('Connexion',
+                style: AppTextStyles.body.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primary)),
           ),
         ]),
       ),
@@ -111,8 +112,7 @@ class _NavLink extends StatelessWidget {
         padding: const EdgeInsets.symmetric(
             horizontal: 12, vertical: 8),
         child: Text(label,
-            style: TextStyle(
-                fontSize: 13,
+            style: AppTextStyles.body.copyWith(
                 fontWeight: active ? FontWeight.w800 : FontWeight.w600,
                 color: active
                     ? AppColors.primary

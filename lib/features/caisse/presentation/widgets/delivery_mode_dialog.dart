@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../domain/entities/sale.dart';
 import '../../../../features/inventaire/domain/entities/stock_location.dart';
 
@@ -131,24 +132,25 @@ class _DeliveryModeSheetState extends State<_DeliveryModeSheet> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.10),
+                    color: AppColors.primary.withValues(alpha:0.10),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(Icons.local_shipping_rounded,
                       size: 18, color: AppColors.primary),
                 ),
                 const SizedBox(width: 10),
-                const Expanded(
+                Expanded(
                   child: Text('Comment la commande est-elle livrée ?',
-                      style: TextStyle(fontSize: 14,
+                      style: AppTextStyles.label.copyWith(
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF0F172A))),
+                          color: const Color(0xFF0F172A))),
                 ),
               ]),
               const SizedBox(height: 6),
-              const Text(
+              Text(
                   'Le stock sera déduit de la bonne source selon votre choix.',
-                  style: TextStyle(fontSize: 11, color: Color(0xFF6B7280))),
+                  style: AppTextStyles.captionHint
+                      .copyWith(color: const Color(0xFF6B7280))),
               const SizedBox(height: 16),
 
               Expanded(
@@ -262,7 +264,7 @@ class _DeliveryModeSheetState extends State<_DeliveryModeSheet> {
             constraints: const BoxConstraints(maxWidth: 240),
             child: Text(p.name,
                 maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13)),
+                style: AppTextStyles.body),
           ),
         ]),
       )).toList(),
@@ -288,10 +290,11 @@ class _DeliveryModeSheetState extends State<_DeliveryModeSheet> {
     padding: const EdgeInsets.only(left: 4),
     child: TextField(
       controller: controller,
-      style: const TextStyle(fontSize: 13),
+      style: AppTextStyles.body,
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
+        hintStyle: AppTextStyles.bodySm
+            .copyWith(color: const Color(0xFFBBBBBB)),
         prefixIcon: Icon(icon, size: 15, color: const Color(0xFFAAAAAA)),
         filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
         contentPadding: const EdgeInsets.symmetric(
@@ -323,7 +326,7 @@ class _Tile extends StatelessWidget {
       duration: const Duration(milliseconds: 150),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: selected ? color.withOpacity(0.08) : Colors.white,
+        color: selected ? color.withValues(alpha:0.08) : Colors.white,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: selected ? color : const Color(0xFFE5E7EB),
@@ -334,7 +337,7 @@ class _Tile extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(7),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.10),
+            color: color.withValues(alpha:0.10),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(icon, size: 16, color: color),
@@ -345,15 +348,14 @@ class _Tile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(label,
-                  style: TextStyle(fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                  style: AppTextStyles.bodyBold.copyWith(
                       color: onTap == null
                           ? AppColors.textHint
                           : (selected ? color : const Color(0xFF0F172A)))),
               const SizedBox(height: 2),
               Text(subtitle,
-                  style: const TextStyle(fontSize: 11,
-                      color: Color(0xFF9CA3AF))),
+                  style: AppTextStyles.captionHint
+                      .copyWith(color: const Color(0xFF9CA3AF))),
             ],
           ),
         ),

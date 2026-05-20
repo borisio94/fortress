@@ -37,14 +37,14 @@ class AppSwitch extends StatelessWidget {
       // Track : violet très atténué quand actif, gris clair quand inactif
       trackColor: WidgetStateProperty.resolveWith<Color>((states) {
         if (states.contains(WidgetState.selected)) {
-          return color.withOpacity(0.25);
+          return color.withValues(alpha:0.25);
         }
         return const Color(0xFFE5E7EB);
       }),
       // Bordure du track
       trackOutlineColor: WidgetStateProperty.resolveWith<Color>((states) {
         if (states.contains(WidgetState.selected)) {
-          return color.withOpacity(0.4);
+          return color.withValues(alpha:0.4);
         }
         return const Color(0xFFD1D5DB);
       }),
@@ -52,7 +52,7 @@ class AppSwitch extends StatelessWidget {
       // Pas d'overlay / splash violet sur le thumb
       overlayColor: WidgetStateProperty.resolveWith<Color>((states) {
         if (states.contains(WidgetState.pressed)) {
-          return color.withOpacity(0.1);
+          return color.withValues(alpha:0.1);
         }
         return Colors.transparent;
       }),

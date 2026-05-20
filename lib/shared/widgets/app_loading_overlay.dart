@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AppLoadingOverlay — overlay bloquant pendant les opérations longues
@@ -30,7 +31,7 @@ class AppLoadingOverlay extends StatelessWidget {
                 opacity: isLoading ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 200),
                 child: Container(
-                  color: Colors.black.withOpacity(0.3),
+                  color: Colors.black.withValues(alpha:0.3),
                   child: Center(
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -40,7 +41,7 @@ class AppLoadingOverlay extends StatelessWidget {
                         borderRadius: BorderRadius.circular(14),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.12),
+                            color: Colors.black.withValues(alpha:0.12),
                             blurRadius: 20,
                             offset: const Offset(0, 4),
                           ),
@@ -60,9 +61,8 @@ class AppLoadingOverlay extends StatelessWidget {
                             const SizedBox(height: 12),
                             Text(
                               message!,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: Color(0xFF374151),
+                              style: AppTextStyles.body.copyWith(
+                                color: const Color(0xFF374151),
                                 fontWeight: FontWeight.w500,
                               ),
                             ),

@@ -209,11 +209,11 @@ class _SuppliersPageState extends State<SuppliersPage> {
   Future<void> _delete(Supplier s) async {
     // Règle métier : protéger contre la suppression d'un fournisseur référencé.
     final usedByOrders = HiveBoxes.purchaseOrdersBox.values.any((raw) {
-      final m = Map<String, dynamic>.from(raw as Map);
+      final m = Map<String, dynamic>.from(raw);
       return m['supplier_id'] == s.id;
     });
     final usedByReceptions = HiveBoxes.receptionsBox.values.any((raw) {
-      final m = Map<String, dynamic>.from(raw as Map);
+      final m = Map<String, dynamic>.from(raw);
       return m['supplier_id'] == s.id;
     });
     if (usedByOrders || usedByReceptions) {

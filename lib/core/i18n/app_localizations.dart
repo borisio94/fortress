@@ -494,6 +494,7 @@ class AppLocalizations {
   String subSavingsAnnual(int pct) => _isFr
       ? 'Économisez $pct%' : 'Save $pct%';
   String get subYearlyShort      => _isFr ? '/an'   : '/yr';
+  String get subQuarterlyShort   => _isFr ? '/trim.' : '/qtr';
   String get subMonthlyShort     => _isFr ? '/mois' : '/mo';
 
   // Section 3 — contact admin

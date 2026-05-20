@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../data/shop_settings_store.dart';
@@ -52,6 +53,9 @@ class _CurrencyPageState extends ConsumerState<CurrencyPage> {
     if (code == _selected) return;
     setState(() => _selected = code);
     await _store.write('currency_code', code);
+    // Met à jour la devise globale + notifie les widgets sensibles
+    // (CurrencyFormatter.notifier) pour rebuild immédiat.
+    CurrencyFormatter.setCurrent(code, shopId: widget.shopId);
     if (mounted) AppSnack.success(context, context.l10n.commonSaved);
   }
 
@@ -88,7 +92,7 @@ class _CurrencyPageState extends ConsumerState<CurrencyPage> {
                 height: 44,
                 decoration: BoxDecoration(
                   color: selected
-                      ? AppColors.primary.withOpacity(0.1)
+                      ? AppColors.primary.withValues(alpha:0.1)
                       : const Color(0xFFF3F4F6),
                   borderRadius: BorderRadius.circular(10),
                 ),

@@ -4,11 +4,12 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/utils/date_formatter.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../core/theme/app_theme.dart';
-import '../../../subscription/domain/models/plan_type.dart';
+import '../../../../core/theme/app_text_styles.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // AdminSubscriptionsPage — réservée au super_admin.
@@ -48,22 +49,49 @@ class _AdminSubscriptionsPageState
     setState(() => _loading = true);
     try {
       final db = Supabase.instance.client;
-      // Tirer subscriptions + plans + profiles
-      final subs = await db
+      // 1) Récupérer la liste des IDs super admin (source de vérité).
+      final saRows = await db.from('profiles')
+          .select('id')
+          .eq('is_super_admin', true);
+      final saIds = (saRows as List)
+          .map((e) => ((e as Map)['id'] as String?) ?? '')
+          .where((s) => s.isNotEmpty)
+          .toSet();
+      debugPrint('[Paiements] Super admin IDs filtrés : $saIds');
+
+      // 2) Subscriptions — filtre côté SERVEUR via PostgREST `not.in.(...)`
+      //    pour garantir que les rows SA n'arrivent jamais côté client,
+      //    même si le navigateur sert un vieux JS en cache. Double-filtre
+      //    Dart en plus, ceinture + bretelles.
+      var query = db
           .from('subscriptions')
           .select('id, user_id, plan_id, billing_cycle, sub_status, '
               'started_at, expires_at, amount_paid, payment_ref, '
-              'plans(name,label,price_monthly,price_quarterly,price_yearly), '
-              'profiles!subscriptions_user_id_fkey(name,email)')
-          .order('created_at', ascending: false);
+              'plans!subscriptions_plan_id_fkey(name,label,price_monthly,price_quarterly,price_yearly), '
+              'profiles!subscriptions_user_id_fkey(name,email,is_super_admin)');
+      if (saIds.isNotEmpty) {
+        // Format PostgREST : not=in.(uuid1,uuid2,...)
+        query = query.not('user_id', 'in', '(${saIds.join(',')})');
+      }
+      final subs = await query.order('created_at', ascending: false);
+
       final plans = await db.from('plans')
           .select('id, name, label, price_monthly, price_quarterly, '
               'price_yearly, is_active')
           .order('sort_order');
       if (!mounted) return;
       setState(() {
-        _rows = (subs as List).map((e) =>
-            Map<String, dynamic>.from(e as Map)).toList();
+        _rows = (subs as List)
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            // Double sécurité côté client.
+            .where((r) {
+              final uid = r['user_id'] as String?;
+              if (uid != null && saIds.contains(uid)) return false;
+              final p = r['profiles'];
+              if (p is Map && p['is_super_admin'] == true) return false;
+              return true;
+            })
+            .toList();
         _plans = (plans as List)
             .map((e) => Map<String, dynamic>.from(e as Map))
             .where((p) => p['is_active'] == true && p['name'] != 'trial')
@@ -174,8 +202,7 @@ class _AdminSubscriptionsPageState
               const SizedBox(height: 12),
               Text(l.adminSubsAccessDenied,
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 14,
-                      fontWeight: FontWeight.w600, color: cs.onSurface)),
+                  style: AppTextStyles.label.copyWith(color: cs.onSurface)),
               const SizedBox(height: 14),
               ElevatedButton(
                 onPressed: () => context.canPop()
@@ -208,7 +235,7 @@ class _AdminSubscriptionsPageState
               decoration: InputDecoration(
                 hintText: l.adminSubsSearch,
                 prefixIcon: Icon(Icons.search_rounded,
-                    size: 18, color: cs.onSurface.withOpacity(0.5)),
+                    size: 18, color: cs.onSurface.withValues(alpha:0.5)),
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 10),
@@ -241,8 +268,8 @@ class _AdminSubscriptionsPageState
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 60),
                 child: Center(child: Text(l.noData,
-                    style: TextStyle(fontSize: 13,
-                        color: cs.onSurface.withOpacity(0.6)))),
+                    style: AppTextStyles.body.copyWith(
+                        color: cs.onSurface.withValues(alpha:0.6)))),
               )
             else
               for (final r in _filtered)
@@ -289,8 +316,7 @@ class _Topbar extends StatelessWidget {
       ),
       const SizedBox(width: 10),
       Text(title,
-          style: TextStyle(fontSize: 17,
-              fontWeight: FontWeight.w800, color: cs.onSurface)),
+          style: AppTextStyles.subtitleBold.copyWith(color: cs.onSurface)),
     ]);
   }
 }
@@ -334,13 +360,12 @@ class _StatsRow extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start,
             children: [
           Text(it.$2,
-              style: TextStyle(fontSize: 18,
+              style: AppTextStyles.title.copyWith(
                   fontWeight: FontWeight.w800, color: it.$3)),
           const SizedBox(height: 2),
           Text(it.$1,
-              style: TextStyle(fontSize: 11,
-                  color: cs.onSurface.withOpacity(0.6),
-                  fontWeight: FontWeight.w500)),
+              style: AppTextStyles.caption.copyWith(
+                  color: cs.onSurface.withValues(alpha:0.6))),
         ]),
       );
     }).toList());
@@ -387,11 +412,10 @@ class _FilterChips extends StatelessWidget {
                     ? cs.primary : sem.borderSubtle),
               ),
               child: Text(it.$2,
-                  style: TextStyle(fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                  style: AppTextStyles.bodySmBold.copyWith(
                       color: active
                           ? cs.onPrimary
-                          : cs.onSurface.withOpacity(0.7))),
+                          : cs.onSurface.withValues(alpha:0.7))),
             ),
           ),
         );
@@ -433,7 +457,7 @@ class _SubRow extends StatelessWidget {
       statusColor = sem.success;
       statusLabel = (pl['label'] as String?) ?? '—';
     } else {
-      statusColor = cs.onSurface.withOpacity(0.5);
+      statusColor = cs.onSurface.withValues(alpha:0.5);
       statusLabel = (pl['label'] as String?) ?? '—';
     }
     final ctaLabel = isExpired ? l.adminSubsRenew : l.adminSubsActivate;
@@ -449,14 +473,13 @@ class _SubRow extends StatelessWidget {
         Container(
           width: 40, height: 40,
           decoration: BoxDecoration(
-            color: cs.primary.withOpacity(0.10),
+            color: cs.primary.withValues(alpha:0.10),
             borderRadius: BorderRadius.circular(10),
           ),
           alignment: Alignment.center,
           child: Text(
             _initials((p['name'] ?? p['email'] ?? '?').toString()),
-            style: TextStyle(fontSize: 13,
-                fontWeight: FontWeight.w800, color: cs.primary),
+            style: AppTextStyles.bodyBold.copyWith(color: cs.primary),
           ),
         ),
         const SizedBox(width: 10),
@@ -465,14 +488,13 @@ class _SubRow extends StatelessWidget {
             children: [
           Text((p['name'] ?? p['email'] ?? '—').toString(),
               maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 13,
-                  fontWeight: FontWeight.w700, color: cs.onSurface)),
+              style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
           if ((p['email'] as String?) != null) ...[
             const SizedBox(height: 1),
             Text((p['email'] as String?) ?? '',
                 maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 11,
-                    color: cs.onSurface.withOpacity(0.55))),
+                style: AppTextStyles.caption.copyWith(
+                    color: cs.onSurface.withValues(alpha:0.55))),
           ],
           const SizedBox(height: 6),
           Row(children: [
@@ -480,18 +502,18 @@ class _SubRow extends StatelessWidget {
               padding: const EdgeInsets.symmetric(
                   horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: statusColor.withOpacity(0.14),
+                color: statusColor.withValues(alpha:0.14),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(statusLabel,
-                  style: TextStyle(fontSize: 10,
-                      fontWeight: FontWeight.w800, color: statusColor)),
+                  style: AppTextStyles.microBold
+                      .copyWith(color: statusColor)),
             ),
             const SizedBox(width: 6),
             if (exp != null)
               Text(_fmt(exp),
-                  style: TextStyle(fontSize: 10,
-                      color: cs.onSurface.withOpacity(0.55))),
+                  style: AppTextStyles.micro.copyWith(
+                      color: cs.onSurface.withValues(alpha:0.55))),
           ]),
         ])),
         const SizedBox(width: 8),
@@ -499,15 +521,13 @@ class _SubRow extends StatelessWidget {
           onPressed: onActivate,
           style: OutlinedButton.styleFrom(
             foregroundColor: cs.primary,
-            side: BorderSide(color: cs.primary.withOpacity(0.5)),
+            side: BorderSide(color: cs.primary.withValues(alpha:0.5)),
             minimumSize: const Size(0, 36),
             padding: const EdgeInsets.symmetric(horizontal: 12),
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8)),
           ),
-          child: Text(ctaLabel,
-              style: const TextStyle(
-                  fontSize: 11, fontWeight: FontWeight.w700)),
+          child: Text(ctaLabel, style: AppTextStyles.captionBold),
         ),
       ]),
     );
@@ -657,8 +677,8 @@ class _ActivationSheetState extends State<_ActivationSheet> {
                     borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 16),
             Text(l.adminSubsSheetTitle,
-                style: TextStyle(fontSize: 16,
-                    fontWeight: FontWeight.w800, color: cs.onSurface)),
+                style: AppTextStyles.subtitleBold
+                    .copyWith(color: cs.onSurface)),
             const SizedBox(height: 14),
             // Plan
             _Label(text: l.adminSubsPlan),
@@ -677,11 +697,10 @@ class _ActivationSheetState extends State<_ActivationSheet> {
                         ? cs.primary : sem.borderSubtle),
                   ),
                   child: Text((p['label'] as String?) ?? '',
-                      style: TextStyle(fontSize: 12,
-                          fontWeight: FontWeight.w700,
+                      style: AppTextStyles.bodySmBold.copyWith(
                           color: active
                               ? cs.onPrimary
-                              : cs.onSurface.withOpacity(0.7))),
+                              : cs.onSurface.withValues(alpha:0.7))),
                 ),
               );
             }).toList()),
@@ -710,11 +729,10 @@ class _ActivationSheetState extends State<_ActivationSheet> {
                         'yearly'    => l.subBillYearly,
                         _           => l.subBillMonthly,
                       },
-                          style: TextStyle(fontSize: 12,
-                              fontWeight: FontWeight.w700,
+                          style: AppTextStyles.bodySmBold.copyWith(
                               color: _cycle == c
                                   ? cs.onPrimary
-                                  : cs.onSurface.withOpacity(0.7))),
+                                  : cs.onSurface.withValues(alpha:0.7))),
                     ),
                   ),
                 )),
@@ -742,12 +760,11 @@ class _ActivationSheetState extends State<_ActivationSheet> {
                 ),
                 child: Row(children: [
                   Icon(Icons.calendar_today_outlined,
-                      size: 14, color: cs.onSurface.withOpacity(0.55)),
+                      size: 14, color: cs.onSurface.withValues(alpha:0.55)),
                   const SizedBox(width: 8),
                   Text(_fmtDate(_start),
-                      style: TextStyle(fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: cs.onSurface)),
+                      style: AppTextStyles.bodyBold
+                          .copyWith(color: cs.onSurface)),
                 ]),
               ),
             ),
@@ -781,7 +798,7 @@ class _ActivationSheetState extends State<_ActivationSheet> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: cs.primary,
                   foregroundColor: cs.onPrimary,
-                  disabledBackgroundColor: cs.primary.withOpacity(0.4),
+                  disabledBackgroundColor: cs.primary.withValues(alpha:0.4),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
                   elevation: 0,
@@ -792,8 +809,8 @@ class _ActivationSheetState extends State<_ActivationSheet> {
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: cs.onPrimary))
                     : Text(l.adminSubsConfirm,
-                        style: const TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w800)),
+                        style: AppTextStyles.label
+                            .copyWith(fontWeight: FontWeight.w800)),
               ),
             ),
           ]),
@@ -802,10 +819,7 @@ class _ActivationSheetState extends State<_ActivationSheet> {
     );
   }
 
-  static String _fmtDate(DateTime d) =>
-      '${d.day.toString().padLeft(2, '0')}/'
-      '${d.month.toString().padLeft(2, '0')}/'
-      '${d.year}';
+  static String _fmtDate(DateTime d) => DateFormatter.dayMonthYear(d);
 }
 
 class _Label extends StatelessWidget {
@@ -817,8 +831,8 @@ class _Label extends StatelessWidget {
     return Align(
       alignment: Alignment.centerLeft,
       child: Text(text,
-          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-              color: cs.onSurface.withOpacity(0.6))),
+          style: AppTextStyles.captionBold.copyWith(
+              color: cs.onSurface.withValues(alpha:0.6))),
     );
   }
 }

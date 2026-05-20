@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/i18n/app_localizations.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
 import '../../features/dashboard/data/dashboard_providers.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -132,8 +133,7 @@ class _Chips extends StatelessWidget {
                         : const Color(0xFFE5E7EB)),
               ),
               child: Text(it.$2,
-                  style: TextStyle(
-                      fontSize: 12,
+                  style: AppTextStyles.bodySm.copyWith(
                       fontWeight: FontWeight.w600,
                       color: active
                           ? Colors.white
@@ -160,14 +160,14 @@ class _InlineButton extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.08),
+        color: AppColors.primary.withValues(alpha:0.08),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(leadingIcon, size: 12, color: AppColors.primary),
         const SizedBox(width: 6),
         Text(label,
-            style: TextStyle(fontSize: 11,
+            style: AppTextStyles.caption.copyWith(
                 fontWeight: FontWeight.w600,
                 color: AppColors.primary)),
         const SizedBox(width: 2),
@@ -236,7 +236,7 @@ class _BottomSheetState extends State<_BottomSheet> {
                 borderRadius: BorderRadius.circular(2))),
         const SizedBox(height: 16),
         Text(l.periodCustomTitle,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            style: AppTextStyles.subtitleBold),
         const SizedBox(height: 16),
         Wrap(spacing: 8, runSpacing: 8, children: periods.map((p) {
           final active = current == p.$1;
@@ -256,7 +256,8 @@ class _BottomSheetState extends State<_BottomSheet> {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(p.$2,
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
+                  style: AppTextStyles.body.copyWith(
+                      fontWeight: FontWeight.w600,
                       color: active
                           ? Colors.white
                           : const Color(0xFF374151))),
@@ -345,11 +346,12 @@ class _DateBtn extends StatelessWidget {
         const SizedBox(width: 6),
         Expanded(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: const TextStyle(
-              fontSize: 9, color: Color(0xFF9CA3AF))),
+          Text(label, style: AppTextStyles.micro.copyWith(
+              color: const Color(0xFF9CA3AF))),
           Text('${date.day}/${date.month}/${date.year}',
-              style: const TextStyle(fontSize: 12,
-                  fontWeight: FontWeight.w600, color: Color(0xFF0F172A))),
+              style: AppTextStyles.bodySm.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF0F172A))),
         ])),
       ]),
     ),

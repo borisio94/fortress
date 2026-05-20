@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/product_image_card.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
@@ -170,9 +171,9 @@ class _LocationContentsPageState extends ConsumerState<LocationContentsPage> {
           ? FloatingActionButton.extended(
               onPressed: _openTransfer,
               icon: const Icon(Icons.swap_horiz_rounded, size: 18),
-              label: const Text('Transférer',
-                  style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600)),
+              label: Text('Transférer',
+                  style: AppTextStyles.bodyBold.copyWith(
+                      color: Colors.white)),
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
             )
@@ -190,11 +191,11 @@ class _LocationContentsPageState extends ConsumerState<LocationContentsPage> {
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                     child: TextField(
                       onChanged: (v) => setState(() => _query = v),
-                      style: const TextStyle(fontSize: 13),
+                      style: AppTextStyles.body,
                       decoration: InputDecoration(
                         hintText: 'Rechercher un produit, SKU…',
-                        hintStyle: const TextStyle(fontSize: 12,
-                            color: Color(0xFFBBBBBB)),
+                        hintStyle: AppTextStyles.bodySm.copyWith(
+                            color: const Color(0xFFBBBBBB)),
                         prefixIcon: const Icon(Icons.search_rounded, size: 18,
                             color: Color(0xFF9CA3AF)),
                         filled: true, fillColor: const Color(0xFFF9FAFB),
@@ -299,13 +300,10 @@ class _Header extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(location.name,
-                style: const TextStyle(fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF0F172A))),
+                style: AppTextStyles.label),
             const SizedBox(height: 2),
             Text(location.type.labelFr,
-                style: TextStyle(fontSize: 11,
-                    fontWeight: FontWeight.w500, color: _color)),
+                style: AppTextStyles.caption.copyWith(color: _color)),
           ],
         ),
       ),
@@ -313,11 +311,10 @@ class _Header extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Text('$totalUnits',
-              style: TextStyle(fontSize: 18,
-                  fontWeight: FontWeight.w800, color: _color)),
+              style: AppTextStyles.title.copyWith(color: _color)),
           Text('$items référence${items > 1 ? 's' : ''}',
-              style: const TextStyle(
-                  fontSize: 10, color: Color(0xFF9CA3AF))),
+              style: AppTextStyles.micro.copyWith(
+                  color: const Color(0xFF9CA3AF))),
         ],
       ),
     ]),
@@ -352,17 +349,15 @@ class _ItemTile extends StatelessWidget {
             children: [
               Text(item.productName,
                   maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF0F172A))),
+                  style: AppTextStyles.bodyBold),
               const SizedBox(height: 2),
               Text([
                 item.variantName,
                 if ((item.sku ?? '').isNotEmpty) 'SKU ${item.sku}',
               ].join(' · '),
                   maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11,
-                      color: Color(0xFF9CA3AF))),
+                  style: AppTextStyles.caption.copyWith(
+                      color: const Color(0xFF9CA3AF))),
             ],
           ),
         ),
@@ -371,25 +366,25 @@ class _ItemTile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text('${item.available}',
-                style: TextStyle(fontSize: 15,
-                    fontWeight: FontWeight.w800,
+                style: AppTextStyles.label.copyWith(
                     color: empty
                         ? const Color(0xFFEF4444)
                         : lowStock
                             ? const Color(0xFFF59E0B)
                             : const Color(0xFF10B981))),
-            const Text('dispo',
-                style: TextStyle(fontSize: 9, color: Color(0xFF9CA3AF))),
+            Text('dispo',
+                style: AppTextStyles.micro.copyWith(
+                    color: const Color(0xFF9CA3AF))),
           ],
         ),
         if (item.blocked > 0) ...[
           const SizedBox(width: 8),
           Column(children: [
             Text('${item.blocked}',
-                style: const TextStyle(fontSize: 12,
-                    fontWeight: FontWeight.w700, color: Color(0xFFEF4444))),
-            const Text('bloq', style: TextStyle(
-                fontSize: 9, color: Color(0xFF9CA3AF))),
+                style: AppTextStyles.bodySmBold.copyWith(
+                    color: const Color(0xFFEF4444))),
+            Text('bloq', style: AppTextStyles.micro.copyWith(
+                color: const Color(0xFF9CA3AF))),
           ]),
         ],
       ]),

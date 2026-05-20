@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AppSnack — helper centralisé pour tous les SnackBar de l'app
@@ -62,8 +63,8 @@ class AppSnack {
           const SizedBox(width: 10),
           Expanded(
               child: Text(message,
-                  style: const TextStyle(
-                      color: Colors.white, fontSize: 13))),
+                  style: AppTextStyles.body.copyWith(
+                      color: Colors.white))),
         ]),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,

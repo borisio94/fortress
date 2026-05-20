@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../bloc/shop_selector_bloc.dart';
@@ -13,7 +12,6 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/storage/hive_boxes.dart';
-import '../../../../features/auth/domain/entities/user.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/widgets/fortress_logo.dart';
@@ -59,7 +57,7 @@ class _ShopListPageState extends ConsumerState<ShopListPage> {
 
     final ownsAShop = HiveBoxes.shopsBox.values.any((raw) {
       try {
-        final m = Map<String, dynamic>.from(raw as Map);
+        final m = Map<String, dynamic>.from(raw);
         return m['owner_id'] == uid;
       } catch (_) { return false; }
     });
@@ -67,7 +65,7 @@ class _ShopListPageState extends ConsumerState<ShopListPage> {
 
     final hasAnyMembership = HiveBoxes.membershipsBox.values.any((raw) {
       try {
-        final m = Map<String, dynamic>.from(raw as Map);
+        final m = Map<String, dynamic>.from(raw);
         return m['user_id'] == uid;
       } catch (_) { return false; }
     });
@@ -199,20 +197,13 @@ class _ShopListPageState extends ConsumerState<ShopListPage> {
                           children: [
                             Text(
                               'Mes boutiques',
-                              style: TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.textPrimary,
-                                letterSpacing: -0.3,
-                              ),
+                              style: AppTextStyles.display
+                                  .copyWith(letterSpacing: -0.3),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               'Sélectionnez une boutique pour commencer',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: AppColors.textSecondary,
-                              ),
+                              style: AppTextStyles.bodySecondary,
                             ),
                           ],
                         ),
@@ -241,15 +232,28 @@ class _ShopListPageState extends ConsumerState<ShopListPage> {
                       )
                     else if (state is ShopSelectorLoaded) ...[
                         SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+                          padding: EdgeInsets.fromLTRB(
+                              MediaQuery.of(context).size.width < 600 ? 12 : 24,
+                              16,
+                              MediaQuery.of(context).size.width < 600 ? 12 : 24,
+                              24),
                           sliver: SliverGrid(
-                            gridDelegate:
-                            const SliverGridDelegateWithMaxCrossAxisExtent(
-                              maxCrossAxisExtent: 320,
-                              mainAxisSpacing: 14,
-                              crossAxisSpacing: 14,
-                              childAspectRatio: 1.45,
-                            ),
+                            // Mobile (< 600px) : grille fixe 2 colonnes pour
+                            // éviter le vide (1 card prenait toute la largeur).
+                            // Tablette / desktop : tile auto-fit à max 320px.
+                            gridDelegate: MediaQuery.of(context).size.width < 600
+                                ? const SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: 2,
+                                    mainAxisSpacing: 12,
+                                    crossAxisSpacing: 12,
+                                    childAspectRatio: 1.05,
+                                  )
+                                : const SliverGridDelegateWithMaxCrossAxisExtent(
+                                    maxCrossAxisExtent: 320,
+                                    mainAxisSpacing: 14,
+                                    crossAxisSpacing: 14,
+                                    childAspectRatio: 1.45,
+                                  ),
                             delegate: SliverChildBuilderDelegate(
                                   (ctx, i) => _ShopCard(
                                 shop: state.shops[i],
@@ -317,7 +321,7 @@ class _ShopListPageState extends ConsumerState<ShopListPage> {
           Positioned(
             bottom: 20, right: 20,
             child: LanguageSwitcher(
-              backgroundColor: Colors.white.withOpacity(0.92),
+              backgroundColor: Colors.white.withValues(alpha:0.92),
             ),
           ),
         ],
@@ -373,12 +377,12 @@ class _ShopCardState extends State<_ShopCard> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: _hovered ? color.withOpacity(0.4) : AppColors.divider,
+            color: _hovered ? color.withValues(alpha:0.4) : AppColors.divider,
             width: 1.5,
           ),
           boxShadow: _hovered
-              ? [BoxShadow(color: color.withOpacity(0.12), blurRadius: 16, offset: const Offset(0, 4))]
-              : [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+              ? [BoxShadow(color: color.withValues(alpha:0.12), blurRadius: 16, offset: const Offset(0, 4))]
+              : [BoxShadow(color: Colors.black.withValues(alpha:0.04), blurRadius: 8, offset: const Offset(0, 2))],
         ),
         child: Material(
           color: Colors.transparent,
@@ -400,7 +404,7 @@ class _ShopCardState extends State<_ShopCard> {
                           Container(
                             width: 36, height: 36,
                             decoration: BoxDecoration(
-                              color: color.withOpacity(0.10),
+                              color: color.withValues(alpha:0.10),
                               borderRadius: BorderRadius.circular(9),
                             ),
                             child: Icon(icon, color: color, size: 18),
@@ -425,10 +429,9 @@ class _ShopCardState extends State<_ShopCard> {
                                   ),
                                   const SizedBox(width: 3),
                                   Text(l.shopActive,
-                                      style: const TextStyle(
-                                          fontSize: 9,
-                                          color: AppColors.secondary,
-                                          fontWeight: FontWeight.w600)),
+                                      style: AppTextStyles.microBold
+                                          .copyWith(
+                                              color: AppColors.secondary)),
                                 ],
                               ),
                             ),
@@ -439,22 +442,16 @@ class _ShopCardState extends State<_ShopCard> {
                         widget.shop.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary,
-                        ),
+                        style: AppTextStyles.bodyBold,
                       ),
                       const SizedBox(height: 3),
                       Row(
                         children: [
                           Text(_countryFlag(widget.shop.country),
-                              style: const TextStyle(fontSize: 11)),
+                              style: AppTextStyles.caption),
                           const SizedBox(width: 4),
                           Text(widget.shop.currency,
-                              style: const TextStyle(
-                                  fontSize: 10,
-                                  color: AppColors.textHint,
+                              style: AppTextStyles.micro.copyWith(
                                   fontWeight: FontWeight.w500)),
                           const Spacer(),
                           if (widget.shop.todaySales != null)
@@ -462,10 +459,8 @@ class _ShopCardState extends State<_ShopCard> {
                               child: Text(
                                 '${widget.shop.todaySales!.toStringAsFixed(0)} ${widget.shop.currency}',
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w600,
-                                    color: color),
+                                style: AppTextStyles.microBold
+                                    .copyWith(color: color),
                               ),
                             ),
                         ],
@@ -478,7 +473,7 @@ class _ShopCardState extends State<_ShopCard> {
                   Positioned.fill(
                     child: Container(
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.75),
+                        color: Colors.white.withValues(alpha:0.75),
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: const Center(
@@ -553,7 +548,7 @@ class _EmptyOrLoadingStateState extends State<_EmptyOrLoadingState> {
             CircularProgressIndicator(),
             SizedBox(height: 16),
             Text('Chargement de vos boutiques…',
-                style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                style: AppTextStyles.bodySecondary),
           ],
         ),
       );
@@ -600,11 +595,12 @@ class _NewShopBtnState extends State<_NewShopBtn> {
               const SizedBox(width: 6),
               Text(
                 'Nouvelle boutique',
-                style: TextStyle(
-                  fontSize: widget.large ? 14 : 12,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
+                style: (widget.large
+                        ? AppTextStyles.label
+                        : AppTextStyles.bodySm)
+                    .copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white),
               ),
             ],
           ),
@@ -638,9 +634,9 @@ class _SubscriptionHeaderBtn extends ConsumerWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha:0.1),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: color.withOpacity(0.4)),
+            border: Border.all(color: color.withValues(alpha:0.4)),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(
@@ -652,10 +648,7 @@ class _SubscriptionHeaderBtn extends ConsumerWidget {
           const SizedBox(width: 5),
           Text(
               isExpired ? 'Renouveler' : "S'abonner",
-              style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: color),
+              style: AppTextStyles.captionBold.copyWith(color: color),
         ),
         ]),
     ),
@@ -707,15 +700,15 @@ class _PlanStatusCard extends ConsumerWidget {
         return Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.06),
+            color: color.withValues(alpha:0.06),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withOpacity(0.25)),
+            border: Border.all(color: color.withValues(alpha:0.25)),
           ),
           child: Row(children: [
             Container(
               width: 38, height: 38,
               decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
+                  color: color.withValues(alpha:0.12),
                   shape: BoxShape.circle),
               child: Icon(icon, size: 18, color: color),
             ),
@@ -724,14 +717,10 @@ class _PlanStatusCard extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title,
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: color)),
+                      style: AppTextStyles.bodyBold.copyWith(color: color)),
                   Text(subtitle,
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: color.withOpacity(0.8))),
+                      style: AppTextStyles.caption.copyWith(
+                          color: color.withValues(alpha:0.8))),
                 ])),
             const SizedBox(width: 8),
             GestureDetector(
@@ -744,10 +733,8 @@ class _PlanStatusCard extends ConsumerWidget {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(btnLabel,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white)),
+                    style: AppTextStyles.captionBold
+                        .copyWith(color: Colors.white)),
               ),
             ),
           ]),
@@ -779,7 +766,7 @@ class _SuperAdminUsersViewState extends State<_SuperAdminUsersView> {
     try {
       final rows = await Supabase.instance.client
           .from('profiles')
-          .select('id, name, email, prof_status, is_super_admin, created_at, subscriptions(sub_status, expires_at, plans(label))')
+          .select('id, name, email, prof_status, is_super_admin, created_at, subscriptions(sub_status, expires_at, plans!subscriptions_plan_id_fkey(label))')
           .order('created_at', ascending: false)
           .limit(20);
       final list = List<Map<String, dynamic>>.from(rows as List);
@@ -839,14 +826,13 @@ class _SuperAdminUsersViewState extends State<_SuperAdminUsersView> {
                 color: const Color(0xFF534AB7),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.admin_panel_settings_rounded,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.admin_panel_settings_rounded,
                     size: 14, color: Colors.white),
-                SizedBox(width: 5),
+                const SizedBox(width: 5),
                 Text('Admin',
-                    style: TextStyle(fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white)),
+                    style: AppTextStyles.bodySmBold
+                        .copyWith(color: Colors.white)),
               ]),
             ),
           ),
@@ -930,9 +916,7 @@ class _UserTile extends StatelessWidget {
           children: [
             Row(children: [
               Flexible(child: Text(name,
-                  style: const TextStyle(fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary))),
+                  style: AppTextStyles.bodyBold)),
               if (isAdmin) ...[
                 const SizedBox(width: 5),
                 Container(
@@ -940,16 +924,13 @@ class _UserTile extends StatelessWidget {
                   decoration: BoxDecoration(
                       color: const Color(0xFFEEEDFE),
                       borderRadius: BorderRadius.circular(4)),
-                  child: const Text('SA',
-                      style: TextStyle(fontSize: 8,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF534AB7))),
+                  child: Text('SA',
+                      style: AppTextStyles.microBold
+                          .copyWith(color: const Color(0xFF534AB7))),
                 ),
               ],
             ]),
-            Text(email,
-                style: const TextStyle(fontSize: 11,
-                    color: AppColors.textHint)),
+            Text(email, style: AppTextStyles.captionHint),
           ],
         )),
 
@@ -965,20 +946,17 @@ class _UserTile extends StatelessWidget {
                 borderRadius: BorderRadius.circular(5),
               ),
               child: Text(planLabel,
-                  style: TextStyle(
-                      fontSize: 10, fontWeight: FontWeight.w600,
+                  style: AppTextStyles.microBold.copyWith(
                       color: isActive
                           ? const Color(0xFF534AB7)
                           : AppColors.textHint)),
             )
           else
-            const Text('Sans plan',
-                style: TextStyle(fontSize: 10, color: AppColors.textHint)),
+            const Text('Sans plan', style: AppTextStyles.micro),
           if (isBlocked)
-            const Text('Bloqué',
-                style: TextStyle(fontSize: 10,
-                    color: AppColors.error,
-                    fontWeight: FontWeight.w600)),
+            Text('Bloqué',
+                style: AppTextStyles.microBold
+                    .copyWith(color: AppColors.error)),
         ]),
       ]),
     );
@@ -995,16 +973,14 @@ class _StatPill extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
     decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha:0.1),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.2))),
+        border: Border.all(color: color.withValues(alpha:0.2))),
     child: RichText(text: TextSpan(children: [
       TextSpan(text: value,
-          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-              color: color)),
+          style: AppTextStyles.bodyBold.copyWith(color: color)),
       TextSpan(text: '  $label',
-          style: const TextStyle(fontSize: 10,
-              color: AppColors.textSecondary)),
+          style: AppTextStyles.microSecondary),
     ])),
   );
 }

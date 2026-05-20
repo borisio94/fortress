@@ -18,15 +18,10 @@ class _StepAccount extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Créez votre compte',
-              style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary)),
+          Text('Créez votre compte', style: AppTextStyles.display),
           const SizedBox(height: 4),
           Text('Vos identifiants pour vous connecter à Fortress.',
-              style: TextStyle(
-                  fontSize: 12, color: AppColors.textSecondary)),
+              style: AppTextStyles.bodySmSecondary),
           const SizedBox(height: 20),
           NameField(
             controller: state._namCtrl,

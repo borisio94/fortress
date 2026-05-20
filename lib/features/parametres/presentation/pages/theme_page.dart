@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/theme_palette.dart';
+import '../../../../core/theme/theme_mode_provider.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
+import '../../../caisse/presentation/widgets/empty_cart_dashboard.dart';
 
 class ThemePage extends ConsumerWidget {
   final String? shopId;
@@ -34,11 +38,13 @@ class ThemePage extends ConsumerWidget {
             children: [
               _Header(palette: current, label: current.label(isFr)),
               const SizedBox(height: 18),
+              _ModeSelector(primary: current.primary, isFr: isFr),
+              const SizedBox(height: 18),
               Row(children: [
                 Container(
                   width: 28, height: 28,
                   decoration: BoxDecoration(
-                    color: current.primary.withOpacity(0.12),
+                    color: current.primary.withValues(alpha:0.12),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(Icons.palette_outlined,
@@ -50,14 +56,9 @@ class ThemePage extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(l.paramThemeSubtitle,
-                          style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF0F172A))),
+                          style: AppTextStyles.bodyBold),
                       Text(l.paramThemeHint,
-                          style: const TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF6B7280))),
+                          style: AppTextStyles.caption),
                     ],
                   ),
                 ),
@@ -88,10 +89,72 @@ class ThemePage extends ConsumerWidget {
                   );
                 },
               ),
+              const SizedBox(height: 24),
+              const _EmptyDashboardToggle(),
             ],
           );
         },
       ),
+    );
+  }
+}
+
+// ─── Toggle « Tableau de bord dans le panier vide » ────────────────────────
+//
+// Persisté dans la box Hive globale `settings_box` via les helpers exposés
+// par `empty_cart_dashboard.dart`. Pas de provider Riverpod — on lit/écrit
+// directement, le rebuild du panier prend le relais à la prochaine entrée
+// dans la caisse.
+class _EmptyDashboardToggle extends StatefulWidget {
+  const _EmptyDashboardToggle();
+  @override
+  State<_EmptyDashboardToggle> createState() => _EmptyDashboardToggleState();
+}
+
+class _EmptyDashboardToggleState extends State<_EmptyDashboardToggle> {
+  late bool _enabled = isEmptyCartDashboardEnabled();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs    = theme.colorScheme;
+    final sem   = theme.semantic;
+    final l     = context.l10n;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: sem.borderSubtle),
+      ),
+      child: Row(children: [
+        Container(
+          width: 28, height: 28,
+          decoration: BoxDecoration(
+            color: cs.primary.withValues(alpha:0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(Icons.dashboard_customize_outlined,
+              size: 16, color: cs.primary),
+        ),
+        const SizedBox(width: 10),
+        Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+          Text(l.settingsEmptyDashboardToggle,
+              style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
+          Text(l.settingsEmptyDashboardHint,
+              style: AppTextStyles.caption.copyWith(
+                  color: cs.onSurface.withValues(alpha: 0.6))),
+        ])),
+        Switch(
+          value: _enabled,
+          onChanged: (v) async {
+            await setEmptyCartDashboardEnabled(v);
+            if (mounted) setState(() => _enabled = v);
+          },
+        ),
+      ]),
     );
   }
 }
@@ -116,7 +179,7 @@ class _Header extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: palette.primary.withOpacity(0.25),
+            color: palette.primary.withValues(alpha:0.25),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -127,10 +190,10 @@ class _Header extends StatelessWidget {
           Container(
             width: 56, height: 56,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
+              color: Colors.white.withValues(alpha:0.2),
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                  color: Colors.white.withOpacity(0.35), width: 1.5),
+                  color: Colors.white.withValues(alpha:0.35), width: 1.5),
             ),
             child: const Icon(Icons.color_lens_rounded,
                 color: Colors.white, size: 26),
@@ -141,19 +204,14 @@ class _Header extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Thème actif',
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white.withOpacity(0.85),
+                    style: AppTextStyles.captionBold.copyWith(
+                        color: Colors.white.withValues(alpha:0.85),
                         letterSpacing: 0.5)),
                 const SizedBox(height: 2),
                 Text(label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white)),
+                    style: AppTextStyles.title.copyWith(color: Colors.white)),
                 const SizedBox(height: 8),
                 Row(children: [
                   _MiniDot(palette.primary),
@@ -225,14 +283,14 @@ class _PaletteCard extends StatelessWidget {
             boxShadow: selected
                 ? [
                     BoxShadow(
-                      color: palette.primary.withOpacity(0.18),
+                      color: palette.primary.withValues(alpha:0.18),
                       blurRadius: 14,
                       offset: const Offset(0, 6),
                     ),
                   ]
                 : [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.03),
+                      color: Colors.black.withValues(alpha:0.03),
                       blurRadius: 6,
                       offset: const Offset(0, 2),
                     ),
@@ -261,9 +319,7 @@ class _PaletteCard extends StatelessWidget {
                         label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
+                        style: AppTextStyles.bodyBold.copyWith(
                           color: selected
                               ? palette.primary
                               : const Color(0xFF0F172A),
@@ -342,7 +398,7 @@ class _PaletteMockup extends StatelessWidget {
                 Container(
                   width: 14, height: 14,
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.3),
+                    color: Colors.white.withValues(alpha:0.3),
                     borderRadius: BorderRadius.circular(3),
                   ),
                 ),
@@ -351,7 +407,7 @@ class _PaletteMockup extends StatelessWidget {
                   child: Container(
                     height: 6,
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.5),
+                      color: Colors.white.withValues(alpha:0.5),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -373,7 +429,7 @@ class _PaletteMockup extends StatelessWidget {
                 Container(
                   width: 16, height: 16,
                   decoration: BoxDecoration(
-                    color: palette.primary.withOpacity(0.15),
+                    color: palette.primary.withValues(alpha:0.15),
                     borderRadius: BorderRadius.circular(3),
                   ),
                   child: Icon(Icons.bolt_rounded,
@@ -411,12 +467,144 @@ class _PaletteMockup extends StatelessWidget {
             child: Container(
               width: 28, height: 4,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.85),
+                color: Colors.white.withValues(alpha:0.85),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Sélecteur de mode (Clair / Sombre / Système) ───────────────────────────
+
+class _ModeSelector extends ConsumerWidget {
+  final Color primary;
+  final bool isFr;
+  const _ModeSelector({required this.primary, required this.isFr});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(themeModeProvider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Container(
+            width: 28, height: 28,
+            decoration: BoxDecoration(
+              color: primary.withValues(alpha:0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(Icons.brightness_6_rounded, size: 16, color: primary),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(isFr ? 'Apparence' : 'Appearance',
+                    style: AppTextStyles.bodyBold),
+                Text(
+                    isFr
+                        ? 'Mode clair, sombre ou suivre le système.'
+                        : 'Light, dark or follow system.',
+                    style: AppTextStyles.caption),
+              ],
+            ),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(
+              child: _ModeCard(
+                  icon: Icons.light_mode_rounded,
+                  label: isFr ? 'Clair' : 'Light',
+                  selected: mode == ThemeMode.light,
+                  primary: primary,
+                  onTap: () => ref
+                      .read(themeModeProvider.notifier)
+                      .setMode(ThemeMode.light))),
+          const SizedBox(width: 8),
+          Expanded(
+              child: _ModeCard(
+                  icon: Icons.dark_mode_rounded,
+                  label: isFr ? 'Sombre' : 'Dark',
+                  selected: mode == ThemeMode.dark,
+                  primary: primary,
+                  onTap: () => ref
+                      .read(themeModeProvider.notifier)
+                      .setMode(ThemeMode.dark))),
+          const SizedBox(width: 8),
+          Expanded(
+              child: _ModeCard(
+                  icon: Icons.brightness_auto_rounded,
+                  label: isFr ? 'Système' : 'System',
+                  selected: mode == ThemeMode.system,
+                  primary: primary,
+                  onTap: () => ref
+                      .read(themeModeProvider.notifier)
+                      .setMode(ThemeMode.system))),
+        ]),
+      ],
+    );
+  }
+}
+
+class _ModeCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final Color primary;
+  final VoidCallback onTap;
+  const _ModeCard({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.primary,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+          decoration: BoxDecoration(
+            color: selected ? primary.withValues(alpha:0.08) : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? primary : const Color(0xFFE5E7EB),
+              width: selected ? 1.5 : 1,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon,
+                  size: 22,
+                  color: selected ? primary : const Color(0xFF6B7280)),
+              const SizedBox(height: 6),
+              Text(label,
+                  style: AppTextStyles.bodySm.copyWith(
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                    color: selected ? primary : const Color(0xFF374151),
+                  )),
+            ],
+          ),
+        ),
       ),
     );
   }

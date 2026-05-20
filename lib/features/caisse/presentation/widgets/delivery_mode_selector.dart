@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../domain/entities/sale.dart';
 import '../../../../features/inventaire/domain/entities/stock_location.dart';
 import '../bloc/caisse_bloc.dart';
@@ -29,10 +30,10 @@ class DeliveryModeSelector extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Mode de livraison',
-                style: TextStyle(fontSize: 14,
+            Text('Mode de livraison',
+                style: AppTextStyles.label.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF0F172A))),
+                    color: const Color(0xFF0F172A))),
             const SizedBox(height: 12),
             _ModeTile(
               icon: Icons.store_rounded,
@@ -94,7 +95,7 @@ class _ModeTile extends StatelessWidget {
       duration: const Duration(milliseconds: 150),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: selected ? color.withOpacity(0.08) : Colors.white,
+        color: selected ? color.withValues(alpha:0.08) : Colors.white,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: selected ? color : const Color(0xFFE5E7EB),
@@ -105,7 +106,7 @@ class _ModeTile extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(7),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.10),
+            color: color.withValues(alpha:0.10),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(icon, size: 16, color: color),
@@ -116,13 +117,12 @@ class _ModeTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(label,
-                  style: TextStyle(fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                  style: AppTextStyles.bodyBold.copyWith(
                       color: selected ? color : const Color(0xFF0F172A))),
               const SizedBox(height: 2),
               Text(subtitle,
-                  style: const TextStyle(fontSize: 11,
-                      color: Color(0xFF9CA3AF))),
+                  style: AppTextStyles.captionHint
+                      .copyWith(color: const Color(0xFF9CA3AF))),
             ],
           ),
         ),
@@ -169,10 +169,11 @@ class _PersonNameFieldState extends State<_PersonNameField> {
     padding: const EdgeInsets.only(left: 4),
     child: TextField(
       controller: _ctrl,
-      style: const TextStyle(fontSize: 13),
+      style: AppTextStyles.body,
       decoration: InputDecoration(
         hintText: 'Nom du livreur (optionnel)',
-        hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
+        hintStyle: AppTextStyles.bodySm
+            .copyWith(color: const Color(0xFFBBBBBB)),
         prefixIcon: const Icon(Icons.person_outline, size: 15,
             color: Color(0xFFAAAAAA)),
         filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
@@ -264,8 +265,8 @@ class _PartnerSectionState extends State<_PartnerSection> {
                     child: Text(p.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13,
-                            color: Color(0xFF0F172A))),
+                        style: AppTextStyles.body
+                            .copyWith(color: const Color(0xFF0F172A))),
                   ),
                 ]),
               )).toList(),

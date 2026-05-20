@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/database/app_database.dart';
@@ -101,7 +102,7 @@ class _ClientsPageState extends State<ClientsPage> {
             Expanded(
               child: TextField(
                 onChanged: (v) => setState(() => _query = v),
-                style: const TextStyle(fontSize: 14),
+                style: AppTextStyles.input,
                 decoration: InputDecoration(
                   hintText: l.crmSearch,
                   prefixIcon: const Icon(Icons.search_rounded,
@@ -175,9 +176,7 @@ class _ClientsPageState extends State<ClientsPage> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: Row(children: [
               Text('${filtered.length} client${filtered.length > 1 ? 's' : ''}',
-                  style: const TextStyle(fontSize: 11,
-                      color: AppColors.textHint,
-                      fontWeight: FontWeight.w500)),
+                  style: AppTextStyles.captionHint),
             ]),
           ),
 
@@ -346,11 +345,9 @@ class _Kpi extends StatelessWidget {
       const SizedBox(width: 8),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(value, style: TextStyle(fontSize: 13,
-                fontWeight: FontWeight.w800, color: color),
+            Text(value, style: AppTextStyles.bodyBold.copyWith(color: color),
                 overflow: TextOverflow.ellipsis, maxLines: 1),
-            Text(label, style: const TextStyle(fontSize: 10,
-                color: AppColors.textHint)),
+            Text(label, style: AppTextStyles.micro),
           ])),
     ]),
   );
@@ -375,8 +372,7 @@ class _FilterChip extends StatelessWidget {
             color: selected ? AppColors.primary : AppColors.divider),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Text(label, style: TextStyle(fontSize: 11,
-            fontWeight: FontWeight.w600,
+        Text(label, style: AppTextStyles.captionBold.copyWith(
             color: selected ? Colors.white : AppColors.textSecondary)),
         const SizedBox(width: 5),
         Container(
@@ -387,8 +383,7 @@ class _FilterChip extends StatelessWidget {
                 : AppColors.inputFill,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Text('$count', style: TextStyle(fontSize: 9,
-              fontWeight: FontWeight.w700,
+          child: Text('$count', style: AppTextStyles.microBold.copyWith(
               color: selected ? Colors.white : AppColors.textSecondary)),
         ),
       ]),
@@ -433,8 +428,7 @@ class _ClientCard extends StatelessWidget {
                 decoration: BoxDecoration(
                     color: AppColors.primarySurface, shape: BoxShape.circle),
                 child: Center(child: Text(initial,
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800,
-                        color: color)))),
+                    style: AppTextStyles.bodyBold.copyWith(color: color)))),
             if (client.tag == ClientTag.vip)
               Positioned(right: -2, bottom: -2,
                   child: Container(width: 12, height: 12,
@@ -454,8 +448,7 @@ class _ClientCard extends StatelessWidget {
                 Row(children: [
                   Expanded(child: Text(client.name,
                       maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                      style: AppTextStyles.captionBold.copyWith(
                           color: AppColors.textPrimary))),
                   if (client.tag != ClientTag.none)
                     _TagBadge(client.tag),
@@ -464,8 +457,7 @@ class _ClientCard extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(client.phone!,
                       maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 9, color: AppColors.textSecondary)),
+                      style: AppTextStyles.microSecondary),
                 ],
                 const SizedBox(height: 5),
                 Wrap(
@@ -484,11 +476,9 @@ class _ClientCard extends StatelessWidget {
           // Montant + actions
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text(_fmtAmount(client.totalSpent),
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800,
-                    color: color)),
+                style: AppTextStyles.bodyBold.copyWith(color: color)),
             Text(CurrencyFormatter.currentSymbol,
-                style: const TextStyle(fontSize: 9,
-                    color: AppColors.textHint)),
+                style: AppTextStyles.micro),
             const SizedBox(height: 6),
             Row(mainAxisSize: MainAxisSize.min, children: [
               GestureDetector(
@@ -573,8 +563,7 @@ class _TagBadge extends StatelessWidget {
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(_icon(), size: 10, color: color),
         const SizedBox(width: 3),
-        Text(tag.label, style: TextStyle(fontSize: 9,
-            fontWeight: FontWeight.w700, color: color)),
+        Text(tag.label, style: AppTextStyles.microBold.copyWith(color: color)),
       ]),
     );
   }
@@ -588,7 +577,7 @@ class _Stat extends StatelessWidget {
       children: [
         Icon(icon, size: 11, color: AppColors.textHint),
         const SizedBox(width: 3),
-        Text(label, style: const TextStyle(fontSize: 10, color: AppColors.textHint)),
+        Text(label, style: AppTextStyles.micro),
       ]);
 }
 
@@ -634,22 +623,20 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 12),
           Text(title,
               maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary)),
+              style: AppTextStyles.bodySmBold),
           const SizedBox(height: 4),
           Text(desc,
               textAlign: TextAlign.center,
               maxLines: 3, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 10,
-                  color: AppColors.textSecondary)),
+              style: AppTextStyles.microSecondary),
           if (showCta) ...[
             const SizedBox(height: 14),
             FilledButton.icon(
               onPressed: onAdd,
               icon: const Icon(Icons.person_add_rounded, size: 16),
-              label: const Text('Ajouter un client',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              label: Text('Ajouter un client',
+                  style: AppTextStyles.bodySmBold.copyWith(
+                      color: Colors.white)),
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
@@ -1088,9 +1075,7 @@ class ClientFormSheetState extends State<ClientFormSheet> {
                 const Padding(
                   padding: EdgeInsets.fromLTRB(20, 14, 20, 0),
                   child: Text('Cette action est irréversible.',
-                      style: TextStyle(
-                          fontSize: 13,
-                          color: AppColors.textSecondary)),
+                      style: AppTextStyles.bodySecondary),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
@@ -1141,8 +1126,7 @@ class _FieldError extends StatelessWidget {
     child: Padding(
       padding: const EdgeInsets.only(top: 3, left: 2),
       child: Text(message,
-          style: const TextStyle(
-              fontSize: 10, color: AppColors.error)),
+          style: AppTextStyles.micro.copyWith(color: AppColors.error)),
     ),
   );
 }
@@ -1165,8 +1149,7 @@ class _OptionalFieldToggle extends StatelessWidget {
         Icon(icon, size: 16, color: AppColors.primary),
         const SizedBox(width: 8),
         Text(label,
-            style: TextStyle(fontSize: 12,
-                fontWeight: FontWeight.w600,
+            style: AppTextStyles.bodySmBold.copyWith(
                 color: AppColors.primary)),
         const Spacer(),
         Icon(Icons.add_rounded, size: 16, color: AppColors.primary),

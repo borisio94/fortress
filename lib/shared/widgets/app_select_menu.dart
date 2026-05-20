@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
+import 'form_sheet.dart';
 
 // ─── Widget bouton déclencheur ────────────────────────────────────────────────
 
@@ -48,15 +50,14 @@ class AppSelectField extends StatelessWidget {
           if (prefixIcon != null) ...[
             Icon(prefixIcon, size: 15,
                 color: hasValue
-                    ? AppColors.primary.withOpacity(0.7)
+                    ? AppColors.primary.withValues(alpha:0.7)
                     : const Color(0xFFAAAAAA)),
             const SizedBox(width: 8),
           ],
           Expanded(
             child: Text(
               hasValue ? value! : placeholder,
-              style: TextStyle(
-                fontSize: 13,
+              style: AppTextStyles.body.copyWith(
                 color: hasValue
                     ? const Color(0xFF1A1D2E)
                     : const Color(0xFFBBBBBB),
@@ -103,8 +104,15 @@ class AppSelectMenu {
     final box =
     anchorKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return null;
-    final pos = box.localToGlobal(Offset.zero);
+    // L'Overlay sert de système de coordonnées pour `showMenu` : la
+    // `RelativeRect` est interprétée comme des distances aux 4 bords de
+    // l'overlay, PAS comme des positions absolues. Sans cette conversion,
+    // le menu peut s'afficher loin du widget cliqué.
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final pos = box.localToGlobal(Offset.zero, ancestor: overlay);
     final size = box.size;
+    final overlaySize = overlay.size;
 
     return showMenu<String>(
       context: context,
@@ -114,8 +122,8 @@ class AppSelectMenu {
       position: RelativeRect.fromLTRB(
         pos.dx,
         pos.dy + size.height + 4,
-        pos.dx + size.width,
-        0,
+        overlaySize.width - pos.dx - size.width,
+        overlaySize.height - pos.dy - size.height,
       ),
       constraints: BoxConstraints(
         minWidth: size.width.clamp(minWidth, 320),
@@ -194,7 +202,7 @@ class _MenuContainerState extends State<_MenuContainer> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.10),
+            color: Colors.black.withValues(alpha:0.10),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
@@ -214,8 +222,7 @@ class _MenuContainerState extends State<_MenuContainer> {
                       size: 15, color: AppColors.textSecondary),
                   const SizedBox(width: 8),
                   Text(context.l10n.invNoResult,
-                      style: TextStyle(
-                          fontSize: 12, color: AppColors.textSecondary)),
+                      style: AppTextStyles.bodySmSecondary),
                 ]),
               )
             else
@@ -228,7 +235,7 @@ class _MenuContainerState extends State<_MenuContainer> {
                 // Alternance de fond : pair = blanc, impair = très léger violet
                 final bg = idx.isEven
                     ? Colors.white
-                    : AppColors.primarySurface.withOpacity(0.5);
+                    : AppColors.primarySurface.withValues(alpha:0.5);
                 return _MenuItem(
                   label: item,
                   isSelected: isSelected,
@@ -286,8 +293,7 @@ class _MenuContainerState extends State<_MenuContainer> {
                     ),
                     const SizedBox(width: 10),
                     Text(widget.addLabel ?? 'Ajouter',
-                        style: TextStyle(
-                            fontSize: 12,
+                        style: AppTextStyles.bodySm.copyWith(
                             color: AppColors.primary,
                             fontWeight: FontWeight.w600)),
                   ]),
@@ -356,8 +362,7 @@ class _MenuItem extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              style: TextStyle(
-                fontSize: 13,
+              style: AppTextStyles.body.copyWith(
                 fontWeight: isSelected
                     ? FontWeight.w600 : FontWeight.w400,
                 color: isSelected
@@ -467,55 +472,94 @@ class _AppSelectWidgetState extends State<AppSelectWidget> {
     }
   }
 
+  /// Bottom sheet de renommage. Refonte UX : remplace l'AlertDialog par
+  /// un FormSheet verrouillé (X intégré, pas de tap-outside).
   Future<void> _showRenameDialog(String currentName) async {
     final ctrl = TextEditingController(text: currentName);
-    final newName = await showDialog<String>(
+    final newName = await showFormSheet<String>(
       context: context,
-      builder: (dc) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-        contentPadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-        actionsPadding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-        title: const Text('Renommer',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-        content: TextFormField(
-          controller: ctrl, autofocus: true,
-          style: const TextStyle(fontSize: 13, color: Color(0xFF1A1D2E)),
-          decoration: InputDecoration(
-            hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 12),
-            filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dc).pop(null),
-            child: const Text('Annuler',
-                style: TextStyle(color: Color(0xFF6B7280))),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary, foregroundColor: Colors.white,
-              elevation: 0, padding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 9),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8)),
+      builder: (dc) {
+        final mq = MediaQuery.of(dc);
+        return Padding(
+          padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FormSheetHeader(
+                  title: 'Renommer',
+                  icon: Icons.edit_rounded,
+                ),
+                const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                  child: TextFormField(
+                    controller: ctrl,
+                    autofocus: true,
+                    style: AppTextStyles.body.copyWith(
+                        color: const Color(0xFF1A1D2E)),
+                    decoration: InputDecoration(
+                      hintStyle: AppTextStyles.bodySm.copyWith(
+                          color: const Color(0xFFBBBBBB)),
+                      filled: true,
+                      fillColor: const Color(0xFFF9FAFB),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 11),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                              color: Color(0xFFE5E7EB))),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                              color: Color(0xFFE5E7EB))),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                              color: AppColors.primary, width: 1.5)),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                  child: Row(children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(dc).pop(null),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 44),
+                          foregroundColor: const Color(0xFF6B7280),
+                        ),
+                        child: const Text('Annuler'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          minimumSize: const Size(0, 44),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () {
+                          final v = ctrl.text.trim();
+                          if (v.isNotEmpty) Navigator.of(dc).pop(v);
+                        },
+                        child: const Text('Renommer'),
+                      ),
+                    ),
+                  ]),
+                ),
+              ],
             ),
-            onPressed: () {
-              final v = ctrl.text.trim();
-              if (v.isNotEmpty) Navigator.of(dc).pop(v);
-            },
-            child: const Text('Renommer'),
           ),
-        ],
-      ),
+        );
+      },
     );
     if (newName != null && newName != currentName && mounted) {
       await widget.onRename!(currentName, newName);
@@ -528,9 +572,8 @@ class _AppSelectWidgetState extends State<AppSelectWidget> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         RichText(text: TextSpan(
-          style: const TextStyle(
-              fontSize: 11, fontWeight: FontWeight.w500,
-              color: Color(0xFF6B7280)),
+          style: AppTextStyles.caption.copyWith(
+              color: const Color(0xFF6B7280)),
           children: [
             TextSpan(text: widget.label),
             if (widget.required)
@@ -599,15 +642,13 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
           contentPadding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
           actionsPadding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
           title: Text(widget.label,
-              style: const TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w700)),
+              style: AppTextStyles.label.copyWith(
+                  fontWeight: FontWeight.w700)),
           content: widget.items.isEmpty
               ? Padding(
             padding: const EdgeInsets.all(16),
             child: Text(context.l10n.invNoResult,
-                style: TextStyle(
-                    fontSize: 13,
-                    color: AppColors.textSecondary)),
+                style: AppTextStyles.bodySecondary),
           )
               : SizedBox(
             width: double.maxFinite,
@@ -619,7 +660,7 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
                 final sel = temp.contains(item);
                 final bg = i.isEven
                     ? Colors.white
-                    : AppColors.primarySurface.withOpacity(0.4);
+                    : AppColors.primarySurface.withValues(alpha:0.4);
                 return InkWell(
                   onTap: () => setSt(() {
                     if (sel) temp.remove(item);
@@ -652,8 +693,7 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
                       ),
                       const SizedBox(width: 10),
                       Text(item,
-                          style: TextStyle(
-                              fontSize: 13,
+                          style: AppTextStyles.body.copyWith(
                               fontWeight: sel
                                   ? FontWeight.w600
                                   : FontWeight.w400,
@@ -724,9 +764,7 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
             const SizedBox(width: 4),
           ],
           Text(display,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
+              style: AppTextStyles.caption.copyWith(
                   color: count > 0
                       ? AppColors.primary : const Color(0xFF374151))),
           if (count > 1) ...[
@@ -738,8 +776,7 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
                   color: AppColors.primary,
                   borderRadius: BorderRadius.circular(10)),
               child: Text('$count',
-                  style: const TextStyle(
-                      fontSize: 9,
+                  style: AppTextStyles.micro.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w700)),
             ),

@@ -31,12 +31,16 @@ class AppPermissions {
   /// boutique courante. Le owner a TOUS les droits par définition, peu
   /// importe ce que stocke `shop_memberships.permissions`.
   final bool                     isShopOwner;
+  /// True si l'utilisateur possède STRICTEMENT plus d'une boutique. Sert
+  /// à n'exposer le « Hub central » qu'en contexte multi-boutique.
+  final bool                     isMultiStore;
 
   const AppPermissions({
     required this.plan,
     this.shopRole,
     this.customPermissions,
     this.isShopOwner = false,
+    this.isMultiStore = false,
   });
 
   /// Évaluation d'une permission combinant rôle + grants + denies :
@@ -178,16 +182,22 @@ class AppPermissions {
 
   // ── Ventes spéciales (hotfix_024) ────────────────────────────────────────
   /// Annuler ou rembourser une vente déjà encaissée.
-  bool get canCancelSale =>
-      _grain(EmployeePermission.salesCancel, legacy: isShopAdmin);
+  bool get canCancelSale => hasActiveSubscription
+      && _grain(EmployeePermission.salesCancel, legacy: isShopAdmin);
 
   /// Appliquer une remise hors barème sur le panier.
-  bool get canApplyDiscount =>
-      _grain(EmployeePermission.salesDiscount, legacy: isShopAdmin);
+  bool get canApplyDiscount => hasActiveSubscription
+      && _grain(EmployeePermission.salesDiscount, legacy: isShopAdmin);
+
+  /// Transférer une commande "scheduled" à un livreur via WhatsApp
+  /// (cf. hotfix_049). Vérification miroir côté serveur dans la RPC
+  /// `transfer_order_to_delivery` via `_user_has_permission`.
+  bool get canTransferDelivery => hasActiveSubscription
+      && _grain(EmployeePermission.deliveryWhatsApp, legacy: isShopAdmin);
 
   /// Inviter / créer un nouveau membre dans la boutique.
-  bool get canInviteMembers =>
-      _grain(EmployeePermission.membersInvite, legacy: isShopAdmin);
+  bool get canInviteMembers => hasActiveSubscription
+      && _grain(EmployeePermission.membersInvite, legacy: isShopAdmin);
 
   // ── Permissions OWNER-ONLY (hotfix_024) ─────────────────────────────────
   /// Supprimer la boutique. Garde-fou : isOwnerOnly empêche l'admin de

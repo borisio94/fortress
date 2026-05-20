@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../storage/hive_boxes.dart';
+import 'external_launcher.dart';
 import 'whatsapp/meta_direct_provider.dart';
 import 'whatsapp/twilio_provider.dart';
 
@@ -81,14 +81,17 @@ class WameProvider implements IWhatsappProvider {
 
   Future<bool> _open(String phone, String message) async {
     final p = _normalize(phone);
-    if (p.isEmpty) return false;
-    final uri = Uri.parse(
-        'https://wa.me/$p?text=${Uri.encodeComponent(message)}');
-    try {
-      return await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (_) {
+    if (p.isEmpty) {
+      debugPrint('[WhatsApp] _open: numéro vide');
       return false;
     }
+    final url = 'https://wa.me/$p?text=${Uri.encodeComponent(message)}';
+    // `openExternal` gère :
+    //  - Web : window.open synchrone PUIS fallback ancre programmatique
+    //    (bypass popup blockers même après quelques awaits).
+    //  - Mobile / desktop natif : url_launcher externalApplication (ouvre
+    //    l'app WhatsApp installée si dispo, sinon le navigateur).
+    return openExternal(url);
   }
 
   @override
@@ -120,13 +123,8 @@ class WameProvider implements IWhatsappProvider {
   /// l'utilisateur, qui choisit où envoyer le message pré-rempli.
   @override
   Future<bool> share(String message) async {
-    final uri = Uri.parse(
-        'https://wa.me/?text=${Uri.encodeComponent(message)}');
-    try {
-      return await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (_) {
-      return false;
-    }
+    final url = 'https://wa.me/?text=${Uri.encodeComponent(message)}';
+    return openExternal(url);
   }
 }
 

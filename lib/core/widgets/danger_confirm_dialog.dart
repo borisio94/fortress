@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../shared/widgets/adaptive_form_frame.dart';
 import '../i18n/app_localizations.dart';
 import '../theme/app_theme.dart';
 
@@ -27,8 +28,10 @@ class DangerConfirmDialog extends StatefulWidget {
     required this.onConfirmed,
   });
 
-  /// Helper pour afficher le dialog. Renvoie `true` si confirmé,
-  /// `false` ou `null` sinon.
+  /// Helper pour afficher le sheet. Renvoie `true` si confirmé,
+  /// `false` ou `null` sinon. (Anciennement un AlertDialog ; converti en
+  /// bottom sheet verrouillé pour cohérence UX — bouton X intégré, pas de
+  /// tap-outside, expérience identique sur mobile et desktop.)
   static Future<bool?> show({
     required BuildContext context,
     required String title,
@@ -36,9 +39,8 @@ class DangerConfirmDialog extends StatefulWidget {
     required List<String> consequences,
     required String confirmText,
     required VoidCallback onConfirmed,
-  }) => showDialog<bool>(
+  }) => showAdaptiveFormSheet<bool>(
         context: context,
-        barrierDismissible: false,
         builder: (_) => DangerConfirmDialog(
           title: title,
           description: description,
@@ -82,46 +84,18 @@ class _DangerConfirmDialogState extends State<DangerConfirmDialog> {
     final semantic = theme.semantic;
     final l10n     = AppLocalizations.of(context)!;
 
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      contentPadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-      actionsPadding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      content: SizedBox(
-        width: 360,
+    return AdaptiveFormFrame(
+      title:     widget.title,
+      icon:      Icons.warning_amber_rounded,
+      iconColor: semantic.danger,
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // ── Icône warning dans cercle ────────────────────────────
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: semantic.danger.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.warning_amber_rounded,
-                color: semantic.danger,
-                size: 24,
-              ),
-            ),
-            const SizedBox(height: 14),
-            // ── Titre ────────────────────────────────────────────────
-            Text(
-              widget.title,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-                color: scheme.onSurface,
-              ),
-            ),
-            const SizedBox(height: 8),
-            // ── Description ──────────────────────────────────────────
             Text(
               widget.description,
-              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 12,
                 color: scheme.onSurface.withValues(alpha: 0.6),
@@ -133,16 +107,12 @@ class _DangerConfirmDialogState extends State<DangerConfirmDialog> {
               _ConsequencesBanner(items: widget.consequences),
             ],
             const SizedBox(height: 14),
-            // ── Champ de saisie ──────────────────────────────────────
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                l10n.dangerConfirmTypeToConfirm(widget.confirmText),
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: scheme.onSurface.withValues(alpha: 0.75),
-                ),
+            Text(
+              l10n.dangerConfirmTypeToConfirm(widget.confirmText),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: scheme.onSurface.withValues(alpha: 0.75),
               ),
             ),
             const SizedBox(height: 6),
@@ -156,37 +126,42 @@ class _DangerConfirmDialogState extends State<DangerConfirmDialog> {
                 isDense: true,
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 20),
+            Row(children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 44),
+                  ),
+                  child: Text(l10n.dangerConfirmCancel),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _matches
+                      ? () {
+                          Navigator.of(context).pop(true);
+                          widget.onConfirmed();
+                        }
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: semantic.danger,
+                    foregroundColor: scheme.onError,
+                    disabledBackgroundColor:
+                        semantic.danger.withValues(alpha: 0.35),
+                    disabledForegroundColor:
+                        scheme.onError.withValues(alpha: 0.85),
+                    minimumSize: const Size(0, 44),
+                  ),
+                  child: Text(l10n.dangerConfirmConfirm),
+                ),
+              ),
+            ]),
           ],
         ),
       ),
-      actions: [
-        OutlinedButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size(0, 44),
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-          ),
-          child: Text(l10n.dangerConfirmCancel),
-        ),
-        ElevatedButton(
-          onPressed: _matches
-              ? () {
-                  Navigator.of(context).pop(true);
-                  widget.onConfirmed();
-                }
-              : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: semantic.danger,
-            foregroundColor: scheme.onError,
-            disabledBackgroundColor: semantic.danger.withValues(alpha: 0.35),
-            disabledForegroundColor: scheme.onError.withValues(alpha: 0.85),
-            minimumSize: const Size(0, 44),
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-          ),
-          child: Text(l10n.dangerConfirmConfirm),
-        ),
-      ],
     );
   }
 }

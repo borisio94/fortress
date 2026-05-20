@@ -7,6 +7,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/app_snack.dart';
+import '../../../../shared/widgets/form_sheet.dart';
 import '../../data/providers/pending_actions_provider.dart';
 import '../../data/services/admin_actions_service.dart';
 
@@ -57,10 +58,10 @@ class _OwnerApprovalBannerState extends ConsumerState<OwnerApprovalBanner> {
           margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           decoration: BoxDecoration(
-            color: theme.colorScheme.primary.withOpacity(0.08),
+            color: theme.colorScheme.primary.withValues(alpha:0.08),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-                color: theme.colorScheme.primary.withOpacity(0.3)),
+                color: theme.colorScheme.primary.withValues(alpha:0.3)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -143,52 +144,88 @@ class _ActionRow extends ConsumerWidget {
     // refresh : le Realtime déclenchera une nouvelle fetch
   }
 
+  // Refonte UX : dialog → bottom sheet verrouillé (cf. showFormSheet).
+  // L'obscureText reste activé pour ne jamais afficher le mot de passe owner.
   Future<void> _approve(BuildContext context, WidgetRef ref) async {
     final pwdCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showFormSheet<bool>(
       context: context,
-      builder: (dc) => AlertDialog(
-        title: const Text('Confirmation propriétaire'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-                'Pour approuver "${action.type.labelFr}", '
-                'saisissez votre mot de passe.',
-                style: AppTextStyles.body13Secondary),
-            const SizedBox(height: 12),
-            TextField(
-              controller: pwdCtrl,
-              obscureText: true,
-              autofocus: true,
-              decoration: InputDecoration(
-                hintText: 'Mot de passe',
-                filled: true,
-                fillColor: AppColors.inputFill,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: AppColors.inputBorder),
+      builder: (dc) {
+        final theme = Theme.of(dc);
+        final mq = MediaQuery.of(dc);
+        return Padding(
+          padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FormSheetHeader(
+                  title: 'Confirmation propriétaire',
+                  icon: Icons.lock_outline_rounded,
                 ),
-              ),
+                const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                          'Pour approuver "${action.type.labelFr}", '
+                          'saisissez votre mot de passe.',
+                          style: AppTextStyles.body13Secondary),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: pwdCtrl,
+                        obscureText: true,
+                        autofocus: true,
+                        decoration: InputDecoration(
+                          hintText: 'Mot de passe',
+                          filled: true,
+                          fillColor: AppColors.inputFill,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide:
+                                BorderSide(color: AppColors.inputBorder),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+                  child: Row(children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(dc, false),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 44),
+                        ),
+                        child: const Text('Annuler'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: theme.colorScheme.primary,
+                          foregroundColor: theme.colorScheme.onPrimary,
+                          minimumSize: const Size(0, 44),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () => Navigator.pop(dc, true),
+                        child: const Text('Confirmer'),
+                      ),
+                    ),
+                  ]),
+                ),
+              ],
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dc, false),
-            child: const Text('Annuler'),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              foregroundColor: Theme.of(context).colorScheme.onPrimary,
-            ),
-            onPressed: () => Navigator.pop(dc, true),
-            child: const Text('Confirmer'),
-          ),
-        ],
-      ),
+        );
+      },
     ) ?? false;
 
     if (!ok || !context.mounted) return;

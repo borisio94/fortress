@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
-import '../../../../core/storage/hive_boxes.dart';
-import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
-import '../../domain/entities/product.dart';
 import '../../../../core/services/stock_service.dart';
 import '../../../caisse/domain/entities/sale.dart';
 import '../../../caisse/data/repositories/sale_local_datasource.dart';
@@ -101,27 +98,26 @@ class _OrderReturnCard extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(order.clientName ?? 'Client anonyme',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary)),
-          Text(itemNames, style: const TextStyle(fontSize: 11,
-              color: AppColors.textHint),
+              style: AppTextStyles.bodyBold),
+          Text(itemNames, style: AppTextStyles.captionHint,
               maxLines: 1, overflow: TextOverflow.ellipsis),
           Text('${_fmtDate(order.createdAt)} · ${CurrencyFormatter.format(order.total)}',
-              style: const TextStyle(fontSize: 10, color: Color(0xFFD1D5DB))),
+              style: AppTextStyles.micro
+                  .copyWith(color: const Color(0xFFD1D5DB))),
         ])),
         GestureDetector(
           onTap: onReturn,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-                color: AppColors.warning.withOpacity(0.1),
+                color: AppColors.warning.withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(8)),
-            child: const Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.assignment_return_rounded, size: 14,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.assignment_return_rounded, size: 14,
                   color: AppColors.warning),
-              SizedBox(width: 4),
-              Text('Retour', style: TextStyle(fontSize: 11,
-                  fontWeight: FontWeight.w600, color: AppColors.warning)),
+              const SizedBox(width: 4),
+              Text('Retour', style: AppTextStyles.captionBold
+                  .copyWith(color: AppColors.warning)),
             ]),
           ),
         ),
@@ -177,7 +173,7 @@ class _ReturnSheetState extends State<_ReturnSheet> {
           child: Row(children: [
             Container(width: 34, height: 34,
                 decoration: BoxDecoration(
-                    color: AppColors.warning.withOpacity(0.1),
+                    color: AppColors.warning.withValues(alpha:0.1),
                     borderRadius: BorderRadius.circular(9)),
                 child: const Icon(Icons.assignment_return_rounded,
                     size: 17, color: AppColors.warning)),
@@ -185,9 +181,9 @@ class _ReturnSheetState extends State<_ReturnSheet> {
             Expanded(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('Retour client',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  style: AppTextStyles.subtitleBold),
               Text(widget.order.clientName ?? 'Commande ${widget.order.id}',
-                  style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                  style: AppTextStyles.bodySmSecondary),
             ])),
           ]),
         ),
@@ -209,19 +205,20 @@ class _ReturnSheetState extends State<_ReturnSheet> {
                 Row(children: [
                   Expanded(child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(ri.saleItem.productName, style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w700)),
+                    Text(ri.saleItem.productName,
+                        style: AppTextStyles.bodyBold),
                     Text('Acheté : ×${ri.saleItem.quantity} · ${CurrencyFormatter.format(ri.saleItem.subtotal)}',
-                        style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
+                        style: AppTextStyles.captionHint),
                   ])),
                   SizedBox(width: 80, child: TextField(
                     controller: ri.qtyCtrl,
                     keyboardType: TextInputType.number,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                    style: AppTextStyles.input
+                        .copyWith(fontWeight: FontWeight.w700),
                     decoration: InputDecoration(
                       labelText: 'Retour',
-                      labelStyle: const TextStyle(fontSize: 10),
+                      labelStyle: AppTextStyles.micro,
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                       filled: true, fillColor: const Color(0xFFFFF7ED),
@@ -233,7 +230,8 @@ class _ReturnSheetState extends State<_ReturnSheet> {
                 const SizedBox(height: 8),
                 // État du retour
                 Row(children: [
-                  const Text('État : ', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                  Text('État : ', style: AppTextStyles.captionHint
+                      .copyWith(color: AppColors.textSecondary)),
                   const SizedBox(width: 4),
                   _StatePill('Bon état', ri.isGoodCondition,
                       AppColors.secondary,
@@ -326,12 +324,12 @@ class _StatePill extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: active ? color.withOpacity(0.1) : const Color(0xFFF9FAFB),
+        color: active ? color.withValues(alpha:0.1) : const Color(0xFFF9FAFB),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
             color: active ? color : AppColors.divider,
             width: active ? 1.5 : 1)),
-      child: Text(label, style: TextStyle(fontSize: 11,
+      child: Text(label, style: AppTextStyles.captionHint.copyWith(
           fontWeight: active ? FontWeight.w700 : FontWeight.w500,
           color: active ? color : AppColors.textHint)),
     ),

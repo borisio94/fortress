@@ -37,15 +37,11 @@ class _StepRecap extends StatelessWidget {
           ),
           Text('Vous y êtes presque !',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary)),
+              style: AppTextStyles.display),
           const SizedBox(height: 4),
           Text('Voici ce que nous allons créer pour vous :',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontSize: 12, color: AppColors.textSecondary)),
+              style: AppTextStyles.bodySmSecondary),
           const SizedBox(height: 20),
           _RecapRow(
               icon: Icons.person_outline_rounded,
@@ -94,8 +90,8 @@ class _StepRecap extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                     child: Text(context.l10n.onlineRequiredForRegister,
-                        style: const TextStyle(
-                            fontSize: 11, color: Color(0xFF92400E)))),
+                        style: AppTextStyles.caption
+                            .copyWith(color: const Color(0xFF92400E)))),
               ]),
             ),
           ],
@@ -124,17 +120,12 @@ class _RecapRow extends StatelessWidget {
           SizedBox(
             width: 80,
             child: Text(label,
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary)),
+                style: AppTextStyles.caption
+                    .copyWith(fontWeight: FontWeight.w600)),
           ),
           Expanded(
             child: Text(value,
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary),
+                style: AppTextStyles.bodyBold,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis),
           ),
@@ -155,10 +146,8 @@ class _RecapBullet extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(text,
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
+                style: AppTextStyles.bodySm
+                    .copyWith(fontWeight: FontWeight.w600)),
           ),
         ]),
       );
@@ -173,8 +162,8 @@ class _ErrText extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.only(top: 4, left: 2),
           child: Text(message,
-              style: const TextStyle(
-                  fontSize: 10, color: Color(0xFFEF4444))),
+              style: AppTextStyles.micro
+                  .copyWith(color: const Color(0xFFEF4444))),
         ),
       );
 }

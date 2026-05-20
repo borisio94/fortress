@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../domain/entities/promo_campaign.dart';
 import '../providers/promo_campaign_provider.dart';
 
@@ -102,8 +103,7 @@ class _NotFound extends StatelessWidget {
             const SizedBox(height: 12),
             const Text('Campagne introuvable ou expirée.',
                 textAlign: TextAlign.center,
-                style:
-                    TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                style: AppTextStyles.label),
             const SizedBox(height: 18),
             OutlinedButton.icon(
               onPressed: () => context.go('/catalogue/$shopId'),

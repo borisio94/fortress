@@ -1,5 +1,4 @@
 import '../entities/shop_summary.dart';
-import '../repositories/shop_selector_repository.dart';
 
 abstract class ShopSelectorRepository {
   Future<List<ShopSummary>> getMyShops();

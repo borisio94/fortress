@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/services/external_launcher.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../widgets/landing_faq_section.dart';
 import '../widgets/landing_waitlist_section.dart';
 import '../widgets/public_footer.dart';
@@ -122,17 +123,19 @@ class _HeroSection extends StatelessWidget {
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10)),
                   ),
-                  child: const Text('Essayer 14 jours gratuit',
-                      style: TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w800)),
+                  child: Text('Essayer 14 jours gratuit',
+                      style: AppTextStyles.label.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white)),
                 ),
                 OutlinedButton.icon(
                   onPressed: _openDemo,
                   icon: const Icon(Icons.play_circle_outline_rounded,
                       size: 18),
-                  label: const Text('Voir une démo (10 min)',
-                      style: TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w700)),
+                  label: Text('Voir une démo (10 min)',
+                      style: AppTextStyles.label.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.primary)),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.primary,
                     side: BorderSide(
@@ -154,9 +157,10 @@ class _HeroSection extends StatelessWidget {
             FilledButton.tonalIcon(
               onPressed: () => context.go(RouteNames.login),
               icon: const Icon(Icons.login_rounded, size: 19),
-              label: const Text('J\'ai déjà un compte — Se connecter',
-                  style: TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w800)),
+              label: Text('J\'ai déjà un compte — Se connecter',
+                  style: AppTextStyles.label.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.primary)),
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.primary.withValues(alpha: 0.12),
                 foregroundColor: AppColors.primary,
@@ -195,8 +199,7 @@ class _HeroBullet extends StatelessWidget {
       Icon(Icons.check_circle_rounded, size: 14, color: AppColors.secondary),
       const SizedBox(width: 5),
       Text(text,
-          style: TextStyle(
-              fontSize: 12,
+          style: AppTextStyles.bodySm.copyWith(
               fontWeight: FontWeight.w600,
               color: theme.colorScheme.onSurface.withValues(alpha: 0.7))),
     ]);
@@ -311,15 +314,12 @@ class _FeatureCard extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           Text(data.title,
-              style: TextStyle(
-                  fontSize: 16,
+              style: AppTextStyles.subtitleBold.copyWith(
                   fontWeight: FontWeight.w800,
                   color: theme.colorScheme.onSurface)),
           const SizedBox(height: 6),
           Text(data.body,
-              style: TextStyle(
-                  fontSize: 13,
-                  height: 1.5,
+              style: AppTextStyles.body.copyWith(
                   color: theme.colorScheme.onSurface
                       .withValues(alpha: 0.7))),
         ],

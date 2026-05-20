@@ -7,6 +7,7 @@ import '../../domain/entities/sale.dart' show DeliveryMode;
 import '../../domain/entities/sale_item.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../features/dashboard/data/dashboard_providers.dart';
@@ -185,7 +186,7 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
         child: TextField(
           autofocus: false,
           onChanged: (v) => setState(() => _query = v),
-          style: const TextStyle(fontSize: 14),
+          style: AppTextStyles.input,
           decoration: InputDecoration(
             hintText: 'Rechercher par nom, SKU, code-barres…',
             prefixIcon: const Icon(Icons.search_rounded,
@@ -237,9 +238,8 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
         child: Row(children: [
           Text(
             '${products.length} produit${products.length > 1 ? 's' : ''}',
-            style: const TextStyle(
-                fontSize: 11, color: Color(0xFF9CA3AF),
-                fontWeight: FontWeight.w500),
+            style: AppTextStyles.caption
+                .copyWith(color: const Color(0xFF9CA3AF)),
           ),
         ]),
       ),
@@ -365,10 +365,9 @@ class _SheetHeader extends StatelessWidget {
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
         child: Row(children: [
-          const Text('Ajouter des produits',
-              style: TextStyle(
-                  fontSize: 16, fontWeight: FontWeight.w700,
-                  color: Color(0xFF0F172A))),
+          Text('Ajouter des produits',
+              style: AppTextStyles.subtitleBold
+                  .copyWith(color: const Color(0xFF0F172A))),
           const Spacer(),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -377,9 +376,8 @@ class _SheetHeader extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text('$count en stock',
-                style: TextStyle(
-                    fontSize: 11, fontWeight: FontWeight.w600,
-                    color: AppColors.primary)),
+                style: AppTextStyles.captionBold
+                    .copyWith(color: AppColors.primary)),
           ),
         ]),
       ),
@@ -440,32 +438,39 @@ class _ProductCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Image — ratio carré 1:1 unifié, BoxFit.cover, placeholder
-              // neutre (cf. ProductImageCard).
-              ProductImageCard(
-                imageUrl: product.mainImageUrl,
-                borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(11)),
+              // Image — occupe tout l'espace restant (Expanded + fillParent)
+              // pour maximiser la visibilité produit. BoxFit.cover, ratio
+              // source préservé (cf. ProductImageCard), placeholder neutre.
+              Expanded(
+                child: ProductImageCard(
+                  imageUrl: product.mainImageUrl,
+                  fillParent: true,
+                  borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(11)),
+                ),
               ),
 
-              // Infos
+              // Infos — bloc compact : nom sur 1 ligne + prix/stock fusionnés
+              // sur une seule ligne pour réduire la hauteur au profit de
+              // l'image.
               Padding(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.fromLTRB(8, 5, 8, 6),
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Row(children: [
                         Expanded(
                           child: Text(
                             product.name,
-                            style: const TextStyle(
-                                fontSize: 11, fontWeight: FontWeight.w600,
-                                color: Color(0xFF0F172A)),
-                            maxLines: 2,
+                            style: AppTextStyles.captionBold
+                                .copyWith(color: const Color(0xFF0F172A)),
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        if (hasVariants)
+                        if (hasVariants) ...[
+                          const SizedBox(width: 4),
                           Tooltip(
                             message: '${product.variants.length} variantes',
                             child: Container(
@@ -478,18 +483,21 @@ class _ProductCard extends StatelessWidget {
                                   size: 10, color: AppColors.primary),
                             ),
                           ),
+                        ],
                       ]),
-                      const SizedBox(height: 4),
-                      Text(
-                        price,
-                        style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.primary),
-                      ),
                       const SizedBox(height: 3),
-                      // Stock badge
                       Row(children: [
+                        Expanded(
+                          child: Text(
+                            price,
+                            style: AppTextStyles.bodySmBold.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.primary),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
                         Container(
                           width: 5, height: 5,
                           decoration: BoxDecoration(
@@ -497,10 +505,9 @@ class _ProductCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          outOfStockAt
-                              ? 'Rupture'
-                              : '$stockAt en stock',
-                          style: TextStyle(fontSize: 9, color: stockColor),
+                          outOfStockAt ? 'Rupture' : '$stockAt',
+                          style: AppTextStyles.micro
+                              .copyWith(color: stockColor),
                         ),
                       ]),
                     ]),
@@ -578,22 +585,20 @@ class _VariantPickerSheet extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(product.name,
-                        style: const TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w700,
-                            color: Color(0xFF0F172A))),
+                        style: AppTextStyles.subtitleBold
+                            .copyWith(color: const Color(0xFF0F172A))),
                     Text('${product.variants.length} variantes disponibles',
-                        style: const TextStyle(
-                            fontSize: 12, color: Color(0xFF9CA3AF))),
+                        style: AppTextStyles.bodySm
+                            .copyWith(color: const Color(0xFF9CA3AF))),
                   ])),
             ]),
           ),
           const SizedBox(height: 16),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 20),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Text('Choisissez une variante',
-                style: TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600,
-                    color: Color(0xFF6B7280))),
+                style: AppTextStyles.bodySmBold
+                    .copyWith(color: const Color(0xFF6B7280))),
           ),
           const SizedBox(height: 8),
 
@@ -667,10 +672,8 @@ class _VariantPickerSheet extends StatelessWidget {
                                   child: Text(v.name,
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                          color: Color(0xFF0F172A))),
+                                      style: AppTextStyles.bodyBold
+                                          .copyWith(color: const Color(0xFF0F172A))),
                                 ),
                                 if (v.isMain) ...[
                                   const SizedBox(width: 6),
@@ -682,10 +685,8 @@ class _VariantPickerSheet extends StatelessWidget {
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Text('Principal',
-                                        style: TextStyle(
-                                            fontSize: 8,
-                                            fontWeight: FontWeight.w700,
-                                            color: AppColors.primary)),
+                                        style: AppTextStyles.microBold
+                                            .copyWith(color: AppColors.primary)),
                                   ),
                                 ],
                               ]),
@@ -693,9 +694,8 @@ class _VariantPickerSheet extends StatelessWidget {
                                 Text('SKU: ${v.sku}',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontSize: 10,
-                                        color: Color(0xFF9CA3AF))),
+                                    style: AppTextStyles.micro
+                                        .copyWith(color: const Color(0xFF9CA3AF))),
                             ])),
 
                         // Prix + stock
@@ -706,8 +706,7 @@ class _VariantPickerSheet extends StatelessWidget {
                                 v.priceSellPos > 0
                                     ? CurrencyFormatter.format(v.priceSellPos)
                                     : 'N/D',
-                                style: TextStyle(
-                                    fontSize: 13,
+                                style: AppTextStyles.bodyBold.copyWith(
                                     fontWeight: FontWeight.w800,
                                     color: AppColors.primary),
                               ),
@@ -729,8 +728,7 @@ class _VariantPickerSheet extends StatelessWidget {
                                   outOfStock
                                       ? 'Rupture'
                                       : '$stockAt dispo',
-                                  style: TextStyle(
-                                      fontSize: 9,
+                                  style: AppTextStyles.micro.copyWith(
                                       color: outOfStock
                                           ? const Color(0xFFEF4444)
                                           : lowStock
@@ -779,9 +777,7 @@ class _Chip extends StatelessWidget {
             color: selected ? AppColors.primary : const Color(0xFFE5E7EB)),
       ),
       child: Text(label,
-          style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
+          style: AppTextStyles.captionBold.copyWith(
               color:
               selected ? Colors.white : const Color(0xFF6B7280))),
     ),
@@ -806,8 +802,7 @@ class _EmptyProducts extends StatelessWidget {
         query.isNotEmpty
             ? 'Aucun résultat pour "$query"'
             : 'Aucun produit actif dans cette boutique',
-        style: const TextStyle(
-            fontSize: 13, color: Color(0xFF6B7280)),
+        style: AppTextStyles.body.copyWith(color: const Color(0xFF6B7280)),
         textAlign: TextAlign.center,
       ),
     ]),
@@ -1019,11 +1014,11 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
       height: isCompact ? 38 : 40,
       child: TextField(
         onChanged: (v) => setState(() => _query = v),
-        style: const TextStyle(fontSize: 13),
+        style: AppTextStyles.body,
         decoration: InputDecoration(
           hintText: l.boutiqueSearchHint,
-          hintStyle: const TextStyle(fontSize: 13,
-              color: AppColors.textHint),
+          hintStyle: AppTextStyles.body
+              .copyWith(color: AppColors.textHint),
           prefixIcon: const Icon(Icons.search_rounded,
               size: 18, color: AppColors.textHint),
           suffixIcon: _query.isNotEmpty
@@ -1116,9 +1111,8 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
             l.boutiqueCountLine(products.length,
                 products.fold<int>(0, (s, p) => s + (p.variants.isEmpty
                     ? 1 : p.variants.length))),
-            style: const TextStyle(fontSize: 10,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textSecondary),
+            style: AppTextStyles.microSecondary
+                .copyWith(fontWeight: FontWeight.w500),
           )),
           _ViewModeToggle(
             mode: _viewMode,
@@ -1145,8 +1139,8 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
                 _query.isNotEmpty
                     ? l.invNoResult
                     : l.inventaireEmpty,
-                style: const TextStyle(
-                    fontSize: 12, color: AppColors.textHint),
+                style: AppTextStyles.bodySm
+                    .copyWith(color: AppColors.textHint),
               ),
             ],
           ),
@@ -1299,8 +1293,7 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
                       : AppColors.textSecondary),
               const SizedBox(width: 10),
               Expanded(child: Text(o.$2,
-                  style: TextStyle(
-                      fontSize: 13,
+                  style: AppTextStyles.body.copyWith(
                       fontWeight: _sort == o.$1
                           ? FontWeight.w700
                           : FontWeight.w500,
@@ -1337,15 +1330,13 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
       position: position,
       constraints: const BoxConstraints(minWidth: 220, maxWidth: 280),
       items: [
-        const PopupMenuItem<String>(
+        PopupMenuItem<String>(
           enabled: false,
           height: 28,
           child: Padding(
-            padding: EdgeInsets.only(top: 4),
+            padding: const EdgeInsets.only(top: 4),
             child: Text('Stock',
-                style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
+                style: AppTextStyles.microBold.copyWith(
                     letterSpacing: 0.5,
                     color: AppColors.textHint)),
           ),
@@ -1361,8 +1352,7 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
                       : AppColors.textSecondary),
               const SizedBox(width: 10),
               Expanded(child: Text(o.$2,
-                  style: TextStyle(
-                      fontSize: 13,
+                  style: AppTextStyles.body.copyWith(
                       fontWeight: _stockFilter == o.$1
                           ? FontWeight.w700
                           : FontWeight.w500,
@@ -1383,10 +1373,8 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
                   size: 16, color: AppColors.error),
               const SizedBox(width: 10),
               Text('Effacer les filtres',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.error)),
+                  style: AppTextStyles.bodyBold
+                      .copyWith(color: AppColors.error)),
             ]),
           ),
       ],
@@ -1562,9 +1550,7 @@ class _PosProductListTileState extends State<_PosProductListTile> {
                 Row(children: [
                   Expanded(child: Text(p.name,
                       maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary))),
+                      style: AppTextStyles.bodyBold)),
                   if (outOfStock) ...[
                     const SizedBox(width: 4),
                     _StockBadgePill(
@@ -1606,14 +1592,12 @@ class _PosProductListTileState extends State<_PosProductListTile> {
                 Text(price > 0
                         ? CurrencyFormatter.format(price)
                         : 'N/D',
-                    style: const TextStyle(fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textPrimary)),
+                    style: AppTextStyles.bodyBold
+                        .copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 2),
                 Text('$stock',
-                    style: TextStyle(fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: stockColor)),
+                    style: AppTextStyles.captionBold
+                        .copyWith(color: stockColor)),
               ]),
             ),
             // Bouton « + » end-of-row supprimé (round 9) — la card
@@ -1727,8 +1711,7 @@ class _ToolbarButton extends StatelessWidget {
                 color: active ? AppColors.primary : AppColors.textSecondary),
             const SizedBox(width: 5),
             Text(label,
-                style: TextStyle(fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                style: AppTextStyles.captionBold.copyWith(
                     color: active ? AppColors.primary : AppColors.textPrimary)),
             if (badge > 0) ...[
               const SizedBox(width: 5),
@@ -1740,7 +1723,7 @@ class _ToolbarButton extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text('$badge',
-                    style: const TextStyle(fontSize: 9,
+                    style: AppTextStyles.microBold.copyWith(
                         fontWeight: FontWeight.w800, color: Colors.white)),
               ),
             ],
@@ -1763,7 +1746,7 @@ class _StockBadgePill extends StatelessWidget {
       color: color, borderRadius: BorderRadius.circular(6),
     ),
     child: Text(label,
-        style: const TextStyle(fontSize: 9,
+        style: AppTextStyles.microBold.copyWith(
             fontWeight: FontWeight.w800, color: Colors.white)),
   );
 }
@@ -1809,7 +1792,7 @@ class _VariantChipRow extends StatelessWidget {
                   ),
                 ),
                 child: Center(child: Text(visible[i].name,
-                    style: TextStyle(fontSize: 9,
+                    style: AppTextStyles.micro.copyWith(
                         fontWeight: isSel
                             ? FontWeight.w800 : FontWeight.w600,
                         color: isSel
@@ -1831,9 +1814,8 @@ class _VariantChipRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text('+$extra',
-                  style: TextStyle(fontSize: 9,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.primary)),
+                  style: AppTextStyles.microBold
+                      .copyWith(color: AppColors.primary)),
             ),
           ),
         ],

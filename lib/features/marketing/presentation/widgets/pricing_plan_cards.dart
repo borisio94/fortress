@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../../../core/router/route_names.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // PricingPlanCards — 3 cards plans (Starter / Pro highlighted / Business)
@@ -157,9 +158,8 @@ class _PlanCard extends StatelessWidget {
               decoration: BoxDecoration(
                   color: AppColors.primary,
                   borderRadius: BorderRadius.circular(4)),
-              child: const Text('POPULAIRE',
-                  style: TextStyle(
-                      fontSize: 10,
+              child: Text('POPULAIRE',
+                  style: AppTextStyles.micro.copyWith(
                       fontWeight: FontWeight.w800,
                       letterSpacing: 1.2,
                       color: Colors.white)),
@@ -168,13 +168,11 @@ class _PlanCard extends StatelessWidget {
             const SizedBox(height: 22),
           const SizedBox(height: 10),
           Text(plan.name,
-              style: TextStyle(
-                  fontSize: 20,
+              style: AppTextStyles.title.copyWith(
                   fontWeight: FontWeight.w800,
                   color: theme.colorScheme.onSurface)),
           Text(plan.tagline,
-              style: TextStyle(
-                  fontSize: 12,
+              style: AppTextStyles.bodySm.copyWith(
                   color: theme.colorScheme.onSurface
                       .withValues(alpha: 0.6))),
           const SizedBox(height: 16),
@@ -183,21 +181,17 @@ class _PlanCard extends StatelessWidget {
               textBaseline: TextBaseline.alphabetic,
               children: [
                 Text(fmt.format(price),
-                    style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.w800,
-                        color: theme.colorScheme.onSurface)),
+                    style: AppTextStyles.display
+                        .copyWith(color: theme.colorScheme.onSurface)),
                 const SizedBox(width: 4),
                 Text('FCFA',
-                    style: TextStyle(
-                        fontSize: 13,
+                    style: AppTextStyles.body.copyWith(
                         fontWeight: FontWeight.w600,
                         color: theme.colorScheme.onSurface
                             .withValues(alpha: 0.7))),
                 const SizedBox(width: 4),
                 Text(per,
-                    style: TextStyle(
-                        fontSize: 13,
+                    style: AppTextStyles.body.copyWith(
                         color: theme.colorScheme.onSurface
                             .withValues(alpha: 0.55))),
               ]),
@@ -221,9 +215,12 @@ class _PlanCard extends StatelessWidget {
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8)),
               ),
-              child: const Text('Commencer 14j gratuit',
-                  style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w800)),
+              child: Text('Commencer 14j gratuit',
+                  style: AppTextStyles.body.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: plan.highlight
+                          ? Colors.white
+                          : AppColors.primary)),
             ),
           ),
           const SizedBox(height: 18),
@@ -236,8 +233,7 @@ class _PlanCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(f,
-                      style: TextStyle(
-                          fontSize: 13,
+                      style: AppTextStyles.body.copyWith(
                           color: theme.colorScheme.onSurface
                               .withValues(alpha: 0.85))),
                 ),

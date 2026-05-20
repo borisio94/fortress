@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/auth_provider.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
 
 /// ─────────────────────────────────────────────────────────────────────────
 /// Switcher de langue — utilisable n'importe où dans l'app.
@@ -53,10 +54,10 @@ class LanguageSwitcher extends ConsumerWidget {
       height: 32,
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: backgroundColor ?? Colors.white.withOpacity(0.15),
+        color: backgroundColor ?? Colors.white.withValues(alpha:0.15),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: AppColors.primary.withOpacity(0.2),
+          color: AppColors.primary.withValues(alpha:0.2),
           width: 1,
         ),
       ),
@@ -106,12 +107,11 @@ class _PillItem extends StatelessWidget {
         ),
         child: AnimatedDefaultTextStyle(
           duration: const Duration(milliseconds: 200),
-          style: TextStyle(
-            fontSize: 12,
+          style: AppTextStyles.bodySm.copyWith(
             fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
             color: isActive
                 ? Colors.white
-                : (inactiveColor ?? AppColors.primary.withOpacity(0.6)),
+                : (inactiveColor ?? AppColors.primary.withValues(alpha:0.6)),
             letterSpacing: 0.5,
           ),
           child: Text(label),
@@ -140,8 +140,8 @@ class _LangIcon extends ConsumerWidget {
           const SizedBox(width: 4),
           Text(
             localeLabel(current),
-            style: TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w700,
+            style: AppTextStyles.bodySm.copyWith(
+              fontWeight: FontWeight.w700,
               color: color ?? AppColors.primary,
             ),
           ),
@@ -182,8 +182,7 @@ class _LangDropdown extends ConsumerWidget {
               value: locale,
               child: Text(
                 _langFullName(locale),
-                style: TextStyle(
-                  fontSize: 14,
+                style: AppTextStyles.labelRegular.copyWith(
                   color: textColor ?? const Color(0xFF1A1D2E),
                   fontWeight: locale == current
                       ? FontWeight.w600

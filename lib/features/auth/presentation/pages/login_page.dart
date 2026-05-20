@@ -1,21 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
+import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/router/route_names.dart';
+import '../../../../core/storage/local_storage_service.dart';
+import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/widgets/fortress_logo.dart';
+import '../../../../shared/widgets/app_snack.dart';
+import '../../../../shared/widgets/language_switcher.dart';
 import '../bloc/auth_bloc.dart';
 import '../bloc/auth_event.dart';
 import '../bloc/auth_state.dart';
-import '../../../../core/router/route_names.dart';
-import '../../../../core/theme/app_colors.dart';
-import '../../../../core/i18n/app_localizations.dart';
-import '../../../../core/widgets/fortress_logo.dart';
-import '../../../../shared/widgets/app_primary_button.dart';
-import '../../../../shared/widgets/app_snack.dart';
-import '../../../../shared/widgets/language_switcher.dart';
-import '../../../../shared/widgets/auth_fields.dart';
-import '../../../../core/storage/local_storage_service.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+/// Bascule layout desktop ↔ mobile. > 800px = desktop split (panneau
+/// décoratif gauche fixe + formulaire droite), sinon mobile centré.
 const double _kDesktopBreakpoint = 800;
+
+/// Fond du panneau gauche desktop : surface presque blanche, légèrement
+/// teintée par la couleur primaire active. 100 % dynamique → s'adapte
+/// automatiquement à la palette choisie (pas de Color(0xFF…) hardcodé).
+Color _panelBg(ColorScheme cs) => Color.alphaBlend(
+      cs.primary.withValues(alpha: 0.06),
+      cs.surface,
+    );
 
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
@@ -24,26 +33,22 @@ class LoginPage extends ConsumerStatefulWidget {
 }
 
 class _LoginPageState extends ConsumerState<LoginPage> {
-  final _formKey = GlobalKey<FormState>();
+  final _formKey   = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
+  final _passCtrl  = TextEditingController();
+  final _passFocus = FocusNode();
 
   @override
   void initState() {
     super.initState();
-    // Pré-remplir avec le dernier email utilisé — évite la ressaisie après logout.
     final last = LocalStorageService.getLastLoginEmail();
     if (last != null && last.isNotEmpty) {
       _emailCtrl.text = last;
-      // Focus directement le champ mot de passe : l'utilisateur n'a plus
-      // qu'à taper son mdp et valider.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _passFocus.requestFocus();
       });
     }
   }
-
-  final FocusNode _passFocus = FocusNode();
 
   @override
   void dispose() {
@@ -56,7 +61,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   void _submit() {
     if (_formKey.currentState!.validate()) {
       context.read<AuthBloc>().add(AuthLoginRequested(
-        email: _emailCtrl.text.trim(),
+        email:    _emailCtrl.text.trim(),
         password: _passCtrl.text,
       ));
     }
@@ -65,416 +70,278 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primarySurface,
-      body: Stack(
-        children: [
-          // ── Contenu principal ─────────────────────────────────────
-          BlocConsumer<AuthBloc, AuthState>(
-            listener: (context, state) {
-              // ✅ Navigation : gérée automatiquement par AuthRouterNotifier
-              // ✅ Erreur : affichée ici dans la page
-              if (state is AuthError) {
-                AppSnack.error(context, state.message);
-              }
-            },
-            builder: (context, state) {
-              final isLoading = state is AuthLoading;
-              return LayoutBuilder(builder: (context, box) {
-                final isDesktop = box.maxWidth >= _kDesktopBreakpoint;
-                return isDesktop
-                    ? _DesktopLayout(
-                  screenW: box.maxWidth, screenH: box.maxHeight,
-                  formKey: _formKey, emailCtrl: _emailCtrl,
-                  passCtrl: _passCtrl, passFocus: _passFocus,
-                  isLoading: isLoading,
-                  onSubmit: _submit,
-                  onForgot: () => context.push(RouteNames.forgotPassword),
-                  onRegister: () => context.push(RouteNames.register),
-                )
-                    : _MobileLayout(
-                  formKey: _formKey, emailCtrl: _emailCtrl,
-                  passCtrl: _passCtrl, passFocus: _passFocus,
-                  isLoading: isLoading,
-                  onSubmit: _submit,
-                  onForgot: () => context.push(RouteNames.forgotPassword),
-                  onRegister: () => context.push(RouteNames.register),
-                );
-              });
-            },
-          ),
-
-          // ── Switcher de langue — flottant en haut à droite ────────
-          Positioned(
-            top: 12,
-            right: 16,
-            child: SafeArea(
-              child: LanguageSwitcher(
-                backgroundColor: Colors.white.withOpacity(0.92),
-              ),
-            ),
-          ),
-        ],
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      body: BlocConsumer<AuthBloc, AuthState>(
+        listener: (ctx, state) {
+          if (state is AuthError) AppSnack.error(ctx, state.message);
+        },
+        builder: (ctx, state) {
+          final loading = state is AuthLoading;
+          return LayoutBuilder(builder: (lbCtx, box) {
+            final isDesktop = box.maxWidth > _kDesktopBreakpoint;
+            return isDesktop
+                ? _DesktopLayout(
+                    formKey:   _formKey,
+                    emailCtrl: _emailCtrl,
+                    passCtrl:  _passCtrl,
+                    passFocus: _passFocus,
+                    isLoading: loading,
+                    onSubmit:   _submit,
+                    onForgot:   () => ctx.push(RouteNames.forgotPassword),
+                    onRegister: () => ctx.push(RouteNames.register),
+                  )
+                : _MobileLayout(
+                    formKey:   _formKey,
+                    emailCtrl: _emailCtrl,
+                    passCtrl:  _passCtrl,
+                    passFocus: _passFocus,
+                    isLoading: loading,
+                    onSubmit:   _submit,
+                    onForgot:   () => ctx.push(RouteNames.forgotPassword),
+                    onRegister: () => ctx.push(RouteNames.register),
+                  );
+          });
+        },
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DESKTOP
+// DESKTOP — split 310px / flex
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DesktopLayout extends StatelessWidget {
-  final double screenW, screenH;
-  final GlobalKey<FormState> formKey;
-  final TextEditingController emailCtrl, passCtrl;
-  final FocusNode passFocus;
-  final bool isLoading;
-  final VoidCallback onSubmit, onForgot, onRegister;
+  final GlobalKey<FormState>     formKey;
+  final TextEditingController    emailCtrl, passCtrl;
+  final FocusNode                passFocus;
+  final bool                     isLoading;
+  final VoidCallback             onSubmit, onForgot, onRegister;
 
   const _DesktopLayout({
-    required this.screenW, required this.screenH,
-    required this.formKey, required this.emailCtrl, required this.passCtrl,
+    required this.formKey,
+    required this.emailCtrl,
+    required this.passCtrl,
     required this.passFocus,
     required this.isLoading,
     required this.onSubmit,
-    required this.onForgot, required this.onRegister,
+    required this.onForgot,
+    required this.onRegister,
   });
 
   @override
   Widget build(BuildContext context) {
-    final cW = screenW * 0.78;
-    final cH = screenH * 0.82;
-
-    return Container(
-      width: screenW, height: screenH,
-      color: AppColors.primarySurface,
-      child: Center(
-        child: SizedBox(
-          width: cW, height: cH,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: Row(
+    final cs = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        // Panneau gauche : 50%.
+        const Expanded(flex: 50, child: _LeftPanel()),
+        // Panneau droit : 50%, formulaire centré vertical+horizontal.
+        Expanded(
+          flex: 50,
+          child: Container(
+            color: cs.surface,
+            child: Stack(
               children: [
-                Expanded(flex: 5, child: _LeftPanel(cardH: cH)),
-                Expanded(
-                  flex: 5,
-                  child: Container(
-                    color: Colors.white,
-                    child: OverflowBox(
-                      alignment: Alignment.center,
-                      maxHeight: cH, minHeight: cH,
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: (cW * 0.07).clamp(32.0, 60.0),
-                          vertical: (cH * 0.05).clamp(16.0, 36.0),
-                        ),
-                        child: _FormContent(
-                          formKey: formKey, emailCtrl: emailCtrl,
-                          passCtrl: passCtrl, passFocus: passFocus,
-                          isLoading: isLoading,
-                          onSubmit: onSubmit, onForgot: onForgot,
-                          onRegister: onRegister, availableH: cH,
+                LayoutBuilder(builder: (ctx, box) {
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 48, vertical: 32),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: box.maxHeight),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 420),
+                          child: _LoginForm(
+                            formKey:   formKey,
+                            emailCtrl: emailCtrl,
+                            passCtrl:  passCtrl,
+                            passFocus: passFocus,
+                            isLoading: isLoading,
+                            onSubmit:   onSubmit,
+                            onForgot:   onForgot,
+                            onRegister: onRegister,
+                            compact:    false,
+                          ),
                         ),
                       ),
                     ),
-                  ),
+                  );
+                }),
+                const Positioned(
+                  top: 16, right: 24,
+                  child: SafeArea(child: LanguageSwitcher()),
                 ),
               ],
             ),
           ),
         ),
-      ),
+      ],
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Panneau gauche — fond confondu avec l'arrière-plan
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _LeftPanel extends StatelessWidget {
-  final double cardH;
-  const _LeftPanel({required this.cardH});
-
-  @override
-  Widget build(BuildContext context) {
-    final l = context.l10n;
-    final illustSize = (cardH * 0.36).clamp(100.0, 240.0);
-    final titleSize  = (cardH * 0.038).clamp(14.0, 22.0);
-    final subSize    = (cardH * 0.019).clamp(10.0, 13.0);
-
-    return Container(
-      color: AppColors.primarySurface,
-      child: Column(
-        children: [
-          const Spacer(flex: 2),
-
-          // Grande icône bouclier avec cercle de fond
-          SizedBox(
-            width: illustSize, height: illustSize,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Container(
-                  width: illustSize, height: illustSize,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppColors.primary.withOpacity(0.10),
-                  ),
-                ),
-                // FortressLogo icône — taille dynamique scalée sur l'illustration
-                FortressLogo.light(size: illustSize * 0.52),
-                ..._buildFloating(illustSize),
-              ],
-            ),
-          ),
-
-          const Spacer(flex: 1),
-
-          // Nom + tagline
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 28),
-            child: Text(
-              l.appName,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: titleSize,
-                fontWeight: FontWeight.w800,
-                color: const Color(0xFF0F172A),
-                letterSpacing: 2,
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 36),
-            child: Text(
-              l.panelTagline,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: subSize,
-                color: AppColors.primary.withOpacity(0.65),
-                height: 1.5,
-              ),
-            ),
-          ),
-
-          const Spacer(flex: 1),
-
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _Dot(active: false),
-              const SizedBox(width: 6),
-              _Dot(active: true),
-              const SizedBox(width: 6),
-              _Dot(active: false),
-            ],
-          ),
-
-          const Spacer(flex: 2),
-        ],
-      ),
-    );
-  }
-
-  List<Widget> _buildFloating(double size) {
-    const icons = [Icons.receipt_long, Icons.inventory_2_outlined,
-      Icons.people_outline, Icons.bar_chart];
-    final pos = [
-      Offset(-size * 0.37, -size * 0.26), Offset(size * 0.37, -size * 0.22),
-      Offset(-size * 0.35, size * 0.24),  Offset(size * 0.35, size * 0.28),
-    ];
-    return List.generate(icons.length, (i) {
-      final bx = (size * 0.17).clamp(22.0, 38.0);
-      final ic = (size * 0.10).clamp(12.0, 20.0);
-      return Positioned(
-        left: size / 2 + pos[i].dx - bx / 2,
-        top:  size / 2 + pos[i].dy - bx / 2,
-        child: Container(
-          width: bx, height: bx,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
-            boxShadow: [BoxShadow(
-              color: AppColors.primary.withOpacity(0.14),
-              blurRadius: 8, offset: const Offset(0, 2),
-            )],
-          ),
-          child: Icon(icons[i], size: ic, color: AppColors.primary),
-        ),
-      );
-    });
-  }
-}
-
-class _Dot extends StatelessWidget {
-  final bool active;
-  const _Dot({required this.active});
-  @override
-  Widget build(BuildContext context) => AnimatedContainer(
-    duration: const Duration(milliseconds: 200),
-    width: active ? 20 : 7, height: 7,
-    decoration: BoxDecoration(
-      color: active ? AppColors.primary : AppColors.primary.withOpacity(0.25),
-      borderRadius: BorderRadius.circular(4),
-    ),
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MOBILE
+// MOBILE — centré, padding 18 / 16
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _MobileLayout extends StatelessWidget {
-  final GlobalKey<FormState> formKey;
-  final TextEditingController emailCtrl, passCtrl;
-  final FocusNode passFocus;
-  final bool isLoading;
-  final VoidCallback onSubmit, onForgot, onRegister;
+  final GlobalKey<FormState>     formKey;
+  final TextEditingController    emailCtrl, passCtrl;
+  final FocusNode                passFocus;
+  final bool                     isLoading;
+  final VoidCallback             onSubmit, onForgot, onRegister;
 
   const _MobileLayout({
-    required this.formKey, required this.emailCtrl, required this.passCtrl,
+    required this.formKey,
+    required this.emailCtrl,
+    required this.passCtrl,
     required this.passFocus,
     required this.isLoading,
     required this.onSubmit,
-    required this.onForgot, required this.onRegister,
+    required this.onForgot,
+    required this.onRegister,
   });
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
-        child: _FormContent(
-          formKey: formKey, emailCtrl: emailCtrl, passCtrl: passCtrl,
-          passFocus: passFocus,
-          isLoading: isLoading,
-          onSubmit: onSubmit, onForgot: onForgot, onRegister: onRegister,
-          availableH: double.infinity,
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Formulaire — zéro texte en dur
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _FormContent extends StatelessWidget {
-  final GlobalKey<FormState> formKey;
-  final TextEditingController emailCtrl, passCtrl;
-  final FocusNode passFocus;
-  final bool isLoading;
-  final VoidCallback onSubmit, onForgot, onRegister;
-  final double availableH;
-
-  const _FormContent({
-    required this.formKey, required this.emailCtrl, required this.passCtrl,
-    required this.passFocus,
-    required this.isLoading,
-    required this.onSubmit,
-    required this.onForgot, required this.onRegister,
-    required this.availableH,
-  });
-
-  double get _gap => availableH.isFinite ? (availableH * 0.022).clamp(8, 16) : 12;
-  double get _sg  => availableH.isFinite ? (availableH * 0.036).clamp(14, 26) : 20;
 
   @override
   Widget build(BuildContext context) {
     final l  = context.l10n;
-    final tt = Theme.of(context).textTheme;
-
-    return Form(
-      key: formKey,
+    final cs = Theme.of(context).colorScheme;
+    return SafeArea(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
         children: [
-
-          // ── Logo Fortress — variant light, footer ─────────────────
-          const FortressLogo.light(size: 34),
-          SizedBox(height: _sg),
-
-          // ── Email ──────────────────────────────────────────────────
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(l.loginEmail,
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
-                    color: Color(0xFF6B7280))),
-          ),
-          const SizedBox(height: 5),
-          EmailField(
-            controller: emailCtrl,
-            hint: l.loginEmailHint,
-          ),
-
-          SizedBox(height: _gap),
-
-          // ── Mot de passe ───────────────────────────────────────────
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(l.loginPassword,
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
-                    color: Color(0xFF6B7280))),
-          ),
-          const SizedBox(height: 5),
-          PasswordField(
-            controller: passCtrl,
-            focusNode: passFocus,
-            hint: l.loginPasswordHint,
-          ),
-
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: onForgot,
-              style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-              child: Text(l.loginForgot,
-                  style: TextStyle(color: AppColors.primary, fontSize: 12,
-                      fontWeight: FontWeight.w500)),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: LanguageSwitcher(),
             ),
           ),
-
-          SizedBox(height: _gap),
-
-          AppPrimaryButton(isLoading: isLoading, enabled: !isLoading, onTap: onSubmit, label: l.loginButton),
-
-          SizedBox(height: _sg),
-
-          Row(children: [
-            Expanded(child: Divider(color: Colors.grey.shade200, thickness: 1)),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Text(l.loginOrWith,
-                  style: tt.bodySmall?.copyWith(color: Colors.grey.shade400, fontSize: 11)),
+          // Scroll vertical sans contraintes — le contenu est aligné en
+          // haut et l'utilisateur scrolle naturellement. Le précédent
+          // layout `ConstrainedBox(minHeight: box.maxHeight) + Center`
+          // cachait les boutons (Connecter / Créer un compte) sous le bas
+          // de l'écran sur les petits mobiles.
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+              child: Column(
+                mainAxisSize:       MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const SizedBox(height: 16),
+                  const FortressLogo.light(size: 84),
+                  const SizedBox(height: 10),
+                  Text(
+                    l.appName.toUpperCase(),
+                    style: TextStyle(
+                      fontFamily:    'Georgia',
+                      fontSize:      15,
+                      fontWeight:    FontWeight.w600,
+                      letterSpacing: 3,
+                      color:         cs.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    l.loginPanelKicker,
+                    style: AppTextStyles.micro.copyWith(
+                      letterSpacing: 2,
+                      color:         cs.primary.withValues(alpha: 0.75),
+                      fontWeight:    FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  _LoginForm(
+                    formKey:   formKey,
+                    emailCtrl: emailCtrl,
+                    passCtrl:  passCtrl,
+                    passFocus: passFocus,
+                    isLoading: isLoading,
+                    onSubmit:   onSubmit,
+                    onForgot:   onForgot,
+                    onRegister: onRegister,
+                    compact:    true,
+                  ),
+                ],
+              ),
             ),
-            Expanded(child: Divider(color: Colors.grey.shade200, thickness: 1)),
-          ]),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
-          SizedBox(height: _sg),
+// ─────────────────────────────────────────────────────────────────────────────
+// PANNEAU DÉCORATIF GAUCHE (desktop) — fond #1A1A2E + 3 cercles + features
+// ─────────────────────────────────────────────────────────────────────────────
 
-          _GoogleBtn(label: l.socialGoogle),
+class _LeftPanel extends StatelessWidget {
+  const _LeftPanel();
 
-          SizedBox(height: _sg),
-
-          Center(
-            child: Wrap(
-              alignment: WrapAlignment.center,
+  @override
+  Widget build(BuildContext context) {
+    final l  = context.l10n;
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      color: _panelBg(cs),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          _DecorCircle(size: 380, color: cs.primary.withValues(alpha: 0.18)),
+          _DecorCircle(size: 270, color: cs.primary.withValues(alpha: 0.18)),
+          _DecorCircle(size: 170, color: cs.primary.withValues(alpha: 0.18)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(l.loginNoAccount,
-                    style: tt.bodySmall?.copyWith(color: Colors.grey.shade500, fontSize: 12)),
-                GestureDetector(
-                  onTap: onRegister,
-                  child: Text(l.loginCreate,
-                      style: TextStyle(color: AppColors.primary, fontSize: 12,
-                          fontWeight: FontWeight.w600)),
+                // Logo doublé : 64 → 128. `.light` car le panneau est
+                // désormais sur un fond presque blanc.
+                const FortressLogo.light(size: 128),
+                const SizedBox(height: 24),
+                Text(
+                  l.appName.toUpperCase(),
+                  style: TextStyle(
+                    fontFamily:    'Georgia',
+                    fontSize:      20,
+                    fontWeight:    FontWeight.w600,
+                    letterSpacing: 5,
+                    color:         cs.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  l.loginPanelKicker.toUpperCase(),
+                  style: AppTextStyles.micro.copyWith(
+                    fontWeight:    FontWeight.w500,
+                    letterSpacing: 3,
+                    color:         cs.primary.withValues(alpha: 0.75),
+                  ),
+                ),
+                const SizedBox(height: 40),
+                // Bloc features — Column dédiée align.start pour que les
+                // icônes soient parfaitement alignées verticalement quelle
+                // que soit la longueur du label. Le bloc lui-même reste
+                // centré dans la colonne parent (intrinsic width).
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize:       MainAxisSize.min,
+                  children: [
+                    _FeatureRow(
+                        icon: Icons.point_of_sale_rounded,
+                        label: l.loginPanelFeatureSales),
+                    _FeatureRow(
+                        icon: Icons.inventory_2_rounded,
+                        label: l.loginPanelFeatureInventory),
+                    _FeatureRow(
+                        icon: Icons.people_alt_rounded,
+                        label: l.loginPanelFeatureCrm),
+                    _FeatureRow(
+                        icon: Icons.bar_chart_rounded,
+                        label: l.loginPanelFeatureReports),
+                  ],
                 ),
               ],
             ),
@@ -485,52 +352,321 @@ class _FormContent extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Widgets atomiques du formulaire
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _GoogleBtn extends StatefulWidget {
-  final String label;
-  const _GoogleBtn({required this.label});
+class _DecorCircle extends StatelessWidget {
+  final double size;
+  final Color  color;
+  const _DecorCircle({required this.size, required this.color});
   @override
-  State<_GoogleBtn> createState() => _GoogleBtnState();
+  Widget build(BuildContext context) => Container(
+        width:  size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: color, width: 1),
+        ),
+      );
 }
 
-class _GoogleBtnState extends State<_GoogleBtn> {
-  bool _h = false;
+// Note: `_FeatureRow` est utilisée uniquement par le panneau gauche
+// desktop. Toutes les couleurs sont issues du `colorScheme` actuel
+// (icône, fond carré et label) — adaptable à n'importe quelle palette.
+class _FeatureRow extends StatelessWidget {
+  final IconData icon;
+  final String   label;
+  const _FeatureRow({required this.icon, required this.label});
+
   @override
-  Widget build(BuildContext context) => MouseRegion(
-    onEnter: (_) => setState(() => _h = true),
-    onExit: (_) => setState(() => _h = false),
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
-      width: double.infinity, height: 43,
-      decoration: BoxDecoration(
-        color: _h ? Colors.grey.shade50 : Colors.white,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(
-          color: _h ? AppColors.primary.withOpacity(0.4) : const Color(0xFFDDDDDD),
-          width: 1,
-        ),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () {},
-          borderRadius: BorderRadius.circular(6),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text('G', style: TextStyle(fontSize: 17,
-                  fontWeight: FontWeight.bold, color: Color(0xFFEA4335))),
-              const SizedBox(width: 8),
-              Text('Sign in with ${widget.label}',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
-                      color: Color(0xFF444444))),
-            ],
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 32, height: 32,
+            decoration: BoxDecoration(
+              color:        cs.primary.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 22, color: cs.primary),
           ),
-        ),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: AppTextStyles.bodySm.copyWith(
+              fontWeight: FontWeight.w500,
+              color:      cs.onSurfaceVariant,
+            ),
+          ),
+        ],
       ),
-    ),
-  );
+    );
+  }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FORMULAIRE — partagé desktop / mobile, densité contrôlée par `compact`
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _LoginForm extends StatefulWidget {
+  final GlobalKey<FormState>  formKey;
+  final TextEditingController emailCtrl, passCtrl;
+  final FocusNode             passFocus;
+  final bool                  isLoading;
+  final VoidCallback          onSubmit, onForgot, onRegister;
+  final bool                  compact;
+
+  const _LoginForm({
+    required this.formKey,
+    required this.emailCtrl,
+    required this.passCtrl,
+    required this.passFocus,
+    required this.isLoading,
+    required this.onSubmit,
+    required this.onForgot,
+    required this.onRegister,
+    required this.compact,
+  });
+
+  @override
+  State<_LoginForm> createState() => _LoginFormState();
+}
+
+class _LoginFormState extends State<_LoginForm> {
+  bool _obscurePass = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final l  = context.l10n;
+    final cs = Theme.of(context).colorScheme;
+    final c  = widget.compact;
+
+    final titleSize = c ? 13.0 : 17.0;
+    final subSize   = c ? 10.0 : 11.0;
+    final btnVPad   = c ? 20.0 : 22.0;
+    // fieldVPad : mobile +10% (14 → 15.4). Desktop reste à 18.
+    final fieldVPad = c ? 15.4 : 18.0;
+    final gap       = c ? 18.0 : 22.0;
+    final sectionGap = c ? 26.0 : 30.0;
+    final forgotGap = c ? 8.0  : 10.0;
+
+    return Form(
+      key: widget.formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Titre + sous-titre ────────────────────────────────────
+          Text(
+            l.loginTitle,
+            style: TextStyle(
+              fontSize:   titleSize,
+              fontWeight: FontWeight.w500,
+              color:      cs.onSurface,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            l.loginSubtitle,
+            style: TextStyle(
+              fontSize: subSize,
+              color:    cs.onSurfaceVariant,
+            ),
+          ),
+          SizedBox(height: c ? 18 : 24),
+
+          // ── Email ─────────────────────────────────────────────────
+          TextFormField(
+            controller:        widget.emailCtrl,
+            keyboardType:      TextInputType.emailAddress,
+            textInputAction:   TextInputAction.next,
+            autofillHints:     const [AutofillHints.email],
+            style:             AppTextStyles.bodySm,
+            decoration: _decoration(
+              context,
+              hint: l.loginEmailHint,
+              icon: Icons.email_outlined,
+              vPad: fieldVPad,
+            ),
+            validator: (v) {
+              final s = (v ?? '').trim();
+              if (s.isEmpty) return l.errEmailRequired;
+              if (!s.contains('@') || !s.contains('.')) {
+                return l.errEmailInvalid;
+              }
+              return null;
+            },
+          ),
+          SizedBox(height: gap),
+
+          // ── Mot de passe ──────────────────────────────────────────
+          TextFormField(
+            controller:        widget.passCtrl,
+            focusNode:         widget.passFocus,
+            obscureText:       _obscurePass,
+            textInputAction:   TextInputAction.done,
+            autofillHints:     const [AutofillHints.password],
+            onFieldSubmitted:  (_) => widget.onSubmit(),
+            style:             AppTextStyles.bodySm,
+            decoration: _decoration(
+              context,
+              hint: l.loginPasswordHint,
+              icon: Icons.lock_outline_rounded,
+              vPad: fieldVPad,
+              suffix: IconButton(
+                splashRadius: 18,
+                padding:      EdgeInsets.zero,
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  _obscurePass
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                  size:  16,
+                  color: cs.onSurfaceVariant,
+                ),
+                onPressed: () =>
+                    setState(() => _obscurePass = !_obscurePass),
+              ),
+            ),
+            validator: (v) {
+              if (v == null || v.isEmpty) return l.errPasswordRequired;
+              if (v.length < 6)            return l.errPasswordShort;
+              return null;
+            },
+          ),
+          SizedBox(height: forgotGap),
+
+          // ── Mot de passe oublié ───────────────────────────────────
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: widget.onForgot,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
+                minimumSize:    Size.zero,
+                tapTargetSize:  MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                l.loginForgot,
+                style: AppTextStyles.caption.copyWith(
+                  color:      cs.primary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+          SizedBox(height: gap),
+
+          // ── Bouton principal ──────────────────────────────────────
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: widget.isLoading ? null : widget.onSubmit,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: cs.primary,
+                foregroundColor: Colors.white,
+                elevation:       0,
+                padding: EdgeInsets.symmetric(vertical: btnVPad),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+                minimumSize:  Size.zero,
+                textStyle: AppTextStyles.body.copyWith(
+                    fontWeight: FontWeight.w600, color: Colors.white),
+              ),
+              child: widget.isLoading
+                  ? const SizedBox(
+                      width: 18, height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : Text(l.loginButton),
+            ),
+          ),
+          SizedBox(height: sectionGap),
+
+          // ── Lien créer un compte ──────────────────────────────────
+          Center(
+            child: GestureDetector(
+              onTap: widget.onRegister,
+              child: Text.rich(
+                TextSpan(children: [
+                  TextSpan(
+                    text: l.loginNoAccount,
+                    style: AppTextStyles.caption
+                        .copyWith(color: cs.onSurfaceVariant),
+                  ),
+                  TextSpan(
+                    text: l.loginCreate,
+                    style: AppTextStyles.caption.copyWith(
+                      color:      cs.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// InputDecoration locale — override le `inputDecorationTheme` global
+  /// (rayon 12px) pour respecter la spec login (rayon 8px, bordure 1.5px,
+  /// fillColor surfaceContainerHighest, prefixIcon 14px). Toutes les
+  /// couleurs sont 100% issues du `colorScheme` actuel.
+  InputDecoration _decoration(
+    BuildContext context, {
+    required String   hint,
+    required IconData icon,
+    required double   vPad,
+    Widget?           suffix,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    // `surfaceContainerHighest` est forcé à blanc par le theme global —
+    // on lui ajoute un voile primaire ultra-léger pour différencier la
+    // zone de saisie du fond du panneau (sinon les bordures sont la
+    // seule séparation visible).
+    final fillColor = Color.alphaBlend(
+      cs.primary.withValues(alpha: 0.04),
+      cs.surfaceContainerHighest,
+    );
+    OutlineInputBorder border(Color color, [double w = 1.5]) =>
+        OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide:   BorderSide(color: color, width: w),
+        );
+    return InputDecoration(
+      hintText:  hint,
+      hintStyle: AppTextStyles.bodySm
+          .copyWith(color: cs.onSurfaceVariant.withValues(alpha: 0.7)),
+      filled:    true,
+      fillColor: fillColor,
+      isDense:   true,
+      contentPadding: EdgeInsets.symmetric(
+          horizontal: 12, vertical: vPad),
+      prefixIcon: Padding(
+        padding: const EdgeInsets.only(left: 12, right: 8),
+        child: Icon(icon, size: 14, color: cs.onSurfaceVariant),
+      ),
+      prefixIconConstraints:
+          const BoxConstraints(minWidth: 0, minHeight: 0),
+      suffixIcon: suffix == null
+          ? null
+          : Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: suffix,
+            ),
+      suffixIconConstraints:
+          const BoxConstraints(minWidth: 0, minHeight: 0),
+      border:             border(cs.outlineVariant),
+      enabledBorder:      border(cs.outlineVariant),
+      focusedBorder:      border(cs.primary),
+      errorBorder:        border(cs.error),
+      focusedErrorBorder: border(cs.error),
+      errorStyle:         AppTextStyles.caption,
+    );
+  }
+}
+

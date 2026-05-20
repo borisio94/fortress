@@ -227,6 +227,11 @@ class _OnboardingDialogState extends State<_OnboardingDialog> {
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
                     elevation: 0,
+                    // Sans ça, le minimumSize Size(double.infinity, 52)
+                    // du thème global rend le bouton infiniment large
+                    // dans le Row → il déborde hors du dialogue et
+                    // « Suivant » devient invisible.
+                    minimumSize: const Size(0, 44),
                     padding: const EdgeInsets.symmetric(
                         horizontal: 22, vertical: 12),
                     shape: RoundedRectangleBorder(

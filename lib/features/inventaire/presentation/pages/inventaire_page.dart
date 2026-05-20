@@ -10,6 +10,7 @@ import '../../../../shared/widgets/app_switch.dart';
 import '../../../../shared/widgets/product_image_card.dart';
 import '../../../../shared/widgets/view_filter_chip_bar.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/storage/local_storage_service.dart';
@@ -128,7 +129,7 @@ class _InventairePageState extends ConsumerState<InventairePage>
   bool _creatingCatalogue = false;
 
   // Filtre actif par chip
-  String _activeChip = 'all'; // all | active | inactive | low_stock | no_price
+  String _activeChip = 'stock'; // all | active | inactive | low_stock | no_price | stock
 
   // Filtres catégorie / marque
   Set<String> _filterCategories  = {};
@@ -626,6 +627,20 @@ class _InventairePageState extends ConsumerState<InventairePage>
           .map((e) => '${e.key}:${e.value}')
           .join(',');
     }
+    // Emplacement du périmètre actif (= « emplacement utilisé pour
+    // envoyer ») : Boutique → StockLocation de la boutique ; Partenaire X
+    // → son id. Globale / non résolu → omis (commande rattachée à la
+    // boutique, comportement historique inchangé).
+    final vf = ref.read(dashViewFilterProvider);
+    String? shareLocId;
+    if (vf == null || vf == '_base') {
+      shareLocId = AppDatabase.getShopLocation(widget.shopId)?.id;
+    } else if (HiveBoxes.stockLocationsBox.get(vf) != null) {
+      shareLocId = vf;
+    }
+    if (shareLocId != null && shareLocId.isNotEmpty) {
+      qp['loc'] = shareLocId;
+    }
     final qpString = qp.entries
         .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
         .join('&');
@@ -809,7 +824,7 @@ class _InventairePageState extends ConsumerState<InventairePage>
             const SizedBox(width: 8),
             Expanded(child: Text(e.$2,
                 maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 13,
+                style: AppTextStyles.body.copyWith(
                     fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
                     color: isSel ? cs.primary : cs.onSurface))),
             if (isSel)
@@ -1013,11 +1028,11 @@ class _InventairePageState extends ConsumerState<InventairePage>
                 height: 38,
                 child: TextField(
                   onChanged: (v) => setState(() { _query = v; _page = 1; }),
-                  style: const TextStyle(fontSize: 13),
+                  style: AppTextStyles.body,
                   decoration: InputDecoration(
                     hintText: l.inventaireSearch,
-                    hintStyle: const TextStyle(fontSize: 12,
-                        color: AppColors.textHint),
+                    hintStyle: AppTextStyles.bodySm
+                        .copyWith(color: AppColors.textHint),
                     prefixIcon: const Icon(Icons.search_rounded,
                         size: 18, color: AppColors.textHint),
                     filled: true, fillColor: Colors.white, isDense: true,
@@ -1048,9 +1063,7 @@ class _InventairePageState extends ConsumerState<InventairePage>
             // ── Gauche : nombre d'articles filtrés ──
             Expanded(
               child: Text('${_filtered.length} ${l.invItems}',
-                  style: const TextStyle(fontSize: 11,
-                      color: AppColors.textSecondary,
-                      fontWeight: FontWeight.w500)),
+                  style: AppTextStyles.caption),
             ),
             // ── Centre : stock global ──
             Expanded(
@@ -1064,10 +1077,8 @@ class _InventairePageState extends ConsumerState<InventairePage>
                   ),
                   child: Text(
                       '${_totalAvailableStock()} en stock',
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary)),
+                      style: AppTextStyles.captionBold
+                          .copyWith(color: AppColors.primary)),
                 ),
               ),
             ),
@@ -1077,8 +1088,8 @@ class _InventairePageState extends ConsumerState<InventairePage>
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   Text(l.invPerPage,
-                      style: const TextStyle(fontSize: 11,
-                          color: AppColors.textSecondary)),
+                      style: AppTextStyles.captionHint
+                          .copyWith(color: AppColors.textSecondary)),
                   const SizedBox(width: 6),
                   Theme(
                     data: Theme.of(context).copyWith(
@@ -1092,12 +1103,10 @@ class _InventairePageState extends ConsumerState<InventairePage>
                       underline: const SizedBox.shrink(),
                       dropdownColor: Colors.white,
                       borderRadius: BorderRadius.circular(8),
-                      style: const TextStyle(fontSize: 12,
-                          color: AppColors.textPrimary),
+                      style: AppTextStyles.bodySm,
                       items: [10, 25, 50].map((n) => DropdownMenuItem(
                         value: n,
-                        child: Text('$n', style: const TextStyle(
-                            fontSize: 12, color: AppColors.textPrimary)),
+                        child: Text('$n', style: AppTextStyles.bodySm),
                       )).toList(),
                       onChanged: (v) =>
                           setState(() { _perPage = v!; _page = 1; }),
@@ -1213,8 +1222,8 @@ class _InventairePageState extends ConsumerState<InventairePage>
                               ? 'Génération…'
                               : 'Catalogue WhatsApp '
                                 '(${_selected.length})',
-                          style: const TextStyle(fontSize: 13,
-                              fontWeight: FontWeight.w700)),
+                          style: AppTextStyles.bodyBold
+                              .copyWith(color: Colors.white)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF25D366),
                         foregroundColor: Colors.white,
@@ -1244,15 +1253,27 @@ class _InventairePageState extends ConsumerState<InventairePage>
                         // le marchand visualise au moment du partage,
                         // pas le cumul global Supabase.
                         final snapshot = _buildStockSnapshot(products);
+                        // Emplacement du périmètre actif → propagé à la
+                        // commande client (orders.delivery_location_id).
+                        final vf = ref.read(dashViewFilterProvider);
+                        String? shareLocId;
+                        if (vf == null || vf == '_base') {
+                          shareLocId =
+                              AppDatabase.getShopLocation(widget.shopId)?.id;
+                        } else if (HiveBoxes.stockLocationsBox.get(vf)
+                            != null) {
+                          shareLocId = vf;
+                        }
                         ShareCatalogDialog.show(context,
                             products: _products, shopId: widget.shopId,
                             preSelected: products,
-                            stockSnapshot: snapshot);
+                            stockSnapshot: snapshot,
+                            locationId: shareLocId);
                       },
                       icon: const Icon(Icons.share_rounded, size: 16),
-                      label: const Text('Partager',
-                          style: TextStyle(fontSize: 13,
-                              fontWeight: FontWeight.w700)),
+                      label: Text('Partager',
+                          style: AppTextStyles.bodyBold
+                              .copyWith(color: AppColors.primary)),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.primary,
                         side: BorderSide(
@@ -1356,8 +1377,7 @@ class _StatusFilterPopupBtnState extends State<_StatusFilterPopupBtn> {
             const SizedBox(width: 8),
             Expanded(child: Text(it.$2,
                 maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 13,
+                style: AppTextStyles.body.copyWith(
                     fontWeight: isSel
                         ? FontWeight.w700
                         : FontWeight.w500,
@@ -1603,9 +1623,7 @@ class _InlineMultiMenuState extends State<_InlineMultiMenu> {
               padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
               child: Text(widget.label.toUpperCase(),
                   maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
+                  style: AppTextStyles.microBold.copyWith(
                       letterSpacing: 0.6,
                       color: cs.onSurface.withValues(alpha: 0.5))),
             ),
@@ -1617,8 +1635,7 @@ class _InlineMultiMenuState extends State<_InlineMultiMenu> {
                       color: AppColors.textSecondary),
                   const SizedBox(width: 8),
                   Text(context.l10n.invNoResult,
-                      style: TextStyle(fontSize: 12,
-                          color: AppColors.textSecondary)),
+                      style: AppTextStyles.bodySmSecondary),
                 ]),
               )
             else
@@ -1652,8 +1669,7 @@ class _InlineMultiMenuState extends State<_InlineMultiMenu> {
                         const SizedBox(width: 8),
                         Flexible(child: Text(item,
                             maxLines: 1, overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                fontSize: 12,
+                            style: AppTextStyles.bodySm.copyWith(
                                 fontWeight: sel
                                     ? FontWeight.w600 : FontWeight.w400,
                                 color: sel ? AppColors.primary
@@ -1680,9 +1696,8 @@ class _InlineMultiMenuState extends State<_InlineMultiMenu> {
                           color: AppColors.error),
                       const SizedBox(width: 8),
                       Text(context.l10n.clear,
-                          style: TextStyle(fontSize: 12,
-                              color: AppColors.error,
-                              fontWeight: FontWeight.w600)),
+                          style: AppTextStyles.bodySmBold
+                              .copyWith(color: AppColors.error)),
                     ]),
                   ),
                 ),
@@ -1775,8 +1790,7 @@ class _DesktopRowState extends ConsumerState<_DesktopRow> {
             const SizedBox(width: 10),
             Expanded(flex: 3, child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(p.name, style: const TextStyle(fontSize: 12,
-                  fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+              Text(p.name, style: AppTextStyles.bodySmBold,
                   maxLines: 1, overflow: TextOverflow.ellipsis),
               Row(children: [
                 ...List.generate(5, (i) => Icon(
@@ -1784,34 +1798,32 @@ class _DesktopRowState extends ConsumerState<_DesktopRow> {
                     size: 10, color: AppColors.warning)),
                 const SizedBox(width: 4),
                 if (p.sku != null) Text(p.sku!,
-                    style: const TextStyle(fontSize: 9, color: AppColors.textHint)),
+                    style: AppTextStyles.micro),
               ]),
             ])),
             Expanded(flex: 2, child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(context.l10n.invCategoryLabel, style: const TextStyle(fontSize: 9, color: AppColors.textHint)),
-              Text(p.categoryId ?? '—', style: const TextStyle(fontSize: 11,
-                  color: Color(0xFF374151)),
+              Text(context.l10n.invCategoryLabel, style: AppTextStyles.micro),
+              Text(p.categoryId ?? '—', style: AppTextStyles.captionHint
+                  .copyWith(color: const Color(0xFF374151)),
                   maxLines: 1, overflow: TextOverflow.ellipsis),
             ])),
             Expanded(flex: 1, child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(l.invStock, style: const TextStyle(fontSize: 9, color: AppColors.textHint)),
-              Text('$stock', style: TextStyle(fontSize: 12,
-                  fontWeight: FontWeight.w700,
+              Text(l.invStock, style: AppTextStyles.micro),
+              Text('$stock', style: AppTextStyles.bodySmBold.copyWith(
                   color: isLow ? AppColors.error : AppColors.textPrimary)),
             ])),
             Expanded(flex: 2, child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(l.invPriceLabel, style: const TextStyle(fontSize: 9, color: AppColors.textHint)),
+              Text(l.invPriceLabel, style: AppTextStyles.micro),
               _PriceDisplay(product: p, compact: true),
             ])),
             Expanded(flex: 2, child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(l.invVisibility, style: const TextStyle(fontSize: 9, color: AppColors.textHint)),
+              Text(l.invVisibility, style: AppTextStyles.micro),
               if (isPartnerView)
-                const Text('—', style: TextStyle(fontSize: 11,
-                    color: AppColors.textHint))
+                const Text('—', style: AppTextStyles.captionHint)
               else
                 Transform.scale(scale: 0.7, alignment: Alignment.centerLeft,
                     child: AppSwitch(value: p.isActive,
@@ -1848,6 +1860,7 @@ class _DesktopRowState extends ConsumerState<_DesktopRow> {
             onChanged: widget.onProductChanged,
             isPartnerView: isPartnerView,
             partnerLocId:  partnerLocId,
+            locationIds:   locIds,
           ),
       ]),
     );
@@ -1930,9 +1943,8 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
                       mainAxisSize: MainAxisSize.min, children: [
                     Row(children: [
                       Expanded(child: Text(p.name,
-                          style: const TextStyle(fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.textPrimary),
+                          style: AppTextStyles.captionBold
+                              .copyWith(color: AppColors.textPrimary),
                           maxLines: 1, overflow: TextOverflow.ellipsis)),
                       if (p.rating > 0) ...[
                         const SizedBox(width: 6),
@@ -1942,17 +1954,15 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
                     if ((p.sku ?? '').isNotEmpty) ...[
                       const SizedBox(height: 1),
                       Text('SKU : ${p.sku}',
-                          style: const TextStyle(fontSize: 9,
-                              color: AppColors.textHint),
+                          style: AppTextStyles.micro,
                           maxLines: 1, overflow: TextOverflow.ellipsis),
                     ],
                     const SizedBox(height: 4),
                     Wrap(spacing: 6, runSpacing: 4, children: [
                       if (p.categoryId != null && p.categoryId!.isNotEmpty)
                         Text(p.categoryId!,
-                            style: const TextStyle(fontSize: 10,
-                                color: AppColors.textSecondary,
-                                fontWeight: FontWeight.w500)),
+                            style: AppTextStyles.microSecondary
+                                .copyWith(fontWeight: FontWeight.w500)),
                       _StockBadge(stock: stockAt, min: p.stockMinAlert),
                       _PriceDisplay(product: p),
                       _MarginPill(product: p),
@@ -2051,7 +2061,8 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
                   Expanded(child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(context.l10n.invActiveInCaisse,
-                        style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                        style: AppTextStyles.captionHint
+                            .copyWith(color: AppColors.textSecondary)),
                     Transform.scale(scale: 0.85, alignment: Alignment.centerLeft,
                         child: AppSwitch(value: p.isActive,
                             onChanged: widget.onToggleActive)),
@@ -2059,7 +2070,8 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
                   Expanded(child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(context.l10n.invVisibleWeb,
-                        style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                        style: AppTextStyles.captionHint
+                            .copyWith(color: AppColors.textSecondary)),
                     Transform.scale(scale: 0.85, alignment: Alignment.centerLeft,
                         child: AppSwitch(value: p.isVisibleWeb,
                             onChanged: widget.onToggleWeb)),
@@ -2084,9 +2096,8 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
                           color: AppColors.primary),
                       const SizedBox(width: 6),
                       Text('${p.variants.length} variante(s)',
-                          style: TextStyle(fontSize: 12,
-                              color: AppColors.primary,
-                              fontWeight: FontWeight.w600)),
+                          style: AppTextStyles.bodySmBold
+                              .copyWith(color: AppColors.primary)),
                       const Spacer(),
                       Icon(_showVariants
                           ? Icons.expand_less : Icons.expand_more,
@@ -2136,10 +2147,7 @@ class _StockBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text('${context.l10n.invStock}: $stock',
-          style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              color: color)),
+          style: AppTextStyles.microBold.copyWith(color: color)),
     );
   }
 }
@@ -2172,8 +2180,7 @@ class _MarginPill extends StatelessWidget {
       ),
       child: Text(
         margin == null ? '—' : '${margin.toStringAsFixed(0)}%',
-        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
-            color: color),
+        style: AppTextStyles.microBold.copyWith(color: color),
       ),
     );
   }
@@ -2255,8 +2262,7 @@ class _VariantsSummary extends StatelessWidget {
                   color: hasOut ? AppColors.error : AppColors.warning),
               const SizedBox(width: 3),
               Text(l.invLowStockLabel,
-                  style: TextStyle(fontSize: 10,
-                      fontWeight: FontWeight.w700,
+                  style: AppTextStyles.microBold.copyWith(
                       color: hasOut ? AppColors.error : AppColors.warning)),
             ]),
           ),
@@ -2289,14 +2295,12 @@ class _VariantPill extends StatelessWidget {
         ),
         const SizedBox(width: 5),
         Text(variant.name,
-            style: const TextStyle(fontSize: 10,
+            style: AppTextStyles.micro.copyWith(
                 fontWeight: FontWeight.w600,
                 color: AppColors.textPrimary)),
         const SizedBox(width: 5),
         Text('· ${variant.stockAvailable}',
-            style: TextStyle(fontSize: 10,
-                fontWeight: FontWeight.w700,
-                color: statusColor)),
+            style: AppTextStyles.microBold.copyWith(color: statusColor)),
       ]),
     );
   }
@@ -2313,8 +2317,13 @@ class _VariantsSection extends StatefulWidget {
   /// leur stockAvailable (= boutique).
   final bool isPartnerView;
   final String? partnerLocId;
+  /// Emplacements résolus de la vue active (cf. `_resolveLocationIds`).
+  /// Globale = tous (boutique + partenaires) → chaque variante affiche la
+  /// SOMME de son stock sur ces emplacements, cohérent avec le stock
+  /// produit du visuel principal. Null = repli `variant.stockAvailable`.
+  final List<String>? locationIds;
   const _VariantsSection({required this.product, this.onChanged,
-    this.isPartnerView = false, this.partnerLocId});
+    this.isPartnerView = false, this.partnerLocId, this.locationIds});
   @override
   State<_VariantsSection> createState() => _VariantsSectionState();
 }
@@ -2391,8 +2400,8 @@ class _VariantsSectionState extends State<_VariantsSection> {
           Icon(Icons.layers_outlined, size: 13, color: AppColors.primary),
           const SizedBox(width: 5),
           Text('${l.invVariantsLabel} (${shown.length})',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                  color: AppColors.primary)),
+              style: AppTextStyles.captionBold
+                  .copyWith(color: AppColors.primary)),
         ]),
         const SizedBox(height: 8),
         if (shown.isEmpty)
@@ -2402,8 +2411,8 @@ class _VariantsSectionState extends State<_VariantsSection> {
               widget.isPartnerView
                   ? 'Aucune variante transférée chez ce partenaire.'
                   : 'Aucune variante.',
-              style: const TextStyle(fontSize: 11,
-                  color: AppColors.textSecondary)),
+              style: AppTextStyles.captionHint
+                  .copyWith(color: AppColors.textSecondary)),
           )
         else
           // Scrollable horizontal si l'écran est trop étroit pour toutes
@@ -2422,6 +2431,7 @@ class _VariantsSectionState extends State<_VariantsSection> {
                   onChanged: widget.onChanged,
                   isPartnerView: widget.isPartnerView,
                   partnerLocId:  widget.partnerLocId,
+                  locationIds:   widget.locationIds,
                 )),
                 const SizedBox(height: 6),
                 // Pas d'ajout de variante en vue partenaire — la création
@@ -2467,9 +2477,7 @@ class _HeaderCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(label,
       textAlign: right ? TextAlign.right : TextAlign.left,
-      style: const TextStyle(
-          fontSize: 9,
-          fontWeight: FontWeight.w700,
+      style: AppTextStyles.microBold.copyWith(
           color: AppColors.textHint,
           letterSpacing: 0.3));
 }
@@ -2487,10 +2495,15 @@ class _VariantRow extends StatelessWidget {
   /// ne s'appliquent qu'à la boutique propriétaire du produit).
   final bool           isPartnerView;
   final String?        partnerLocId;
+  /// Emplacements de la vue active (cf. `_resolveLocationIds`). Le stock
+  /// affiché = Σ du stock de CETTE variante sur ces emplacements
+  /// (Globale = boutique + partenaires), cohérent avec le stock produit
+  /// du visuel principal. Null/legacy sans id → `variant.stockAvailable`.
+  final List<String>?  locationIds;
   const _VariantRow({
     required this.variant, required this.product,
     this.onSetMain, this.onChanged,
-    this.isPartnerView = false, this.partnerLocId,
+    this.isPartnerView = false, this.partnerLocId, this.locationIds,
   });
 
   double? _margin() {
@@ -2515,12 +2528,17 @@ class _VariantRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l      = context.l10n;
-    // En vue partenaire, on lit le StockLevel local du partenaire — c'est
-    // ce stock qui a été effectivement transféré chez ce partenaire. Sinon
-    // on lit le stockAvailable de la variante (= stock boutique).
-    final stockShown = (isPartnerView && partnerLocId != null && variant.id != null)
-        ? (AppDatabase.getStockLevel(variant.id!, partnerLocId!)?.stockAvailable ?? 0)
-        : variant.stockAvailable;
+    // Stock variante = Σ du stock de CETTE variante sur les emplacements
+    // de la vue active (helper partagé, identique au calcul du stock
+    // produit du visuel principal) :
+    //   * Globale    → boutique + tous les partenaires (la somme attendue),
+    //   * Boutique   → emplacements `type='shop'`,
+    //   * Partenaire → ce partenaire uniquement.
+    // Legacy : variante sans id → repli `variant.stockAvailable` (le helper
+    // renverrait 0, ce qui masquerait à tort un stock boutique existant).
+    final stockShown = variant.id == null
+        ? variant.stockAvailable
+        : stock_loc.stockForVariantAtLocations(variant, locationIds);
     final isLow  = stockShown > 0 && stockShown <= variant.stockMinAlert;
     final margin = _margin();
     final stockC = stockShown <= 0
@@ -2558,9 +2576,8 @@ class _VariantRow extends StatelessWidget {
                 Row(children: [
                   Expanded(child: Text(variant.name,
                       maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary))),
+                      style: AppTextStyles.captionBold
+                          .copyWith(color: AppColors.textPrimary))),
                   if (variant.isMain) ...[
                     const SizedBox(width: 3),
                     Icon(Icons.star_rounded, size: 11,
@@ -2570,8 +2587,7 @@ class _VariantRow extends StatelessWidget {
                 if ((variant.sku ?? '').isNotEmpty)
                   Text(variant.sku!,
                       maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 9,
-                          color: AppColors.textHint)),
+                      style: AppTextStyles.micro),
               ])),
             ]),
           )),
@@ -2580,7 +2596,7 @@ class _VariantRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Align(alignment: Alignment.centerRight,
               child: Text('$stockShown',
-                  style: TextStyle(fontSize: 12,
+                  style: AppTextStyles.bodySmBold.copyWith(
                       fontWeight: FontWeight.w800, color: stockC)))),
           ),
           // ── Col 3 : Prix vente ────────────────────────────────────
@@ -2597,9 +2613,7 @@ class _VariantRow extends StatelessWidget {
                   variant.priceBuy > 0
                       ? CurrencyFormatter.format(variant.priceBuy)
                       : '—',
-                  style: const TextStyle(fontSize: 11,
-                      color: AppColors.textSecondary,
-                      fontWeight: FontWeight.w600)))),
+                  style: AppTextStyles.captionBold))),
           ),
           // ── Col 5 : Marge pill ────────────────────────────────────
           SizedBox(width: 50, child: Padding(
@@ -2607,8 +2621,7 @@ class _VariantRow extends StatelessWidget {
             child: Align(alignment: Alignment.centerRight,
               child: margin == null
                   ? const Text('—',
-                      style: TextStyle(fontSize: 10,
-                          color: AppColors.textHint))
+                      style: AppTextStyles.micro)
                   : Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 5, vertical: 1),
@@ -2617,9 +2630,8 @@ class _VariantRow extends StatelessWidget {
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text('${margin.toStringAsFixed(0)}%',
-                          style: TextStyle(fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.secondary)),
+                          style: AppTextStyles.microBold
+                              .copyWith(color: AppColors.secondary)),
                     ))),
           ),
           // ── Col 6 : Actions (variante) — masquées en vue Partenaire,
@@ -2725,8 +2737,8 @@ class _VariantSwatch extends StatelessWidget {
           color: bg, borderRadius: BorderRadius.circular(4)),
       alignment: Alignment.center,
       child: Text(letter,
-          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800,
-              color: fg)),
+          style: AppTextStyles.captionBold
+              .copyWith(fontWeight: FontWeight.w800, color: fg)),
     );
   }
 }
@@ -2760,9 +2772,8 @@ class _AddVariantButton extends StatelessWidget {
             Icon(Icons.add_rounded, size: 14, color: AppColors.primary),
             const SizedBox(width: 5),
             Text(l.invAddVariant,
-                style: TextStyle(fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.primary)),
+                style: AppTextStyles.captionBold
+                    .copyWith(color: AppColors.primary)),
           ]),
         ),
       ),
@@ -2832,15 +2843,15 @@ class _VariantPriceDisplay extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!_isPromoActive) {
       return Text(CurrencyFormatter.format(variant.priceSellPos),
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
-              color: AppColors.primary));
+          style: AppTextStyles.bodySmBold
+              .copyWith(color: AppColors.primary));
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
       Text(CurrencyFormatter.format(variant.promoPrice!),
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
-              color: AppColors.error)),
+          style: AppTextStyles.bodySmBold
+              .copyWith(color: AppColors.error)),
       Text(CurrencyFormatter.format(variant.priceSellPos),
-          style: const TextStyle(fontSize: 9, color: AppColors.textHint,
+          style: AppTextStyles.micro.copyWith(
               decoration: TextDecoration.lineThrough,
               decorationColor: AppColors.textHint)),
       if (variant.promoEnd != null)
@@ -2860,11 +2871,12 @@ class _DetailRow extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 3),
     child: Row(children: [
-      Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+      Text(label, style: AppTextStyles.captionHint
+          .copyWith(color: AppColors.textSecondary)),
       const Spacer(),
       Flexible(child: Text(value,
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-              color: valueColor ?? AppColors.textPrimary),
+          style: AppTextStyles.bodySmBold
+              .copyWith(color: valueColor ?? AppColors.textPrimary),
           textAlign: TextAlign.right, overflow: TextOverflow.ellipsis)),
     ]),
   );
@@ -2878,7 +2890,8 @@ class _DetailRowWidget extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 3),
     child: Row(children: [
-      Text(label, style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+      Text(label, style: AppTextStyles.captionHint
+          .copyWith(color: AppColors.textSecondary)),
       const Spacer(),
       child,
     ]),
@@ -2902,12 +2915,11 @@ class _NoResultState extends StatelessWidget {
             child: const Icon(Icons.search_off_rounded, size: 28,
                 color: AppColors.textHint)),
         const SizedBox(height: 16),
-        Text(l.invNoResult, style: const TextStyle(
-            fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+        Text(l.invNoResult, style: AppTextStyles.subtitleBold,
             textAlign: TextAlign.center),
         const SizedBox(height: 6),
         Text(l.invNoResultHint,
-            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            style: AppTextStyles.bodySmSecondary,
             textAlign: TextAlign.center),
       ]),
     ));
@@ -2953,12 +2965,12 @@ class _Pagination extends StatelessWidget {
               minimumSize: Size.zero,
               padding: btnPad),
           child: Text(l.invPrevPage,
-              style: TextStyle(fontSize: btnFs,
+              style: AppTextStyles.body.copyWith(fontSize: btnFs,
                   fontWeight: FontWeight.w600)),
         ),
         const Spacer(),
         Text('$start–$end / $count',
-            style: TextStyle(fontSize: countFs,
+            style: AppTextStyles.bodySm.copyWith(fontSize: countFs,
                 color: AppColors.textSecondary)),
         const Spacer(),
         TextButton(
@@ -2969,7 +2981,7 @@ class _Pagination extends StatelessWidget {
               minimumSize: Size.zero,
               padding: btnPad),
           child: Text(l.invNextPage,
-              style: TextStyle(fontSize: btnFs,
+              style: AppTextStyles.body.copyWith(fontSize: btnFs,
                   fontWeight: FontWeight.w600)),
         ),
       ]),
@@ -3018,15 +3030,12 @@ class _PriceDisplay extends StatelessWidget {
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
           Text(CurrencyFormatter.format(promoV.promoPrice!),
-              style: TextStyle(
+              style: AppTextStyles.captionBold.copyWith(
                   fontSize: compact ? 11 : 10,
-                  fontWeight: FontWeight.w700,
                   color: AppColors.error)),
           const SizedBox(width: 5),
           Text(CurrencyFormatter.format(promoV.priceSellPos),
-              style: const TextStyle(
-                  fontSize: 9,
-                  color: AppColors.textHint,
+              style: AppTextStyles.micro.copyWith(
                   decoration: TextDecoration.lineThrough,
                   decorationColor: AppColors.textHint)),
         ]),
@@ -3036,9 +3045,8 @@ class _PriceDisplay extends StatelessWidget {
     }
 
     return Text(CurrencyFormatter.format(basePrice),
-        style: TextStyle(
+        style: AppTextStyles.captionBold.copyWith(
             fontSize: compact ? 11 : 10,
-            fontWeight: FontWeight.w700,
             color: AppColors.primary));
   }
 }
@@ -3073,7 +3081,7 @@ class _PromoCountdownState extends State<_PromoCountdown> {
   Widget build(BuildContext context) {
     if (_remaining.inSeconds <= 0) {
       return const Text('Promo terminée',
-          style: TextStyle(fontSize: 8, color: AppColors.textHint));
+          style: AppTextStyles.micro);
     }
     final h = _remaining.inHours;
     final m = _remaining.inMinutes % 60;
@@ -3096,8 +3104,8 @@ class _PromoCountdownState extends State<_PromoCountdown> {
         Icon(Icons.timer_outlined, size: 8, color: AppColors.error),
         const SizedBox(width: 2),
         Text(label,
-            style: TextStyle(fontSize: 8, color: AppColors.error,
-                fontWeight: FontWeight.w600)),
+            style: AppTextStyles.micro.copyWith(
+                color: AppColors.error, fontWeight: FontWeight.w600)),
       ]),
     );
   }
@@ -3147,7 +3155,7 @@ class _ProductActionsMenu extends ConsumerWidget {
         child: Row(children: [
           Icon(Icons.swap_horiz_rounded, size: 16, color: AppColors.primary),
           const SizedBox(width: 8),
-          const Text('Transférer', style: TextStyle(fontSize: 13)),
+          const Text('Transférer', style: AppTextStyles.body),
         ]),
       ));
     }
@@ -3156,7 +3164,7 @@ class _ProductActionsMenu extends ConsumerWidget {
       child: Row(children: const [
         Icon(Icons.send_rounded, size: 16, color: Color(0xFF25D366)),
         SizedBox(width: 8),
-        Text('Partager via WhatsApp', style: TextStyle(fontSize: 13)),
+        Text('Partager via WhatsApp', style: AppTextStyles.body),
       ]),
     ));
     items.add(PopupMenuItem<String>(
@@ -3164,7 +3172,7 @@ class _ProductActionsMenu extends ConsumerWidget {
       child: Row(children: [
         Icon(Icons.share_outlined, size: 16, color: AppColors.secondary),
         const SizedBox(width: 8),
-        const Text('Partager', style: TextStyle(fontSize: 13)),
+        const Text('Partager', style: AppTextStyles.body),
       ]),
     ));
     if (perms.canEditProduct && !isPartnerView) {
@@ -3177,7 +3185,7 @@ class _ProductActionsMenu extends ConsumerWidget {
               color: promoActive ? AppColors.secondary : AppColors.primary),
           const SizedBox(width: 8),
           Text(promoActive ? 'Promotion (active)' : 'Activer une promo',
-              style: TextStyle(fontSize: 13,
+              style: AppTextStyles.body.copyWith(
                   fontWeight: promoActive
                       ? FontWeight.w700 : FontWeight.w400,
                   color: promoActive ? AppColors.secondary : null)),
@@ -3188,24 +3196,27 @@ class _ProductActionsMenu extends ConsumerWidget {
         child: Row(children: [
           Icon(Icons.edit_outlined, size: 16, color: AppColors.textSecondary),
           SizedBox(width: 8),
-          Text('Modifier', style: TextStyle(fontSize: 13)),
+          Text('Modifier', style: AppTextStyles.body),
         ]),
       ));
     }
     if (perms.canDeleteProduct && !isPartnerView) {
-      items.add(const PopupMenuItem<String>(
+      items.add(PopupMenuItem<String>(
         value: 'delete',
         child: Row(children: [
-          Icon(Icons.delete_outline, size: 16, color: AppColors.error),
-          SizedBox(width: 8),
+          const Icon(Icons.delete_outline, size: 16, color: AppColors.error),
+          const SizedBox(width: 8),
           Text('Supprimer',
-              style: TextStyle(fontSize: 13, color: AppColors.error)),
+              style: AppTextStyles.body.copyWith(color: AppColors.error)),
         ]),
       ));
     }
     if (items.isEmpty) return const SizedBox.shrink();
 
     return PopupMenuButton<String>(
+      // Abonnement gelé → kebab grisé (consultation seule). Le menu
+      // AppBar (AppOverflowMenu) reste, lui, actif.
+      enabled: perms.hasActiveSubscription,
       icon: Icon(Icons.more_vert_rounded,
           size: iconSize, color: AppColors.textSecondary),
       padding: EdgeInsets.zero,
@@ -3374,7 +3385,7 @@ class _QuickPromoDialogState extends State<_QuickPromoDialog> {
         const SizedBox(width: 10),
         const Expanded(
           child: Text('Promotion',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              style: AppTextStyles.subtitleBold),
         ),
       ]),
       content: SizedBox(
@@ -3383,9 +3394,7 @@ class _QuickPromoDialogState extends State<_QuickPromoDialog> {
           child: Column(mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(widget.product.name,
-                style: const TextStyle(fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
+                style: AppTextStyles.bodyBold),
             const SizedBox(height: 10),
             for (var i = 0; i < variants.length; i++)
               _buildVariantTile(variants[i], _rows[i], single),
@@ -3411,11 +3420,10 @@ class _QuickPromoDialogState extends State<_QuickPromoDialog> {
                       _end == null
                           ? 'Fin de promo (optionnel)'
                           : 'Fin : ${_fmtDate(_end!)}',
-                      style: TextStyle(fontSize: 12,
+                      style: AppTextStyles.bodySmBold.copyWith(
                           color: _end == null
                               ? AppColors.textSecondary
-                              : AppColors.textPrimary,
-                          fontWeight: FontWeight.w600),
+                              : AppColors.textPrimary),
                     ),
                   ),
                   if (_end != null)
@@ -3430,8 +3438,8 @@ class _QuickPromoDialogState extends State<_QuickPromoDialog> {
             if (_error != null) ...[
               const SizedBox(height: 10),
               Text(_error!,
-                  style: const TextStyle(fontSize: 12,
-                      color: AppColors.error, fontWeight: FontWeight.w600)),
+                  style: AppTextStyles.bodySmBold
+                      .copyWith(color: AppColors.error)),
             ],
           ]),
         ),
@@ -3474,9 +3482,7 @@ class _QuickPromoDialogState extends State<_QuickPromoDialog> {
         Row(children: [
           Expanded(
             child: Text(single ? 'Activer la promo' : v.name,
-                style: const TextStyle(fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
+                style: AppTextStyles.bodyBold),
           ),
           AppSwitch(
             value: row.enabled,
@@ -3491,8 +3497,8 @@ class _QuickPromoDialogState extends State<_QuickPromoDialog> {
             padding: const EdgeInsets.only(top: 2),
             child: Text(
                 'Prix normal : ${CurrencyFormatter.format(v.priceSellPos)}',
-                style: const TextStyle(fontSize: 11,
-                    color: AppColors.textSecondary)),
+                style: AppTextStyles.captionHint
+                    .copyWith(color: AppColors.textSecondary)),
           ),
         if (row.enabled) ...[
           const SizedBox(height: 10),
@@ -3501,15 +3507,15 @@ class _QuickPromoDialogState extends State<_QuickPromoDialog> {
               padding: const EdgeInsets.only(bottom: 6),
               child: Text(
                   'Prix normal : ${CurrencyFormatter.format(v.priceSellPos)}',
-                  style: const TextStyle(fontSize: 11,
-                      color: AppColors.textSecondary)),
+                  style: AppTextStyles.captionHint
+                      .copyWith(color: AppColors.textSecondary)),
             ),
           TextField(
             controller: row.price,
             keyboardType:
                 const TextInputType.numberWithOptions(decimal: true),
-            style: const TextStyle(fontSize: 14,
-                fontWeight: FontWeight.w700),
+            style: AppTextStyles.input
+                .copyWith(fontWeight: FontWeight.w700),
             decoration: InputDecoration(
               isDense: true,
               hintText: 'Prix promo',
@@ -3599,7 +3605,7 @@ class _ShareVariantsPickerDialogState
         const SizedBox(width: 10),
         const Expanded(
           child: Text('Variantes à partager',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              style: AppTextStyles.subtitleBold),
         ),
       ]),
       content: SizedBox(
@@ -3607,9 +3613,7 @@ class _ShareVariantsPickerDialogState
         child: Column(mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(widget.product.name,
-              style: const TextStyle(fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary)),
+              style: AppTextStyles.bodyBold),
           const SizedBox(height: 8),
           // Tout / Rien
           InkWell(
@@ -3626,9 +3630,8 @@ class _ShareVariantsPickerDialogState
                 Text(allSelected
                     ? 'Tout désélectionner'
                     : 'Tout sélectionner',
-                    style: TextStyle(fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.primary)),
+                    style: AppTextStyles.bodySmBold
+                        .copyWith(color: AppColors.primary)),
               ]),
             ),
           ),
@@ -3674,18 +3677,13 @@ class _ShareVariantsPickerDialogState
                           children: [
                         Text(v.name.isEmpty ? '—' : v.name,
                             maxLines: 1, overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textPrimary)),
+                            style: AppTextStyles.bodySmBold),
                         if ((v.sku ?? '').isNotEmpty)
                           Text('SKU ${v.sku}',
-                              style: const TextStyle(fontSize: 10,
-                                  color: AppColors.textHint)),
+                              style: AppTextStyles.micro),
                       ])),
                       Text('${v.stockAvailable}',
-                          style: const TextStyle(fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.textSecondary)),
+                          style: AppTextStyles.captionBold),
                     ]),
                   ),
                 );
@@ -3740,9 +3738,8 @@ class _PickOneVariantDialogState extends State<_PickOneVariantDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       titlePadding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
       title: Text(p.name,
-          style: const TextStyle(fontSize: 14,
-              fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary)),
+          style: AppTextStyles.label
+              .copyWith(fontWeight: FontWeight.w800)),
       contentPadding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
       content: SizedBox(
         width: 320,
@@ -3756,12 +3753,10 @@ class _PickOneVariantDialogState extends State<_PickOneVariantDialog> {
               dense: true,
               activeColor: AppColors.primary,
               title: const Text('Produit complet (image principale)',
-                  style: TextStyle(fontSize: 13,
-                      fontWeight: FontWeight.w600)),
+                  style: AppTextStyles.bodyBold),
               subtitle: Text('${p.totalStock} unité'
                   '${p.totalStock > 1 ? 's' : ''} au total',
-                  style: const TextStyle(fontSize: 11,
-                      color: AppColors.textHint)),
+                  style: AppTextStyles.captionHint),
             ),
             const Divider(height: 8, color: AppColors.divider),
             for (final v in p.variants)
@@ -3772,13 +3767,11 @@ class _PickOneVariantDialogState extends State<_PickOneVariantDialog> {
                 dense: true,
                 activeColor: AppColors.primary,
                 title: Text(v.name,
-                    style: const TextStyle(fontSize: 13,
-                        fontWeight: FontWeight.w600)),
+                    style: AppTextStyles.bodyBold),
                 subtitle: Text('${v.stockAvailable} unité'
                     '${v.stockAvailable > 1 ? 's' : ''} · '
                     '${CurrencyFormatter.format(v.priceSellPos)}',
-                    style: const TextStyle(fontSize: 11,
-                        color: AppColors.textHint)),
+                    style: AppTextStyles.captionHint),
               ),
           ],
         ),
@@ -3856,8 +3849,9 @@ class _CatalogueShareDialogState extends State<_CatalogueShareDialog> {
           borderRadius: BorderRadius.circular(14)),
       titlePadding:   const EdgeInsets.fromLTRB(20, 20, 20, 4),
       contentPadding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-      title: const Text('Que partager ?',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+      title: Text('Que partager ?',
+          style: AppTextStyles.subtitleBold
+              .copyWith(fontWeight: FontWeight.w800)),
       content: SizedBox(
         width: 360,
         child: Column(
@@ -3872,7 +3866,7 @@ class _CatalogueShareDialogState extends State<_CatalogueShareDialog> {
               onChanged: (v) => setState(() => _kind = v!),
               title: const Text('Tout le catalogue'),
               subtitle: const Text('Tous les produits visibles publiquement',
-                  style: TextStyle(fontSize: 11)),
+                  style: AppTextStyles.caption),
             ),
             if (widget.categories.isNotEmpty) ...[
               RadioListTile<_CatalogueShareKind>(
@@ -3883,7 +3877,7 @@ class _CatalogueShareDialogState extends State<_CatalogueShareDialog> {
                 onChanged: (v) => setState(() => _kind = v!),
                 title: const Text('Une catégorie'),
                 subtitle: const Text('Filtre par catégorie de produit',
-                    style: TextStyle(fontSize: 11)),
+                    style: AppTextStyles.caption),
               ),
               if (_kind == _CatalogueShareKind.category)
                 Padding(
@@ -3902,7 +3896,7 @@ class _CatalogueShareDialogState extends State<_CatalogueShareDialog> {
                         .map((c) => DropdownMenuItem(
                             value: c,
                             child: Text(c,
-                                style: const TextStyle(fontSize: 13))))
+                                style: AppTextStyles.body)))
                         .toList(),
                     onChanged: (v) => setState(() => _category = v),
                   ),
@@ -3918,7 +3912,7 @@ class _CatalogueShareDialogState extends State<_CatalogueShareDialog> {
                 title: Text(
                     'Sélection actuelle (${widget.selectionCount} produit${widget.selectionCount > 1 ? 's' : ''})'),
                 subtitle: const Text('Uniquement les produits cochés',
-                    style: TextStyle(fontSize: 11)),
+                    style: AppTextStyles.caption),
               ),
           ],
         ),

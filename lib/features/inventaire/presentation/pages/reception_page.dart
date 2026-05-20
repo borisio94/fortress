@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/widgets/back_dated_picker.dart';
 import '../../../../core/storage/local_storage_service.dart';
@@ -79,16 +80,18 @@ class _ReceptionPageState extends State<ReceptionPage> {
           ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
               const Icon(Icons.inbox_outlined, size: 48, color: Color(0xFFD1D5DB)),
               const SizedBox(height: 12),
-              const Text('Aucun bon de réception',
-                  style: TextStyle(fontSize: 14, color: Color(0xFF9CA3AF))),
+              Text('Aucun bon de réception',
+                  style: AppTextStyles.labelRegular
+                      .copyWith(color: const Color(0xFF9CA3AF))),
               const SizedBox(height: 16),
               Center(
                 child: TextButton.icon(
                   onPressed: () => _showCreateSheet(context),
                   icon: const Icon(Icons.add_rounded, size: 16,
                       color: Colors.white),
-                  label: const Text('Créer un bon',
-                      style: TextStyle(fontSize: 12, color: Colors.white)),
+                  label: Text('Créer un bon',
+                      style: AppTextStyles.bodySm
+                          .copyWith(color: Colors.white)),
                   style: TextButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     shape: RoundedRectangleBorder(
@@ -158,7 +161,7 @@ class _ReceptionPageState extends State<ReceptionPage> {
                         size: 17, color: AppColors.primary)),
                 const SizedBox(width: 10),
                 const Expanded(child: Text('Nouvelle réception',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+                    style: AppTextStyles.subtitleBold)),
               ]),
             ),
             const SizedBox(height: 12),
@@ -193,9 +196,7 @@ class _ReceptionPageState extends State<ReceptionPage> {
                               ? 'Aujourd\'hui'
                               : DateFormat('d MMMM yyyy', 'fr_FR')
                                   .format(receptionDate),
-                          style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600)),
+                          style: AppTextStyles.bodySmBold),
                     ),
                     Icon(Icons.edit_calendar_outlined,
                         size: 12,
@@ -225,12 +226,11 @@ class _ReceptionPageState extends State<ReceptionPage> {
                   child: Row(children: [
                     Expanded(child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(p.name, style: const TextStyle(fontSize: 13,
-                          fontWeight: FontWeight.w600), maxLines: 1,
+                      Text(p.name, style: AppTextStyles.bodyBold, maxLines: 1,
                           overflow: TextOverflow.ellipsis),
                       Text('Stock actuel : ${p.totalStock}',
-                          style: const TextStyle(fontSize: 10,
-                              color: Color(0xFF9CA3AF))),
+                          style: AppTextStyles.micro
+                              .copyWith(color: const Color(0xFF9CA3AF))),
                     ])),
                     // Contrôles quantité
                     Row(mainAxisSize: MainAxisSize.min, children: [
@@ -244,8 +244,8 @@ class _ReceptionPageState extends State<ReceptionPage> {
                         constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                         color: AppColors.primary),
                       SizedBox(width: 28, child: Center(
-                          child: Text('$qty', style: const TextStyle(fontSize: 14,
-                              fontWeight: FontWeight.w700)))),
+                          child: Text('$qty', style: AppTextStyles.label
+                              .copyWith(fontWeight: FontWeight.w700)))),
                       IconButton(
                         onPressed: () => setSt(() => selected[p.id!] = qty + 1),
                         icon: const Icon(Icons.add_circle_outline, size: 20),
@@ -382,7 +382,7 @@ class _ValidateSheetState extends State<_ValidateSheet> {
             Icon(Icons.fact_check_rounded, size: 20, color: Color(0xFF3B82F6)),
             SizedBox(width: 10),
             Text('Validation de la réception',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                style: AppTextStyles.subtitleBold),
           ]),
         ),
         const Divider(height: 24),
@@ -399,17 +399,18 @@ class _ValidateSheetState extends State<_ValidateSheet> {
                 color: Colors.white, borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: const Color(0xFFE5E7EB))),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(s.item.productName, style: const TextStyle(fontSize: 13,
-                    fontWeight: FontWeight.w700)),
+                Text(s.item.productName, style: AppTextStyles.bodyBold),
                 Text('Attendu : ${s.item.expectedQty}',
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+                    style: AppTextStyles.captionHint
+                        .copyWith(color: const Color(0xFF9CA3AF))),
                 const SizedBox(height: 8),
                 _QtyField(label: 'Quantité reçue', ctrl: s.receivedCtrl,
                     color: const Color(0xFF10B981)),
                 const SizedBox(height: 4),
-                const Text(
+                Text(
                     'Les défauts se déclarent après en incident sur le produit.',
-                    style: TextStyle(fontSize: 10, color: Color(0xFF9CA3AF))),
+                    style: AppTextStyles.micro
+                        .copyWith(color: const Color(0xFF9CA3AF))),
               ]),
             );
           },
@@ -529,8 +530,8 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
-    child: Text(text, style: const TextStyle(fontSize: 12,
-        fontWeight: FontWeight.w700, letterSpacing: 0.3, color: Color(0xFF6B7280))),
+    child: Text(text, style: AppTextStyles.bodySmBold.copyWith(
+        letterSpacing: 0.3, color: const Color(0xFF6B7280))),
   );
 }
 
@@ -562,15 +563,17 @@ class _ReceptionCard extends StatelessWidget {
                 color: statusColor.withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(6)),
             child: Text(reception.status.label,
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
-                    color: statusColor)),
+                style: AppTextStyles.microBold
+                    .copyWith(color: statusColor)),
           ),
           const SizedBox(width: 8),
           Expanded(child: Text(
               '${reception.items.length} produit${reception.items.length > 1 ? 's' : ''}',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)))),
+              style: AppTextStyles.bodySm
+                  .copyWith(color: const Color(0xFF6B7280)))),
           Text(_fmtDate(reception.createdAt),
-              style: const TextStyle(fontSize: 10, color: Color(0xFF9CA3AF))),
+              style: AppTextStyles.micro
+                  .copyWith(color: const Color(0xFF9CA3AF))),
         ]),
         if (reception.status == ReceptionStatus.validated) ...[
           const SizedBox(height: 6),
@@ -627,8 +630,8 @@ class _Chip extends StatelessWidget {
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
     decoration: BoxDecoration(
         color: color.withValues(alpha:0.1), borderRadius: BorderRadius.circular(4)),
-    child: Text(label, style: TextStyle(fontSize: 10,
-        fontWeight: FontWeight.w600, color: color)),
+    child: Text(label, style: AppTextStyles.micro
+        .copyWith(fontWeight: FontWeight.w600, color: color)),
   );
 }
 
@@ -641,13 +644,15 @@ class _QtyField extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color)),
+      Text(label, style: AppTextStyles.micro
+          .copyWith(fontWeight: FontWeight.w600, color: color)),
       const SizedBox(height: 4),
       TextField(
         controller: ctrl,
         keyboardType: TextInputType.number,
         textAlign: TextAlign.center,
-        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: color),
+        style: AppTextStyles.input
+            .copyWith(fontWeight: FontWeight.w700, color: color),
         decoration: InputDecoration(
           isDense: true,
           contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),

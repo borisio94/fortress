@@ -40,6 +40,15 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
     _email = user?.email ?? '';
     _initialName = user?.name;
     _initialPhone = user?.phone;
+    // Sans ces listeners, taper dans nom/téléphone ne reconstruit pas le
+    // widget → `_hasChanges` reste false → le bouton Enregistrer reste
+    // désactivé (impossible de sauvegarder une modif de téléphone/nom).
+    _nameCtrl.addListener(_onFieldChanged);
+    _phoneCtrl.addListener(_onFieldChanged);
+  }
+
+  void _onFieldChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -304,10 +313,10 @@ class _AvatarHeader extends StatelessWidget {
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.25),
+                color: Colors.white.withValues(alpha:0.25),
                 shape: BoxShape.circle,
                 border:
-                    Border.all(color: Colors.white.withOpacity(0.4), width: 2),
+                    Border.all(color: Colors.white.withValues(alpha:0.4), width: 2),
               ),
               child: Center(
                 child: Text(initials,
@@ -326,7 +335,7 @@ class _AvatarHeader extends StatelessWidget {
             const SizedBox(height: 2),
             Text(email,
                 style: TextStyle(
-                    fontSize: 12, color: Colors.white.withOpacity(0.85))),
+                    fontSize: 12, color: Colors.white.withValues(alpha:0.85))),
           ],
         ),
       );

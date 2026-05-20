@@ -1,5 +1,4 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import '../../features/shop_selector/domain/entities/shop_summary.dart';
 import '../../features/auth/domain/entities/user.dart';
 import '../../core/storage/local_storage_service.dart';

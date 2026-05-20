@@ -4,10 +4,12 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/utils/date_formatter.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/permisions/user_plan.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../domain/models/plan_type.dart';
 
@@ -42,10 +44,11 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
   // sur hotfix_063_pricing_canvas_v2). Ces valeurs sont dupliquées ici
   // pour le rendu offline-first ; à terme on lira la table `plans` depuis
   // Hive cache. Annuel = mensuel × 9 (≈ -25 % vs 12 mois).
+  // Trimestriel = mensuel × 3 − 10 %.
   static const _prices = <PlanType, Map<String, double>>{
-    PlanType.starter:  {'monthly':  3500, 'yearly':  31500},
-    PlanType.pro:      {'monthly':  8500, 'yearly':  76500},
-    PlanType.business: {'monthly': 18000, 'yearly': 162000},
+    PlanType.starter:  {'monthly':  3500, 'quarterly':  9450, 'yearly':  31500},
+    PlanType.pro:      {'monthly':  8500, 'quarterly': 22950, 'yearly':  76500},
+    PlanType.business: {'monthly': 18000, 'quarterly': 48600, 'yearly': 162000},
   };
 
   double _priceFor(PlanType p) => _prices[p]?[_cycle] ?? 0;
@@ -197,8 +200,7 @@ class _Topbar extends StatelessWidget {
       ),
       const SizedBox(width: 10),
       Text(title,
-          style: TextStyle(fontSize: 17,
-              fontWeight: FontWeight.w800, color: cs.onSurface)),
+          style: AppTextStyles.subtitleBold.copyWith(color: cs.onSurface)),
     ]);
   }
 }
@@ -254,7 +256,7 @@ class _CurrentStatusCard extends StatelessWidget {
       dateLine  = plan.expiresAt != null
           ? '${l.subActiveUntil} ${_fmt(plan.expiresAt!)}'
           : '';
-      totalDays = daysLeft <= 30 ? 30 : 365;
+      totalDays = daysLeft <= 31 ? 30 : daysLeft <= 95 ? 90 : 365;
     } else {
       accent    = sem.warning;
       icon      = Icons.help_outline_rounded;
@@ -291,9 +293,8 @@ class _CurrentStatusCard extends StatelessWidget {
           Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(l.subCurrentStatus,
-                style: TextStyle(fontSize: 11,
-                    color: cs.onSurface.withValues(alpha:0.55),
-                    fontWeight: FontWeight.w500)),
+                style: AppTextStyles.caption.copyWith(
+                    color: cs.onSurface.withValues(alpha:0.55))),
             const SizedBox(height: 2),
             Container(
               padding: const EdgeInsets.symmetric(
@@ -303,24 +304,22 @@ class _CurrentStatusCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(label,
-                  style: TextStyle(fontSize: 12,
-                      fontWeight: FontWeight.w800, color: accent)),
+                  style: AppTextStyles.bodySmBold.copyWith(color: accent)),
             ),
           ])),
           if (plan.isActive || plan.isTrial)
             Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
               Text('$daysLeft',
-                  style: TextStyle(fontSize: 22,
-                      fontWeight: FontWeight.w800, color: accent)),
+                  style: AppTextStyles.display.copyWith(color: accent)),
               Text(daysText,
-                  style: TextStyle(fontSize: 10,
+                  style: AppTextStyles.micro.copyWith(
                       color: cs.onSurface.withValues(alpha:0.55))),
             ]),
         ]),
         if (dateLine.isNotEmpty) ...[
           const SizedBox(height: 12),
           Text(dateLine,
-              style: TextStyle(fontSize: 12,
+              style: AppTextStyles.bodySm.copyWith(
                   color: cs.onSurface.withValues(alpha:0.7),
                   fontWeight: FontWeight.w500)),
         ],
@@ -338,17 +337,14 @@ class _CurrentStatusCard extends StatelessWidget {
         if (plan.isActive || plan.isTrial) ...[
           const SizedBox(height: 4),
           Text(l.subDaysOverTotal(daysLeft, totalDays),
-              style: TextStyle(fontSize: 10,
+              style: AppTextStyles.micro.copyWith(
                   color: cs.onSurface.withValues(alpha:0.5))),
         ],
       ]),
     );
   }
 
-  static String _fmt(DateTime d) =>
-      '${d.day.toString().padLeft(2, '0')}/'
-      '${d.month.toString().padLeft(2, '0')}/'
-      '${d.year}';
+  static String _fmt(DateTime d) => DateFormatter.dayMonthYear(d);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -378,7 +374,7 @@ class _CycleSelector extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(children: [
-        for (final c in const ['monthly', 'yearly'])
+        for (final c in const ['monthly', 'quarterly', 'yearly'])
           Expanded(child: GestureDetector(
             onTap: () => onChange(c),
             child: AnimatedContainer(
@@ -389,19 +385,19 @@ class _CycleSelector extends StatelessWidget {
                 borderRadius: BorderRadius.circular(9),
               ),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Text(c == 'yearly'
-                        ? l.subBillYearly
-                        : l.subBillMonthly,
-                    style: TextStyle(fontSize: 12,
-                        fontWeight: FontWeight.w700,
+                Text(switch (c) {
+                      'yearly'    => l.subBillYearly,
+                      'quarterly' => l.subBillQuarterly,
+                      _           => l.subBillMonthly,
+                    },
+                    style: AppTextStyles.bodySmBold.copyWith(
                         color: current == c
                             ? cs.onPrimary
                             : cs.onSurface.withValues(alpha:0.7))),
                 if (c == 'yearly' && annualSavingsPct > 0) ...[
                   const SizedBox(height: 1),
                   Text(l.subSavingsAnnual(annualSavingsPct),
-                      style: TextStyle(fontSize: 9,
-                          fontWeight: FontWeight.w700,
+                      style: AppTextStyles.microBold.copyWith(
                           color: current == c
                               ? cs.onPrimary.withValues(alpha:0.85)
                               : sem.success)),
@@ -456,8 +452,11 @@ class _PlanCard extends StatelessWidget {
       PlanType.business => l.planBusiness,
       _                 => '',
     };
-    final priceSuffix = cycle == 'yearly' ? l.subYearlyShort
-                                          : l.subMonthlyShort;
+    final priceSuffix = switch (cycle) {
+      'yearly'    => l.subYearlyShort,
+      'quarterly' => l.subQuarterlyShort,
+      _           => l.subMonthlyShort,
+    };
 
     return Stack(clipBehavior: Clip.none, children: [
       Container(
@@ -481,26 +480,25 @@ class _PlanCard extends StatelessWidget {
           // Header : nom + prix
           Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text(label,
-                style: TextStyle(fontSize: 17,
-                    fontWeight: FontWeight.w800, color: cs.onSurface)),
+                style: AppTextStyles.subtitleBold.copyWith(
+                    color: cs.onSurface)),
             const Spacer(),
             Text('${_compact(price)} XAF',
-                style: TextStyle(fontSize: 18,
+                style: AppTextStyles.title.copyWith(
                     fontWeight: FontWeight.w800, color: accent)),
             const SizedBox(width: 2),
             Padding(
               padding: const EdgeInsets.only(bottom: 2),
               child: Text(priceSuffix,
-                  style: TextStyle(fontSize: 11,
-                      fontWeight: FontWeight.w600,
+                  style: AppTextStyles.captionBold.copyWith(
                       color: cs.onSurface.withValues(alpha:0.55))),
             ),
           ]),
           if (savingsPct != null && savingsPct! > 0) ...[
             const SizedBox(height: 4),
             Text(l.subSavingsAnnual(savingsPct!),
-                style: TextStyle(fontSize: 11,
-                    fontWeight: FontWeight.w700, color: sem.success)),
+                style: AppTextStyles.captionBold.copyWith(
+                    color: sem.success)),
           ],
           const SizedBox(height: 14),
           // Liste features avec checkmarks
@@ -512,7 +510,7 @@ class _PlanCard extends StatelessWidget {
                   size: 16, color: accent),
               const SizedBox(width: 8),
               Expanded(child: Text(line,
-                  style: TextStyle(fontSize: 12.5,
+                  style: AppTextStyles.bodySm.copyWith(
                       height: 1.35, color: cs.onSurface))),
             ]),
           )),
@@ -536,8 +534,8 @@ class _PlanCard extends StatelessWidget {
                       Icon(Icons.check_rounded, size: 16, color: accent),
                       const SizedBox(width: 6),
                       Text(l.subCurrentPlanBadge,
-                          style: TextStyle(fontSize: 13,
-                              fontWeight: FontWeight.w700, color: accent)),
+                          style: AppTextStyles.bodyBold
+                              .copyWith(color: accent)),
                     ]),
                   )
                 : ElevatedButton(
@@ -550,8 +548,7 @@ class _PlanCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(10)),
                     ),
                     child: Text(l.subChoosePlan,
-                        style: const TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w800)),
+                        style: AppTextStyles.bodyBold),
                   ),
           ),
         ]),
@@ -573,8 +570,8 @@ class _PlanCard extends StatelessWidget {
               Icon(Icons.star_rounded, size: 12, color: cs.onPrimary),
               const SizedBox(width: 4),
               Text(l.subPopularBadge,
-                  style: TextStyle(fontSize: 10,
-                      fontWeight: FontWeight.w800, color: cs.onPrimary)),
+                  style: AppTextStyles.microBold
+                      .copyWith(color: cs.onPrimary)),
             ]),
           ),
         ),
@@ -650,11 +647,11 @@ class _ContactAdminCard extends StatelessWidget {
         Expanded(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(l.subContactAdminTitle,
-              style: TextStyle(fontSize: 13,
-                  fontWeight: FontWeight.w800, color: cs.onSurface)),
+              style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
           const SizedBox(height: 4),
           Text(l.subContactAdminBody,
-              style: TextStyle(fontSize: 12, height: 1.5,
+              style: AppTextStyles.bodySm.copyWith(
+                  height: 1.5,
                   color: cs.onSurface.withValues(alpha:0.7))),
         ])),
       ]),

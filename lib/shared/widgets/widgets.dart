@@ -14,5 +14,5 @@ export 'offline_banner_widget.dart';
 // FortressLogo a été déplacé vers lib/core/widgets/fortress_logo.dart —
 // importer directement depuis '../../core/widgets/fortress_logo.dart'.
 export 'language_switcher.dart';
-export 'app_product_image.dart';
+export 'product_image_card.dart';
 export 'phone_field.dart';

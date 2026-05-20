@@ -4,12 +4,10 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/database/app_database.dart';
-import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
 import '../../domain/entities/stock_movement.dart';
-import '../../domain/entities/product.dart';
 
 /// Page globale des mouvements de stock.
 /// Si [productId] est fourni, filtre sur ce produit uniquement.
@@ -48,7 +46,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
   void _load() => setState(() {
     _movements = HiveBoxes.stockMovementsBox.values
         .map((m) => _MovementView.fromMap(
-            Map<String, dynamic>.from(m as Map)))
+            Map<String, dynamic>.from(m)))
         .where((v) => v.movement.shopId == widget.shopId &&
             (widget.productId == null
                 || v.movement.productId == widget.productId))
@@ -108,11 +106,11 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                   decoration: BoxDecoration(
                       color: AppColors.primary, borderRadius: BorderRadius.circular(8)),
-                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.tune_rounded, size: 15, color: Colors.white),
-                    SizedBox(width: 6),
-                    Text('Ajustement', style: TextStyle(fontSize: 12,
-                        fontWeight: FontWeight.w600, color: Colors.white)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.tune_rounded, size: 15, color: Colors.white),
+                    const SizedBox(width: 6),
+                    Text('Ajustement', style: AppTextStyles.bodySmBold
+                        .copyWith(color: Colors.white)),
                   ]),
                 ),
               ),
@@ -165,7 +163,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                         color: AppColors.primary)),
                 const SizedBox(width: 10),
                 const Text('Ajustement de stock',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    style: AppTextStyles.subtitleBold),
               ]),
               const SizedBox(height: 20),
               // Direction
@@ -175,7 +173,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     decoration: BoxDecoration(
-                      color: isPositive ? AppColors.secondary.withOpacity(0.1) : const Color(0xFFF9FAFB),
+                      color: isPositive ? AppColors.secondary.withValues(alpha:0.1) : const Color(0xFFF9FAFB),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: isPositive
                           ? AppColors.secondary : AppColors.divider)),
@@ -183,8 +181,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                       Icon(Icons.add_circle_rounded, size: 24,
                           color: isPositive ? AppColors.secondary : const Color(0xFFD1D5DB)),
                       const SizedBox(height: 4),
-                      Text('Entrée', style: TextStyle(fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                      Text('Entrée', style: AppTextStyles.bodySmBold.copyWith(
                           color: isPositive ? AppColors.secondary : AppColors.textHint)),
                     ]),
                   ),
@@ -195,7 +192,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     decoration: BoxDecoration(
-                      color: !isPositive ? AppColors.error.withOpacity(0.1) : const Color(0xFFF9FAFB),
+                      color: !isPositive ? AppColors.error.withValues(alpha:0.1) : const Color(0xFFF9FAFB),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: !isPositive
                           ? AppColors.error : AppColors.divider)),
@@ -203,8 +200,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                       Icon(Icons.remove_circle_rounded, size: 24,
                           color: !isPositive ? AppColors.error : const Color(0xFFD1D5DB)),
                       const SizedBox(height: 4),
-                      Text('Sortie', style: TextStyle(fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                      Text('Sortie', style: AppTextStyles.bodySmBold.copyWith(
                           color: !isPositive ? AppColors.error : AppColors.textHint)),
                     ]),
                   ),
@@ -215,7 +211,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                 controller: qtyCtrl,
                 keyboardType: TextInputType.number,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                style: AppTextStyles.title,
                 decoration: InputDecoration(
                   hintText: '0', labelText: 'Quantité',
                   filled: true, fillColor: const Color(0xFFF9FAFB),
@@ -226,7 +222,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
               const SizedBox(height: 10),
               TextField(
                 controller: notesCtrl,
-                style: const TextStyle(fontSize: 13),
+                style: AppTextStyles.body,
                 decoration: InputDecoration(
                   hintText: 'Raison de l\'ajustement...',
                   labelText: 'Notes',
@@ -313,21 +309,21 @@ class _Summary extends StatelessWidget {
         border: Border.all(color: AppColors.divider)),
       child: Row(children: [
         Expanded(child: Column(children: [
-          Text('$entries', style: const TextStyle(fontSize: 16,
+          Text('$entries', style: AppTextStyles.subtitleBold.copyWith(
               fontWeight: FontWeight.w800, color: AppColors.secondary)),
-          const Text('Entrées', style: TextStyle(fontSize: 10, color: AppColors.textHint)),
+          const Text('Entrées', style: AppTextStyles.micro),
         ])),
         Container(width: 1, height: 28, color: AppColors.divider),
         Expanded(child: Column(children: [
-          Text('$exits', style: const TextStyle(fontSize: 16,
+          Text('$exits', style: AppTextStyles.subtitleBold.copyWith(
               fontWeight: FontWeight.w800, color: AppColors.error)),
-          const Text('Sorties', style: TextStyle(fontSize: 10, color: AppColors.textHint)),
+          const Text('Sorties', style: AppTextStyles.micro),
         ])),
         Container(width: 1, height: 28, color: AppColors.divider),
         Expanded(child: Column(children: [
-          Text('${movements.length}', style: TextStyle(fontSize: 16,
+          Text('${movements.length}', style: AppTextStyles.subtitleBold.copyWith(
               fontWeight: FontWeight.w800, color: AppColors.primary)),
-          const Text('Total mvts', style: TextStyle(fontSize: 10, color: AppColors.textHint)),
+          const Text('Total mvts', style: AppTextStyles.micro),
         ])),
       ]),
     );
@@ -372,19 +368,19 @@ class _MovementCard extends StatelessWidget {
         Container(
           width: 34, height: 34,
           decoration: BoxDecoration(
-              color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+              color: color.withValues(alpha:0.1), borderRadius: BorderRadius.circular(8)),
           child: Icon(isPos ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded,
               size: 16, color: color),
         ),
         const SizedBox(width: 10),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-          Text(m.type.label, style: TextStyle(fontSize: 12.5,
-              fontWeight: FontWeight.w700, color: color)),
+          Text(m.type.label, style: AppTextStyles.bodySmBold
+              .copyWith(color: color)),
           if (hasSub) ...[
             const SizedBox(height: 2),
             Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11,
+                style: AppTextStyles.captionHint.copyWith(
                     color: AppColors.textSecondary, height: 1.3)),
           ],
           const SizedBox(height: 4),
@@ -395,20 +391,18 @@ class _MovementCard extends StatelessWidget {
               const SizedBox(width: 3),
               Flexible(child: Text(actor,
                   overflow: TextOverflow.ellipsis, maxLines: 1,
-                  style: const TextStyle(fontSize: 10.5,
-                      color: AppColors.textHint))),
+                  style: AppTextStyles.micro)),
               const SizedBox(width: 8),
             ],
             const Icon(Icons.access_time_rounded, size: 11,
                 color: AppColors.textHint),
             const SizedBox(width: 3),
             Text(_fmtDate(m.createdAt),
-                style: const TextStyle(fontSize: 10.5,
-                    color: AppColors.textHint)),
+                style: AppTextStyles.micro),
           ]),
         ])),
         const SizedBox(width: 8),
-        Text(qtyStr, style: TextStyle(fontSize: 16,
+        Text(qtyStr, style: AppTextStyles.subtitleBold.copyWith(
             fontWeight: FontWeight.w800,
             color: isPos ? AppColors.secondary : AppColors.error)),
       ]),
@@ -496,8 +490,7 @@ class _FilterChip extends StatelessWidget {
             color: active ? AppColors.primary : Colors.white,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: active ? AppColors.primary : AppColors.divider)),
-          child: Text(label, style: TextStyle(fontSize: 11,
-              fontWeight: FontWeight.w600,
+          child: Text(label, style: AppTextStyles.captionBold.copyWith(
               color: active ? Colors.white : AppColors.textSecondary)),
         ),
       ),

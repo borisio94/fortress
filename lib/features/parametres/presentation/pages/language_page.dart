@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
-import '../../../../shared/widgets/language_switcher.dart';
 import '../../../../shared/providers/auth_provider.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/i18n/app_localizations.dart';
 
 class LanguagePage extends ConsumerWidget {
@@ -38,7 +38,7 @@ class LanguagePage extends ConsumerWidget {
             ),
             subtitle: Text(
               loc.languageCode == 'fr' ? 'Langue française' : 'English language',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+              style: AppTextStyles.bodySm.copyWith(color: const Color(0xFF9CA3AF)),
             ),
             trailing: loc == locale
                 ? Icon(Icons.check_circle, color: AppColors.primary, size: 20)

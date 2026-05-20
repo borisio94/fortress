@@ -16,29 +16,38 @@ class StorageService {
   static final _storage = Supabase.instance.client.storage;
   static const _bucket  = 'product-images';
 
-  /// Upload une image vers Supabase Storage
-  /// Retourne l'URL publique si succès, ou le chemin local en fallback
+  /// Upload une image vers Supabase Storage à partir d'un `File`
+  /// (mobile/desktop). Délègue à `uploadImageBytes` pour la portabilité web.
+  /// Retourne l'URL publique si succès, ou le chemin local en fallback.
   static Future<String> uploadImage(File file, {required String name}) async {
     try {
       final ext      = p.extension(file.path).toLowerCase().replaceAll('.', '');
       final mimeType = ext == 'png' ? 'image/png' : 'image/jpeg';
-      final path     = '$name.${ext.isEmpty ? 'jpg' : ext}';
-
-      await _storage.from(_bucket).upload(
-        path,
-        file,
-        fileOptions: FileOptions(contentType: mimeType, upsert: true),
-      );
-
-      final url = _storage.from(_bucket).getPublicUrl(path);
-      debugPrint('[Storage] Image uploadée: $url');
-      return url;
-
+      final bytes    = await file.readAsBytes();
+      return await uploadImageBytes(bytes, name: name, mimeType: mimeType);
     } catch (e) {
       debugPrint('[Storage] Upload échoué: $e — fallback local');
-      // Fallback : sauvegarder localement si Supabase Storage indisponible
       return await _saveLocally(file, name: name);
     }
+  }
+
+  /// Upload une image vers Supabase Storage à partir de bytes en mémoire.
+  /// Compatible web (où `dart:io File` n'est pas utilisable).
+  static Future<String> uploadImageBytes(
+    Uint8List bytes, {
+    required String name,
+    String mimeType = 'image/jpeg',
+  }) async {
+    final ext  = mimeType.contains('png') ? 'png' : 'jpg';
+    final path = '$name.$ext';
+    await _storage.from(_bucket).uploadBinary(
+      path,
+      bytes,
+      fileOptions: FileOptions(contentType: mimeType, upsert: true),
+    );
+    final url = _storage.from(_bucket).getPublicUrl(path);
+    debugPrint('[Storage] Image uploadée: $url');
+    return url;
   }
 
   /// Upload plusieurs images en parallèle

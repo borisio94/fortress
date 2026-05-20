@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/services/document_service.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -73,7 +74,7 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
             Container(
               width: 40, height: 40,
               decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withOpacity(0.12),
+                  color: const Color(0xFF10B981).withValues(alpha:0.12),
                   borderRadius: BorderRadius.circular(10)),
               child: const Icon(Icons.receipt_long_rounded,
                   size: 20, color: Color(0xFF10B981)),
@@ -81,12 +82,13 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
             const SizedBox(width: 12),
             Expanded(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Envoyer le reçu',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800,
-                      color: Color(0xFF0F172A))),
+              Text('Envoyer le reçu',
+                  style: AppTextStyles.subtitleBold.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFF0F172A))),
               Text(CurrencyFormatter.format(sale.total),
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-                      color: AppColors.primary)),
+                  style: AppTextStyles.bodyBold
+                      .copyWith(color: AppColors.primary)),
             ])),
             if (sale.clientName != null)
               Container(
@@ -95,18 +97,18 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
                     color: AppColors.primarySurface,
                     borderRadius: BorderRadius.circular(8)),
                 child: Text(sale.clientName!,
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
-                        color: AppColors.primary)),
+                    style: AppTextStyles.captionBold
+                        .copyWith(color: AppColors.primary)),
               ),
           ]),
           const SizedBox(height: 20),
 
           // ── Sélection format ──────────────────────────────────
-          const Align(
+          Align(
             alignment: Alignment.centerLeft,
             child: Text('Format du reçu',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                    color: Color(0xFF6B7280))),
+                style: AppTextStyles.bodySmBold
+                    .copyWith(color: const Color(0xFF6B7280))),
           ),
           const SizedBox(height: 8),
           Row(children: List.generate(_formats.length, (i) {
@@ -129,8 +131,7 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
                     Icon(f.$3, size: 20,
                         color: sel ? Colors.white : const Color(0xFF9CA3AF)),
                     const SizedBox(height: 4),
-                    Text(f.$1, style: TextStyle(fontSize: 11,
-                        fontWeight: FontWeight.w700,
+                    Text(f.$1, style: AppTextStyles.captionBold.copyWith(
                         color: sel ? Colors.white : const Color(0xFF6B7280))),
                   ]),
                 ),
@@ -205,15 +206,15 @@ class _SheetBtn extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.06),
+        color: color.withValues(alpha:0.06),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2)),
+        border: Border.all(color: color.withValues(alpha:0.2)),
       ),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, size: 22, color: color),
         const SizedBox(height: 4),
-        Text(label, style: TextStyle(fontSize: 11,
-            fontWeight: FontWeight.w600, color: color)),
+        Text(label, style: AppTextStyles.captionBold
+            .copyWith(color: color)),
       ]),
     ),
   );

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../core/storage/hive_boxes.dart';
@@ -450,15 +451,13 @@ class _KpiHeader extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Total — ${period.label}',
-                style: const TextStyle(fontSize: 11, color: Colors.white70,
-                    fontWeight: FontWeight.w500)),
+                style: AppTextStyles.caption.copyWith(color: Colors.white70)),
             const SizedBox(height: 2),
             Text(CurrencyFormatter.format(total),
-                style: const TextStyle(fontSize: 22, color: Colors.white,
-                    fontWeight: FontWeight.w800)),
+                style: AppTextStyles.display.copyWith(color: Colors.white)),
             const SizedBox(height: 2),
             Text('$count ligne${count > 1 ? 's' : ''}',
-                style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                style: AppTextStyles.micro.copyWith(color: Colors.white70)),
           ])),
       ]),
       if (feesTotal > 0) ...[
@@ -476,8 +475,7 @@ class _KpiHeader extends StatelessWidget {
             Expanded(child: Text(
               'Direct : ${CurrencyFormatter.format(directTotal)} · '
               'Frais commandes : ${CurrencyFormatter.format(feesTotal)}',
-              style: const TextStyle(fontSize: 10.5, color: Colors.white,
-                  fontWeight: FontWeight.w500),
+              style: AppTextStyles.micro.copyWith(color: Colors.white),
             )),
           ]),
         ),
@@ -548,7 +546,7 @@ class _PeriodBar extends StatelessWidget {
             ),
             child: Text(p.label,
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                style: AppTextStyles.captionBold.copyWith(
                     color: active ? Colors.white : const Color(0xFF374151))),
           ),
         ),
@@ -597,13 +595,12 @@ class _CategoryChips extends StatelessWidget {
                     color: active ? Colors.white : cat.color),
                 const SizedBox(width: 5),
                 Text(cat.label,
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                    style: AppTextStyles.captionBold.copyWith(
                         color: active ? Colors.white : cat.color)),
                 const SizedBox(width: 6),
                 Text(CurrencyFormatter.format(e.value),
-                    style: TextStyle(fontSize: 10,
-                        color: active ? Colors.white70 : cat.color.withValues(alpha:0.8),
-                        fontWeight: FontWeight.w600)),
+                    style: AppTextStyles.microBold.copyWith(
+                        color: active ? Colors.white70 : cat.color.withValues(alpha:0.8))),
               ]),
             ),
           );
@@ -645,9 +642,8 @@ class _ExpenseTile extends StatelessWidget {
             Row(children: [
               Flexible(child: Text(row.label,
                   maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF0F172A)))),
+                  style: AppTextStyles.bodyBold.copyWith(
+                      color: const Color(0xFF0F172A)))),
               if (row.isVirtual) ...[
                 const SizedBox(width: 6),
                 Container(
@@ -657,34 +653,30 @@ class _ExpenseTile extends StatelessWidget {
                     color: const Color(0xFF3B82F6).withValues(alpha:0.12),
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Text('Commande',
-                      style: TextStyle(fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF3B82F6))),
+                  child: Text('Commande',
+                      style: AppTextStyles.microBold.copyWith(
+                          color: const Color(0xFF3B82F6))),
                 ),
               ],
             ]),
             const SizedBox(height: 2),
             Row(children: [
               Text(cat.label,
-                  style: TextStyle(fontSize: 10.5,
-                      color: cat.color, fontWeight: FontWeight.w600)),
+                  style: AppTextStyles.microBold.copyWith(color: cat.color)),
               const SizedBox(width: 6),
-              const Text('•', style: TextStyle(fontSize: 10,
-                  color: Color(0xFF9CA3AF))),
+              Text('•', style: AppTextStyles.micro.copyWith(
+                  color: const Color(0xFF9CA3AF))),
               const SizedBox(width: 6),
               Text(_fmtDate(row.paidAt),
-                  style: const TextStyle(fontSize: 10.5,
-                      color: Color(0xFF6B7280))),
+                  style: AppTextStyles.microSecondary),
             ]),
           ])),
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(CurrencyFormatter.format(row.amount),
-                  style: const TextStyle(fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFFEF4444))),
+                  style: AppTextStyles.label.copyWith(
+                      color: const Color(0xFFEF4444))),
               ...[
                 const SizedBox(height: 6),
                 InkWell(
@@ -697,15 +689,14 @@ class _ExpenseTile extends StatelessWidget {
                       color: const Color(0xFFEF4444).withValues(alpha:0.10),
                       borderRadius: BorderRadius.circular(7),
                     ),
-                    child: const Row(mainAxisSize: MainAxisSize.min,
+                    child: Row(mainAxisSize: MainAxisSize.min,
                         children: [
-                      Icon(Icons.delete_outline_rounded, size: 14,
+                      const Icon(Icons.delete_outline_rounded, size: 14,
                           color: Color(0xFFEF4444)),
-                      SizedBox(width: 4),
+                      const SizedBox(width: 4),
                       Text('Supprimer',
-                          style: TextStyle(fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFFEF4444))),
+                          style: AppTextStyles.captionBold.copyWith(
+                              color: const Color(0xFFEF4444))),
                     ]),
                   ),
                 ),
@@ -893,8 +884,7 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
 
             // Catégorie — grid
             const Text('Catégorie',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
-                    color: Color(0xFF6B7280))),
+                style: AppTextStyles.captionBold),
             const SizedBox(height: 6),
             Wrap(spacing: 6, runSpacing: 6,
                 children: ExpenseCategory.values.map((c) {
@@ -916,8 +906,7 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
                         color: active ? Colors.white : c.color),
                     const SizedBox(width: 5),
                     Text(c.label,
-                        style: TextStyle(fontSize: 11,
-                            fontWeight: FontWeight.w600,
+                        style: AppTextStyles.captionBold.copyWith(
                             color: active ? Colors.white : c.color)),
                   ]),
                 ),
@@ -943,8 +932,8 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
                   Expanded(child: Text(
                     'Payée le ${_paidAt.day.toString().padLeft(2, '0')}/'
                     '${_paidAt.month.toString().padLeft(2, '0')}/${_paidAt.year}',
-                    style: const TextStyle(fontSize: 13,
-                        color: Color(0xFF0F172A)))),
+                    style: AppTextStyles.body.copyWith(
+                        color: const Color(0xFF0F172A)))),
                   const Icon(Icons.chevron_right_rounded,
                       size: 16, color: Color(0xFF9CA3AF)),
                 ]),
@@ -1014,8 +1003,8 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: Colors.white))
                   : Text(widget.expense == null ? 'Enregistrer' : 'Mettre à jour',
-                      style: const TextStyle(fontSize: 14,
-                          fontWeight: FontWeight.w600)),
+                      style: AppTextStyles.label.copyWith(
+                          color: Colors.white)),
             )),
             ]),
           ),
@@ -1028,8 +1017,9 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
     labelText: label,
     hintText: hint,
     isDense: true,
-    labelStyle: const TextStyle(fontSize: 12),
-    hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFD1D5DB)),
+    labelStyle: AppTextStyles.bodySm,
+    hintStyle: AppTextStyles.bodySm.copyWith(
+        color: const Color(0xFFD1D5DB)),
     border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
         borderSide: const BorderSide(color: Color(0xFFE5E7EB))),

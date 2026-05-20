@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // LandingFaqSection — 5 questions courantes pour lever les freins à
@@ -50,10 +51,8 @@ class LandingFaqSection extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Questions fréquentes',
-                  style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: theme.colorScheme.onSurface)),
+                  style: AppTextStyles.display
+                      .copyWith(color: theme.colorScheme.onSurface)),
               const SizedBox(height: 20),
               for (final f in _faq) _FaqItem(entry: f),
             ],
@@ -87,8 +86,7 @@ class _FaqItem extends StatelessWidget {
       ),
       child: ExpansionTile(
         title: Text(entry.q,
-            style: TextStyle(
-                fontSize: 14,
+            style: AppTextStyles.label.copyWith(
                 fontWeight: FontWeight.w700,
                 color: theme.colorScheme.onSurface)),
         iconColor: AppColors.primary,
@@ -100,9 +98,7 @@ class _FaqItem extends StatelessWidget {
           Align(
             alignment: Alignment.centerLeft,
             child: Text(entry.a,
-                style: TextStyle(
-                    fontSize: 13,
-                    height: 1.5,
+                style: AppTextStyles.body.copyWith(
                     color: theme.colorScheme.onSurface
                         .withValues(alpha: 0.75))),
           ),

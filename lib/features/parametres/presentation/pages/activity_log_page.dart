@@ -5,7 +5,14 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/i18n/app_localizations.dart';
-import '../../../../shared/widgets/app_scaffold.dart';
+import '../../../../core/services/activity_log_service.dart';
+import '../../../../shared/widgets/app_snack.dart';
+import '../../../../core/permisions/subscription_provider.dart';
+import '../../../../core/storage/hive_boxes.dart';
+import '../../../../core/storage/local_storage_service.dart';
+import '../../../../core/utils/currency_formatter.dart';
+import '../../../../features/dashboard/data/dashboard_providers.dart';
+import '../../../../features/inventaire/domain/entities/stock_location.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // PAGE HISTORIQUE — liste des actions auditées sur la boutique courante.
@@ -19,6 +26,32 @@ import '../../../../shared/widgets/app_scaffold.dart';
 //   COCA-33 · Boissons · 500 XAF · stock 50")
 // ═════════════════════════════════════════════════════════════════════════════
 
+// ─── Helper : résolution du filtre dashboard en location_ids ───────────────
+//
+// `dashViewFilterProvider` peut valoir :
+//   * null         → vue Globale, pas de filtre.
+//   * '_base'      → boutique seule, on prend la `StockLocation type='shop'`
+//                    rattachée à `shopId`.
+//   * <location_id> → un partenaire spécifique.
+List<String>? _resolveLocationIds(String? viewFilter, String shopId) {
+  if (viewFilter == null) return null;
+  if (viewFilter == '_base') {
+    final ids = <String>[];
+    for (final raw in HiveBoxes.stockLocationsBox.values) {
+      try {
+        final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+        if (loc.shopId == shopId
+            && loc.type == StockLocationType.shop
+            && loc.isActive) {
+          ids.add(loc.id);
+        }
+      } catch (_) {/* skip */}
+    }
+    return ids;
+  }
+  return [viewFilter];
+}
+
 class ActivityLogPage extends ConsumerStatefulWidget {
   final String shopId;
   const ActivityLogPage({super.key, required this.shopId});
@@ -28,8 +61,12 @@ class ActivityLogPage extends ConsumerStatefulWidget {
 
 class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
   List<_LogEntry> _logs = [];
-  bool   _syncing = false;
-  String _filter  = 'all';
+  bool   _syncing    = false;
+  String _filter     = 'all';
+  /// Filtre par utilisateur (uniquement visible pour admin/owner).
+  /// `null` = tous les utilisateurs. Pour un vendeur (`!isShopAdmin`), ce
+  /// champ est forcé à son propre `user_id` côté `_filtered`.
+  String? _userFilter;
 
   @override
   void initState() {
@@ -68,23 +105,78 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
     _readFromHive();
   }
 
-  List<_LogEntry> get _filtered =>
-      _filter == 'all' ? _logs : _logs.where((l) => l.category == _filter).toList();
+  /// Liste des `(user_id, name)` distincts présents dans les logs courants —
+  /// alimente le dropdown du filtre utilisateur. Construit à la volée pour
+  /// éviter une jointure à `shop_memberships` (qui ajouterait un sync).
+  List<({String id, String name})> get _actors {
+    final seen = <String, String>{};
+    for (final log in _logs) {
+      final id = log.actorId;
+      if (id == null || id.isEmpty) continue;
+      seen.putIfAbsent(id, () => log.actorName);
+    }
+    final out = seen.entries
+        .map((e) => (id: e.key, name: e.value))
+        .toList();
+    out.sort((a, b) => a.name.compareTo(b.name));
+    return out;
+  }
+
+  /// Logs filtrés selon : (1) règle hiérarchique, (2) catégorie,
+  /// (3) utilisateur sélectionné, (4) vue location (Globale / boutique
+  /// seule / partenaire).
+  List<_LogEntry> _filteredFor(String? selfFilterId, List<String>? locIds) {
+    Iterable<_LogEntry> out = _logs;
+    // (1) Règle hiérarchique : un vendeur ne voit que ses propres actions.
+    if (selfFilterId != null) {
+      out = out.where((l) => l.actorId == selfFilterId);
+    } else if (_userFilter != null && _userFilter!.isNotEmpty) {
+      // (3) Filtre utilisateur explicite (admin/owner).
+      out = out.where((l) => l.actorId == _userFilter);
+    }
+    // (2) Catégorie.
+    if (_filter != 'all') {
+      out = out.where((l) => l.category == _filter);
+    }
+    // (4) Vue location — uniquement si filtre actif (sinon tout passe).
+    if (locIds != null && locIds.isNotEmpty) {
+      out = out.where((l) => l.matchesLocations(locIds));
+    }
+    return out.toList();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final l = context.l10n;
+    final l     = context.l10n;
+    final perms = ref.watch(permissionsProvider(widget.shopId));
+    final myUid = LocalStorageService.getCurrentUser()?.id;
+    // Vendeur (rôle `user`) : ne voit que ses propres actions, sans
+    // possibilité de filtrer par autre utilisateur. Admin/owner voient
+    // tout, peuvent affiner via le dropdown.
+    final isPrivileged = perms.isShopAdmin || perms.isOwner;
+    final selfFilterId = isPrivileged ? null : myUid;
+    // Filtre location issu du dashboard (Globale / boutique seule /
+    // partenaire) — appliqué en sus des filtres existants.
+    final viewFilter = ref.watch(dashViewFilterProvider);
+    final locIds     = _resolveLocationIds(viewFilter, widget.shopId);
     return Column(children: [
       _FilterBar(
         selected: _filter,
         onChange: (v) => setState(() => _filter = v),
       ),
-      Expanded(child: _body(l)),
+      if (isPrivileged && _actors.length > 1)
+        _UserFilterDropdown(
+          selected: _userFilter,
+          actors:   _actors,
+          onChange: (v) => setState(() => _userFilter = v),
+        ),
+      Expanded(child: _body(l, _filteredFor(selfFilterId, locIds),
+          canManage: isPrivileged)),
     ]);
   }
 
-  Widget _body(AppLocalizations l) {
-    final list = _filtered;
+  Widget _body(AppLocalizations l, List<_LogEntry> list,
+      {required bool canManage}) {
     if (list.isEmpty) {
       return RefreshIndicator(
         onRefresh: _syncInBackground,
@@ -97,8 +189,7 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
             const SizedBox(height: 12),
             Text(l.historiqueEmpty,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 13,
-                    color: AppColors.textSecondary)),
+                style: AppTextStyles.bodySecondary),
           ],
         ),
       );
@@ -109,9 +200,87 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
         itemCount: list.length,
         separatorBuilder: (_, __) => const SizedBox(height: 6),
-        itemBuilder: (_, i) => _LogTile(entry: list[i]),
+        itemBuilder: (_, i) => _LogTile(
+          entry: list[i],
+          // Archive/delete réservé super-admin et propriétaire de la
+          // boutique (cf. RPC `_can_manage_activity_logs` côté serveur
+          // qui vérifie côté serveur — la règle UI ici est juste pour
+          // ne pas afficher un bouton qui throw côté serveur).
+          canManage: canManage,
+          onArchive: canManage ? () => _confirmArchive(list[i]) : null,
+          onDelete:  canManage ? () => _confirmDelete(list[i])  : null,
+        ),
       ),
     );
+  }
+
+  Future<void> _confirmArchive(_LogEntry e) async {
+    final id = e.id;
+    if (id == null || id.isEmpty) {
+      AppSnack.error(context, 'Log sans id, impossible à archiver');
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Archiver ce log ?'),
+        content: Text('"${e.message}" sera marqué archivé. '
+            'Action tracée dans l\'audit.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Annuler')),
+          ElevatedButton(onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Archiver')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      final n = await ActivityLogService.archiveLogs([id],
+          reason: 'Archivé manuellement depuis Historique');
+      if (mounted) AppSnack.success(context, '$n log(s) archivé(s)');
+      await _syncInBackground();
+    } catch (err) {
+      if (mounted) AppSnack.error(context,
+          'Archivage refusé : ${err.toString()}');
+    }
+  }
+
+  Future<void> _confirmDelete(_LogEntry e) async {
+    final id = e.id;
+    if (id == null || id.isEmpty) {
+      AppSnack.error(context, 'Log sans id, impossible à supprimer');
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer ce log ?'),
+        content: Text('"${e.message}" sera supprimé définitivement. '
+            'Action tracée dans l\'audit. Préférez l\'archivage si '
+            'possible.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Annuler')),
+          ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.error,
+                  foregroundColor: Colors.white),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Supprimer')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      final n = await ActivityLogService.deleteLogs([id],
+          reason: 'Suppression manuelle depuis Historique');
+      if (mounted) AppSnack.success(context, '$n log(s) supprimé(s)');
+      await _syncInBackground();
+    } catch (err) {
+      if (mounted) AppSnack.error(context,
+          'Suppression refusée : ${err.toString()}');
+    }
   }
 }
 
@@ -161,7 +330,7 @@ class _FilterBar extends StatelessWidget {
               const SizedBox(width: 5),
               Text(f.$2,
                   maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                  style: AppTextStyles.captionBold.copyWith(
                       color: active ? Colors.white : AppColors.textSecondary)),
             ]),
           ),
@@ -171,11 +340,74 @@ class _FilterBar extends StatelessWidget {
   );
 }
 
+// ─── Dropdown filtre utilisateur (admin/owner uniquement) ──────────────────
+
+class _UserFilterDropdown extends StatelessWidget {
+  final String? selected;
+  final List<({String id, String name})> actors;
+  final ValueChanged<String?> onChange;
+  const _UserFilterDropdown({
+    required this.selected,
+    required this.actors,
+    required this.onChange,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      child: Row(children: [
+        const Icon(Icons.person_outline_rounded, size: 14,
+            color: AppColors.textHint),
+        const SizedBox(width: 6),
+        const Text('Utilisateur :',
+            style: AppTextStyles.captionBold),
+        const SizedBox(width: 8),
+        Expanded(
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String?>(
+              value: selected,
+              isDense: true,
+              isExpanded: true,
+              icon: const Icon(Icons.expand_more_rounded, size: 16),
+              style: AppTextStyles.bodySmBold,
+              items: [
+                const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('Tous',
+                        overflow: TextOverflow.ellipsis)),
+                for (final a in actors)
+                  DropdownMenuItem<String?>(
+                      value: a.id,
+                      child: Text(a.name,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1)),
+              ],
+              onChanged: onChange,
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
 // ─── Tuile log ──────────────────────────────────────────────────────────────
 
 class _LogTile extends StatelessWidget {
   final _LogEntry entry;
-  const _LogTile({required this.entry});
+  /// Si true, affiche un menu trailing avec Archive/Supprimer (réservé
+  /// super-admin + propriétaire de la boutique du log — la règle est
+  /// re-vérifiée côté serveur dans le RPC).
+  final bool canManage;
+  final VoidCallback? onArchive;
+  final VoidCallback? onDelete;
+  const _LogTile({
+    required this.entry,
+    this.canManage = false,
+    this.onArchive,
+    this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -191,7 +423,7 @@ class _LogTile extends StatelessWidget {
     final iconSize = isMobile ? 14.0 : 15.0;
     final iconBg   = isMobile
         ? AppColors.primarySurface
-        : entry.color.withOpacity(0.1);
+        : entry.color.withValues(alpha:0.1);
     final iconFg   = isMobile ? AppColors.primary : entry.color;
     final titleFs  = isMobile ? 11.0 : 12.5;
     final metaFs   = isMobile ? 9.0  : 10.5;
@@ -216,7 +448,7 @@ class _LogTile extends StatelessWidget {
             children: [
           Text(entry.message,
               maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(
+              style: AppTextStyles.bodySm.copyWith(
                   fontSize: titleFs,
                   fontWeight: isMobile ? FontWeight.w500 : FontWeight.w600,
                   color: AppColors.textPrimary)),
@@ -225,7 +457,7 @@ class _LogTile extends StatelessWidget {
             Text(entry.subtitle!,
                 maxLines: isMobile ? 1 : 2,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: metaFs,
+                style: AppTextStyles.micro.copyWith(fontSize: metaFs,
                     color: AppColors.textSecondary, height: 1.3)),
           ],
           const SizedBox(height: 4),
@@ -236,18 +468,49 @@ class _LogTile extends StatelessWidget {
             // Flexible sur l'acteur — la heure prend sa place fixe à droite.
             Flexible(child: Text(entry.actorName,
                 overflow: TextOverflow.ellipsis, maxLines: 1,
-                style: TextStyle(fontSize: metaFs,
-                    color: AppColors.textHint))),
+                style: AppTextStyles.micro.copyWith(fontSize: metaFs))),
             const SizedBox(width: 8),
             Icon(Icons.access_time_rounded, size: 11,
                 color: AppColors.textHint),
             const SizedBox(width: 3),
             Text(dateLabel,
                 maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: metaFs,
-                    color: AppColors.textHint)),
+                style: AppTextStyles.micro.copyWith(fontSize: metaFs)),
           ]),
         ])),
+        if (canManage && (onArchive != null || onDelete != null))
+          PopupMenuButton<String>(
+            tooltip: 'Actions',
+            padding: EdgeInsets.zero,
+            iconSize: 18,
+            icon: Icon(Icons.more_vert_rounded,
+                size: 18, color: AppColors.textSecondary),
+            itemBuilder: (_) => [
+              if (onArchive != null)
+                const PopupMenuItem(
+                    value: 'archive',
+                    child: Row(children: [
+                      Icon(Icons.archive_outlined, size: 16),
+                      SizedBox(width: 8),
+                      Text('Archiver', style: AppTextStyles.bodySm),
+                    ])),
+              if (onDelete != null)
+                PopupMenuItem(
+                    value: 'delete',
+                    child: Row(children: [
+                      Icon(Icons.delete_outline_rounded,
+                          size: 16, color: AppColors.error),
+                      const SizedBox(width: 8),
+                      Text('Supprimer',
+                          style: AppTextStyles.bodySm.copyWith(
+                              color: AppColors.error)),
+                    ])),
+            ],
+            onSelected: (v) {
+              if (v == 'archive') onArchive?.call();
+              if (v == 'delete')  onDelete?.call();
+            },
+          ),
       ]),
     );
   }
@@ -265,14 +528,25 @@ class _LogTile extends StatelessWidget {
 // ─── Modèle + mapping ───────────────────────────────────────────────────────
 
 class _LogEntry {
+  /// `id` brut du log — requis pour appeler les RPCs archive/delete.
+  final String?  id;
   final String   action;
   final String   category;
   final String   message;     // titre (1 ligne)
   final String?  subtitle;    // sous-ligne discrète (composée depuis details)
+  /// `actor_id` Supabase — utilisé pour le filtre hiérarchique (un vendeur
+  /// ne voit que ses propres logs).
+  final String?  actorId;
   final String   actorName;
   final IconData icon;
   final Color    color;
   final String?  targetLabel;
+  /// `target_id` brut — utile pour filtrer par location (cas où
+  /// `target_type='stock_location'` ou `'shop'`).
+  final String?  targetId;
+  /// `details` JSONB brut — scanné pour matcher les ids de location
+  /// embarqués (origin_location_id, to_location_id, etc.).
+  final Map<String, dynamic>? details;
   final DateTime? date;
 
   const _LogEntry({
@@ -282,26 +556,35 @@ class _LogEntry {
     required this.actorName,
     required this.icon,
     required this.color,
+    this.id,
+    this.actorId,
     this.subtitle,
     this.targetLabel,
+    this.targetId,
+    this.details,
     this.date,
   });
 
   factory _LogEntry.fromRow(Map<String, dynamic> r,
-      {required String actorName}) {
+      {required String actorName, String? actorId}) {
     final action      = r['action']       as String? ?? 'unknown';
     final targetLabel = r['target_label'] as String?;
+    final targetId    = r['target_id']?.toString();
     final rawDate     = r['created_at']   as String?;
     final date        = rawDate != null ? DateTime.tryParse(rawDate) : null;
     final details     = _parseDetails(r['details']);
     final meta        = _metaFor(action);
     return _LogEntry(
+      id:          r['id']?.toString(),
       action:      action,
       category:    meta.category,
       icon:        meta.icon,
       color:       meta.color,
+      actorId:     actorId,
       actorName:   actorName,
       targetLabel: targetLabel,
+      targetId:    targetId,
+      details:     details,
       date:        date,
       message:     _titleFor(action, targetLabel),
       subtitle:    _subtitleFor(action, details),
@@ -314,7 +597,24 @@ class _LogEntry {
     final actor = (m['_actor_name'] as String?)
         ?? (m['actor_email'] as String?)
         ?? '—';
-    return _LogEntry.fromRow(m, actorName: actor);
+    final actorId = m['actor_id']?.toString();
+    return _LogEntry.fromRow(m, actorName: actor, actorId: actorId);
+  }
+
+  /// `true` si ce log est pertinent pour au moins une des [locIds] —
+  /// match sur `targetId` ou sur n'importe quelle valeur scalaire
+  /// dans `details` (origin_location_id, to_location_id, etc.). Si
+  /// [locIds] est null/vide → pas de filtre, accepte tout.
+  bool matchesLocations(List<String>? locIds) {
+    if (locIds == null || locIds.isEmpty) return true;
+    if (targetId != null && locIds.contains(targetId)) return true;
+    final d = details;
+    if (d != null) {
+      for (final v in d.values) {
+        if (v is String && locIds.contains(v)) return true;
+      }
+    }
+    return false;
   }
 }
 
@@ -608,7 +908,7 @@ String? _subtitleFor(String action, Map<String, dynamic>? d) {
         _str(d['sku']) != null ? 'SKU ${d['sku']}' : null,
         _str(d['category']),
         _str(d['brand']),
-        _num(d['price'], unit: 'XAF'),
+        _num(d['price'], unit: CurrencyFormatter.currentSymbol),
         _num(d['stock'], unit: 'unités', zeroOk: true) != null
             ? 'stock ${d['stock']}' : null,
         _str(d['variant_count']) != null
@@ -654,7 +954,7 @@ String? _subtitleFor(String action, Map<String, dynamic>? d) {
       return join([
         _str(d['product']) != null ? 'Produit ${d['product']}' : null,
         _str(d['sku']) != null ? 'SKU ${d['sku']}' : null,
-        _num(d['price'], unit: 'XAF'),
+        _num(d['price'], unit: CurrencyFormatter.currentSymbol),
         _num(d['stock'], unit: 'unités', zeroOk: true) != null
             ? 'stock ${d['stock']}' : null,
       ]).ifEmpty();
@@ -708,7 +1008,7 @@ String? _subtitleFor(String action, Map<String, dynamic>? d) {
       return join([
         _num(d['item_count']) != null
             ? '${d['item_count']} article(s)' : null,
-        _num(d['total'], unit: 'XAF'),
+        _num(d['total'], unit: CurrencyFormatter.currentSymbol),
         _str(d['payment_method']),
         _str(d['reference']) != null ? 'réf. ${d['reference']}' : null,
       ]).ifEmpty();
@@ -726,7 +1026,7 @@ String? _subtitleFor(String action, Map<String, dynamic>? d) {
     case 'expense_updated':
     case 'expense_deleted':
       return join([
-        _num(d['amount'], unit: 'XAF'),
+        _num(d['amount'], unit: CurrencyFormatter.currentSymbol),
         _str(d['category']),
         _str(d['payment_method']),
       ]).ifEmpty();
@@ -794,7 +1094,7 @@ String? _subtitleFor(String action, Map<String, dynamic>? d) {
     case 'purchase_order_deleted':
       return join([
         _str(d['supplier']) != null ? 'fournisseur ${d['supplier']}' : null,
-        _num(d['total'], unit: 'XAF'),
+        _num(d['total'], unit: CurrencyFormatter.currentSymbol),
         _str(d['status']),
       ]).ifEmpty();
 
@@ -813,7 +1113,7 @@ String? _subtitleFor(String action, Map<String, dynamic>? d) {
       return join([
         _str(d['plan']) != null ? 'plan ${d['plan']}' : null,
         _str(d['cycle']),
-        _num(d['amount'], unit: 'XAF'),
+        _num(d['amount'], unit: CurrencyFormatter.currentSymbol),
       ]).ifEmpty();
 
     case 'user_blocked':

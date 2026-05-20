@@ -102,7 +102,13 @@ class PartnerLedgerEntry {
     required this.createdAt,
     this.note,
     this.createdByUserId,
+    this.deletedAt,
   });
+
+  /// Suppression douce : si non-null, l'entrée est supprimée (filtrée des
+  /// soldes et de l'historique). Permet une suppression qui converge en
+  /// multi-appareils / offline-first sans résurrection par re-push.
+  final DateTime? deletedAt;
 
   Map<String, dynamic> toMap() => {
         'id': id,
@@ -115,6 +121,7 @@ class PartnerLedgerEntry {
         'created_at': createdAt.toUtc().toIso8601String(),
         'note': note,
         'created_by_user_id': createdByUserId,
+        'deleted_at': deletedAt?.toUtc().toIso8601String(),
       };
 
   factory PartnerLedgerEntry.fromMap(Map<String, dynamic> m) {
@@ -131,6 +138,9 @@ class PartnerLedgerEntry {
       createdAt: DateTime.parse(m['created_at'] as String).toLocal(),
       note: m['note'] as String?,
       createdByUserId: m['created_by_user_id'] as String?,
+      deletedAt: m['deleted_at'] == null
+          ? null
+          : DateTime.tryParse(m['deleted_at'].toString())?.toLocal(),
     );
   }
 }

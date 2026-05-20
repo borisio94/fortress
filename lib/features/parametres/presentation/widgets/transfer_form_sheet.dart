@@ -6,6 +6,7 @@ import '../../../../core/services/stock_service.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/widgets/back_dated_picker.dart';
 import '../../../../shared/widgets/product_image_card.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -232,8 +233,8 @@ class _TransferFormSheetState extends State<TransferFormSheet> {
                         if (_lines.isNotEmpty)
                           Text('${_lines.length} ligne${_lines.length > 1 ? 's' : ''} '
                               '· ${_totalLines()} unités',
-                              style: const TextStyle(fontSize: 11,
-                                  color: Color(0xFF9CA3AF))),
+                              style: AppTextStyles.caption.copyWith(
+                                  color: const Color(0xFF9CA3AF))),
                       ]),
                       const SizedBox(height: 6),
                       if (_lines.isEmpty)
@@ -247,8 +248,7 @@ class _TransferFormSheetState extends State<TransferFormSheet> {
                           child: const Text(
                               'Aucune ligne. Clique "+ Ajouter une ligne" '
                               'ci-dessous pour sélectionner une variante à transférer.',
-                              style: TextStyle(fontSize: 11,
-                                  color: Color(0xFF6B7280))),
+                              style: AppTextStyles.caption),
                         )
                       else
                         ..._lines.asMap().entries.map((e) => _LineTile(
@@ -296,7 +296,7 @@ class _TransferFormSheetState extends State<TransferFormSheet> {
                       TextField(
                         controller: _notesCtrl,
                         maxLines: 2,
-                        style: const TextStyle(fontSize: 13),
+                        style: AppTextStyles.body,
                         decoration: _inputDecoration('Ex : livraison hebdomadaire'),
                       ),
                     ],
@@ -366,8 +366,7 @@ class _Label extends StatelessWidget {
   @override
   Widget build(BuildContext context) => RichText(
     text: TextSpan(
-      style: const TextStyle(fontSize: 11,
-          fontWeight: FontWeight.w500, color: Color(0xFF6B7280)),
+      style: AppTextStyles.caption,
       children: [
         TextSpan(text: text),
         if (required) const TextSpan(text: ' *',
@@ -417,8 +416,7 @@ class _LocationDropdown extends StatelessWidget {
                   child: Text(l.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13,
-                          color: Color(0xFF0F172A))),
+                      style: AppTextStyles.body),
                 ),
               ]),
             )).toList();
@@ -430,8 +428,8 @@ class _LocationDropdown extends StatelessWidget {
       onChanged: onChanged,
       isDense: true,
       isExpanded: true,
-      hint: const Text('Choisir…',
-          style: TextStyle(fontSize: 13, color: Color(0xFFBBBBBB))),
+      hint: Text('Choisir…',
+          style: AppTextStyles.body.copyWith(color: const Color(0xFFBBBBBB))),
       icon: const Icon(Icons.arrow_drop_down_rounded,
           color: Color(0xFF9CA3AF)),
       decoration: _inputDecoration(''),
@@ -471,14 +469,12 @@ class _LineTile extends StatelessWidget {
           children: [
             Text(line.productName ?? '—',
                 maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF0F172A))),
+                style: AppTextStyles.bodyBold),
             if ((line.variantName ?? '').isNotEmpty)
               Text(line.variantName!,
                   maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11,
-                      color: Color(0xFF9CA3AF))),
+                  style: AppTextStyles.caption.copyWith(
+                      color: const Color(0xFF9CA3AF))),
           ],
         ),
       ),
@@ -490,8 +486,7 @@ class _LineTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
         ),
         child: Text('× ${line.quantity}',
-            style: TextStyle(fontSize: 12,
-                fontWeight: FontWeight.w700, color: AppColors.primary)),
+            style: AppTextStyles.bodySmBold.copyWith(color: AppColors.primary)),
       ),
       IconButton(
         icon: const Icon(Icons.close_rounded, size: 16,
@@ -653,14 +648,12 @@ class _VariantPickerSheetState extends State<_VariantPickerSheet> {
                       borderRadius: BorderRadius.circular(2)))),
               const SizedBox(height: 10),
               const Text('Ajouter une variante',
-                  style: TextStyle(fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF0F172A))),
+                  style: AppTextStyles.label),
               const SizedBox(height: 10),
               TextField(
                 onChanged: (v) => setState(() => _query = v),
                 autofocus: true,
-                style: const TextStyle(fontSize: 13),
+                style: AppTextStyles.body,
                 decoration: _inputDecoration(
                     'Rechercher un produit, variante ou SKU…')
                     .copyWith(prefixIcon: const Icon(
@@ -670,13 +663,13 @@ class _VariantPickerSheetState extends State<_VariantPickerSheet> {
               const SizedBox(height: 10),
               Flexible(
                 child: list.isEmpty
-                    ? const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 28),
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 28),
                         child: Center(
                           child: Text(
                               'Aucune variante disponible à la source',
-                              style: TextStyle(fontSize: 12,
-                                  color: Color(0xFF9CA3AF))),
+                              style: AppTextStyles.bodySm.copyWith(
+                                  color: const Color(0xFF9CA3AF))),
                         ),
                       )
                     : ListView.separated(
@@ -725,24 +718,20 @@ class _VariantPickerSheetState extends State<_VariantPickerSheet> {
                                       Text(e.product.name,
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(fontSize: 13,
-                                              fontWeight: FontWeight.w600,
-                                              color: Color(0xFF0F172A))),
+                                          style: AppTextStyles.bodyBold),
                                       if (e.variant.name.isNotEmpty)
                                         Text(e.variant.name,
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                                fontSize: 11,
-                                                color: Color(0xFF9CA3AF))),
+                                            style: AppTextStyles.caption.copyWith(
+                                                color: const Color(0xFF9CA3AF))),
                                     ],
                                   ),
                                 ),
                                 const SizedBox(width: 10),
                                 Text('${e.available} dispo',
-                                    style: const TextStyle(fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: Color(0xFF10B981))),
+                                    style: AppTextStyles.captionBold.copyWith(
+                                        color: const Color(0xFF10B981))),
                               ]),
                             ),
                           );
@@ -797,12 +786,10 @@ class _QtySelector extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const Text('Quantité',
-                style: TextStyle(fontSize: 11,
-                    color: Color(0xFF6B7280),
-                    fontWeight: FontWeight.w500)),
+                style: AppTextStyles.caption),
             Text('Max : $max',
-                style: const TextStyle(fontSize: 11,
-                    color: Color(0xFF9CA3AF))),
+                style: AppTextStyles.caption.copyWith(
+                    color: const Color(0xFF9CA3AF))),
           ],
         ),
         const SizedBox(height: 4),
@@ -815,7 +802,7 @@ class _QtySelector extends StatelessWidget {
                 controller: controller,
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                style: const TextStyle(fontSize: 13),
+                style: AppTextStyles.body,
                 decoration: _inputDecoration('1'),
               ),
             ),
@@ -875,8 +862,7 @@ class _DatePickerTile extends StatelessWidget {
           Icon(Icons.event_rounded, size: 16, color: AppColors.primary),
           const SizedBox(width: 10),
           Expanded(child: Text(label,
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w600))),
+              style: AppTextStyles.bodyBold)),
           Icon(Icons.edit_calendar_outlined,
               size: 14,
               color: Theme.of(context).colorScheme.onSurface

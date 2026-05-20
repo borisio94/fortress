@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -87,7 +88,7 @@ class _IncidentsPageState extends State<IncidentsPage>
             unselectedLabelColor: AppColors.textHint,
             indicatorColor: AppColors.primary,
             indicatorWeight: 2,
-            labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            labelStyle: AppTextStyles.bodySmBold,
             tabs: [
               Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
                 const Text('En attente'),
@@ -226,8 +227,9 @@ class _Kpi extends StatelessWidget {
   const _Kpi(this.label, this.value, this.color);
   @override
   Widget build(BuildContext context) => Expanded(child: Column(children: [
-    Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: color)),
-    Text(label, style: const TextStyle(fontSize: 10, color: AppColors.textHint)),
+    Text(value, style: AppTextStyles.label
+        .copyWith(fontWeight: FontWeight.w800, color: color)),
+    Text(label, style: AppTextStyles.micro),
   ]));
 }
 
@@ -238,8 +240,8 @@ class _Badge extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
     decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(8)),
-    child: Text('$count', style: const TextStyle(fontSize: 9,
-        fontWeight: FontWeight.w700, color: Colors.white)),
+    child: Text('$count', style: AppTextStyles.microBold
+        .copyWith(color: Colors.white)),
   );
 }
 
@@ -314,8 +316,7 @@ class _IncidentCard extends StatelessWidget {
         ),
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(incident.productName, style: const TextStyle(fontSize: 13,
-              fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+          Text(incident.productName, style: AppTextStyles.bodyBold,
               maxLines: 1, overflow: TextOverflow.ellipsis),
           const SizedBox(height: 2),
           Wrap(spacing: 6, runSpacing: 4, children: [
@@ -329,7 +330,7 @@ class _IncidentCard extends StatelessWidget {
           if (incident.repairCost > 0) ...[
             const SizedBox(height: 2),
             Text('Coût : ${CurrencyFormatter.format(incident.repairCost)}',
-                style: const TextStyle(fontSize: 10, color: AppColors.warning)),
+                style: AppTextStyles.micro.copyWith(color: AppColors.warning)),
           ],
         ])),
         if (onDelete != null)
@@ -347,8 +348,8 @@ class _IncidentCard extends StatelessWidget {
               decoration: BoxDecoration(
                   color: AppColors.primary.withValues(alpha:0.08),
                   borderRadius: BorderRadius.circular(8)),
-              child: Text('Traiter', style: TextStyle(fontSize: 11,
-                  fontWeight: FontWeight.w600, color: AppColors.primary)),
+              child: Text('Traiter', style: AppTextStyles.captionBold
+                  .copyWith(color: AppColors.primary)),
             ),
           ),
       ]),
@@ -364,8 +365,8 @@ class _TypeBadge extends StatelessWidget {
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
     decoration: BoxDecoration(
         color: color.withValues(alpha:0.1), borderRadius: BorderRadius.circular(4)),
-    child: Text(text, style: TextStyle(fontSize: 10,
-        fontWeight: FontWeight.w600, color: color)),
+    child: Text(text, style: AppTextStyles.micro
+        .copyWith(fontWeight: FontWeight.w600, color: color)),
   );
 }
 
@@ -425,18 +426,18 @@ class _ResolveSheetState extends State<_ResolveSheet> {
             const SizedBox(width: 10),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('Résolution d\'incident',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  style: AppTextStyles.subtitleBold),
               Text(widget.incident.productName,
-                  style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                  style: AppTextStyles.bodySmSecondary),
             ])),
           ]),
           const SizedBox(height: 20),
 
           // Choix de résolution
-          const Align(alignment: Alignment.centerLeft,
+          Align(alignment: Alignment.centerLeft,
               child: Text('Action à appliquer',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                      color: AppColors.textSecondary))),
+                  style: AppTextStyles.bodySmBold
+                      .copyWith(color: AppColors.textSecondary))),
           const SizedBox(height: 8),
           ...IncidentType.values.map((t) => _ResolutionTile(
             type: t, selected: _resolution == t,
@@ -484,9 +485,7 @@ class _ResolveSheetState extends State<_ResolveSheet> {
                 Expanded(
                   child: Text('Résolu le : '
                       '${DateFormat('d MMMM yyyy', 'fr_FR').format(_resolvedAt)}',
-                      style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600)),
+                      style: AppTextStyles.bodySmBold),
                 ),
                 Icon(Icons.edit_calendar_outlined,
                     size: 12,
@@ -638,11 +637,9 @@ class _ResolutionTile extends StatelessWidget {
           Icon(_icons[type], size: 18, color: color),
           const SizedBox(width: 10),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(type.label, style: TextStyle(fontSize: 13,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                color: AppColors.textPrimary)),
-            Text(_descs[type]!, style: const TextStyle(fontSize: 10,
-                color: AppColors.textHint)),
+            Text(type.label, style: AppTextStyles.body.copyWith(
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500)),
+            Text(_descs[type]!, style: AppTextStyles.micro),
           ])),
           if (selected) Icon(Icons.check_circle_rounded, size: 18, color: color),
         ]),
@@ -662,16 +659,17 @@ class _Field extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(label, style: const TextStyle(fontSize: 12,
-          fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+      Text(label, style: AppTextStyles.bodySmBold
+          .copyWith(color: AppColors.textSecondary)),
       const SizedBox(height: 4),
       TextField(
         controller: ctrl,
         keyboardType: isNumber ? TextInputType.number : TextInputType.text,
-        style: const TextStyle(fontSize: 13),
+        style: AppTextStyles.body,
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
+          hintStyle: AppTextStyles.bodySm
+              .copyWith(color: const Color(0xFFBBBBBB)),
           prefixIcon: Icon(icon, size: 16, color: AppColors.textHint),
           filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

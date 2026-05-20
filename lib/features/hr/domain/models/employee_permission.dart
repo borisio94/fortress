@@ -48,6 +48,11 @@ enum EmployeePermission {
   /// Appliquer une remise hors barème sur une vente.
   salesDiscount,
 
+  // ── Livraison (hotfix_049) ───────────────────────────────────────────────
+  /// Transférer une commande "scheduled" à un livreur via WhatsApp.
+  /// Owner + admin par défaut ; user requiert un grant explicite.
+  deliveryWhatsApp,
+
   // ── Membres (hotfix_024) ────────────────────────────────────────────────
   /// Inviter un nouveau membre (= créer un employé via RH).
   membersInvite,
@@ -102,6 +107,7 @@ extension EmployeePermissionX on EmployeePermission {
     EmployeePermission.shopActivity     => 'shop.activity',
     EmployeePermission.salesCancel      => 'sales.cancel',
     EmployeePermission.salesDiscount    => 'sales.discount',
+    EmployeePermission.deliveryWhatsApp => 'delivery.send_whatsapp',
     EmployeePermission.membersInvite    => 'members.invite',
     EmployeePermission.shopDelete       => 'shop.delete',
     EmployeePermission.adminRemove      => 'admin.remove',
@@ -121,7 +127,8 @@ extension EmployeePermissionX on EmployeePermission {
     EmployeePermission.caisseScheduled  ||
     EmployeePermission.caisseViewAllOrders ||
     EmployeePermission.salesCancel      ||
-    EmployeePermission.salesDiscount    => EmployeePermissionGroup.caisse,
+    EmployeePermission.salesDiscount    ||
+    EmployeePermission.deliveryWhatsApp => EmployeePermissionGroup.caisse,
     EmployeePermission.crmView          ||
     EmployeePermission.crmWrite         ||
     EmployeePermission.crmDelete        => EmployeePermissionGroup.crm,
@@ -296,6 +303,7 @@ class EmployeePermissionPresets {
     ...employee,
     EmployeePermission.caisseEditOrders,
     EmployeePermission.salesDiscount,
+    EmployeePermission.deliveryWhatsApp,
   };
 
   /// Gestionnaire de stock : tout l'inventaire + lecture caisse.

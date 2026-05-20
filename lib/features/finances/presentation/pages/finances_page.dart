@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../shared/widgets/kpi_card.dart';
@@ -120,8 +121,8 @@ class _LockedFeaturePlaceholder extends StatelessWidget {
           const SizedBox(height: 16),
           Text(context.l10n.upgradeFeatureTitle,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16,
-                  fontWeight: FontWeight.w800, color: cs.onSurface)),
+              style: AppTextStyles.subtitleBold.copyWith(
+                  color: cs.onSurface)),
           const SizedBox(height: 18),
           ElevatedButton.icon(
             onPressed: () => UpgradeSheet.showFeature(
@@ -364,8 +365,7 @@ class _FinancialRecap extends StatelessWidget {
                   size: 15, color: AppColors.primary)),
           const SizedBox(width: 8),
           Text(l.financesTabBilan,
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w700)),
+              style: AppTextStyles.bodyBold),
         ]),
         const SizedBox(height: 12),
         _row(l.financesBilanCA,
@@ -398,11 +398,10 @@ class _FinancialRecap extends StatelessWidget {
         const SizedBox(height: 8),
         Row(children: [
           Expanded(child: Text(l.financesBilanNet,
-              style: const TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w700))),
+              style: AppTextStyles.bodySmBold)),
           Text(
               '${isPositive ? '+' : '−'}${_fmt(net.abs())} ${CurrencyFormatter.currentSymbol}',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800,
+              style: AppTextStyles.label.copyWith(
                   color: isPositive
                       ? AppColors.primary
                       : AppColors.error)),
@@ -412,10 +411,8 @@ class _FinancialRecap extends StatelessWidget {
   }
 
   Widget _row(String label, String value, Color color) => Row(children: [
-    Expanded(child: Text(label, style: const TextStyle(
-        fontSize: 12, color: AppColors.textSecondary))),
-    Text(value, style: TextStyle(fontSize: 12,
-        fontWeight: FontWeight.w700, color: color)),
+    Expanded(child: Text(label, style: AppTextStyles.bodySmSecondary)),
+    Text(value, style: AppTextStyles.bodySmBold.copyWith(color: color)),
   ]);
 }
 
@@ -441,8 +438,7 @@ class _EmptyCard extends StatelessWidget {
       const SizedBox(height: 8),
       Text(message,
           textAlign: TextAlign.center,
-          style: const TextStyle(
-              fontSize: 12, color: AppColors.textSecondary)),
+          style: AppTextStyles.bodySmSecondary),
     ]),
   );
 }
@@ -496,9 +492,7 @@ class _SalesBarChart extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(l.dashSalesOverview,
-            style: const TextStyle(fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary)),
+            style: AppTextStyles.label),
         const SizedBox(height: 8),
         Wrap(spacing: 14, runSpacing: 6, children: [
           _LegendDot(color: salesColor,    label: l.dashChartSales),
@@ -517,8 +511,7 @@ class _SalesBarChart extends StatelessWidget {
                         size: 32, color: AppColors.textHint),
                     const SizedBox(height: 6),
                     Text(l.dashNoSalesYet,
-                        style: const TextStyle(
-                            fontSize: 11, color: AppColors.textHint)),
+                        style: AppTextStyles.captionHint),
                   ]))
               : BarChart(BarChartData(
                   maxY: chartMax,
@@ -543,8 +536,7 @@ class _SalesBarChart extends StatelessWidget {
                       reservedSize: 38,
                       interval: chartMax / 4,
                       getTitlesWidget: (v, _) => Text(_compact(v),
-                          style: const TextStyle(
-                              fontSize: 9, color: AppColors.textHint)),
+                          style: AppTextStyles.micro),
                     )),
                     bottomTitles: AxisTitles(sideTitles: SideTitles(
                       showTitles: true,
@@ -559,9 +551,7 @@ class _SalesBarChart extends StatelessWidget {
                         return Padding(
                           padding: const EdgeInsets.only(top: 6),
                           child: Text(labels[i],
-                              style: const TextStyle(
-                                  fontSize: 9,
-                                  color: AppColors.textHint)),
+                              style: AppTextStyles.micro),
                         );
                       },
                     )),
@@ -637,8 +627,7 @@ class _LegendDot extends StatelessWidget {
       Container(width: 8, height: 8,
           decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
       const SizedBox(width: 6),
-      Text(label, style: const TextStyle(fontSize: 11,
-          fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
+      Text(label, style: AppTextStyles.captionBold),
     ],
   );
 }

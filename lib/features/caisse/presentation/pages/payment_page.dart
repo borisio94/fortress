@@ -8,6 +8,7 @@ import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/database/app_database.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/services/invoice_storage_service.dart';
@@ -76,8 +77,9 @@ class _PaymentView extends StatelessWidget {
                 const Icon(Icons.shopping_cart_outlined,
                     size: 48, color: Color(0xFFD1D5DB)),
                 const SizedBox(height: 12),
-                const Text('Panier vide',
-                    style: TextStyle(fontSize: 14, color: Color(0xFF9CA3AF))),
+                Text('Panier vide',
+                    style: AppTextStyles.labelRegular
+                        .copyWith(color: const Color(0xFF9CA3AF))),
                 const SizedBox(height: 16),
                 TextButton(
                   onPressed: () => context.pop(),
@@ -101,13 +103,12 @@ class _PaymentView extends StatelessWidget {
               ),
               child: Column(children: [
                 Text(l.boutiqueTotal,
-                    style: const TextStyle(fontSize: 13,
-                        color: Color(0xFF6B7280))),
+                    style: AppTextStyles.body
+                        .copyWith(color: const Color(0xFF6B7280))),
                 const SizedBox(height: 8),
                 Text(CurrencyFormatter.format(state.total),
-                    style: TextStyle(fontSize: 28,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.primary)),
+                    style: AppTextStyles.display
+                        .copyWith(color: AppColors.primary)),
                 const SizedBox(height: 12),
                 const Divider(color: Color(0xFFF0F0F0)),
                 const SizedBox(height: 8),
@@ -131,8 +132,8 @@ class _PaymentView extends StatelessWidget {
                 ],
                 const SizedBox(height: 4),
                 Text('${state.itemCount} article${state.itemCount > 1 ? 's' : ''}',
-                    style: const TextStyle(fontSize: 11,
-                        color: Color(0xFF9CA3AF))),
+                    style: AppTextStyles.captionHint
+                        .copyWith(color: const Color(0xFF9CA3AF))),
               ]),
             ),
             const SizedBox(height: 24),
@@ -230,8 +231,8 @@ class _PaymentView extends StatelessWidget {
                           const Icon(Icons.check_circle_rounded, size: 20),
                           const SizedBox(width: 8),
                           Text('Confirmer ${CurrencyFormatter.format(state.total)}',
-                              style: const TextStyle(fontSize: 15,
-                                  fontWeight: FontWeight.w700)),
+                              style: AppTextStyles.subtitleBold
+                                  .copyWith(color: Colors.white)),
                         ]),
               ),
             ),
@@ -239,8 +240,8 @@ class _PaymentView extends StatelessWidget {
             if (state.error != null) ...[
               const SizedBox(height: 12),
               Text(state.error!,
-                  style: const TextStyle(fontSize: 12,
-                      color: Color(0xFFEF4444)),
+                  style: AppTextStyles.bodySm
+                      .copyWith(color: const Color(0xFFEF4444)),
                   textAlign: TextAlign.center),
             ],
           ]);
@@ -259,11 +260,10 @@ class _SummaryLine extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     mainAxisAlignment: MainAxisAlignment.spaceBetween,
     children: [
-      Text(label, style: TextStyle(fontSize: 12,
-          color: color ?? const Color(0xFF6B7280))),
-      Text(value, style: TextStyle(fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: color ?? const Color(0xFF374151))),
+      Text(label, style: AppTextStyles.bodySm
+          .copyWith(color: color ?? const Color(0xFF6B7280))),
+      Text(value, style: AppTextStyles.bodySmBold
+          .copyWith(color: color ?? const Color(0xFF374151))),
     ],
   );
 }
@@ -409,22 +409,23 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
               ),
             ),
             const SizedBox(height: 20),
-            const Text('Vente encaissée !',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800,
-                    color: Color(0xFF0F172A))),
+            Text('Vente encaissée !',
+                style: AppTextStyles.title.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFF0F172A))),
             const SizedBox(height: 6),
             Text(CurrencyFormatter.format(sale.total),
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800,
-                    color: AppColors.primary)),
+                style: AppTextStyles.display
+                    .copyWith(color: AppColors.primary)),
             const SizedBox(height: 4),
             Text(_paymentLabel(sale.paymentMethod),
-                style: const TextStyle(fontSize: 13,
-                    color: Color(0xFF6B7280))),
+                style: AppTextStyles.body
+                    .copyWith(color: const Color(0xFF6B7280))),
             if (sale.clientName != null) ...[
               const SizedBox(height: 4),
               Text('Client : ${sale.clientName}',
-                  style: const TextStyle(fontSize: 12,
-                      color: Color(0xFF9CA3AF))),
+                  style: AppTextStyles.bodySm
+                      .copyWith(color: const Color(0xFF9CA3AF))),
             ],
 
             const Spacer(),
@@ -435,8 +436,10 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
               child: ElevatedButton.icon(
                 onPressed: () => _printTicket(context, sale),
                 icon: const Icon(Icons.print_rounded, size: 18),
-                label: const Text('Imprimer le ticket',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                label: Text('Imprimer le ticket',
+                    style: AppTextStyles.label.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary.withValues(alpha:0.10),
                   foregroundColor: AppColors.primary,
@@ -462,8 +465,9 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
                     _sendingInvoice
                         ? 'Préparation de la facture…'
                         : 'Envoyer la facture (WhatsApp)',
-                    style: const TextStyle(fontSize: 14,
-                        fontWeight: FontWeight.w700)),
+                    style: AppTextStyles.label.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF25D366),
                   foregroundColor: Colors.white,
@@ -481,8 +485,10 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
               child: OutlinedButton.icon(
                 onPressed: () => PostSaleSheet.show(context, sale),
                 icon: const Icon(Icons.receipt_long_rounded, size: 18),
-                label: const Text('Envoyer le reçu',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                label: Text('Envoyer le reçu',
+                    style: AppTextStyles.label.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary)),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.primary,
                   side: BorderSide(color: AppColors.primary.withValues(alpha:0.4)),
@@ -499,9 +505,9 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
               child: ElevatedButton.icon(
                 onPressed: onNewSale,
                 icon: const Icon(Icons.add_rounded, size: 20),
-                label: const Text('Nouvelle vente',
-                    style: TextStyle(fontSize: 15,
-                        fontWeight: FontWeight.w700)),
+                label: Text('Nouvelle vente',
+                    style: AppTextStyles.subtitleBold
+                        .copyWith(color: Colors.white)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
@@ -514,9 +520,9 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
             const SizedBox(height: 12),
             TextButton(
               onPressed: () => context.go('/shop/$shopId/dashboard'),
-              child: const Text('Retour au dashboard',
-                  style: TextStyle(fontSize: 13,
-                      color: Color(0xFF6B7280))),
+              child: Text('Retour au dashboard',
+                  style: AppTextStyles.body
+                      .copyWith(color: const Color(0xFF6B7280))),
             ),
 
             const Spacer(),

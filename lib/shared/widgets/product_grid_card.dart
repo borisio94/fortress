@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/app_localizations.dart';
+import '../../core/theme/app_text_styles.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../features/inventaire/domain/entities/product.dart';
@@ -273,8 +274,8 @@ class _StatusPill extends StatelessWidget {
         ),
         const SizedBox(width: 6),
         Text(label,
-            style: TextStyle(
-                fontSize: 10, fontWeight: FontWeight.w500,
+            style: AppTextStyles.micro.copyWith(
+                fontWeight: FontWeight.w500,
                 color: color, letterSpacing: 0.2)),
       ]),
     );
@@ -300,8 +301,8 @@ class _QtyPill extends StatelessWidget {
       decoration: BoxDecoration(
           color: bg, borderRadius: BorderRadius.circular(10)),
       child: Text('×$stock',
-          style: const TextStyle(
-              fontSize: 10, fontWeight: FontWeight.w500,
+          style: AppTextStyles.micro.copyWith(
+              fontWeight: FontWeight.w500,
               color: Colors.white)),
     );
   }
@@ -356,8 +357,8 @@ class _BottomTextBlock extends StatelessWidget {
           Row(children: [
             Expanded(child: Text(product.name,
                 maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w500,
+                style: AppTextStyles.body.copyWith(
+                    fontWeight: FontWeight.w500,
                     color: Colors.white))),
             if (discount != null) ...[
               const SizedBox(width: 6),
@@ -386,9 +387,9 @@ Widget _priceLine(Product p) {
       ?? (p.variants.isNotEmpty ? p.variants.first : null);
   final base = feat?.priceSellPos ?? p.priceSellPos;
   if (base <= 0) {
-    return const Text('N/D',
-        style: TextStyle(
-            fontSize: 14, fontWeight: FontWeight.w500,
+    return Text('N/D',
+        style: AppTextStyles.label.copyWith(
+            fontWeight: FontWeight.w500,
             color: Colors.white));
   }
   final symbol = CurrencyFormatter.currentSymbol;
@@ -406,8 +407,8 @@ Widget _priceLine(Product p) {
         textBaseline: TextBaseline.alphabetic,
         children: [
           Text(basePart,
-              style: TextStyle(
-                  fontSize: 10, color: muted,
+              style: AppTextStyles.micro.copyWith(
+                  color: muted,
                   decoration: TextDecoration.lineThrough,
                   decorationColor: muted)),
           const SizedBox(width: 6),
@@ -428,13 +429,13 @@ class _PriceText extends StatelessWidget {
     return RichText(
       text: TextSpan(children: [
         TextSpan(text: numberPart,
-            style: const TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w500,
+            style: AppTextStyles.label.copyWith(
+                fontWeight: FontWeight.w500,
                 color: Colors.white)),
         const TextSpan(text: ' '),
         TextSpan(text: symbol,
-            style: TextStyle(
-                fontSize: 9, fontWeight: FontWeight.w400,
+            style: AppTextStyles.micro.copyWith(
+                fontWeight: FontWeight.w400,
                 color: Colors.white.withValues(alpha: 0.7))),
       ]),
     );
@@ -454,8 +455,8 @@ class _DiscountBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(label,
-          style: const TextStyle(
-              fontSize: 10, fontWeight: FontWeight.w500,
+          style: AppTextStyles.micro.copyWith(
+              fontWeight: FontWeight.w500,
               color: Colors.white)),
     );
   }
@@ -494,8 +495,7 @@ class _VariantsRow extends StatelessWidget {
         ),
       if (extra > 0)
         Text('+$extra',
-            style: TextStyle(
-                fontSize: 10,
+            style: AppTextStyles.micro.copyWith(
                 color: Colors.white.withValues(alpha: 0.85),
                 fontWeight: FontWeight.w500)),
     ]);

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AppPrimaryButton — bouton principal de l'app (pleine largeur)
@@ -76,12 +77,10 @@ class _AppPrimaryButtonState extends State<AppPrimaryButton> {
                         ],
                         Text(
                           widget.label,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
+                          style: AppTextStyles.label.copyWith(
                             color: active
                                 ? Colors.white
-                                : Colors.white.withOpacity(0.6),
+                                : Colors.white.withValues(alpha:0.6),
                             letterSpacing: 0.3,
                           ),
                         ),
@@ -113,6 +112,10 @@ class AppIconBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Suit la couleur de l'IconTheme ambiant (AppBar.actionsIconTheme en mobile,
+    // IconButtonTheme/onSurface en desktop) pour rester cohérent avec le
+    // hamburger / back button.
+    final iconColor = IconTheme.of(context).color ?? const Color(0xFF374151);
     final btn = InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
@@ -121,7 +124,7 @@ class AppIconBadge extends StatelessWidget {
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            Icon(icon, size: 22, color: const Color(0xFF374151)),
+            Icon(icon, size: 22, color: iconColor),
             if (count > 0)
               Positioned(
                 top: -4, right: -4,
@@ -136,8 +139,7 @@ class AppIconBadge extends StatelessWidget {
                   ),
                   child: Text(
                     count > 99 ? '99+' : '$count',
-                    style: const TextStyle(
-                        fontSize: 9,
+                    style: AppTextStyles.micro.copyWith(
                         color: Colors.white,
                         fontWeight: FontWeight.w700),
                     textAlign: TextAlign.center,

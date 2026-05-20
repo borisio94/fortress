@@ -1,106 +1,217 @@
 import 'package:flutter/material.dart';
 import 'app_colors.dart';
 
-/// Styles de texte centralisés.
+/// ════════════════════════════════════════════════════════════════════════
+/// ÉCHELLE TYPOGRAPHIQUE FORTRESS — une seule source de vérité.
 ///
-/// Le `theme.textTheme` standard Material (12, 14, 16, 18, 24, 28) ne
-/// couvre pas les tailles 9/10/11/13/15/17 omniprésentes dans Fortress.
-/// Cette classe les expose sous des noms explicites pour qu'aucune page
-/// n'écrive plus `TextStyle(fontSize: 13, color: Color(0xFF6B7280))` en dur.
+/// Police : `Inter` (embarquée, cf. pubspec.yaml) → rendu strictement
+/// identique sur web / Android / iOS.
 ///
-/// **Convention de nommage :** `<usage><taille>[Bold|Secondary|...]`
-///   - `usage` : micro / caption / body / label / subtitle / title
-///   - `taille` : pixel size en clair (9, 10, 11, 12, 13, 14, 15, 16, 17, 18)
-///   - suffixe `Bold` pour FontWeight.w700, `Secondary` pour textSecondary, etc.
+/// L'app ne doit JAMAIS écrire `TextStyle(fontSize: 13, color: …)` en dur.
+/// On choisit l'échelon le plus proche du besoin parmi les 7 ci-dessous,
+/// puis on ajuste seulement la couleur via `.copyWith(color: …)`.
 ///
-/// **Exemple :**
-/// ```dart
-/// Text('label', style: AppTextStyles.caption11)
-/// Text('valeur', style: AppTextStyles.body13Bold.copyWith(
-///   color: theme.semantic.success,
-/// ))
-/// ```
+/// ── LES 7 ÉCHELONS (du plus petit au plus grand) ───────────────────────
+///
+///  | Échelon      | px | Poids | Usage                                    |
+///  |--------------|----|-------|------------------------------------------|
+///  | `micro`      | 10 | 400   | badges, horodatage, métadonnées          |
+///  | `caption`    | 11 | 500   | légendes, labels de champ, helper text   |
+///  | `bodySm`     | 12 | 400   | texte secondaire dense (listes serrées)  |
+///  | `body`       | 13 | 400   | CORPS PAR DÉFAUT (paragraphes, valeurs)  |
+///  | `label`      | 14 | 600   | saisie, boutons, items de liste, onglets |
+///  | `subtitle`   | 16 | 600   | sous-titres, titres de card / dialogue   |
+///  | `title`      | 18 | 700   | titres de page / section / AppBar        |
+///
+///  + échelon spécial chiffres : `display` (24, w800) pour les gros KPI.
+///
+/// Chaque échelon a 3 variantes prêtes à l'emploi :
+///   `Xxx`         → couleur primaire (texte principal)
+///   `XxxSecondary`→ couleur secondaire (gris moyen)
+///   `XxxBold`     → poids renforcé (w700)
+///
+/// ── COMPATIBILITÉ ──────────────────────────────────────────────────────
+/// Les anciens noms (`micro9`, `body13`, `subtitle15`, `title16`, …) sont
+/// conservés comme alias pour ne rien casser, mais sont @Deprecated : tout
+/// nouveau code et toute migration doit utiliser les 7 échelons ci-dessus.
+/// ════════════════════════════════════════════════════════════════════════
 class AppTextStyles {
   AppTextStyles._();
 
-  // ─── Tailles micro (9-10) — badges, timestamps, métadonnées ───────────
-  static const micro9 = TextStyle(
-      fontSize: 9, color: AppColors.textHint);
-  static const micro9Bold = TextStyle(
-      fontSize: 9, fontWeight: FontWeight.w700, color: AppColors.textHint);
-  static const micro10 = TextStyle(
-      fontSize: 10, color: AppColors.textHint);
-  static const micro10Bold = TextStyle(
-      fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.textSecondary);
+  // ════════════════════════════════════════════════════════════════════
+  //  ÉCHELLE CANONIQUE — à utiliser partout
+  // ════════════════════════════════════════════════════════════════════
 
-  // ─── Caption (11) — labels mineurs, légendes ──────────────────────────
-  static const caption11 = TextStyle(
-      fontSize: 11, color: AppColors.textSecondary);
-  static const caption11Bold = TextStyle(
-      fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textSecondary);
-  static const caption11Hint = TextStyle(
-      fontSize: 11, color: AppColors.textHint);
+  // ── 1. micro (10) ────────────────────────────────────────────────────
+  static const micro = TextStyle(
+      fontSize: 10, height: 1.3, color: AppColors.textHint);
+  static const microSecondary = TextStyle(
+      fontSize: 10, height: 1.3, color: AppColors.textSecondary);
+  static const microBold = TextStyle(
+      fontSize: 10, height: 1.3,
+      fontWeight: FontWeight.w700, color: AppColors.textSecondary);
 
-  // ─── Body small (12-13) — corps de texte courant ──────────────────────
-  static const body12 = TextStyle(
-      fontSize: 12, color: AppColors.textPrimary);
-  static const body12Secondary = TextStyle(
-      fontSize: 12, color: AppColors.textSecondary);
-  static const body12Bold = TextStyle(
-      fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
-  static const body13 = TextStyle(
-      fontSize: 13, color: AppColors.textPrimary, height: 1.5);
-  static const body13Secondary = TextStyle(
-      fontSize: 13, color: AppColors.textSecondary, height: 1.5);
-  static const body13Bold = TextStyle(
-      fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
+  // ── 2. caption (11) ──────────────────────────────────────────────────
+  static const caption = TextStyle(
+      fontSize: 11, height: 1.35,
+      fontWeight: FontWeight.w500, color: AppColors.textSecondary);
+  static const captionHint = TextStyle(
+      fontSize: 11, height: 1.35, color: AppColors.textHint);
+  static const captionBold = TextStyle(
+      fontSize: 11, height: 1.35,
+      fontWeight: FontWeight.w700, color: AppColors.textSecondary);
 
-  // ─── Label medium (14) — boutons, champs, labels actifs ───────────────
-  static const label14 = TextStyle(
-      fontSize: 14, color: AppColors.textPrimary);
-  static const label14Bold = TextStyle(
-      fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
-  static const label14Secondary = TextStyle(
-      fontSize: 14, color: AppColors.textSecondary);
+  // ── 3. bodySm (12) ───────────────────────────────────────────────────
+  static const bodySm = TextStyle(
+      fontSize: 12, height: 1.45, color: AppColors.textPrimary);
+  static const bodySmSecondary = TextStyle(
+      fontSize: 12, height: 1.45, color: AppColors.textSecondary);
+  static const bodySmBold = TextStyle(
+      fontSize: 12, height: 1.45,
+      fontWeight: FontWeight.w700, color: AppColors.textPrimary);
 
-  // ─── Subtitle (15) — sous-titres de cards ─────────────────────────────
-  static const subtitle15 = TextStyle(
-      fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
+  // ── 4. body (13) — CORPS PAR DÉFAUT ──────────────────────────────────
+  static const body = TextStyle(
+      fontSize: 13, height: 1.5, color: AppColors.textPrimary);
+  static const bodySecondary = TextStyle(
+      fontSize: 13, height: 1.5, color: AppColors.textSecondary);
+  static const bodyBold = TextStyle(
+      fontSize: 13, height: 1.5,
+      fontWeight: FontWeight.w700, color: AppColors.textPrimary);
 
-  // ─── Titles (16-18) — en-têtes de sections, modals ────────────────────
-  static const title16 = TextStyle(
-      fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary);
-  static const title17 = TextStyle(
-      fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary);
-  static const title18 = TextStyle(
-      fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.textPrimary);
+  // ── 5. label (14) — saisie / boutons / listes ────────────────────────
+  static const label = TextStyle(
+      fontSize: 14, height: 1.4,
+      fontWeight: FontWeight.w600, color: AppColors.textPrimary);
+  static const labelRegular = TextStyle(
+      fontSize: 14, height: 1.4, color: AppColors.textPrimary);
+  static const labelSecondary = TextStyle(
+      fontSize: 14, height: 1.4, color: AppColors.textSecondary);
+
+  /// Texte SAISI dans un champ (TextField / TextFormField). Échelon `label`
+  /// sans gras. UNIQUE référence pour la taille de saisie de toute l'app
+  /// → plus aucun champ « trop grand / trop petit ».
+  static const input = TextStyle(
+      fontSize: 14, height: 1.3, color: AppColors.textPrimary);
+
+  /// Placeholder / hint d'un champ — même taille que [input], couleur hint.
+  static const inputHint = TextStyle(
+      fontSize: 14, height: 1.3, color: AppColors.textHint);
+
+  // ── 6. subtitle (16) — sous-titres / titres de card / dialogue ───────
+  static const subtitle = TextStyle(
+      fontSize: 16, height: 1.35,
+      fontWeight: FontWeight.w600, color: AppColors.textPrimary);
+  static const subtitleBold = TextStyle(
+      fontSize: 16, height: 1.35,
+      fontWeight: FontWeight.w700, color: AppColors.textPrimary);
+
+  // ── 7. title (18) — titres de page / section ─────────────────────────
+  static const title = TextStyle(
+      fontSize: 18, height: 1.3,
+      fontWeight: FontWeight.w700, color: AppColors.textPrimary);
+
+  // ── + display (24) — gros chiffres KPI uniquement ────────────────────
+  static const display = TextStyle(
+      fontSize: 24, height: 1.2,
+      fontWeight: FontWeight.w800, color: AppColors.textPrimary);
+
+  // ════════════════════════════════════════════════════════════════════
+  //  ALIAS HÉRITÉS — @Deprecated, conservés pour compat (ne pas réutiliser)
+  //  Chaque alias est CALÉ sur l'échelon canonique le plus proche pour que
+  //  les écrans non encore migrés s'alignent automatiquement.
+  // ════════════════════════════════════════════════════════════════════
+
+  @Deprecated('Utiliser AppTextStyles.micro')
+  static const micro9 = micro;
+  @Deprecated('Utiliser AppTextStyles.microBold')
+  static const micro9Bold = microBold;
+  @Deprecated('Utiliser AppTextStyles.micro')
+  static const micro10 = micro;
+  @Deprecated('Utiliser AppTextStyles.microBold')
+  static const micro10Bold = microBold;
+
+  @Deprecated('Utiliser AppTextStyles.caption')
+  static const caption11 = caption;
+  @Deprecated('Utiliser AppTextStyles.captionBold')
+  static const caption11Bold = captionBold;
+  @Deprecated('Utiliser AppTextStyles.captionHint')
+  static const caption11Hint = captionHint;
+
+  @Deprecated('Utiliser AppTextStyles.bodySm')
+  static const body12 = bodySm;
+  @Deprecated('Utiliser AppTextStyles.bodySmSecondary')
+  static const body12Secondary = bodySmSecondary;
+  @Deprecated('Utiliser AppTextStyles.bodySmBold')
+  static const body12Bold = bodySmBold;
+
+  @Deprecated('Utiliser AppTextStyles.body')
+  static const body13 = body;
+  @Deprecated('Utiliser AppTextStyles.bodySecondary')
+  static const body13Secondary = bodySecondary;
+  @Deprecated('Utiliser AppTextStyles.bodyBold')
+  static const body13Bold = bodyBold;
+
+  @Deprecated('Utiliser AppTextStyles.labelRegular')
+  static const label14 = labelRegular;
+  @Deprecated('Utiliser AppTextStyles.label')
+  static const label14Bold = label;
+  @Deprecated('Utiliser AppTextStyles.labelSecondary')
+  static const label14Secondary = labelSecondary;
+
+  @Deprecated('Utiliser AppTextStyles.subtitle')
+  static const subtitle15 = subtitle;
+
+  @Deprecated('Utiliser AppTextStyles.subtitle')
+  static const title16 = subtitle;
+  @Deprecated('Utiliser AppTextStyles.title')
+  static const title17 = title;
+  @Deprecated('Utiliser AppTextStyles.title')
+  static const title18 = title;
 }
 
-/// Raccourcis d'accès depuis un BuildContext quand on veut les couleurs
-/// dynamiques du thème courant (utile pour le mode sombre).
+/// Raccourcis context-aware : mêmes échelons mais couleurs tirées du
+/// `colorScheme` courant (indispensable pour le mode sombre).
 ///
 /// ```dart
-/// Text('hello', style: context.styles.body13Themed)
+/// Text('hello', style: context.styles.bodyThemed)
 /// ```
 extension AppTextStylesX on BuildContext {
   AppTextStylesContext get styles => AppTextStylesContext(this);
 }
 
-/// Variantes context-aware pour textes qui doivent suivre `colorScheme`.
 class AppTextStylesContext {
   final BuildContext _ctx;
   const AppTextStylesContext(this._ctx);
 
   ColorScheme get _cs => Theme.of(_ctx).colorScheme;
 
-  TextStyle get caption11Themed => TextStyle(
-      fontSize: 11, color: _cs.onSurface.withOpacity(0.6));
-  TextStyle get body12Themed => TextStyle(
-      fontSize: 12, color: _cs.onSurface);
-  TextStyle get body13Themed => TextStyle(
-      fontSize: 13, color: _cs.onSurface, height: 1.5);
-  TextStyle get body13SecondaryThemed => TextStyle(
-      fontSize: 13, color: _cs.onSurface.withOpacity(0.65), height: 1.5);
-  TextStyle get title16Themed => TextStyle(
-      fontSize: 16, fontWeight: FontWeight.w700, color: _cs.onSurface);
+  TextStyle get captionThemed => TextStyle(
+      fontSize: 11, height: 1.35, fontWeight: FontWeight.w500,
+      color: _cs.onSurface.withValues(alpha: 0.6));
+  TextStyle get bodySmThemed => TextStyle(
+      fontSize: 12, height: 1.45, color: _cs.onSurface);
+  TextStyle get bodyThemed => TextStyle(
+      fontSize: 13, height: 1.5, color: _cs.onSurface);
+  TextStyle get bodySecondaryThemed => TextStyle(
+      fontSize: 13, height: 1.5,
+      color: _cs.onSurface.withValues(alpha: 0.65));
+  TextStyle get subtitleThemed => TextStyle(
+      fontSize: 16, height: 1.35, fontWeight: FontWeight.w600,
+      color: _cs.onSurface);
+  TextStyle get titleThemed => TextStyle(
+      fontSize: 18, height: 1.3, fontWeight: FontWeight.w700,
+      color: _cs.onSurface);
+
+  // ── Alias hérités context-aware ─────────────────────────────────────
+  @Deprecated('Utiliser captionThemed')
+  TextStyle get caption11Themed => captionThemed;
+  @Deprecated('Utiliser bodySmThemed')
+  TextStyle get body12Themed => bodySmThemed;
+  @Deprecated('Utiliser bodyThemed')
+  TextStyle get body13Themed => bodyThemed;
+  @Deprecated('Utiliser bodySecondaryThemed')
+  TextStyle get body13SecondaryThemed => bodySecondaryThemed;
+  @Deprecated('Utiliser subtitleThemed')
+  TextStyle get title16Themed => subtitleThemed;
 }

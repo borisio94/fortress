@@ -5,12 +5,15 @@ import 'package:go_router/go_router.dart';
 import '../../core/database/app_database.dart';
 import '../../core/permisions/permission_guard.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
 import '../../core/i18n/app_localizations.dart';
+import '../../core/utils/currency_formatter.dart';
 import '../../features/caisse/presentation/bloc/caisse_bloc.dart';
 import 'adaptive_scaffold.dart';
 import 'app_drawer.dart';
 import 'offline_banner_widget.dart';
 import 'pin_lock_banner.dart';
+import 'sync_status_banner.dart';
 import 'app_primary_button.dart';
 
 class AppScaffold extends ConsumerStatefulWidget {
@@ -52,6 +55,9 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
     // navigations. Le channel reste vivant jusqu'à changement de shop
     // ou déconnexion (géré dans didUpdateWidget et dans la logique auth).
     AppDatabase.subscribeToShop(widget.shopId);
+    // Charge la devise du shop courant (lit shop_<id>_currency_code dans
+    // Hive et met à jour CurrencyFormatter.current).
+    CurrencyFormatter.loadForShop(widget.shopId);
   }
 
   @override
@@ -60,6 +66,9 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
     if (oldWidget.shopId != widget.shopId) {
       AppDatabase.unsubscribeFromShop(oldWidget.shopId);
       AppDatabase.subscribeToShop(widget.shopId);
+      // Recharge la devise au switch de shop (chaque shop a sa propre
+      // préférence de devise persistée).
+      CurrencyFormatter.loadForShop(widget.shopId);
     }
   }
 
@@ -72,13 +81,31 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
     // d'OfflineBlockGuard et des bannières (PinLock, Offline) en
     // s'appuyant sur celles déjà fournies par AdaptiveScaffold.
     //
-    // ⚠ Side effect : les `actions` custom et le `bottomNavigationBar`
-    // passés à AppScaffold par les sub-pages sont ignorés dans ce mode.
-    // À porter en P2 via un InheritedWidget si besoin.
+    // ⚠ Side effect : les `actions` custom passés à AppScaffold par les
+    // sub-pages sont ignorés dans ce mode (à porter en P2 via un
+    // InheritedWidget si besoin).
+    //
+    // Note : si la sub-page expose un `floatingActionButton` ou un
+    // `bottomNavigationBar`, on les rend via un Scaffold léger imbriqué
+    // (background transparent) — sinon ils seraient invisibles. C'est le
+    // cas pour la page Templates de livraison qui a un FAB "Nouveau".
     final inAdaptive =
         context.findAncestorWidgetOfExactType<AdaptiveScaffold>() != null;
     if (inAdaptive) {
-      return widget.body;
+      if (widget.floatingActionButton == null
+          && widget.bottomNavigationBar == null) {
+        return widget.body;
+      }
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        body: widget.body,
+        floatingActionButton: widget.floatingActionButton,
+        bottomNavigationBar: widget.bottomNavigationBar,
+        // Important : `resizeToAvoidBottomInset: false` car l'AdaptiveScaffold
+        // parent gère déjà l'inset clavier. Sans ça, le contenu se compresse
+        // doublement (parent + ce Scaffold) quand le clavier apparaît.
+        resizeToAvoidBottomInset: false,
+      );
     }
 
     final isDesktop = MediaQuery.of(context).size.width >= _kDesktop;
@@ -112,6 +139,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
                 children: [
                   const PinLockBanner(),
                   const OfflineBanner(),
+                  const SyncStatusBanner(),
                   const SubscriptionBanner(),
                   Expanded(child: widget.body),
                 ],
@@ -134,6 +162,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
           children: [
             const PinLockBanner(),
             const OfflineBanner(),
+            const SyncStatusBanner(),
             const SubscriptionBanner(),
             Expanded(child: widget.body),
           ],
@@ -152,10 +181,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
       leading: _buildLeading(context, isDesktop: isDesktop),
       title: Text(
         widget.title,
-        style: const TextStyle(
-          fontSize: 16, fontWeight: FontWeight.w700,
-          color: AppColors.textPrimary,
-        ),
+        style: AppTextStyles.subtitleBold,
       ),
       centerTitle: isDesktop ? false : true,
       actions: [
@@ -266,21 +292,22 @@ class _NotifBtn extends StatelessWidget {
                   borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 16),
           Text(l.notificationsTitle,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              style: AppTextStyles.subtitleBold),
           const SizedBox(height: 32),
           const Icon(Icons.notifications_off_outlined,
               size: 40, color: Color(0xFFD1D5DB)),
           const SizedBox(height: 12),
-          const Text('Aucune notification',
-              style: TextStyle(fontSize: 13,
+          Text('Aucune notification',
+              style: AppTextStyles.bodySecondary.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF6B7280))),
+                  color: const Color(0xFF6B7280))),
           const SizedBox(height: 4),
-          const Text(
+          Text(
             'Les alertes liées à vos ventes et à votre stock\n'
             'apparaîtront ici.',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 11, color: Color(0xFF9CA3AF))),
+            style: AppTextStyles.caption.copyWith(
+                color: const Color(0xFF9CA3AF))),
           const SizedBox(height: 24),
         ]),
       ),

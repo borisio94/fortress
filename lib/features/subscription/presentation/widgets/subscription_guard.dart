@@ -153,7 +153,7 @@ class _LockedDecorator extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(8),
           child: Center(child: Icon(Icons.lock_rounded,
-              size: 16, color: cs.onSurface.withOpacity(0.55))),
+              size: 16, color: cs.onSurface.withValues(alpha:0.55))),
         ),
       )),
     ]);
@@ -291,7 +291,7 @@ class UpgradeSheet extends StatelessWidget {
           Container(
             width: 56, height: 56,
             decoration: BoxDecoration(
-              color: accent.withOpacity(0.12),
+              color: accent.withValues(alpha:0.12),
               borderRadius: BorderRadius.circular(16),
             ),
             child: Icon(icon, size: 28, color: accent),
@@ -307,7 +307,7 @@ class UpgradeSheet extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(
                   fontSize: 13, height: 1.5,
-                  color: cs.onSurface.withOpacity(0.7))),
+                  color: cs.onSurface.withValues(alpha:0.7))),
           const SizedBox(height: 18),
           SizedBox(
             width: double.infinity, height: 46,
@@ -335,7 +335,7 @@ class UpgradeSheet extends StatelessWidget {
             child: Text(l.commonCancel,
                 style: TextStyle(
                     fontSize: 12, fontWeight: FontWeight.w600,
-                    color: cs.onSurface.withOpacity(0.7))),
+                    color: cs.onSurface.withValues(alpha:0.7))),
           ),
         ]),
       ),

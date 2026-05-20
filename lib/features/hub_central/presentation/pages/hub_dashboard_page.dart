@@ -9,12 +9,14 @@ import '../bloc/hub_bloc.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../features/dashboard/data/dashboard_providers.dart';
+import '../../../../features/inventaire/domain/entities/stock_location.dart';
 import '../../../../features/subscription/presentation/widgets/subscription_guard.dart';
-import '../../../../shared/providers/auth_provider.dart';
-import '../../../../shared/widgets/period_selector.dart';
+import '../../../../features/tickets/domain/entities/shop_ticket.dart';
 import '../../../../core/widgets/fortress_logo.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -103,8 +105,8 @@ class _HubDashboardPageState extends ConsumerState<HubDashboardPage> {
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 80),
                       child: Center(child: Text(state.message,
-                          style: TextStyle(color: sem.danger,
-                              fontSize: 13, fontWeight: FontWeight.w600))),
+                          style: AppTextStyles.bodyBold
+                              .copyWith(color: sem.danger))),
                     )
                   else if (state is HubLoaded)
                     ..._loadedSections(context, state.stats, l)
@@ -126,7 +128,7 @@ class _HubDashboardPageState extends ConsumerState<HubDashboardPage> {
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 60),
           child: Center(child: Text(l.hubNoData,
-              style: TextStyle(fontSize: 13,
+              style: AppTextStyles.body.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant))),
         ),
       ];
@@ -156,6 +158,10 @@ class _HubDashboardPageState extends ConsumerState<HubDashboardPage> {
           ),
         );
       }),
+      const SizedBox(height: 18),
+      _OpenTicketsCard(stats: s),
+      const SizedBox(height: 18),
+      _PartnersOverviewCard(stats: s),
     ];
   }
 
@@ -196,8 +202,10 @@ class _Topbar extends ConsumerWidget {
     final cs    = theme.colorScheme;
     final sem   = theme.semantic;
     final l     = context.l10n;
-    final auth  = ref.watch(authStateProvider);
-    final user  = auth.user;
+    // Source unique de l'utilisateur courant : le cache local alimenté par
+    // AuthBloc (cf. app_drawer). L'ancien `authStateProvider` n'était jamais
+    // alimenté (setUser() jamais appelé) → l'avatar affichait toujours « ? ».
+    final user  = LocalStorageService.getCurrentUser();
     final initials = _computeInitials(user?.name ?? user?.email ?? '?');
     // Notifications : pas de provider dédié — placeholder à 0.
     const notifCount = 0;
@@ -255,16 +263,13 @@ class _Topbar extends ConsumerWidget {
       Container(
         width: 36, height: 36,
         decoration: BoxDecoration(
-          color: cs.primary.withOpacity(0.12),
+          color: cs.primary.withValues(alpha:0.12),
           shape: BoxShape.circle,
-          border: Border.all(color: cs.primary.withOpacity(0.25)),
+          border: Border.all(color: cs.primary.withValues(alpha:0.25)),
         ),
         alignment: Alignment.center,
         child: Text(initials,
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                color: cs.primary)),
+            style: AppTextStyles.bodySmBold.copyWith(color: cs.primary)),
       ),
     ]);
   }
@@ -322,10 +327,8 @@ class _IconButtonBadge extends StatelessWidget {
                   alignment: Alignment.center,
                   child: Text(
                       badge > 99 ? '99+' : '$badge',
-                      style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w800,
-                          color: cs.onError)),
+                      style: AppTextStyles.microBold
+                          .copyWith(color: cs.onError)),
                 ),
               ),
           ]),
@@ -365,10 +368,8 @@ class _ControlsRow extends ConsumerWidget {
             Icon(Icons.add_rounded, size: 16, color: cs.onPrimary),
             const SizedBox(width: 6),
             Text(l.hubNewShop,
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: cs.onPrimary)),
+                style: AppTextStyles.bodySmBold
+                    .copyWith(color: cs.onPrimary)),
           ]),
         ),
       ),
@@ -436,12 +437,10 @@ class _CompactPeriodSelector extends ConsumerWidget {
                     : sem.borderSubtle),
               ),
               child: Text(labelOf(p),
-                  style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                  style: AppTextStyles.bodySmBold.copyWith(
                       color: active
                           ? cs.onPrimary
-                          : cs.onSurface.withOpacity(0.7))),
+                          : cs.onSurface.withValues(alpha:0.7))),
             ),
           ),
         );
@@ -468,7 +467,7 @@ class _KpiSection extends StatelessWidget {
     final items = [
       _KpiData(
         label:    l.financesCA,
-        value:    '${_compact(stats.totalRevenue)} XAF',
+        value:    '${_compact(stats.totalRevenue)} ${CurrencyFormatter.currentSymbol}',
         icon:     Icons.trending_up_rounded,
         color:    sem.success,
         delta:    stats.revenueTrend,
@@ -484,7 +483,7 @@ class _KpiSection extends StatelessWidget {
       ),
       _KpiData(
         label:    l.hubAvgBasket,
-        value:    '${_compact(stats.averageBasket)} XAF',
+        value:    '${_compact(stats.averageBasket)} ${CurrencyFormatter.currentSymbol}',
         icon:     Icons.shopping_basket_rounded,
         color:    sem.warning,
         delta:    stats.averageBasketTrend,
@@ -541,7 +540,7 @@ class _KpiCard extends StatelessWidget {
     final sem   = theme.semantic;
     final positive = data.delta >= 0;
     final trendColor = data.delta == 0
-        ? cs.onSurface.withOpacity(0.5)
+        ? cs.onSurface.withValues(alpha:0.5)
         : (positive ? sem.success : sem.danger);
     return Container(
       padding: const EdgeInsets.all(12),
@@ -554,7 +553,7 @@ class _KpiCard extends StatelessWidget {
         Row(children: [
           Container(width: 30, height: 30,
               decoration: BoxDecoration(
-                  color: data.color.withOpacity(0.12),
+                  color: data.color.withValues(alpha:0.12),
                   borderRadius: BorderRadius.circular(8)),
               child: Icon(data.icon, size: 16, color: data.color)),
           const Spacer(),
@@ -562,7 +561,7 @@ class _KpiCard extends StatelessWidget {
             padding: const EdgeInsets.symmetric(
                 horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: trendColor.withOpacity(0.12),
+              color: trendColor.withValues(alpha:0.12),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -575,23 +574,19 @@ class _KpiCard extends StatelessWidget {
                   size: 10, color: trendColor),
               const SizedBox(width: 2),
               Text(data.sub,
-                  style: TextStyle(fontSize: 9,
-                      fontWeight: FontWeight.w800, color: trendColor)),
+                  style: AppTextStyles.microBold
+                      .copyWith(color: trendColor)),
             ]),
           ),
         ]),
         const SizedBox(height: 10),
         Text(data.value,
             maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w800,
-                color: data.color)),
+            style: AppTextStyles.subtitleBold.copyWith(color: data.color)),
         const SizedBox(height: 2),
         Text(data.label,
-            style: TextStyle(fontSize: 11,
-                color: cs.onSurface.withOpacity(0.6),
-                fontWeight: FontWeight.w500)),
+            style: AppTextStyles.caption.copyWith(
+                color: cs.onSurface.withValues(alpha:0.6))),
       ]),
     );
   }
@@ -637,8 +632,7 @@ class _RevenueByShopChart extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(l.hubRevenueByShop,
-            style: TextStyle(fontSize: 13,
-                fontWeight: FontWeight.w700, color: cs.onSurface)),
+            style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
         const SizedBox(height: 10),
         Wrap(spacing: 12, runSpacing: 6,
             children: stats.shopStats.asMap().entries.map((e) {
@@ -650,9 +644,8 @@ class _RevenueByShopChart extends StatelessWidget {
                     borderRadius: BorderRadius.circular(3))),
             const SizedBox(width: 6),
             Text(sh.shopName,
-                style: TextStyle(fontSize: 11,
-                    color: cs.onSurface.withOpacity(0.7),
-                    fontWeight: FontWeight.w600)),
+                style: AppTextStyles.captionBold.copyWith(
+                    color: cs.onSurface.withValues(alpha:0.7))),
           ]);
         }).toList()),
         const SizedBox(height: 12),
@@ -675,8 +668,8 @@ class _RevenueByShopChart extends StatelessWidget {
               showTitles: true, reservedSize: 38,
               interval: chartMax / 4,
               getTitlesWidget: (v, _) => Text(_compact(v),
-                  style: TextStyle(fontSize: 9,
-                      color: cs.onSurface.withOpacity(0.5))),
+                  style: AppTextStyles.micro.copyWith(
+                      color: cs.onSurface.withValues(alpha:0.5))),
             )),
             bottomTitles: AxisTitles(sideTitles: SideTitles(
               showTitles: true, reservedSize: 22,
@@ -690,8 +683,8 @@ class _RevenueByShopChart extends StatelessWidget {
                 return Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(labels[i],
-                      style: TextStyle(fontSize: 9,
-                          color: cs.onSurface.withOpacity(0.5))),
+                      style: AppTextStyles.micro.copyWith(
+                          color: cs.onSurface.withValues(alpha:0.5))),
                 );
               },
             )),
@@ -705,9 +698,9 @@ class _RevenueByShopChart extends StatelessWidget {
               getTooltipItem: (group, gi, rod, ri) {
                 final shop = stats.shopStats[ri];
                 return BarTooltipItem(
-                  '${shop.shopName} : ${_compact(rod.toY)} XAF',
-                  TextStyle(color: rod.color ?? cs.surface,
-                      fontSize: 10, fontWeight: FontWeight.w700),
+                  '${shop.shopName} : ${_compact(rod.toY)} ${CurrencyFormatter.currentSymbol}',
+                  AppTextStyles.microBold
+                      .copyWith(color: rod.color ?? cs.surface),
                 );
               },
             ),
@@ -769,8 +762,8 @@ class _RevenueShareDonut extends StatelessWidget {
           border: Border.all(color: sem.borderSubtle),
         ),
         child: Text(l.hubNoData,
-            style: TextStyle(fontSize: 12,
-                color: cs.onSurface.withOpacity(0.6))),
+            style: AppTextStyles.bodySm.copyWith(
+                color: cs.onSurface.withValues(alpha:0.6))),
       );
     }
 
@@ -785,10 +778,7 @@ class _RevenueShareDonut extends StatelessWidget {
         radius:   38,
         showTitle: pct >= 6, // n'afficher le %  que si la part est lisible
         title:    '${pct.toStringAsFixed(0)}%',
-        titleStyle: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w800,
-            color: cs.surface),
+        titleStyle: AppTextStyles.microBold.copyWith(color: cs.surface),
       ));
     }
 
@@ -801,8 +791,7 @@ class _RevenueShareDonut extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(l.hubRevenueShare,
-            style: TextStyle(fontSize: 13,
-                fontWeight: FontWeight.w700, color: cs.onSurface)),
+            style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
         const SizedBox(height: 12),
         Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
           SizedBox(
@@ -831,13 +820,11 @@ class _RevenueShareDonut extends StatelessWidget {
                 const SizedBox(width: 6),
                 Expanded(child: Text(ss.shopName,
                     maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: cs.onSurface))),
+                    style: AppTextStyles.captionBold
+                        .copyWith(color: cs.onSurface))),
                 Text('${pct.toStringAsFixed(1)}%',
-                    style: TextStyle(fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: cs.onSurface.withOpacity(0.7))),
+                    style: AppTextStyles.microBold.copyWith(
+                        color: cs.onSurface.withValues(alpha:0.7))),
               ]),
             );
           }).toList())),
@@ -858,7 +845,7 @@ class _ShopsHeader extends StatelessWidget {
     final cs    = theme.colorScheme;
     final l     = context.l10n;
     return Text(l.hubMyShops,
-        style: TextStyle(fontSize: 14,
+        style: AppTextStyles.label.copyWith(
             fontWeight: FontWeight.w700, color: cs.onSurface));
   }
 }
@@ -916,7 +903,7 @@ class _ShopCard extends StatelessWidget {
                 Container(
                   width: 40, height: 40,
                   decoration: BoxDecoration(
-                    color: cs.onSurface.withOpacity(0.85),
+                    color: cs.onSurface.withValues(alpha:0.85),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(Icons.storefront_rounded,
@@ -929,7 +916,7 @@ class _ShopCard extends StatelessWidget {
                   Row(children: [
                     Expanded(child: Text(shop.shopName,
                         maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 14,
+                        style: AppTextStyles.label.copyWith(
                             fontWeight: FontWeight.w700,
                             color: cs.onSurface))),
                     if (isTop)
@@ -941,14 +928,14 @@ class _ShopCard extends StatelessWidget {
                   ]),
                   const SizedBox(height: 2),
                   Text(l.hubTransactionsCount(shop.transactionCount),
-                      style: TextStyle(fontSize: 11,
-                          color: cs.onSurface.withOpacity(0.6))),
+                      style: AppTextStyles.caption.copyWith(
+                          color: cs.onSurface.withValues(alpha:0.6))),
                 ])),
                 const SizedBox(width: 6),
                 Column(crossAxisAlignment: CrossAxisAlignment.end,
                     mainAxisSize: MainAxisSize.min, children: [
                   Text(CurrencyFormatter.format(shop.totalSales),
-                      style: TextStyle(fontSize: 14,
+                      style: AppTextStyles.label.copyWith(
                           fontWeight: FontWeight.w800,
                           color: cs.primary)),
                   const SizedBox(height: 2),
@@ -959,13 +946,13 @@ class _ShopCard extends StatelessWidget {
                         size: 11, color: trendColor),
                     const SizedBox(width: 2),
                     Text('${shop.growthRate.abs().toStringAsFixed(1)}%',
-                        style: TextStyle(fontSize: 11,
-                            fontWeight: FontWeight.w700, color: trendColor)),
+                        style: AppTextStyles.captionBold
+                            .copyWith(color: trendColor)),
                   ]),
                 ]),
                 const SizedBox(width: 6),
                 Icon(Icons.chevron_right_rounded,
-                    size: 18, color: cs.onSurface.withOpacity(0.4)),
+                    size: 18, color: cs.onSurface.withValues(alpha:0.4)),
               ]),
               const SizedBox(height: 10),
               Row(children: [
@@ -974,20 +961,18 @@ class _ShopCard extends StatelessWidget {
                   child: LinearProgressIndicator(
                     value: progress,
                     minHeight: 6,
-                    backgroundColor: color.withOpacity(0.15),
+                    backgroundColor: color.withValues(alpha:0.15),
                     valueColor: AlwaysStoppedAnimation(color),
                   ),
                 )),
                 const SizedBox(width: 8),
                 Text('${sharePct.toStringAsFixed(1)}%',
-                    style: TextStyle(fontSize: 11,
-                        fontWeight: FontWeight.w700, color: color)),
+                    style: AppTextStyles.captionBold.copyWith(color: color)),
               ]),
               const SizedBox(height: 3),
               Text(l.hubShareOfRevenue,
-                  style: TextStyle(fontSize: 9,
-                      color: cs.onSurface.withOpacity(0.5),
-                      fontWeight: FontWeight.w500)),
+                  style: AppTextStyles.micro.copyWith(
+                      color: cs.onSurface.withValues(alpha:0.5))),
             ]),
           ),
         )),
@@ -1004,11 +989,304 @@ class _StatusBadge extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
     decoration: BoxDecoration(
-      color: color.withOpacity(0.12),
+      color: color.withValues(alpha:0.12),
       borderRadius: BorderRadius.circular(6),
     ),
     child: Text(text,
-        style: TextStyle(fontSize: 9,
-            fontWeight: FontWeight.w800, color: color)),
+        style: AppTextStyles.microBold.copyWith(color: color)),
   );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// CARD — Tickets ouverts par boutique (phase 5)
+//
+// Lit `shop_tickets` Hive pour les shops du Hub, compte les tickets `open`
+// par niveau (`admin` / `owner` / `super_admin`) et propose un tap par shop
+// pour naviguer vers sa page Messagerie. Aide le owner à voir d'un coup
+// d'œil ce qui demande son arbitrage cross-boutique.
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _OpenTicketsCard extends StatelessWidget {
+  final GlobalStats stats;
+  const _OpenTicketsCard({required this.stats});
+
+  /// Compte les tickets ouverts pour une shop donnée, par niveau.
+  /// Retourne `(admin, owner, superAdmin)`.
+  ({int admin, int owner, int superAdmin}) _countFor(String shopId) {
+    var a = 0, o = 0, sa = 0;
+    for (final raw in HiveBoxes.shopTicketsBox.values) {
+      try {
+        final t = ShopTicket.fromMap(Map<String, dynamic>.from(raw));
+        if (t.shopId != shopId) continue;
+        if (t.status != TicketStatus.open) continue;
+        switch (t.currentLevel) {
+          case TicketLevel.admin:      a++;
+          case TicketLevel.owner:      o++;
+          case TicketLevel.superAdmin: sa++;
+        }
+      } catch (_) {/* skip */}
+    }
+    return (admin: a, owner: o, superAdmin: sa);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs    = theme.colorScheme;
+    final sem   = theme.semantic;
+
+    final rows = <({String shopId, String name, int admin, int owner, int superAdmin})>[];
+    var totalOpen = 0;
+    for (final s in stats.shopStats) {
+      final c = _countFor(s.shopId);
+      final sum = c.admin + c.owner + c.superAdmin;
+      if (sum > 0) {
+        rows.add((shopId: s.shopId, name: s.shopName,
+            admin: c.admin, owner: c.owner, superAdmin: c.superAdmin));
+        totalOpen += sum;
+      }
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: sem.borderSubtle),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(Icons.forum_rounded, size: 16, color: cs.primary),
+          const SizedBox(width: 8),
+          Text('Messagerie',
+              style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
+          const Spacer(),
+          if (totalOpen > 0)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: sem.warning.withValues(alpha:0.14),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text('$totalOpen ouvert${totalOpen > 1 ? "s" : ""}',
+                  style: AppTextStyles.microBold
+                      .copyWith(color: sem.warning)),
+            ),
+        ]),
+        const SizedBox(height: 10),
+        if (rows.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text('Aucun ticket en cours.',
+                style: AppTextStyles.caption.copyWith(
+                    color: cs.onSurface.withValues(alpha:0.55))),
+          )
+        else
+          for (final r in rows) Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => context.push('/shop/${r.shopId}/tickets'),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 6),
+                child: Row(children: [
+                  Expanded(child: Text(r.name,
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySmBold
+                          .copyWith(color: cs.onSurface))),
+                  if (r.admin > 0)
+                    _LevelBadge(label: 'Admin · ${r.admin}',
+                        color: sem.info),
+                  if (r.owner > 0) ...[
+                    const SizedBox(width: 4),
+                    _LevelBadge(label: 'Owner · ${r.owner}',
+                        color: sem.warning),
+                  ],
+                  if (r.superAdmin > 0) ...[
+                    const SizedBox(width: 4),
+                    _LevelBadge(label: 'Support · ${r.superAdmin}',
+                        color: sem.danger),
+                  ],
+                  const SizedBox(width: 4),
+                  Icon(Icons.chevron_right_rounded,
+                      size: 16, color: sem.borderSubtle),
+                ]),
+              ),
+            ),
+          ),
+      ]),
+    );
+  }
+}
+
+class _LevelBadge extends StatelessWidget {
+  final String label;
+  final Color  color;
+  const _LevelBadge({required this.label, required this.color});
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha:0.14),
+      borderRadius: BorderRadius.circular(4),
+    ),
+    child: Text(label,
+        style: AppTextStyles.microBold.copyWith(color: color)),
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// CARD — Aperçu des partenaires (phase 5)
+//
+// Liste les `StockLocation type='partner'` actifs des owners shops avec
+// quelques métriques rapides : ville + nombre de variantes en stock + total
+// unités. Tap → navigue vers la page Emplacements de la shop tutelle pour
+// drilldown.
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _PartnersOverviewCard extends StatelessWidget {
+  final GlobalStats stats;
+  const _PartnersOverviewCard({required this.stats});
+
+  /// `(variants, totalAvailable)` pour une location partenaire.
+  ({int variants, int total}) _stockFor(String locationId) {
+    var v = 0, t = 0;
+    for (final raw in HiveBoxes.stockLevelsBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw);
+        if (m['location_id']?.toString() != locationId) continue;
+        final qty = (m['stock_available'] as num?)?.toInt() ?? 0;
+        if (qty > 0) v++;
+        t += qty;
+      } catch (_) {/* skip */}
+    }
+    return (variants: v, total: t);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs    = theme.colorScheme;
+    final sem   = theme.semantic;
+
+    // Set des owner_id correspondant aux shops du Hub.
+    final shopOwnerIds = <String>{};
+    for (final s in stats.shopStats) {
+      final shop = LocalStorageService.getShop(s.shopId);
+      if (shop?.ownerId != null) shopOwnerIds.add(shop!.ownerId!);
+    }
+
+    // Index shopId par owner_id pour résoudre la "shop tutelle" approximative
+    // (le 1er shop main du même owner).
+    String? mainShopForOwner(String ownerId) {
+      final s = stats.shopStats.firstWhere(
+          (st) => LocalStorageService.getShop(st.shopId)?.ownerId == ownerId,
+          orElse: () => stats.shopStats.first);
+      return s.shopId;
+    }
+
+    final partners = <StockLocation>[];
+    for (final raw in HiveBoxes.stockLocationsBox.values) {
+      try {
+        final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+        if (loc.type != StockLocationType.partner) continue;
+        if (!loc.isActive) continue;
+        if (!shopOwnerIds.contains(loc.ownerId)) continue;
+        partners.add(loc);
+      } catch (_) {/* skip */}
+    }
+    partners.sort((a, b) => a.name.compareTo(b.name));
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: sem.borderSubtle),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(Icons.local_shipping_rounded,
+              size: 16, color: sem.warning),
+          const SizedBox(width: 8),
+          Text('Dépôts partenaires',
+              style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
+          const Spacer(),
+          if (partners.isNotEmpty)
+            Text('${partners.length} actif${partners.length > 1 ? "s" : ""}',
+                style: AppTextStyles.microBold.copyWith(
+                    color: cs.onSurface.withValues(alpha:0.55))),
+        ]),
+        const SizedBox(height: 10),
+        if (partners.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+                'Aucun dépôt partenaire. Crée-en un depuis Inventaire → '
+                'Emplacements.',
+                style: AppTextStyles.caption.copyWith(
+                    color: cs.onSurface.withValues(alpha:0.55))),
+          )
+        else
+          for (final p in partners) Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () {
+                final mainShop = mainShopForOwner(p.ownerId);
+                if (mainShop != null) {
+                  context.push('/shop/$mainShop/parametres/locations');
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 6),
+                child: Row(children: [
+                  Container(
+                    width: 28, height: 28,
+                    decoration: BoxDecoration(
+                      color: sem.warning.withValues(alpha:0.12),
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                    child: Icon(Icons.local_shipping_rounded,
+                        size: 14, color: sem.warning),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text(p.name,
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySmBold
+                            .copyWith(color: cs.onSurface)),
+                    if ((p.city ?? '').isNotEmpty)
+                      Text(p.city!,
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.micro.copyWith(
+                              color: cs.onSurface.withValues(alpha:0.55))),
+                  ])),
+                  Builder(builder: (_) {
+                    final s = _stockFor(p.id);
+                    return Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                      Text('${s.total} u.',
+                          style: AppTextStyles.bodySmBold
+                              .copyWith(color: cs.onSurface)),
+                      Text('${s.variants} variantes',
+                          style: AppTextStyles.micro.copyWith(
+                              color: cs.onSurface.withValues(alpha:0.55))),
+                    ]);
+                  }),
+                  const SizedBox(width: 4),
+                  Icon(Icons.chevron_right_rounded,
+                      size: 16, color: sem.borderSubtle),
+                ]),
+              ),
+            ),
+          ),
+      ]),
+    );
+  }
 }

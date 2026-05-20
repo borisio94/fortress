@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/validators/input_validators.dart';
 import '../../../../shared/widgets/auth_fields.dart';
+import '../../../../shared/widgets/form_sheet.dart';
 import '../../data/providers/employees_provider.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../domain/models/employee.dart';
@@ -231,7 +233,6 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs    = theme.colorScheme;
-    final sem   = theme.semantic;
     final l     = context.l10n;
     final viewInsets = MediaQuery.of(context).viewInsets.bottom;
     // Affiche les permissions sensibles (shopCreate, shopFullEdit, etc.)
@@ -241,19 +242,15 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
         ref.watch(permissionsProvider(widget.shopId)).isOwner;
 
     return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(20, 12, 20, 20 + viewInsets),
-        child: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Container(width: 36, height: 4,
-                decoration: BoxDecoration(
-                    color: sem.borderSubtle,
-                    borderRadius: BorderRadius.circular(2))),
-            const SizedBox(height: 16),
-            Text(_isEdit ? l.hrEditEmployee : l.hrNewEmployee,
-                style: TextStyle(fontSize: 16,
-                    fontWeight: FontWeight.w800, color: cs.onSurface)),
-            const SizedBox(height: 16),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        FormSheetHeader(
+          title: _isEdit ? l.hrEditEmployee : l.hrNewEmployee,
+          icon: _isEdit ? Icons.edit_outlined : Icons.person_add_outlined,
+        ),
+        Flexible(child: Padding(
+          padding: EdgeInsets.fromLTRB(20, 4, 20, 20 + viewInsets),
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
 
             // ── Nom ─────────────────────────────────────────────
             NameField(
@@ -353,7 +350,7 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: cs.primary,
                   foregroundColor: cs.onPrimary,
-                  disabledBackgroundColor: cs.primary.withOpacity(0.4),
+                  disabledBackgroundColor: cs.primary.withValues(alpha:0.4),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
                   elevation: 0,
@@ -364,13 +361,15 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: cs.onPrimary))
                     : Text(_isEdit ? l.hrActionSave : l.hrActionCreate,
-                        style: const TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w800)),
+                        style: AppTextStyles.label.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: cs.onPrimary)),
               ),
             ),
           ]),
-        ),
-      ),
+          ),
+        )),
+      ]),
     );
   }
 }
@@ -440,11 +439,11 @@ class _PermissionGroup extends StatelessWidget {
                 size: 20,
                 color: allChecked || !noneChecked
                     ? cs.primary
-                    : cs.onSurface.withOpacity(0.5),
+                    : cs.onSurface.withValues(alpha:0.5),
               ),
               const SizedBox(width: 8),
               Text(_groupLabel(l, group),
-                  style: TextStyle(fontSize: 13.5,
+                  style: AppTextStyles.body.copyWith(
                       fontWeight: FontWeight.w800, color: cs.onSurface)),
             ]),
           ),
@@ -463,12 +462,12 @@ class _PermissionGroup extends StatelessWidget {
                 size: 18,
                 color: selected.contains(p)
                     ? cs.primary
-                    : cs.onSurface.withOpacity(0.4),
+                    : cs.onSurface.withValues(alpha:0.4),
               ),
               const SizedBox(width: 8),
               Expanded(child: Text(_permLabel(l, p),
-                  style: TextStyle(fontSize: 12.5,
-                      color: cs.onSurface.withOpacity(0.85)))),
+                  style: AppTextStyles.bodySm.copyWith(
+                      color: cs.onSurface.withValues(alpha:0.85)))),
               // Badge "par défaut" : permission accordée naturellement par
               // le rôle. Décocher = ajouter un `deny:` (override explicite).
               if (roleDefaults.contains(p))
@@ -476,13 +475,13 @@ class _PermissionGroup extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: cs.onSurface.withOpacity(0.06),
+                    color: cs.onSurface.withValues(alpha:0.06),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text('par défaut',
-                      style: TextStyle(fontSize: 9,
+                      style: AppTextStyles.micro.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: cs.onSurface.withOpacity(0.55))),
+                          color: cs.onSurface.withValues(alpha:0.55))),
                 ),
             ]),
           ),
@@ -522,6 +521,7 @@ class _PermissionGroup extends StatelessWidget {
     EmployeePermission.shopActivity     => l.permShopActivity,
     EmployeePermission.salesCancel      => l.permSalesCancel,
     EmployeePermission.salesDiscount    => l.permSalesDiscount,
+    EmployeePermission.deliveryWhatsApp => l.permDeliveryWhatsApp,
     EmployeePermission.membersInvite    => l.permMembersInvite,
     EmployeePermission.shopDelete       => l.permShopDelete,
     EmployeePermission.adminRemove      => l.permAdminRemove,
@@ -539,8 +539,8 @@ class _FieldLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Align(alignment: Alignment.centerLeft, child: Text(text,
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-            color: cs.onSurface.withOpacity(0.6))));
+        style: AppTextStyles.captionBold
+            .copyWith(color: cs.onSurface.withValues(alpha:0.6))));
   }
 }
 
@@ -567,10 +567,10 @@ class _SegmentedRole extends StatelessWidget {
           ),
           alignment: Alignment.center,
           child: Text(label,
-              style: TextStyle(fontSize: 12,
+              style: AppTextStyles.bodySm.copyWith(
                   fontWeight: FontWeight.w700,
                   color: active
-                      ? cs.onPrimary : cs.onSurface.withOpacity(0.7))),
+                      ? cs.onPrimary : cs.onSurface.withValues(alpha:0.7))),
         ),
       ));
     }
@@ -605,17 +605,17 @@ class _StatusSelector extends StatelessWidget {
           curve: Curves.easeOut,
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
           decoration: BoxDecoration(
-            color: active ? accent.withOpacity(0.14) : Colors.transparent,
+            color: active ? accent.withValues(alpha:0.14) : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(icon, size: 14,
-                color: active ? accent : cs.onSurface.withOpacity(0.5)),
+                color: active ? accent : cs.onSurface.withValues(alpha:0.5)),
             const SizedBox(width: 6),
             Flexible(child: Text(label, overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12,
+                style: AppTextStyles.bodySm.copyWith(
                     fontWeight: active ? FontWeight.w700 : FontWeight.w600,
-                    color: active ? accent : cs.onSurface.withOpacity(0.65)))),
+                    color: active ? accent : cs.onSurface.withValues(alpha:0.65)))),
           ]),
         ),
       ));
@@ -634,7 +634,7 @@ class _StatusSelector extends StatelessWidget {
         seg(EmployeeStatus.suspended, Icons.pause_circle_rounded,
             l.hrStatusSuspended, sem.warning),
         seg(EmployeeStatus.archived,  Icons.inventory_2_rounded,
-            l.hrStatusArchived,  cs.onSurface.withOpacity(0.55)),
+            l.hrStatusArchived,  cs.onSurface.withValues(alpha:0.55)),
       ]),
     );
   }
@@ -717,7 +717,7 @@ class _PresetRadio extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
         decoration: BoxDecoration(
           color: selected
-              ? cs.primary.withOpacity(0.10)
+              ? cs.primary.withValues(alpha:0.10)
               : sem.elevatedSurface,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
@@ -734,7 +734,7 @@ class _PresetRadio extends StatelessWidget {
               shape: BoxShape.circle,
               color: selected ? cs.primary : Colors.transparent,
               border: Border.all(
-                color: selected ? cs.primary : cs.onSurface.withOpacity(0.35),
+                color: selected ? cs.primary : cs.onSurface.withValues(alpha:0.35),
                 width: 1.5,
               ),
             ),
@@ -750,14 +750,14 @@ class _PresetRadio extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Icon(spec.icon, size: 14,
-              color: selected ? cs.primary : cs.onSurface.withOpacity(0.55)),
+              color: selected ? cs.primary : cs.onSurface.withValues(alpha:0.55)),
           const SizedBox(width: 6),
           Text(spec.label,
-              style: TextStyle(fontSize: 12,
+              style: AppTextStyles.bodySm.copyWith(
                   fontWeight: FontWeight.w700,
                   color: selected
                       ? cs.primary
-                      : cs.onSurface.withOpacity(0.85))),
+                      : cs.onSurface.withValues(alpha:0.85))),
         ]),
       ),
     );

@@ -8,6 +8,9 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../shared/widgets/app_switch.dart';
 import '../../../../shared/widgets/app_snack.dart';
+import '../../../../shared/widgets/plan_card.dart';
+import '../../../../core/i18n/app_localizations.dart';
+import '../../../subscription/domain/models/plan_type.dart';
 import '../../../../core/widgets/fortress_logo.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/secure_storage.dart';
@@ -24,7 +27,7 @@ final _saStatsProvider = FutureProvider.autoDispose<_SAStats>((ref) async {
   final profiles = await db.from('profiles')
       .select('id,prof_status,is_super_admin,created_at')
       .eq('is_super_admin', false);
-  final subs     = await db.from('subscriptions').select('id,sub_status,amount_paid,billing_cycle,expires_at,user_id,plans(name,label)');
+  final subs     = await db.from('subscriptions').select('id,sub_status,amount_paid,billing_cycle,expires_at,user_id,plans!subscriptions_plan_id_fkey(name,label)');
   final shops    = await db.from('shops').select('id,name,owner_id,is_active,created_at');
   final orders   = await db.from('orders').select('id,created_at');
 
@@ -73,7 +76,7 @@ final _saStatsProvider = FutureProvider.autoDispose<_SAStats>((ref) async {
 final _saUsersProvider = FutureProvider.autoDispose<List<Map<String,dynamic>>>((ref) async {
   final rows = await Supabase.instance.client
       .from('profiles')
-      .select('id,name,email,phone,prof_status,is_super_admin,created_at,subscriptions(sub_status,expires_at,billing_cycle,amount_paid,plans(name,label))')
+      .select('id,name,email,phone,prof_status,is_super_admin,created_at,subscriptions(sub_status,expires_at,billing_cycle,amount_paid,plans!subscriptions_plan_id_fkey(name,label))')
       .eq('is_super_admin', false)           // ← exclure les super admins
       .order('created_at', ascending: false).limit(100);
   return List<Map<String,dynamic>>.from(rows as List);
@@ -105,7 +108,7 @@ final _saPaymentsProvider = FutureProvider.autoDispose<List<Map<String,dynamic>>
   final db = Supabase.instance.client;
   final rows = List<Map<String,dynamic>>.from(
       await db.from('subscriptions')
-          .select('id,sub_status,billing_cycle,amount_paid,payment_ref,notes,started_at,expires_at,cancelled_at,user_id,plans(label,name)')
+          .select('id,sub_status,billing_cycle,amount_paid,payment_ref,notes,started_at,expires_at,cancelled_at,user_id,plans!subscriptions_plan_id_fkey(label,name)')
           .order('started_at', ascending: false).limit(200) as List);
   final userIds = rows.map((s) => s['user_id'] as String?)
       .whereType<String>().toSet().toList();
@@ -270,9 +273,7 @@ class _SAAppBar extends StatelessWidget {
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32)),
           const SizedBox(width: 8),
         ],
-        Text(section.label, style: const TextStyle(
-            fontSize: 16, fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary)),
+        Text(section.label, style: AppTextStyles.subtitleBold),
         const Spacer(),
         IconButton(onPressed: onRefresh,
             icon: const Icon(Icons.refresh_rounded, size: 20,
@@ -292,8 +293,8 @@ class _SAAppBar extends StatelessWidget {
                     decoration: const BoxDecoration(
                         color: AppColors.error, shape: BoxShape.circle),
                     child: Center(child: Text('$alertCount',
-                        style: const TextStyle(fontSize: 8,
-                            fontWeight: FontWeight.w800, color: Colors.white))))),
+                        style: AppTextStyles.microBold
+                            .copyWith(color: Colors.white))))),
         ]),
         const SizedBox(width: 4),
         _SAAvatar(),
@@ -316,21 +317,21 @@ class _SAAvatar extends ConsumerWidget {
           padding: const EdgeInsets.all(20),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             CircleAvatar(radius: 28, backgroundColor: AppColors.primarySurface,
-                child: Text(init, style: TextStyle(fontSize: 20,
+                child: Text(init, style: AppTextStyles.title.copyWith(
                     fontWeight: FontWeight.w800, color: AppColors.primary))),
             const SizedBox(height: 8),
-            Text(email, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            Text(email, style: AppTextStyles.bodyBold),
             const SizedBox(height: 4),
             Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                 decoration: BoxDecoration(color: AppColors.primarySurface,
                     borderRadius: BorderRadius.circular(20)),
-                child: Text('Super Admin', style: TextStyle(fontSize: 11,
-                    fontWeight: FontWeight.w700, color: AppColors.primary))),
+                child: Text('Super Admin', style: AppTextStyles.captionBold
+                    .copyWith(color: AppColors.primary))),
             const SizedBox(height: 20),
             ListTile(
               leading: const Icon(Icons.logout_rounded, color: AppColors.error, size: 20),
-              title: const Text('Déconnexion', style: TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.error)),
+              title: Text('Déconnexion', style: AppTextStyles.bodyBold
+                  .copyWith(color: AppColors.error)),
               onTap: () {
                 Navigator.of(context).pop();
                 Future.microtask(() => _showLogoutConfirm(context));
@@ -342,10 +343,9 @@ class _SAAvatar extends ConsumerWidget {
       child: Container(width: 32, height: 32,
           decoration: BoxDecoration(
               color: AppColors.primarySurface, shape: BoxShape.circle,
-              border: Border.all(color: AppColors.primary.withOpacity(0.3))),
-          child: Center(child: Text(init, style: TextStyle(
-              fontSize: 13, fontWeight: FontWeight.w800,
-              color: AppColors.primary)))),
+              border: Border.all(color: AppColors.primary.withValues(alpha:0.3))),
+          child: Center(child: Text(init, style: AppTextStyles.bodyBold
+              .copyWith(color: AppColors.primary)))),
     );
   }
 }
@@ -396,7 +396,7 @@ class _SADrawerContent extends ConsumerWidget {
               decoration: BoxDecoration(
                   color: AppColors.primarySurface,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.primary.withOpacity(0.2))),
+                  border: Border.all(color: AppColors.primary.withValues(alpha:0.2))),
               child: Row(children: [
                 Container(width: 28, height: 28,
                     decoration: BoxDecoration(
@@ -406,10 +406,10 @@ class _SADrawerContent extends ConsumerWidget {
                         size: 14, color: Colors.white)),
                 const SizedBox(width: 8),
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Super Admin', style: TextStyle(fontSize: 11,
-                      fontWeight: FontWeight.w700, color: AppColors.primary)),
-                  const Text('Panneau principal', style: TextStyle(
-                      fontSize: 9, color: AppColors.textSecondary)),
+                  Text('Super Admin', style: AppTextStyles.captionBold
+                      .copyWith(color: AppColors.primary)),
+                  const Text('Panneau principal',
+                      style: AppTextStyles.microSecondary),
                 ]),
               ]),
             ),
@@ -463,14 +463,15 @@ class _SADrawerContent extends ConsumerWidget {
             InkWell(
               onTap: () => _confirmLogout(context),
               borderRadius: BorderRadius.circular(10),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 child: Row(children: [
-                  Icon(Icons.logout_rounded, size: 20, color: AppColors.error),
-                  SizedBox(width: 10),
-                  Expanded(child: Text('Déconnexion', style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w500,
-                      color: AppColors.error))),
+                  const Icon(Icons.logout_rounded, size: 20, color: AppColors.error),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text('Déconnexion',
+                      style: AppTextStyles.body.copyWith(
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.error))),
                 ]),
               ),
             ),
@@ -488,17 +489,17 @@ class _SADrawerContent extends ConsumerWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         icon: Container(width: 48, height: 48,
             decoration: BoxDecoration(
-                color: AppColors.error.withOpacity(0.1),
+                color: AppColors.error.withValues(alpha:0.1),
                 shape: BoxShape.circle),
             child: const Icon(Icons.logout_rounded,
                 color: AppColors.error, size: 22)),
         title: const Text('Déconnexion',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            style: AppTextStyles.subtitleBold),
         content: const Text(
             'Vous allez quitter le panneau administrateur.\n\nÊtes-vous sûr de vouloir vous déconnecter ?',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+            style: AppTextStyles.bodySecondary),
         actionsAlignment: MainAxisAlignment.center,
         actions: [
           OutlinedButton(
@@ -510,8 +511,7 @@ class _SADrawerContent extends ConsumerWidget {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 24, vertical: 10)),
             child: const Text('Annuler',
-                style: TextStyle(color: AppColors.textSecondary,
-                    fontSize: 13)),
+                style: AppTextStyles.bodySecondary),
           ),
           ElevatedButton(
             onPressed: () {
@@ -527,8 +527,7 @@ class _SADrawerContent extends ConsumerWidget {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 24, vertical: 10)),
             child: const Text('Déconnecter',
-                style: TextStyle(fontSize: 13,
-                    fontWeight: FontWeight.w700)),
+                style: AppTextStyles.bodyBold),
           ),
         ],
       ),
@@ -544,13 +543,12 @@ class _MiniStat extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
     decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha:0.08),
         borderRadius: BorderRadius.circular(6)),
     child: RichText(text: TextSpan(children: [
-      TextSpan(text: value, style: TextStyle(fontSize: 11,
-          fontWeight: FontWeight.w700, color: color)),
-      TextSpan(text: ' $label', style: const TextStyle(
-          fontSize: 9, color: AppColors.textSecondary)),
+      TextSpan(text: value, style: AppTextStyles.captionBold
+          .copyWith(color: color)),
+      TextSpan(text: ' $label', style: AppTextStyles.microSecondary),
     ])),
   );
 }
@@ -561,9 +559,8 @@ class _DrawerLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-    child: Text(text, style: const TextStyle(fontSize: 10,
-        fontWeight: FontWeight.w700, color: AppColors.textSecondary,
-        letterSpacing: 0.5)),
+    child: Text(text, style: AppTextStyles.microBold
+        .copyWith(letterSpacing: 0.5)),
   );
 }
 
@@ -588,7 +585,7 @@ class _DrawerTile extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 2),
       decoration: BoxDecoration(
-          color: active ? AppColors.primary.withOpacity(0.08) : Colors.transparent,
+          color: active ? AppColors.primary.withValues(alpha:0.08) : Colors.transparent,
           borderRadius: BorderRadius.circular(10)),
       child: InkWell(
         onTap: onTap,
@@ -599,15 +596,16 @@ class _DrawerTile extends StatelessWidget {
             Icon(section.icon, size: 20,
                 color: active ? AppColors.primary : AppColors.textSecondary),
             const SizedBox(width: 10),
-            Expanded(child: Text(section.label, style: TextStyle(fontSize: 13,
-                fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                color: active ? AppColors.primary : const Color(0xFF374151)))),
+            Expanded(child: Text(section.label, style: AppTextStyles.body
+                .copyWith(
+                    fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+                    color: active ? AppColors.primary : const Color(0xFF374151)))),
             if (badge != null && badge! > 0)
               Container(width: 18, height: 18,
                   decoration: const BoxDecoration(
                       color: AppColors.error, shape: BoxShape.circle),
-                  child: Center(child: Text('$badge', style: const TextStyle(
-                      fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white)))),
+                  child: Center(child: Text('$badge', style: AppTextStyles
+                      .microBold.copyWith(color: Colors.white)))),
             if (active && (badge == null || badge == 0)) ...[
               const SizedBox(width: 4),
               Container(width: 3, height: 16,
@@ -865,11 +863,11 @@ class _PaymentsSectionState extends ConsumerState<_PaymentsSection> {
           return Container(color: Colors.white,
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: Row(children: [
-              Text('${list.length} paiement(s)', style: const TextStyle(
-                  fontSize: 12, color: AppColors.textSecondary)),
+              Text('${list.length} paiement(s)',
+                  style: AppTextStyles.bodySmSecondary),
               const Spacer(),
-              Text('Total : ${_fmt(total)} XAF', style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.secondary)),
+              Text('Total : ${_fmt(total)} XAF', style: AppTextStyles
+                  .bodyBold.copyWith(color: AppColors.secondary)),
             ]),
           );
         },
@@ -907,27 +905,143 @@ class _PaymentsSectionState extends ConsumerState<_PaymentsSection> {
 // ─── Plans ────────────────────────────────────────────────────────────────────
 class _PlansSection extends ConsumerWidget {
   const _PlansSection();
+
+  void _openEdit(BuildContext context, WidgetRef ref,
+      Map<String, dynamic> plan) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _EditPlanSheet(
+        plan: plan,
+        onSaved: () => ref.invalidate(_saPlansProvider),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l     = context.l10n;
+    final theme = Theme.of(context);
     final async = ref.watch(_saPlansProvider);
+
     return async.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => _ErrorState(e.toString()),
-      data: (plans) => RefreshIndicator(
-        onRefresh: () async => ref.invalidate(_saPlansProvider),
-        child: ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: plans.length,
-          itemBuilder: (_, i) => _PlanCard(plan: plans[i],
-              onEdit: () => showModalBottomSheet(
-                context: context, isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                builder: (_) => _EditPlanSheet(
-                    plan: plans[i], onSaved: () => ref.invalidate(_saPlansProvider)),
-              )),
-        ),
-      ),
+      data: (rawPlans) {
+        // Conversion vers PlanDisplay + tri canonique (Trial → Business).
+        final byType = <PlanType, ({PlanDisplay display, Map<String, dynamic> raw})>{};
+        for (final raw in rawPlans) {
+          final d = PlanDisplay.fromMap(raw);
+          byType[d.type] = (display: d, raw: raw);
+        }
+        const order = [
+          PlanType.trial, PlanType.starter, PlanType.pro, PlanType.business,
+        ];
+        final ordered = [
+          for (final t in order)
+            if (byType.containsKey(t)) byType[t]!,
+        ];
+
+        return RefreshIndicator(
+          onRefresh: () async => ref.invalidate(_saPlansProvider),
+          child: LayoutBuilder(builder: (_, c) {
+            // Desktop ≥ 700 → grille 2 colonnes ; mobile → liste.
+            final isWide = c.maxWidth > 700;
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+              children: [
+                Row(children: [
+                  Expanded(
+                    child: Text(l.planTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.title.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: theme.colorScheme.onSurface)),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () => AppSnack.info(context,
+                        'Ajout d\'un plan — à brancher.'),
+                    icon: const Icon(Icons.add_rounded, size: 16),
+                    label: Text(l.planAddNew,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySmBold),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: 16),
+                if (isWide)
+                  _PlansGrid(
+                    items: ordered,
+                    onEdit: (raw) => _openEdit(context, ref, raw),
+                  )
+                else
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (int i = 0; i < ordered.length; i++) ...[
+                        if (i > 0) const SizedBox(height: 12),
+                        PlanCard(
+                          plan: ordered[i].display,
+                          onEdit: () => _openEdit(context, ref, ordered[i].raw),
+                        ),
+                      ],
+                    ],
+                  ),
+              ],
+            );
+          }),
+        );
+      },
     );
+  }
+}
+
+/// Grille 2 colonnes (desktop) — paire les cards 2 par 2 avec
+/// `IntrinsicHeight` pour aligner verticalement.
+class _PlansGrid extends StatelessWidget {
+  final List<({PlanDisplay display, Map<String, dynamic> raw})> items;
+  final void Function(Map<String, dynamic>) onEdit;
+  const _PlansGrid({required this.items, required this.onEdit});
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <Widget>[];
+    for (int i = 0; i < items.length; i += 2) {
+      final left  = items[i];
+      final right = i + 1 < items.length ? items[i + 1] : null;
+      rows.add(IntrinsicHeight(
+        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Expanded(
+            child: PlanCard(
+              plan: left.display,
+              onEdit: () => onEdit(left.raw),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: right == null
+                ? const SizedBox()
+                : PlanCard(
+                    plan: right.display,
+                    onEdit: () => onEdit(right.raw),
+                  ),
+          ),
+        ]),
+      ));
+      if (i + 2 < items.length) rows.add(const SizedBox(height: 12));
+    }
+    return Column(mainAxisSize: MainAxisSize.min, children: rows);
   }
 }
 
@@ -1014,16 +1128,18 @@ class _LogsSectionState extends ConsumerState<_LogsSection> {
 class _MessagesSection extends StatelessWidget {
   const _MessagesSection();
   @override
-  Widget build(BuildContext context) => const Center(
-    child: Padding(padding: EdgeInsets.all(32),
+  Widget build(BuildContext context) => Center(
+    child: Padding(padding: const EdgeInsets.all(32),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.chat_bubble_outline_rounded, size: 48, color: Color(0xFFD1D5DB)),
-          SizedBox(height: 12),
-          Text('Messagerie — Prochaine version', style: TextStyle(
-              fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-          SizedBox(height: 6),
+          const Icon(Icons.chat_bubble_outline_rounded, size: 48, color: Color(0xFFD1D5DB)),
+          const SizedBox(height: 12),
+          Text('Messagerie — Prochaine version',
+              style: AppTextStyles.label
+                  .copyWith(color: AppColors.textSecondary)),
+          const SizedBox(height: 6),
           Text('Les messages des utilisateurs apparaîtront ici.',
-              style: TextStyle(fontSize: 12, color: AppColors.textHint),
+              style: AppTextStyles.bodySm
+                  .copyWith(color: AppColors.textHint),
               textAlign: TextAlign.center),
         ])),
   );
@@ -1253,7 +1369,7 @@ class _KpiCard extends StatelessWidget {
         border: Border.all(color: AppColors.divider),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha:0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -1262,16 +1378,14 @@ class _KpiCard extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Container(width: 30, height: 30,
-              decoration: BoxDecoration(color: color.withOpacity(0.1),
+              decoration: BoxDecoration(color: color.withValues(alpha:0.1),
                   borderRadius: BorderRadius.circular(8)),
               child: Icon(icon, size: 20, color: color)),
           const Spacer(),
         ]),
         const Spacer(),
-        Text(value, style: TextStyle(fontSize: 24,
-            fontWeight: FontWeight.w800, color: color)),
-        Text(label, style: const TextStyle(fontSize: 11,
-            color: AppColors.textSecondary)),
+        Text(value, style: AppTextStyles.display.copyWith(color: color)),
+        Text(label, style: AppTextStyles.caption),
       ]),
     ),
   );
@@ -1291,12 +1405,12 @@ class _QuickAction extends StatelessWidget {
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withValues(alpha:0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha:0.3)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha:0.04),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -1311,11 +1425,7 @@ class _QuickAction extends StatelessWidget {
             child: Text(
               label,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: color,
-              ),
+              style: AppTextStyles.bodyBold.copyWith(color: color),
             ),
           ),
         ],
@@ -1337,16 +1447,16 @@ class _Alert extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
+          color: color.withValues(alpha:0.08),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: color.withOpacity(0.3))),
+          border: Border.all(color: color.withValues(alpha:0.3))),
       child: Row(children: [
         Icon(icon, size: 14, color: color),
         const SizedBox(width: 8),
-        Expanded(child: Text(message, style: TextStyle(
-            fontSize: 12, fontWeight: FontWeight.w500, color: color))),
+        Expanded(child: Text(message, style: AppTextStyles.bodySm
+            .copyWith(fontWeight: FontWeight.w500, color: color))),
         if (onTap != null)
-          Icon(Icons.chevron_right_rounded, size: 16, color: color.withOpacity(0.7)),
+          Icon(Icons.chevron_right_rounded, size: 16, color: color.withValues(alpha:0.7)),
       ]),
     ),
   );
@@ -1368,10 +1478,10 @@ class _FilterBar extends StatelessWidget {
     child: Column(children: [
       if (showSearch) ...[
         SizedBox(height: 36, child: TextField(onChanged: onSearch,
-          style: const TextStyle(fontSize: 13),
+          style: AppTextStyles.input,
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            hintStyle: AppTextStyles.inputHint,
             prefixIcon: const Icon(Icons.search, size: 16, color: AppColors.textSecondary),
             filled: true, fillColor: AppColors.inputFill,
             isDense: true, contentPadding: EdgeInsets.zero,
@@ -1401,7 +1511,7 @@ class _FilterBar extends StatelessWidget {
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: sel ? AppColors.primary : AppColors.inputBorder),
               ),
-              child: Text(filters[i], style: TextStyle(fontSize: 11,
+              child: Text(filters[i], style: AppTextStyles.caption.copyWith(
                   fontWeight: sel ? FontWeight.w700 : FontWeight.w400,
                   color: sel ? AppColors.primary : const Color(0xFF374151))),
             ),
@@ -1418,11 +1528,11 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(children: [
     Container(width: 20, height: 20,
-        decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.12),
+        decoration: BoxDecoration(color: AppColors.primary.withValues(alpha:0.12),
             borderRadius: BorderRadius.circular(5)),
         child: Icon(Icons.label_rounded, size: 11, color: AppColors.primary)),
     const SizedBox(width: 7),
-    Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+    Text(text, style: AppTextStyles.bodySmBold.copyWith(
         color: AppColors.primary, letterSpacing: 0.3)),
   ]);
 }
@@ -1451,49 +1561,46 @@ class _UserCard extends StatelessWidget {
       decoration: BoxDecoration(
           color: Colors.white, borderRadius: BorderRadius.circular(12),
           border: Border.all(
-              color: isBlocked ? AppColors.error.withOpacity(0.4) : AppColors.inputBorder,
+              color: isBlocked ? AppColors.error.withValues(alpha:0.4) : AppColors.inputBorder,
               width: isBlocked ? 1.5 : 1)),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         leading: CircleAvatar(
           radius: 19,
           backgroundColor: isBlocked
-              ? AppColors.error.withOpacity(0.1) : AppColors.primarySurface,
+              ? AppColors.error.withValues(alpha:0.1) : AppColors.primarySurface,
           child: Text(initials.isNotEmpty ? initials : '?',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+              style: AppTextStyles.captionBold.copyWith(
                   color: isBlocked ? AppColors.error : AppColors.primary)),
         ),
         title: Row(children: [
-          Flexible(child: Text(name, style: const TextStyle(
-              fontSize: 13, fontWeight: FontWeight.w600))),
+          Flexible(child: Text(name, style: AppTextStyles.bodyBold)),
           if (isSA) ...[
             const SizedBox(width: 5),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
               decoration: BoxDecoration(color: AppColors.primarySurface,
                   borderRadius: BorderRadius.circular(4)),
-              child: Text('SA', style: TextStyle(fontSize: 8,
-                  fontWeight: FontWeight.w700, color: AppColors.primary)),
+              child: Text('SA', style: AppTextStyles.microBold
+                  .copyWith(color: AppColors.primary)),
             ),
           ],
         ]),
-        subtitle: Text(email, style: const TextStyle(
-            fontSize: 11, color: AppColors.textSecondary)),
+        subtitle: Text(email, style: AppTextStyles.caption),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           if (plan != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
                   color: isExpired
-                      ? AppColors.error.withOpacity(0.1) : AppColors.primarySurface,
+                      ? AppColors.error.withValues(alpha:0.1) : AppColors.primarySurface,
                   borderRadius: BorderRadius.circular(5)),
-              child: Text(plan['label'] ?? '—', style: TextStyle(fontSize: 9,
-                  fontWeight: FontWeight.w700,
-                  color: isExpired ? AppColors.error : AppColors.primary)),
+              child: Text(plan['label'] ?? '—', style: AppTextStyles
+                  .microBold.copyWith(
+                      color: isExpired ? AppColors.error : AppColors.primary)),
             )
           else
-            const Text('Sans plan', style: TextStyle(fontSize: 10,
-                color: AppColors.textSecondary)),
+            const Text('Sans plan', style: AppTextStyles.microSecondary),
           PopupMenuButton<String>(
             onSelected: (v) => _action(context, v),
             color: Colors.white,
@@ -1519,7 +1626,7 @@ class _UserCard extends StatelessWidget {
   PopupMenuItem<String> _item(String v, IconData icon, String label, Color color) =>
       PopupMenuItem(value: v, child: Row(children: [
         Icon(icon, size: 14, color: color), const SizedBox(width: 8),
-        Text(label, style: TextStyle(fontSize: 12, color: color)),
+        Text(label, style: AppTextStyles.bodySm.copyWith(color: color)),
       ]));
 
   void _action(BuildContext ctx, String v) {
@@ -1557,7 +1664,6 @@ class _UserCard extends StatelessWidget {
 
   void _confirmDel(BuildContext ctx) {
     final name  = user['name']  as String? ?? '—';
-    final email = user['email'] as String? ?? '';
     final uid   = user['id']    as String;
     showDialog(context: ctx, builder: (_) => _SaDangerReauthDialog(
       icon: Icons.delete_forever_rounded,
@@ -1597,8 +1703,7 @@ class _UserCard extends StatelessWidget {
         padding: const EdgeInsets.all(20),
         child: Column(mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(user['name'] ?? '—', style: const TextStyle(
-                  fontSize: 16, fontWeight: FontWeight.w800)),
+              Text(user['name'] ?? '—', style: AppTextStyles.subtitleBold),
               const SizedBox(height: 12),
               _DetailRow('Email',    user['email'] ?? '—'),
               _DetailRow('Téléphone', user['phone'] ?? '—'),
@@ -1634,24 +1739,23 @@ class _ShopRow extends StatelessWidget {
       decoration: BoxDecoration(
           color: Colors.white, borderRadius: BorderRadius.circular(12),
           border: Border.all(color: isActive
-              ? AppColors.inputBorder : AppColors.error.withOpacity(0.3))),
+              ? AppColors.inputBorder : AppColors.error.withValues(alpha:0.3))),
       child: Row(children: [
         Container(width: 36, height: 36,
             decoration: BoxDecoration(
-                color: isActive ? AppColors.primarySurface : AppColors.error.withOpacity(0.1),
+                color: isActive ? AppColors.primarySurface : AppColors.error.withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(9)),
             child: Icon(Icons.store_rounded, size: 17,
                 color: isActive ? AppColors.primary : AppColors.error)),
         const SizedBox(width: 10),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(shop['name'] ?? '—', style: const TextStyle(
-              fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(shop['name'] ?? '—', style: AppTextStyles.bodyBold),
           Text(owner != null
               ? '${owner['name'] ?? ''} · ${shop['sector'] ?? ''}' : shop['sector'] ?? '—',
-              style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+              style: AppTextStyles.caption),
           if (created != null)
-            Text('Créée le ${fmt.format(created)}', style: const TextStyle(
-                fontSize: 10, color: Color(0xFFD1D5DB))),
+            Text('Créée le ${fmt.format(created)}', style: AppTextStyles
+                .micro.copyWith(color: const Color(0xFFD1D5DB))),
         ])),
         if (onToggle != null)
           PopupMenuButton<String>(
@@ -1664,13 +1768,14 @@ class _ShopRow extends StatelessWidget {
                     size: 15, color: isActive ? AppColors.warning : AppColors.secondary),
                 const SizedBox(width: 8),
                 Text(isActive ? 'Désactiver' : 'Activer',
-                    style: TextStyle(fontSize: 12,
+                    style: AppTextStyles.bodySm.copyWith(
                         color: isActive ? AppColors.warning : AppColors.secondary)),
               ])),
-              const PopupMenuItem(value: 'd', child: Row(children: [
-                Icon(Icons.delete_outline, size: 15, color: AppColors.error),
-                SizedBox(width: 8),
-                Text('Supprimer', style: TextStyle(fontSize: 12, color: AppColors.error)),
+              PopupMenuItem(value: 'd', child: Row(children: [
+                const Icon(Icons.delete_outline, size: 15, color: AppColors.error),
+                const SizedBox(width: 8),
+                Text('Supprimer', style: AppTextStyles.bodySm
+                    .copyWith(color: AppColors.error)),
               ])),
             ],
           )
@@ -1678,10 +1783,10 @@ class _ShopRow extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
             decoration: BoxDecoration(
-                color: isActive ? AppColors.secondary.withOpacity(0.1) : AppColors.error.withOpacity(0.1),
+                color: isActive ? AppColors.secondary.withValues(alpha:0.1) : AppColors.error.withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(5)),
             child: Text(isActive ? 'Active' : 'Inactive',
-                style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700,
+                style: AppTextStyles.microBold.copyWith(
                     color: isActive ? AppColors.secondary : AppColors.error)),
           ),
       ]),
@@ -1706,21 +1811,20 @@ class _PaymentRow extends StatelessWidget {
           border: Border.all(color: AppColors.inputBorder)),
       child: Row(children: [
         Container(width: 32, height: 32,
-            decoration: BoxDecoration(color: AppColors.secondary.withOpacity(0.1),
+            decoration: BoxDecoration(color: AppColors.secondary.withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(8)),
             child: Icon(Icons.payments_rounded, size: 15, color: AppColors.secondary)),
         const SizedBox(width: 10),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(plan?['label'] ?? '—', style: const TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w600)),
+          Text(plan?['label'] ?? '—', style: AppTextStyles.bodySmBold),
           Text(_cycleLabel(payment['billing_cycle']),
-              style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+              style: AppTextStyles.microSecondary),
         ])),
         Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Text('${_fmt(amount)} XAF', style: const TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.secondary)),
+          Text('${_fmt(amount)} XAF', style: AppTextStyles.bodySmBold
+              .copyWith(color: AppColors.secondary)),
           if (date != null) Text(fmt.format(date),
-              style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+              style: AppTextStyles.microSecondary),
         ]),
       ]),
     );
@@ -1751,12 +1855,12 @@ class _PaymentCard extends StatelessWidget {
         Row(children: [
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(profile?['name'] ?? profile?['email'] ?? '—',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                style: AppTextStyles.bodyBold),
             Text(profile?['email'] ?? '—',
-                style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                style: AppTextStyles.caption),
           ])),
-          Text('${_fmt(amount)} XAF', style: const TextStyle(
-              fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.secondary)),
+          Text('${_fmt(amount)} XAF', style: AppTextStyles.label.copyWith(
+              fontWeight: FontWeight.w800, color: AppColors.secondary)),
         ]),
         const SizedBox(height: 6),
         Row(children: [
@@ -1767,14 +1871,15 @@ class _PaymentCard extends StatelessWidget {
           _StatusBadge(status),
           const Spacer(),
           if (payment['payment_ref'] != null)
-            Text('Réf: ${payment['payment_ref']}', style: const TextStyle(
-                fontSize: 10, color: AppColors.textSecondary)),
+            Text('Réf: ${payment['payment_ref']}',
+                style: AppTextStyles.microSecondary),
         ]),
         if (date != null || exp != null) ...[
           const SizedBox(height: 4),
           Text([if (date != null) 'Du ${fmt.format(date)}',
             if (exp != null) 'au ${fmt.format(exp)}'].join(' '),
-              style: const TextStyle(fontSize: 10, color: Color(0xFFD1D5DB))),
+              style: AppTextStyles.micro
+                  .copyWith(color: const Color(0xFFD1D5DB))),
         ],
         if (status != 'active') ...[
           const SizedBox(height: 8),
@@ -1792,9 +1897,9 @@ class _PaymentCard extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(color: AppColors.primarySurface,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.primary.withOpacity(0.3))),
-              child: Text('Activer / Renouveler', style: TextStyle(
-                  fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.primary)),
+                  border: Border.all(color: AppColors.primary.withValues(alpha:0.3))),
+              child: Text('Activer / Renouveler', style: AppTextStyles
+                  .captionBold.copyWith(color: AppColors.primary)),
             ),
           ),
         ],
@@ -1803,97 +1908,8 @@ class _PaymentCard extends StatelessWidget {
   }
 }
 
-class _PlanCard extends StatelessWidget {
-  final Map<String,dynamic> plan;
-  final VoidCallback onEdit;
-  const _PlanCard({required this.plan, required this.onEdit});
-  @override
-  Widget build(BuildContext context) {
-    final features = plan['features'] as List? ?? [];
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.inputBorder)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Text(plan['label'] ?? '—', style: TextStyle(
-              fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.primary)),
-          const Spacer(),
-          GestureDetector(
-            onTap: onEdit,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(color: AppColors.primarySurface,
-                  borderRadius: BorderRadius.circular(8)),
-              child: Text('Modifier', style: TextStyle(fontSize: 11,
-                  fontWeight: FontWeight.w700, color: AppColors.primary)),
-            ),
-          ),
-        ]),
-        const SizedBox(height: 10),
-        const Divider(height: 1, color: Color(0xFFF0F0F0)),
-        const SizedBox(height: 10),
-        Row(children: [
-          _PriceCol('Mensuel',     plan['price_monthly']),
-          _PriceCol('Trimestriel', plan['price_quarterly']),
-          _PriceCol('Annuel',      plan['price_yearly']),
-        ]),
-        const SizedBox(height: 10),
-        Wrap(spacing: 6, runSpacing: 4, children: [
-          _InfoPill('${plan['max_shops']} boutique(s)', Icons.store_rounded),
-          _InfoPill('${plan['max_users_per_shop']} users/shop', Icons.people_rounded),
-          if (plan['offline_enabled'] == true)
-            _InfoPill('Hors-ligne', Icons.wifi_off_rounded, color: AppColors.secondary),
-        ]),
-        if (features.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Wrap(spacing: 6, runSpacing: 4, children: features.map((f) => Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-            decoration: BoxDecoration(color: AppColors.inputFill,
-                borderRadius: BorderRadius.circular(4)),
-            child: Text(f.toString(), style: const TextStyle(
-                fontSize: 10, color: AppColors.textSecondary)),
-          )).toList()),
-        ],
-      ]),
-    );
-  }
-}
-
-class _PriceCol extends StatelessWidget {
-  final String label;
-  final dynamic value;
-  const _PriceCol(this.label, this.value);
-  @override
-  Widget build(BuildContext context) => Expanded(child: Column(children: [
-    Text('${_fmt((value as num?)?.toDouble() ?? 0)} XAF',
-        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-            color: AppColors.primary)),
-    Text(label, style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
-  ]));
-}
-
-class _InfoPill extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color? color;
-  const _InfoPill(this.label, this.icon, {this.color});
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-    decoration: BoxDecoration(
-        color: (color ?? AppColors.primary).withOpacity(0.08),
-        borderRadius: BorderRadius.circular(20)),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, size: 10, color: color ?? AppColors.primary),
-      const SizedBox(width: 4),
-      Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600,
-          color: color ?? AppColors.primary)),
-    ]),
-  );
-}
+// Anciens widgets _PlanCard / _PriceCol / _InfoPill remplacés par
+// `lib/shared/widgets/plan_card.dart` (PlanCard partagé). Cf. _PlansSection.
 
 class _LogEntry {
   final String    action;      // raw action name (product_created, user_login…)
@@ -2014,20 +2030,19 @@ class _LogTile extends StatelessWidget {
           border: Border.all(color: AppColors.inputBorder)),
       child: Row(children: [
         Container(width: 28, height: 28,
-            decoration: BoxDecoration(color: entry.color.withOpacity(0.1),
+            decoration: BoxDecoration(color: entry.color.withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(7)),
             child: Icon(entry.icon, size: 14, color: entry.color)),
         const SizedBox(width: 10),
         Expanded(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(entry.message, style: const TextStyle(
-              fontSize: 12, color: AppColors.textPrimary)),
-          Text('Par ${entry.actorName}', style: const TextStyle(
-              fontSize: 10, color: AppColors.textSecondary)),
+          Text(entry.message, style: AppTextStyles.bodySm),
+          Text('Par ${entry.actorName}',
+              style: AppTextStyles.microSecondary),
         ])),
         if (entry.date != null)
-          Text(fmt.format(entry.date!), style: const TextStyle(
-              fontSize: 10, color: AppColors.textSecondary)),
+          Text(fmt.format(entry.date!),
+              style: AppTextStyles.microSecondary),
       ]),
     );
   }
@@ -2073,13 +2088,14 @@ class _SubSheetState extends State<_SubSheet> {
                   borderRadius: BorderRadius.circular(2)))),
           Row(children: [
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text("Gérer l'abonnement",
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-              Text(widget.userName, style: const TextStyle(
-                  fontSize: 11, color: AppColors.textSecondary)),
+              Text("Gérer l'abonnement",
+                  style: AppTextStyles.label
+                      .copyWith(fontWeight: FontWeight.w700)),
+              Text(widget.userName, style: AppTextStyles.caption),
             ])),
-            Text('${_price.toStringAsFixed(0)} XAF', style: TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.primary)),
+            Text('${_price.toStringAsFixed(0)} XAF',
+                style: AppTextStyles.subtitleBold
+                    .copyWith(color: AppColors.primary)),
           ]),
           const SizedBox(height: 14),
           Row(children: [
@@ -2109,8 +2125,8 @@ class _SubSheetState extends State<_SubSheet> {
             child: _saving
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(
                 strokeWidth: 2, color: Colors.white))
-                : const Text('Enregistrer', style: TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w700)),
+                : Text('Enregistrer', style: AppTextStyles.label
+                .copyWith(fontWeight: FontWeight.w700)),
           )),
         ]),
   );
@@ -2201,8 +2217,8 @@ class _EditPlanSheetState extends State<_EditPlanSheet> {
           margin: const EdgeInsets.only(bottom: 14),
           decoration: BoxDecoration(color: AppColors.inputBorder,
               borderRadius: BorderRadius.circular(2)))),
-      Text('Modifier — ${widget.plan['label']}', style: const TextStyle(
-          fontSize: 15, fontWeight: FontWeight.w700)),
+      Text('Modifier — ${widget.plan['label']}',
+          style: AppTextStyles.label.copyWith(fontWeight: FontWeight.w700)),
       const SizedBox(height: 14),
       Row(children: [
         Expanded(child: _Field(controller: _monthly, hint: 'Mensuel',
@@ -2225,13 +2241,13 @@ class _EditPlanSheetState extends State<_EditPlanSheet> {
       const SizedBox(height: 8),
       Row(children: [
         const Expanded(child: Text('Mode hors-ligne',
-            style: TextStyle(fontSize: 13))),
+            style: AppTextStyles.body)),
         AppSwitch(value: _offline,
             onChanged: (v) => setState(() => _offline = v)),
       ]),
       Row(children: [
         const Expanded(child: Text('Plan actif',
-            style: TextStyle(fontSize: 13))),
+            style: AppTextStyles.body)),
         AppSwitch(value: _active,
             onChanged: (v) => setState(() => _active = v)),
       ]),
@@ -2245,8 +2261,8 @@ class _EditPlanSheetState extends State<_EditPlanSheet> {
         child: _saving
             ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(
             strokeWidth: 2, color: Colors.white))
-            : const Text('Enregistrer', style: TextStyle(
-            fontSize: 14, fontWeight: FontWeight.w700)),
+            : Text('Enregistrer', style: AppTextStyles.label
+            .copyWith(fontWeight: FontWeight.w700)),
       )),
     ])),
   );
@@ -2285,7 +2301,7 @@ class _SettingsCard extends StatelessWidget {
     decoration: BoxDecoration(
         color: Colors.white, borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.inputBorder),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 8, offset: const Offset(0, 2))]),
     child: Column(children: [
       for (int i = 0; i < items.length; i++) ...[
@@ -2312,18 +2328,18 @@ class _SettingsTile extends StatelessWidget {
       child: Row(children: [
         Container(width: 36, height: 36,
             decoration: BoxDecoration(
-                color: (color ?? AppColors.primary).withOpacity(0.1),
+                color: (color ?? AppColors.primary).withValues(alpha:0.1),
                 borderRadius: BorderRadius.circular(9)),
             child: Icon(icon, size: 17, color: color ?? AppColors.primary)),
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
+          Text(label, style: AppTextStyles.body.copyWith(
+              fontWeight: FontWeight.w500,
               color: color ?? AppColors.textPrimary)),
-          Text(subtitle, style: const TextStyle(fontSize: 11,
-              color: AppColors.textSecondary)),
+          Text(subtitle, style: AppTextStyles.caption),
         ])),
         Icon(Icons.chevron_right_rounded, size: 16,
-            color: AppColors.textSecondary.withOpacity(0.5)),
+            color: AppColors.textSecondary.withValues(alpha:0.5)),
       ]),
     ),
   );
@@ -2337,10 +2353,9 @@ class _Badge extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-    decoration: BoxDecoration(color: color.withOpacity(0.1),
+    decoration: BoxDecoration(color: color.withValues(alpha:0.1),
         borderRadius: BorderRadius.circular(4)),
-    child: Text(label, style: TextStyle(fontSize: 9,
-        fontWeight: FontWeight.w700, color: color)),
+    child: Text(label, style: AppTextStyles.microBold.copyWith(color: color)),
   );
 }
 
@@ -2377,7 +2392,7 @@ class _Btn extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: sel ? AppColors.primary : AppColors.inputBorder)),
         child: Text(label, textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
+            style: AppTextStyles.bodySmBold.copyWith(
                 color: sel ? Colors.white : const Color(0xFF374151))),
       ),
     );
@@ -2394,10 +2409,10 @@ class _Field extends StatelessWidget {
   @override
   Widget build(BuildContext context) => TextField(
     controller: controller, keyboardType: type,
-    style: const TextStyle(fontSize: 13),
+    style: AppTextStyles.input,
     decoration: InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+      hintStyle: AppTextStyles.inputHint,
       prefixIcon: Icon(icon, size: 16, color: AppColors.textSecondary),
       filled: true, fillColor: AppColors.inputFill, isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -2418,10 +2433,9 @@ class _DetailRow extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 4),
     child: Row(children: [
-      SizedBox(width: 100, child: Text(label, style: const TextStyle(
-          fontSize: 11, color: AppColors.textSecondary))),
-      Expanded(child: Text(value, style: const TextStyle(
-          fontSize: 11, fontWeight: FontWeight.w600))),
+      SizedBox(width: 100, child: Text(label,
+          style: AppTextStyles.caption)),
+      Expanded(child: Text(value, style: AppTextStyles.captionBold)),
     ]),
   );
 }
@@ -2436,8 +2450,9 @@ class _ConfirmDialog extends StatelessWidget {
   Widget build(BuildContext context) => AlertDialog(
     backgroundColor: Colors.white,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-    title: Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-    content: Text(body, style: const TextStyle(fontSize: 13)),
+    title: Text(title, style: AppTextStyles.label
+        .copyWith(fontWeight: FontWeight.w700)),
+    content: Text(body, style: AppTextStyles.body),
     actions: [
       TextButton(onPressed: () => Navigator.of(context).pop(),
           child: const Text('Annuler', style: TextStyle(color: AppColors.textSecondary))),
@@ -2461,7 +2476,7 @@ class _EmptyState extends StatelessWidget {
     child: Column(mainAxisSize: MainAxisSize.min, children: [
       const Icon(Icons.inbox_rounded, size: 40, color: Color(0xFFD1D5DB)),
       const SizedBox(height: 10),
-      Text(message, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+      Text(message, style: AppTextStyles.bodySecondary),
     ]),
   );
 }
@@ -2473,7 +2488,7 @@ class _ErrorState extends StatelessWidget {
   Widget build(BuildContext context) => Center(
     child: Padding(padding: const EdgeInsets.all(24),
         child: Text('Erreur: $message',
-            style: const TextStyle(color: AppColors.error, fontSize: 13))),
+            style: AppTextStyles.body.copyWith(color: AppColors.error))),
   );
 }
 
@@ -2528,7 +2543,7 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
             const SizedBox(width: 8),
             Expanded(child: Text(
                 'Email de réinitialisation envoyé à ${widget.targetEmail}',
-                style: const TextStyle(fontSize: 12))),
+                style: AppTextStyles.bodySm)),
           ]),
           backgroundColor: AppColors.secondary,
           behavior: SnackBarBehavior.floating,
@@ -2550,13 +2565,14 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
       title: Row(children: [
         Container(width: 36, height: 36,
             decoration: BoxDecoration(
-                color: AppColors.warning.withOpacity(0.1),
+                color: AppColors.warning.withValues(alpha:0.1),
                 shape: BoxShape.circle),
             child: const Icon(Icons.lock_reset_rounded,
                 color: AppColors.warning, size: 18)),
         const SizedBox(width: 10),
-        const Expanded(child: Text('Réinitialiser le mot de passe',
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700))),
+        Expanded(child: Text('Réinitialiser le mot de passe',
+            style: AppTextStyles.label
+                .copyWith(fontWeight: FontWeight.w700))),
       ]),
       content: SizedBox(
         width: 340,
@@ -2587,8 +2603,7 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
               child: CircularProgressIndicator(
                   strokeWidth: 2, color: Colors.white))
               : Text(_verified ? 'Envoyer le lien' : 'Vérifier',
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w700)),
+              style: AppTextStyles.bodyBold),
         ),
       ],
     );
@@ -2601,7 +2616,7 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       RichText(text: TextSpan(
-        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary, height: 1.5),
+        style: AppTextStyles.bodySmSecondary.copyWith(height: 1.5),
         children: [
           const TextSpan(text: 'Pour réinitialiser le mot de passe de '),
           TextSpan(text: widget.targetName,
@@ -2625,11 +2640,8 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
           Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Text('Compte cible',
-                style: TextStyle(fontSize: 9,
-                    color: AppColors.textSecondary)),
-            Text(widget.targetEmail,
-                style: const TextStyle(fontSize: 11,
-                    fontWeight: FontWeight.w600)),
+                style: AppTextStyles.microSecondary),
+            Text(widget.targetEmail, style: AppTextStyles.captionBold),
           ])),
         ]),
       ),
@@ -2640,7 +2652,7 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
         decoration: BoxDecoration(
             color: AppColors.primarySurface,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AppColors.primary.withOpacity(0.3))),
+            border: Border.all(color: AppColors.primary.withValues(alpha:0.3))),
         child: Row(children: [
           Icon(Icons.shield_rounded,
               size: 15, color: AppColors.primary),
@@ -2648,11 +2660,10 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
           Expanded(child: TextField(
             controller: _pwdCtrl,
             obscureText: _obscure,
-            style: const TextStyle(fontSize: 13),
+            style: AppTextStyles.input,
             decoration: const InputDecoration(
               hintText: 'Votre mot de passe super admin',
-              hintStyle: TextStyle(fontSize: 12,
-                  color: AppColors.textSecondary),
+              hintStyle: AppTextStyles.inputHint,
               border: InputBorder.none,
               isDense: true,
               contentPadding: EdgeInsets.symmetric(vertical: 8),
@@ -2673,8 +2684,8 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
           const Icon(Icons.error_outline_rounded,
               size: 13, color: AppColors.error),
           const SizedBox(width: 6),
-          Expanded(child: Text(_error!, style: const TextStyle(
-              fontSize: 11, color: AppColors.error))),
+          Expanded(child: Text(_error!, style: AppTextStyles.caption
+              .copyWith(color: AppColors.error))),
         ]),
       ],
       const SizedBox(height: 8),
@@ -2691,21 +2702,21 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
-            color: AppColors.secondary.withOpacity(0.08),
+            color: AppColors.secondary.withValues(alpha:0.08),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AppColors.secondary.withOpacity(0.3))),
+            border: Border.all(color: AppColors.secondary.withValues(alpha:0.3))),
         child: Row(children: [
           const Icon(Icons.verified_rounded,
               size: 14, color: AppColors.secondary),
           const SizedBox(width: 8),
-          const Text('Identité vérifiée',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                  color: AppColors.secondary)),
+          Text('Identité vérifiée',
+              style: AppTextStyles.captionBold
+                  .copyWith(color: AppColors.secondary)),
         ]),
       ),
       const SizedBox(height: 12),
       RichText(text: TextSpan(
-        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary, height: 1.5),
+        style: AppTextStyles.bodySmSecondary.copyWith(height: 1.5),
         children: [
           const TextSpan(text: 'Un lien de réinitialisation sera envoyé à '),
           TextSpan(text: widget.targetEmail,
@@ -2720,8 +2731,8 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
           const Icon(Icons.error_outline_rounded,
               size: 13, color: AppColors.error),
           const SizedBox(width: 6),
-          Expanded(child: Text(_error!, style: const TextStyle(
-              fontSize: 11, color: AppColors.error))),
+          Expanded(child: Text(_error!, style: AppTextStyles.caption
+              .copyWith(color: AppColors.error))),
         ]),
       ],
       const SizedBox(height: 8),
@@ -2781,7 +2792,7 @@ class _SaDangerReauthDialogState extends State<_SaDangerReauthDialog> {
           const Icon(Icons.check_circle_outline, color: Colors.white, size: 18),
           const SizedBox(width: 8),
           Expanded(child: Text('${widget.title} — terminé',
-              style: const TextStyle(fontSize: 12))),
+              style: AppTextStyles.bodySm)),
         ]),
         backgroundColor: AppColors.secondary,
         behavior: SnackBarBehavior.floating,
@@ -2805,12 +2816,12 @@ class _SaDangerReauthDialogState extends State<_SaDangerReauthDialog> {
       title: Row(children: [
         Container(width: 36, height: 36,
             decoration: BoxDecoration(
-                color: AppColors.error.withOpacity(0.1),
+                color: AppColors.error.withValues(alpha:0.1),
                 shape: BoxShape.circle),
             child: Icon(widget.icon, color: AppColors.error, size: 18)),
         const SizedBox(width: 10),
         Expanded(child: Text(widget.title,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700))),
+            style: AppTextStyles.label.copyWith(fontWeight: FontWeight.w700))),
       ]),
       content: SizedBox(
         width: 340,
@@ -2845,8 +2856,7 @@ class _SaDangerReauthDialogState extends State<_SaDangerReauthDialog> {
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white))
               : Text(_acknowledged ? widget.confirmLabel : 'Continuer',
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w700)),
+                  style: AppTextStyles.bodyBold),
         ),
       ],
     );
@@ -2860,21 +2870,20 @@ class _SaDangerReauthDialogState extends State<_SaDangerReauthDialog> {
       Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-            color: AppColors.error.withOpacity(0.06),
+            color: AppColors.error.withValues(alpha:0.06),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.error.withOpacity(0.3))),
+            border: Border.all(color: AppColors.error.withValues(alpha:0.3))),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Icon(Icons.warning_amber_rounded,
               size: 16, color: AppColors.error),
           const SizedBox(width: 8),
           Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(widget.warningTitle, style: const TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w700,
-                color: AppColors.error)),
+            Text(widget.warningTitle, style: AppTextStyles.bodySmBold
+                .copyWith(color: AppColors.error)),
             const SizedBox(height: 4),
-            Text(widget.warningMessage, style: const TextStyle(
-                fontSize: 12, color: AppColors.textSecondary, height: 1.45)),
+            Text(widget.warningMessage,
+                style: AppTextStyles.bodySmSecondary),
           ])),
         ]),
       ),
@@ -2887,10 +2896,9 @@ class _SaDangerReauthDialogState extends State<_SaDangerReauthDialog> {
     mainAxisSize: MainAxisSize.min,
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      const Text(
+      Text(
         'Confirmez votre identité en entrant votre mot de passe super admin.',
-        style: TextStyle(fontSize: 12,
-            color: AppColors.textSecondary, height: 1.5),
+        style: AppTextStyles.bodySmSecondary.copyWith(height: 1.5),
       ),
       const SizedBox(height: 12),
       Container(
@@ -2898,7 +2906,7 @@ class _SaDangerReauthDialogState extends State<_SaDangerReauthDialog> {
         decoration: BoxDecoration(
             color: AppColors.primarySurface,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AppColors.primary.withOpacity(0.3))),
+            border: Border.all(color: AppColors.primary.withValues(alpha:0.3))),
         child: Row(children: [
           Icon(Icons.shield_rounded,
               size: 15, color: AppColors.primary),
@@ -2906,11 +2914,10 @@ class _SaDangerReauthDialogState extends State<_SaDangerReauthDialog> {
           Expanded(child: TextField(
             controller: _pwdCtrl,
             obscureText: _obscure,
-            style: const TextStyle(fontSize: 13),
+            style: AppTextStyles.input,
             decoration: const InputDecoration(
               hintText: 'Votre mot de passe super admin',
-              hintStyle: TextStyle(fontSize: 12,
-                  color: AppColors.textSecondary),
+              hintStyle: AppTextStyles.inputHint,
               border: InputBorder.none,
               isDense: true,
               contentPadding: EdgeInsets.symmetric(vertical: 8),
@@ -2931,8 +2938,8 @@ class _SaDangerReauthDialogState extends State<_SaDangerReauthDialog> {
           const Icon(Icons.error_outline_rounded,
               size: 13, color: AppColors.error),
           const SizedBox(width: 6),
-          Expanded(child: Text(_error!, style: const TextStyle(
-              fontSize: 11, color: AppColors.error))),
+          Expanded(child: Text(_error!, style: AppTextStyles.caption
+              .copyWith(color: AppColors.error))),
         ]),
       ],
       const SizedBox(height: 8),
@@ -2950,17 +2957,17 @@ void _showLogoutConfirm(BuildContext context) {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       icon: Container(width: 48, height: 48,
           decoration: BoxDecoration(
-              color: AppColors.error.withOpacity(0.1),
+              color: AppColors.error.withValues(alpha:0.1),
               shape: BoxShape.circle),
           child: const Icon(Icons.logout_rounded,
               color: AppColors.error, size: 22)),
       title: const Text('Déconnexion',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          style: AppTextStyles.subtitleBold),
       content: const Text(
           'Vous allez quitter le panneau administrateur.\n\nÊtes-vous sûr de vouloir vous déconnecter ?',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+          style: AppTextStyles.bodySecondary),
       actionsAlignment: MainAxisAlignment.center,
       actions: [
         OutlinedButton(
@@ -2971,7 +2978,7 @@ void _showLogoutConfirm(BuildContext context) {
                   borderRadius: BorderRadius.circular(10)),
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10)),
           child: const Text('Annuler',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+              style: AppTextStyles.bodySecondary),
         ),
         ElevatedButton(
           onPressed: () {
@@ -2985,7 +2992,7 @@ void _showLogoutConfirm(BuildContext context) {
                   borderRadius: BorderRadius.circular(10)),
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10)),
           child: const Text('Déconnecter',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+              style: AppTextStyles.bodyBold),
         ),
       ],
     ),
@@ -3123,11 +3130,11 @@ class _MaintenanceSectionState extends State<_MaintenanceSection> {
             final shopIds = HiveBoxes.shopsBox.values.map((m) => m['id']?.toString()).whereType<String>().toSet();
             int orphans = 0;
             for (final m in HiveBoxes.productsBox.values) {
-              final sid = (m as Map)['store_id']?.toString();
+              final sid = m['store_id']?.toString();
               if (sid != null && !shopIds.contains(sid)) orphans++;
             }
             for (final m in HiveBoxes.ordersBox.values) {
-              final sid = (m as Map)['shop_id']?.toString();
+              final sid = m['shop_id']?.toString();
               if (sid != null && !shopIds.contains(sid)) orphans++;
             }
             c.status = orphans == 0 ? _CheckStatus.ok : _CheckStatus.warning;
@@ -3135,12 +3142,12 @@ class _MaintenanceSectionState extends State<_MaintenanceSection> {
             c.autoFix = () async {
               for (final key in HiveBoxes.productsBox.keys.toList()) {
                 final m = HiveBoxes.productsBox.get(key);
-                final sid = (m as Map?)? ['store_id']?.toString();
+                final sid = m?['store_id']?.toString();
                 if (sid != null && !shopIds.contains(sid)) await HiveBoxes.productsBox.delete(key);
               }
               for (final key in HiveBoxes.ordersBox.keys.toList()) {
                 final m = HiveBoxes.ordersBox.get(key);
-                final sid = (m as Map?)? ['shop_id']?.toString();
+                final sid = m?['shop_id']?.toString();
                 if (sid != null && !shopIds.contains(sid)) await HiveBoxes.ordersBox.delete(key);
               }
               c.status = _CheckStatus.ok; c.detail = 'Nettoyés';
@@ -3236,7 +3243,7 @@ class _MaintenanceSectionState extends State<_MaintenanceSection> {
               '$_passed/${_checks.length} checks OK'
                   '${_warnings > 0 ? ' · $_warnings attention' : ''}'
                   '${_criticals > 0 ? ' · $_criticals critique${_criticals > 1 ? 's' : ''}' : ''}',
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              style: AppTextStyles.bodyBold,
             )),
           ]),
         ),
@@ -3277,8 +3284,8 @@ class _MaintenanceSectionState extends State<_MaintenanceSection> {
         final items = _checks.where((c) => c.category == cat).toList();
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Padding(padding: const EdgeInsets.only(bottom: 8),
-            child: Text(cat.toUpperCase(), style: const TextStyle(fontSize: 11,
-                fontWeight: FontWeight.w700, letterSpacing: 0.5, color: AppColors.textSecondary))),
+            child: Text(cat.toUpperCase(), style: AppTextStyles.captionBold
+                .copyWith(letterSpacing: 0.5))),
           ...items.map((c) => Container(
             margin: const EdgeInsets.only(bottom: 6),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -3290,9 +3297,9 @@ class _MaintenanceSectionState extends State<_MaintenanceSection> {
               _statusIcon(c.status),
               const SizedBox(width: 10),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(c.label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                Text(c.label, style: AppTextStyles.bodySmBold),
                 if (c.detail.isNotEmpty)
-                  Text(c.detail, style: const TextStyle(fontSize: 10, color: AppColors.textHint),
+                  Text(c.detail, style: AppTextStyles.micro,
                       maxLines: 2, overflow: TextOverflow.ellipsis),
               ])),
               if (c.autoFixable && c.autoFix != null &&
@@ -3302,10 +3309,10 @@ class _MaintenanceSectionState extends State<_MaintenanceSection> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: AppColors.warning.withOpacity(0.1),
+                      color: AppColors.warning.withValues(alpha:0.1),
                       borderRadius: BorderRadius.circular(6)),
-                    child: const Text('Corriger', style: TextStyle(fontSize: 10,
-                        fontWeight: FontWeight.w600, color: AppColors.warning)),
+                    child: Text('Corriger', style: AppTextStyles.microBold
+                        .copyWith(color: AppColors.warning)),
                   ),
                 ),
             ]),
@@ -3426,7 +3433,7 @@ class _MonitoringSectionState extends State<_MonitoringSection>
           unselectedLabelColor: AppColors.textHint,
           indicatorColor: AppColors.primary,
           indicatorWeight: 2,
-          labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          labelStyle: AppTextStyles.bodySmBold,
           tabs: [
             Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
               const Icon(Icons.storage_rounded, size: 14),
@@ -3442,7 +3449,7 @@ class _MonitoringSectionState extends State<_MonitoringSection>
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                   decoration: BoxDecoration(color: AppColors.warning, borderRadius: BorderRadius.circular(8)),
-                  child: Text('${_offlineQueue.length}', style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.w700)),
+                  child: Text('${_offlineQueue.length}', style: AppTextStyles.microBold.copyWith(color: Colors.white)),
                 ),
               ],
             ])),
@@ -3455,7 +3462,7 @@ class _MonitoringSectionState extends State<_MonitoringSection>
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                   decoration: BoxDecoration(color: AppColors.error, borderRadius: BorderRadius.circular(8)),
-                  child: Text('${_syncErrors.length}', style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.w700)),
+                  child: Text('${_syncErrors.length}', style: AppTextStyles.microBold.copyWith(color: Colors.white)),
                 ),
               ],
             ])),
@@ -3480,7 +3487,7 @@ class _MonitoringSectionState extends State<_MonitoringSection>
                 else
                   Icon(Icons.refresh_rounded, size: 14, color: AppColors.primary),
                 const SizedBox(width: 6),
-                Text('Actualiser', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.primary)),
+                Text('Actualiser', style: AppTextStyles.captionBold.copyWith(color: AppColors.primary)),
               ]),
             ),
           ),
@@ -3524,8 +3531,8 @@ class _MetricsTab extends StatelessWidget {
             border: Border.all(color: AppColors.divider)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-              Expanded(child: Text(e.key, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
-              Text(_fmt(e.value), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.primary)),
+              Expanded(child: Text(e.key, style: AppTextStyles.bodySmBold)),
+              Text(_fmt(e.value), style: AppTextStyles.bodyBold.copyWith(color: AppColors.primary)),
             ]),
             const SizedBox(height: 6),
             ClipRRect(borderRadius: BorderRadius.circular(2),
@@ -3537,8 +3544,8 @@ class _MetricsTab extends StatelessWidget {
       }),
       // Hive local
       const SizedBox(height: 12),
-      const Text('CACHE LOCAL (HIVE)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-          letterSpacing: 0.5, color: AppColors.textSecondary)),
+      Text('CACHE LOCAL (HIVE)', style: AppTextStyles.captionBold
+          .copyWith(letterSpacing: 0.5)),
       const SizedBox(height: 8),
       Wrap(spacing: 8, runSpacing: 8, children: [
         _HiveChip('shops', HiveBoxes.shopsBox.length),
@@ -3575,7 +3582,7 @@ class _HiveChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final hot = count > 0;
     final bg = hot
-        ? (alert ? AppColors.error.withOpacity(0.12) : AppColors.primarySurface)
+        ? (alert ? AppColors.error.withValues(alpha:0.12) : AppColors.primarySurface)
         : AppColors.inputFill;
     final fg = hot
         ? (alert ? AppColors.error : AppColors.primary)
@@ -3585,9 +3592,8 @@ class _HiveChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(8)),
-      child: Text('$label: $count', style: TextStyle(fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: fg)),
+      child: Text('$label: $count', style: AppTextStyles.captionBold
+          .copyWith(color: fg)),
     );
   }
 }
@@ -3610,10 +3616,12 @@ class _OfflineQueueTab extends StatelessWidget {
       return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
         const Icon(Icons.cloud_done_rounded, size: 40, color: AppColors.secondary),
         const SizedBox(height: 8),
-        const Text('File d\'attente vide', style: TextStyle(fontSize: 13, color: AppColors.textHint)),
+        Text('File d\'attente vide',
+            style: AppTextStyles.body.copyWith(color: AppColors.textHint)),
         const SizedBox(height: 4),
-        const Text('Toutes les opérations sont synchronisées',
-            style: TextStyle(fontSize: 11, color: Color(0xFFD1D5DB))),
+        Text('Toutes les opérations sont synchronisées',
+            style: AppTextStyles.caption
+                .copyWith(color: const Color(0xFFD1D5DB))),
       ]));
     }
     return ListView.builder(
@@ -3626,8 +3634,8 @@ class _OfflineQueueTab extends StatelessWidget {
             child: Row(children: [
               Expanded(child: Text(
                   '${queue.length} opération${queue.length > 1 ? 's' : ''} en attente',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                      color: Color(0xFF374151)))),
+                  style: AppTextStyles.bodySmBold
+                      .copyWith(color: const Color(0xFF374151)))),
               ElevatedButton.icon(
                 onPressed: onFlush,
                 icon: const Icon(Icons.cloud_upload_rounded, size: 14),
@@ -3635,7 +3643,7 @@ class _OfflineQueueTab extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary, foregroundColor: Colors.white,
                   elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                  textStyle: AppTextStyles.captionBold,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),
@@ -3666,24 +3674,22 @@ class _OfflineQueueTab extends StatelessWidget {
           child: Row(children: [
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(color: color.withOpacity(0.1),
+              decoration: BoxDecoration(color: color.withValues(alpha:0.1),
                   borderRadius: BorderRadius.circular(4)),
-              child: Text(type.toUpperCase(), style: TextStyle(fontSize: 9,
-                  fontWeight: FontWeight.w800, color: color)),
+              child: Text(type.toUpperCase(), style: AppTextStyles.microBold
+                  .copyWith(color: color)),
             ),
             const SizedBox(width: 8),
             Expanded(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(table, style: const TextStyle(fontSize: 12,
-                  fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+              Text(table, style: AppTextStyles.bodySmBold),
               if (detail.isNotEmpty)
-                Text(detail, style: const TextStyle(fontSize: 10,
-                    color: AppColors.textHint),
+                Text(detail, style: AppTextStyles.micro,
                     maxLines: 1, overflow: TextOverflow.ellipsis),
             ])),
             if (queuedAt.isNotEmpty)
-              Text(_fmtTime(queuedAt), style: const TextStyle(fontSize: 10,
-                  color: Color(0xFFD1D5DB))),
+              Text(_fmtTime(queuedAt), style: AppTextStyles.micro
+                  .copyWith(color: const Color(0xFFD1D5DB))),
           ]),
         );
       },
@@ -3711,7 +3717,7 @@ class _SyncErrorsTab extends StatelessWidget {
       return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
         const Icon(Icons.check_circle_outline_rounded, size: 40, color: AppColors.secondary),
         const SizedBox(height: 8),
-        const Text('Aucune erreur de synchronisation', style: TextStyle(fontSize: 13, color: AppColors.textHint)),
+        Text('Aucune erreur de synchronisation', style: AppTextStyles.body.copyWith(color: AppColors.textHint)),
       ]));
     }
     return ListView.separated(
@@ -3731,12 +3737,12 @@ class _SyncErrorsTab extends StatelessWidget {
             Row(children: [
               const Icon(Icons.error_outline_rounded, size: 14, color: AppColors.error),
               const SizedBox(width: 6),
-              Text('${e['table']} · ${e['op']}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.error)),
+              Text('${e['table']} · ${e['op']}', style: AppTextStyles.captionBold.copyWith(color: AppColors.error)),
               const Spacer(),
-              Text(dateStr, style: const TextStyle(fontSize: 10, color: AppColors.textHint)),
+              Text(dateStr, style: AppTextStyles.micro),
             ]),
             const SizedBox(height: 4),
-            Text(e['error']?.toString() ?? '', style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+            Text(e['error']?.toString() ?? '', style: AppTextStyles.microSecondary,
                 maxLines: 3, overflow: TextOverflow.ellipsis),
           ]),
         );

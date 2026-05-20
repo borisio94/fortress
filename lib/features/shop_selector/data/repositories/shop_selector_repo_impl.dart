@@ -8,7 +8,6 @@ class ShopSelectorRepositoryImpl implements ShopSelectorRepository {
 
   @override
   Future<List<ShopSummary>> getMyShops() async {
-    final userId = LocalStorageService.getCurrentUser()?.id ?? '';
     final shops  = await AppDatabase.getMyShops();
     debugPrint('[ShopRepo] ${shops.length} boutiques');
     return shops;
@@ -34,6 +33,7 @@ class ShopSelectorRepositoryImpl implements ShopSelectorRepository {
         currency: data['currency'] as String?,
         country:  data['country']  as String?,
         phone:    data['phone']    as String?,
+        whatsappPhone: data['whatsapp_phone'] as String?,
         email:    data['email']    as String?,
       );
 

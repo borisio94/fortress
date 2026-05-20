@@ -1,4 +1,34 @@
+import 'dart:async';
 import 'package:equatable/equatable.dart';
+import 'package:flutter/foundation.dart';
+
+// ─── Rotation des variantes mises en avant (cas d'égalité de stock) ──────────
+//
+// Quand plusieurs variantes ont le même stock max et qu'aucune n'est marquée
+// `isMain` manuellement, on alterne la mise en avant toutes les
+// [_featuredRotationPeriod] secondes. Le bucket temporel est partagé entre
+// tous les appareils (basé sur `DateTime.now()`), donc deux clients en ligne
+// affichent la même variante au même instant.
+//
+// `featuredRotationTicker` permet à l'UI (grille caisse) de se rebuild quand
+// le bucket change, pour que la rotation soit perceptible à l'écran.
+
+const Duration _featuredRotationPeriod = Duration(seconds: 20);
+
+/// Notifier global incrémenté à chaque changement de bucket de rotation.
+/// Les widgets qui veulent voir la rotation s'abonnent via
+/// `ValueListenableBuilder<int>`. Sinon, `Product.featuredVariant` reste
+/// déterministe à un instant T.
+final ValueNotifier<int> featuredRotationTicker = ValueNotifier<int>(0);
+
+Timer? _featuredRotationTimer;
+
+void _startFeaturedRotationTicker() {
+  if (_featuredRotationTimer != null) return;
+  _featuredRotationTimer = Timer.periodic(_featuredRotationPeriod, (_) {
+    featuredRotationTicker.value++;
+  });
+}
 
 // ─── Variante de produit ──────────────────────────────────────────────────────
 
@@ -249,11 +279,48 @@ class Product extends Equatable {
           ? stockQty
           : variants.fold(0, (s, v) => s + v.stockPhysical);
 
-  /// Image principale = variante marquée isMain, sinon première variante avec image, sinon imageUrl
+  /// Variante mise en avant.
+  /// Priorité (ordre revu pour favoriser le stock disponible) :
+  ///   1. Variante avec le plus grand `stockAvailable` (parmi celles
+  ///      en stock — fallback sur l'ensemble si tout est à 0).
+  ///   2. En cas d'égalité de stock, variante explicitement marquée
+  ///      `isMain` par l'utilisateur. Si pas de marquée parmi les ex æquo,
+  ///      rotation déterministe entre elles selon un bucket temporel de
+  ///      [_featuredRotationPeriod].
+  /// Renvoie `null` si le produit n'a pas de variantes.
+  ///
+  /// La rotation n'est visible à l'écran que si l'UI s'abonne à
+  /// [featuredRotationTicker] (cf. caisse `_PosProductTile`).
+  ProductVariant? featuredVariant({DateTime? now}) {
+    if (variants.isEmpty) return null;
+    final inStock = variants.where((v) => v.stockAvailable > 0).toList();
+    final pool = inStock.isEmpty ? variants : inStock;
+    if (pool.length == 1) return pool.first;
+    final maxStock =
+        pool.fold<int>(0, (m, v) => v.stockAvailable > m ? v.stockAvailable : m);
+    final tied = pool.where((v) => v.stockAvailable == maxStock).toList()
+      ..sort((a, b) => (a.id ?? a.name).compareTo(b.id ?? b.name));
+    if (tied.length == 1) return tied.first;
+    // Tie-breaker : variante manuellement mise en avant si présente parmi
+    // les ex æquo. Si toutes ont le même stock et qu'aucune n'est `isMain`,
+    // on bascule sur la rotation temporelle pour donner sa chance à chacune.
+    final manualInTied = tied.where((v) => v.isMain).firstOrNull;
+    if (manualInTied != null) return manualInTied;
+    // Démarre le ticker à la première utilisation effective de la rotation
+    // (idempotent). Si l'UI ne s'abonne pas, le ticker tourne à vide mais le
+    // coût est négligeable (un increment toutes les 20s).
+    _startFeaturedRotationTicker();
+    final t = (now ?? DateTime.now()).millisecondsSinceEpoch ~/
+        _featuredRotationPeriod.inMilliseconds;
+    return tied[t % tied.length];
+  }
+
+  /// Image principale = image de la variante mise en avant, sinon première
+  /// variante avec image, sinon imageUrl produit.
   String? get mainImageUrl {
     if (variants.isNotEmpty) {
-      final main = variants.where((v) => v.isMain).firstOrNull;
-      if (main?.imageUrl != null) return main!.imageUrl;
+      final feat = featuredVariant();
+      if (feat?.imageUrl != null) return feat!.imageUrl;
       final withImg = variants.where((v) => v.imageUrl != null).firstOrNull;
       if (withImg != null) return withImg.imageUrl;
     }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/services/external_launcher.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // PublicFooter — pied de page des pages publiques (landing + pricing).
@@ -73,8 +74,7 @@ class PublicFooter extends StatelessWidget {
           const SizedBox(height: 14),
           Text('© ${DateTime.now().year} Fortress POS · '
               'Conçu pour les marchands camerounais',
-              style: TextStyle(
-                  fontSize: 11,
+              style: AppTextStyles.caption.copyWith(
                   color: theme.colorScheme.onSurface
                       .withValues(alpha: 0.55))),
         ],
@@ -93,16 +93,14 @@ class _BrandColumn extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Fortress',
-            style: TextStyle(
-                fontSize: 16,
+            style: AppTextStyles.subtitleBold.copyWith(
                 fontWeight: FontWeight.w800,
                 color: theme.colorScheme.onSurface)),
         const SizedBox(height: 6),
         Text(
             'Le POS multi-boutiques offline-first '
             'pour les marchands camerounais.',
-            style: TextStyle(
-                fontSize: 12,
+            style: AppTextStyles.bodySm.copyWith(
                 height: 1.5,
                 color: theme.colorScheme.onSurface
                     .withValues(alpha: 0.7))),
@@ -159,8 +157,7 @@ class _ContactColumn extends StatelessWidget {
                   size: 14, color: AppColors.primary),
               const SizedBox(width: 6),
               Text(_kContactWhatsappLabel,
-                  style: TextStyle(
-                      fontSize: 13,
+                  style: AppTextStyles.body.copyWith(
                       fontWeight: FontWeight.w600,
                       color: AppColors.primary,
                       decoration: TextDecoration.underline,
@@ -171,8 +168,7 @@ class _ContactColumn extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text('Réponse 24h, sept jours sur sept',
-            style: TextStyle(
-                fontSize: 11,
+            style: AppTextStyles.caption.copyWith(
                 color: theme.colorScheme.onSurface
                     .withValues(alpha: 0.55))),
       ],
@@ -187,8 +183,7 @@ class _ColTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Text(label,
-      style: TextStyle(
-          fontSize: 10,
+      style: AppTextStyles.micro.copyWith(
           fontWeight: FontWeight.w800,
           letterSpacing: 1.2,
           color: theme.colorScheme.onSurface.withValues(alpha: 0.5)));
@@ -208,8 +203,7 @@ class _FooterLink extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Text(label,
-            style: TextStyle(
-                fontSize: 12,
+            style: AppTextStyles.bodySm.copyWith(
                 color: theme.colorScheme.onSurface
                     .withValues(alpha: 0.75))),
       ),

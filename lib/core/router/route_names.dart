@@ -32,6 +32,8 @@ class RouteNames {
   static const stockLocationContents = '/shop/:shopId/parametres/locations/:locationId';
   static const stockTransfers = '/shop/:shopId/parametres/transfers';
   static const userProfile = '/shop/:shopId/parametres/profile';
+  static const aide        = '/shop/:shopId/aide';
+  static const apropos     = '/shop/:shopId/apropos';
   static const employees   = '/shop/:shopId/employees';
   static const tickets     = '/shop/:shopId/tickets';
   static const ticketDetail = '/shop/:shopId/tickets/:ticketId';

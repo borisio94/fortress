@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../domain/entities/sale.dart';
 
@@ -96,8 +97,7 @@ class _RecordAcompteDialogState extends State<RecordAcompteDialog> {
         const SizedBox(width: 10),
         Expanded(
           child: Text('Enregistrer un acompte',
-              style: TextStyle(
-                  fontSize: 16,
+              style: AppTextStyles.subtitleBold.copyWith(
                   fontWeight: FontWeight.w800,
                   color: theme.colorScheme.onSurface)),
         ),
@@ -119,9 +119,7 @@ class _RecordAcompteDialogState extends State<RecordAcompteDialog> {
           const Divider(height: 24),
           // Champ montant
           Text('Montant encaissé maintenant',
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
+              style: AppTextStyles.captionBold.copyWith(
                   letterSpacing: 0.5,
                   color: theme.colorScheme.onSurface
                       .withValues(alpha: 0.6))),
@@ -155,14 +153,13 @@ class _RecordAcompteDialogState extends State<RecordAcompteDialog> {
                   borderSide:
                       BorderSide(color: AppColors.primary, width: 1.5)),
             ),
-            style: const TextStyle(
-                fontSize: 18, fontWeight: FontWeight.w700),
+            style: AppTextStyles.title,
           ),
           if (_error != null) ...[
             const SizedBox(height: 8),
             Text(_error!,
-                style: TextStyle(
-                    fontSize: 11, color: theme.colorScheme.error)),
+                style: AppTextStyles.captionHint
+                    .copyWith(color: theme.colorScheme.error)),
           ],
         ],
       ),
@@ -185,9 +182,9 @@ class _RecordAcompteDialogState extends State<RecordAcompteDialog> {
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8)),
           ),
-          child: const Text('Enregistrer',
-              style:
-                  TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+          child: Text('Enregistrer',
+              style: AppTextStyles.bodyBold
+                  .copyWith(color: Colors.white)),
         ),
       ],
     );
@@ -200,14 +197,12 @@ class _RecordAcompteDialogState extends State<RecordAcompteDialog> {
       child: Row(children: [
         Expanded(
           child: Text(label,
-              style: TextStyle(
-                  fontSize: 12,
+              style: AppTextStyles.bodySm.copyWith(
                   color: theme.colorScheme.onSurface
                       .withValues(alpha: 0.7))),
         ),
         Text(value,
-            style: TextStyle(
-                fontSize: 13,
+            style: AppTextStyles.body.copyWith(
                 fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
                 color: color ?? theme.colorScheme.onSurface)),
       ]),

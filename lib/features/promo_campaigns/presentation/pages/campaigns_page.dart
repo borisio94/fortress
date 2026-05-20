@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -12,7 +13,6 @@ import '../../../../shared/widgets/draggable_fab.dart';
 import '../../domain/entities/promo_campaign.dart';
 import '../providers/promo_campaign_provider.dart';
 import '../widgets/campaign_form_sheet.dart';
-import 'campaign_send_page.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // CampaignsPage — liste des campagnes marketing du shop (promotions +
@@ -228,8 +228,7 @@ class _Chip extends StatelessWidget {
                       : AppColors.primary.withValues(alpha: 0.2)),
             ),
             child: Text(label,
-                style: TextStyle(
-                    fontSize: 11,
+                style: AppTextStyles.caption.copyWith(
                     fontWeight: FontWeight.w700,
                     color: selected ? Colors.white : AppColors.primary)),
           ),
@@ -278,15 +277,14 @@ class _CampaignCard extends StatelessWidget {
                       color: AppColors.primary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(6)),
                   child: Text(campaign.type.label,
-                      style: TextStyle(
-                          fontSize: 9,
+                      style: AppTextStyles.micro.copyWith(
                           fontWeight: FontWeight.w800,
                           color: AppColors.primary)),
                 ),
                 const SizedBox(width: 8),
                 Expanded(child: Text(campaign.name,
-                    style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w700),
+                    style: AppTextStyles.label
+                        .copyWith(fontWeight: FontWeight.w700),
                     maxLines: 1, overflow: TextOverflow.ellipsis)),
                 if (canEdit)
                   PopupMenuButton<String>(
@@ -319,8 +317,7 @@ class _CampaignCard extends StatelessWidget {
                     size: 12, color: AppColors.textHint),
                 const SizedBox(width: 4),
                 Text('${campaign.products.length} produits',
-                    style: TextStyle(
-                        fontSize: 11, color: AppColors.textSecondary)),
+                    style: AppTextStyles.caption),
                 const SizedBox(width: 12),
                 if (campaign.discountPercent != null
                     && campaign.discountPercent! > 0) ...[
@@ -328,8 +325,7 @@ class _CampaignCard extends StatelessWidget {
                       size: 12, color: AppColors.error),
                   const SizedBox(width: 4),
                   Text('-${campaign.discountPercent}%',
-                      style: TextStyle(
-                          fontSize: 11,
+                      style: AppTextStyles.caption.copyWith(
                           fontWeight: FontWeight.w700,
                           color: AppColors.error)),
                   const SizedBox(width: 12),
@@ -338,17 +334,14 @@ class _CampaignCard extends StatelessWidget {
                     size: 12, color: AppColors.textHint),
                 const SizedBox(width: 4),
                 Text('${campaign.sentCount} envois',
-                    style: TextStyle(
-                        fontSize: 11, color: AppColors.textSecondary)),
+                    style: AppTextStyles.caption),
               ]),
               if (campaign.validUntil != null) ...[
                 const SizedBox(height: 6),
                 Text('Valable jusqu\'au '
                     '${DateFormat('dd/MM/yyyy').format(campaign.validUntil!.toLocal())}',
-                    style: TextStyle(
-                        fontSize: 10,
-                        color: AppColors.textHint,
-                        fontStyle: FontStyle.italic)),
+                    style: AppTextStyles.micro
+                        .copyWith(fontStyle: FontStyle.italic)),
               ],
             ],
           ),

@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
 
 /// Donnée d'affichage d'un KPI. Format neutre réutilisable partout
 /// (dashboard, finances, etc.).
@@ -185,7 +186,7 @@ class KpiCard extends StatelessWidget {
               Container(
                 width: 28, height: 28,
                 decoration: BoxDecoration(
-                  color: data.color.withOpacity(0.10),
+                  color: data.color.withValues(alpha:0.10),
                   borderRadius: BorderRadius.circular(7),
                 ),
                 child: Icon(data.icon, size: 14, color: data.color),
@@ -199,7 +200,7 @@ class KpiCard extends StatelessWidget {
                     color: (data.positive
                             ? AppColors.secondary
                             : AppColors.error)
-                        .withOpacity(0.12),
+                        .withValues(alpha:0.12),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -213,8 +214,8 @@ class KpiCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 2),
                     Text(data.delta,
-                        style: TextStyle(
-                            fontSize: 9, fontWeight: FontWeight.w700,
+                        style: AppTextStyles.micro.copyWith(
+                            fontWeight: FontWeight.w700,
                             color: data.positive
                                 ? AppColors.secondary
                                 : AppColors.error)),
@@ -227,23 +228,20 @@ class KpiCard extends StatelessWidget {
                   ? '${data.value} ${data.unit}'
                   : data.value,
               maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w800,
+              style: AppTextStyles.subtitle.copyWith(
+                  fontWeight: FontWeight.w800,
                   color: data.color),
             ),
             const SizedBox(height: 2),
             Text(data.label,
                 maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary)),
+                style: AppTextStyles.caption.copyWith(
+                    fontWeight: FontWeight.w600)),
             if (hasSubtext) ...[
               const SizedBox(height: 2),
               Text(data.subtext,
                   maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 10, color: AppColors.textHint)),
+                  style: AppTextStyles.micro),
             ],
           ]),
     );
@@ -255,7 +253,7 @@ class KpiCard extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.divider),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 4, offset: const Offset(0, 2))],
       ),
       clipBehavior: Clip.antiAlias,

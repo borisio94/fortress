@@ -7,6 +7,7 @@ import '../../core/database/app_database.dart';
 import '../../core/permisions/subscription_provider.dart';
 import '../../core/storage/hive_boxes.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
 import 'package:go_router/go_router.dart';
 
 // ── Provider connectivité — détection via connectivity_plus uniquement ──────
@@ -119,8 +120,8 @@ class _OfflineTap extends StatelessWidget {
                 pendingOps > 0
                     ? l.offlinePendingOps(pendingOps)
                     : l.offlineMode,
-                style: const TextStyle(
-                    color: Colors.white, fontSize: 12,
+                style: AppTextStyles.bodySm.copyWith(
+                    color: Colors.white,
                     fontWeight: FontWeight.w500),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -172,7 +173,7 @@ class _OfflineSheet extends StatelessWidget {
           Container(
             width: 56, height: 56,
             decoration: BoxDecoration(
-              color: const Color(0xFFDC2626).withOpacity(0.1),
+              color: const Color(0xFFDC2626).withValues(alpha:0.1),
               shape: BoxShape.circle,
             ),
             child: const Icon(Icons.wifi_off_rounded,
@@ -183,9 +184,8 @@ class _OfflineSheet extends StatelessWidget {
           // Titre
           Text(
             l.offlineMode.split('—').first.trim(),
-            style: const TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w700,
-                color: Color(0xFF0F172A)),
+            style: AppTextStyles.subtitleBold.copyWith(
+                color: const Color(0xFF0F172A)),
           ),
           const SizedBox(height: 8),
 
@@ -193,8 +193,8 @@ class _OfflineSheet extends StatelessWidget {
           Text(
             l.offlineDescription,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-                fontSize: 13, color: Color(0xFF6B7280), height: 1.5),
+            style: AppTextStyles.bodySecondary.copyWith(
+                color: const Color(0xFF6B7280)),
           ),
 
           // Info ops en attente
@@ -214,8 +214,8 @@ class _OfflineSheet extends StatelessWidget {
                 Expanded(
                   child: Text(
                     l.offlinePendingOps(pendingOps),
-                    style: const TextStyle(
-                        fontSize: 12, color: Color(0xFF92400E)),
+                    style: AppTextStyles.bodySm.copyWith(
+                        color: const Color(0xFF92400E)),
                   ),
                 ),
               ]),
@@ -237,7 +237,8 @@ class _OfflineSheet extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12)),
               ),
               child: Text(l.close,
-                  style: const TextStyle(fontSize: 13)),
+                  style: AppTextStyles.body.copyWith(
+                      color: const Color(0xFF6B7280))),
             ),
           ),
         ],
@@ -296,16 +297,16 @@ class OfflineBlockGuard extends ConsumerWidget {
                       size: 36, color: Color(0xFFEF4444)),
                 ),
                 const SizedBox(height: 24),
-                const Text('Connexion requise',
-                    style: TextStyle(fontSize: 20,
+                Text('Connexion requise',
+                    style: AppTextStyles.title.copyWith(
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF0F172A))),
+                        color: const Color(0xFF0F172A))),
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                     "Votre plan Normal nécessite une connexion internet. "
                         "Activez le plan Pro pour utiliser l'application hors ligne.",
-                style: TextStyle(fontSize: 13,
-                    color: Color(0xFF6B7280)),
+                style: AppTextStyles.bodySecondary.copyWith(
+                    color: const Color(0xFF6B7280)),
                 textAlign: TextAlign.center),
             const SizedBox(height: 24),
             // Bouton upgrade
@@ -314,10 +315,10 @@ class OfflineBlockGuard extends ConsumerWidget {
               child: ElevatedButton.icon(
                 onPressed: () => context.push('/subscription'),
                 icon: const Icon(Icons.stars_rounded, size: 16),
-                label: const Text('Passer au plan Pro',
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700)),
+                label: Text('Passer au plan Pro',
+                    style: AppTextStyles.body.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white)),
                 style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
@@ -331,10 +332,9 @@ class OfflineBlockGuard extends ConsumerWidget {
             // Bouton réessayer
             TextButton(
               onPressed: () => ref.invalidate(isOfflineProvider),
-              child: const Text('Réessayer la connexion',
-                  style: TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFF6B7280))),
+              child: Text('Réessayer la connexion',
+                  style: AppTextStyles.bodySecondary.copyWith(
+                      color: const Color(0xFF6B7280))),
             ),
             ],
           ),

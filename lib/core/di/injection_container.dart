@@ -16,8 +16,6 @@ import '../../features/inventaire/domain/usecases/update_stock_usecase.dart';
 import '../../features/inventaire/presentation/bloc/inventaire_bloc.dart';
 import '../../features/crm/data/repositories/client_repository_impl.dart';
 import '../../features/crm/domain/repositories/client_repository.dart';
-import '../../features/crm/domain/usecases/get_clients_usecase.dart';
-import '../../features/crm/presentation/bloc/crm_bloc.dart';
 import '../../features/caisse/data/repositories/sale_local_datasource.dart';
 import '../../features/caisse/data/repositories/sale_repository_impl.dart';
 import '../../features/caisse/domain/repositories/sale_repository.dart';
@@ -88,9 +86,6 @@ final inventaireBlocProvider =
 // ─── CRM ───────────────────────────────────────────────────────────────────────
 final clientRepositoryProvider = Provider<ClientRepository>((_) =>
     const ClientRepositoryImpl());
-
-final crmBlocProvider = Provider.family<CrmBloc, String>((ref, shopId) =>
-    CrmBloc());
 
 // ─── Caisse ────────────────────────────────────────────────────────────────────
 final saleLocalDsProvider = Provider<SaleLocalDatasource>((_) =>

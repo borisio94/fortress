@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/utils/date_formatter.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/router/route_names.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
@@ -19,6 +21,7 @@ import '../../domain/models/employee_permission.dart';
 import '../../domain/models/member_role.dart';
 import 'employee_form_sheet.dart';
 import '../widgets/owner_approval_banner.dart';
+import '../../../../shared/widgets/form_sheet.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // EmployeesPage — Ressources humaines.
@@ -73,7 +76,7 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
           const SizedBox(height: 12),
           Text(l.hrAccessDenied,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14,
+              style: AppTextStyles.label.copyWith(
                   fontWeight: FontWeight.w700, color: cs.onSurface)),
           const SizedBox(height: 14),
           ElevatedButton(
@@ -199,12 +202,9 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
   }
 
   Future<void> _openCreateSheet() async {
-    final created = await showModalBottomSheet<bool>(
+    final created = await showFormSheet<bool>(
       context: context,
-      isScrollControlled: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => EmployeeFormSheet(shopId: widget.shopId),
     );
     if (created == true && mounted) {
@@ -213,12 +213,9 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
   }
 
   Future<void> _openEditSheet(Employee e) async {
-    final saved = await showModalBottomSheet<bool>(
+    final saved = await showFormSheet<bool>(
       context: context,
-      isScrollControlled: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => EmployeeFormSheet(
         shopId: widget.shopId, existing: e,
       ),
@@ -421,7 +418,7 @@ class _ErrorView extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Text(message,
-            style: TextStyle(color: sem.danger, fontSize: 13),
+            style: AppTextStyles.body.copyWith(color: sem.danger),
             textAlign: TextAlign.center),
       ),
     );
@@ -515,8 +512,7 @@ class _MembersTopbar extends StatelessWidget {
             onPressed: onCreate,
             icon: Icon(Icons.add_rounded, size: 16, color: cs.onPrimary),
             label: Text(buttonLabel,
-                style: TextStyle(
-                    fontSize: 13,
+                style: AppTextStyles.body.copyWith(
                     fontWeight: FontWeight.w700,
                     color: cs.onPrimary)),
             style: ElevatedButton.styleFrom(
@@ -604,14 +600,10 @@ class _StatCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(value,
-              style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: color)),
+              style: AppTextStyles.display.copyWith(color: color)),
           const SizedBox(height: 2),
           Text(label,
-              style: TextStyle(
-                  fontSize: 11,
+              style: AppTextStyles.caption.copyWith(
                   color: cs.onSurface.withValues(alpha: 0.6),
                   fontWeight: FontWeight.w600),
               maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -686,8 +678,7 @@ class _TabPill extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Center(
             child: Text(label,
-                style: TextStyle(
-                  fontSize: 12,
+                style: AppTextStyles.bodySm.copyWith(
                   fontWeight: FontWeight.w700,
                   color: active
                       ? cs.onInverseSurface
@@ -755,8 +746,7 @@ class _MembersFilterPopupBtn extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(child: Text(it.$2,
                 maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 12,
+                style: AppTextStyles.bodySm.copyWith(
                     fontWeight: current == it.$1
                         ? FontWeight.w700
                         : FontWeight.w500,
@@ -816,11 +806,11 @@ class _MembersSearchBar extends StatelessWidget {
     final sem   = theme.semantic;
     return TextField(
       onChanged: onChange,
-      style: TextStyle(fontSize: 13, color: cs.onSurface),
+      style: AppTextStyles.body.copyWith(color: cs.onSurface),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: TextStyle(
-            fontSize: 13, color: cs.onSurface.withValues(alpha: 0.45)),
+        hintStyle: AppTextStyles.body
+            .copyWith(color: cs.onSurface.withValues(alpha: 0.45)),
         prefixIcon: Icon(Icons.search_rounded,
             size: 18, color: cs.onSurface.withValues(alpha: 0.5)),
         isDense: true,
@@ -1001,16 +991,14 @@ class _SectionCard extends StatelessWidget {
             ),
             child: Row(children: [
               Expanded(child: Text(title,
-                  style: TextStyle(
-                    fontSize: 12,
+                  style: AppTextStyles.bodySm.copyWith(
                     fontWeight: FontWeight.w800,
                     color: cs.onSurface.withValues(alpha: 0.75),
                     letterSpacing: 0.4,
                   ))),
               if ((trailing ?? '').isNotEmpty)
                 Text(trailing!,
-                    style: TextStyle(
-                      fontSize: 11,
+                    style: AppTextStyles.caption.copyWith(
                       fontWeight: FontWeight.w600,
                       color: cs.onSurface.withValues(alpha: 0.55),
                     )),
@@ -1109,7 +1097,7 @@ class _MemberRow extends StatelessWidget {
         alignment: Alignment.center,
         child: Text(_initialsOf(employee.fullName.isEmpty
                 ? employee.email : employee.fullName),
-            style: TextStyle(fontSize: 14,
+            style: AppTextStyles.label.copyWith(
                 fontWeight: FontWeight.w800, color: accent)),
       ),
       const SizedBox(width: 12),
@@ -1124,8 +1112,7 @@ class _MemberRow extends StatelessWidget {
                 employee.fullName.isEmpty
                     ? employee.email : employee.fullName,
                 maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 13.5,
+                style: AppTextStyles.body.copyWith(
                     fontWeight: FontWeight.w800,
                     color: cs.onSurface))),
             const SizedBox(width: 8),
@@ -1136,8 +1123,8 @@ class _MemberRow extends StatelessWidget {
           // Email
           Text(employee.email,
               maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11,
-                  color: cs.onSurface.withValues(alpha: 0.55))),
+              style: AppTextStyles.caption
+                  .copyWith(color: cs.onSurface.withValues(alpha: 0.55))),
           const SizedBox(height: 6),
 
           // Statut + barre permissions + activité
@@ -1151,8 +1138,7 @@ class _MemberRow extends StatelessWidget {
             ),
             const SizedBox(width: 6),
             Text(statusLabel,
-                style: TextStyle(
-                    fontSize: 10.5,
+                style: AppTextStyles.micro.copyWith(
                     fontWeight: FontWeight.w600,
                     color: statusColor)),
             const SizedBox(width: 10),
@@ -1166,8 +1152,8 @@ class _MemberRow extends StatelessWidget {
 
           const SizedBox(height: 4),
           Text(activityLabel,
-              style: TextStyle(fontSize: 10,
-                  color: cs.onSurface.withValues(alpha: 0.5))),
+              style: AppTextStyles.micro
+                  .copyWith(color: cs.onSurface.withValues(alpha: 0.5))),
         ],
       )),
 
@@ -1240,9 +1226,7 @@ class _MemberRow extends StatelessWidget {
     ]);
   }
 
-  static String _fmtDate(DateTime d) =>
-      '${d.day.toString().padLeft(2, '0')}/'
-      '${d.month.toString().padLeft(2, '0')}/${d.year}';
+  static String _fmtDate(DateTime d) => DateFormatter.dayMonthYear(d);
 }
 
 class _RoleBadge extends StatelessWidget {
@@ -1261,8 +1245,7 @@ class _RoleBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(label,
-          style: TextStyle(
-            fontSize: 10,
+          style: AppTextStyles.micro.copyWith(
             fontWeight: FontWeight.w800,
             color: accent,
           )),
@@ -1300,8 +1283,7 @@ class _PermBar extends StatelessWidget {
       )),
       const SizedBox(width: 6),
       Text('$count/$total',
-          style: TextStyle(
-              fontSize: 10,
+          style: AppTextStyles.micro.copyWith(
               color: cs.onSurface.withValues(alpha: 0.55),
               fontWeight: FontWeight.w600)),
     ]);

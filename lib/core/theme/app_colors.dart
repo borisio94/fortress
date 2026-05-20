@@ -52,4 +52,15 @@ class AppColors {
   static const apple    = Color(0xFF000000);
 
   static const divider = Color(0xFFE5E7EB);
+
+  /// Palette stable utilisée pour dériver une couleur identifiable par
+  /// hash du nom de variante quand le champ `variant.color` n'est pas
+  /// renseigné. 12 teintes distinctes pour minimiser les collisions
+  /// visuelles dans la grille produits.
+  static const variantPalette = <Color>[
+    Color(0xFFEF4444), Color(0xFFF97316), Color(0xFFEAB308),
+    Color(0xFF84CC16), Color(0xFF22C55E), Color(0xFF14B8A6),
+    Color(0xFF06B6D4), Color(0xFF3B82F6), Color(0xFF6366F1),
+    Color(0xFF8B5CF6), Color(0xFFD946EF), Color(0xFFEC4899),
+  ];
 }

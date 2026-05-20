@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
 import 'app_primary_button.dart';
 
 /// État vide unifié — utilisé sur toutes les pages sans données.
@@ -65,9 +66,7 @@ class EmptyStateWidget extends StatelessWidget {
             Text(
               title,
               textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
+              style: AppTextStyles.subtitleBold.copyWith(
                 color: cs.onSurface,
               ),
             ),
@@ -75,10 +74,8 @@ class EmptyStateWidget extends StatelessWidget {
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                fontSize: 13,
-                color: cs.onSurface.withOpacity(0.6),
-                height: 1.5,
+              style: AppTextStyles.bodySecondary.copyWith(
+                color: cs.onSurface.withValues(alpha:0.6),
               ),
             ),
             if (ctaLabel != null && onCta != null) ...[

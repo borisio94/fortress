@@ -110,6 +110,24 @@ flutter:
     - assets/sounds/
     - supabase/migrations/
 
+  # ── Police UI unifiée (Inter) ─────────────────────────────────────────
+  # Embarquée pour un rendu STRICTEMENT identique web / Android / iOS.
+  # Remplace l'ancien `SF Pro Display` (jamais embarqué → fallback
+  # différent par plateforme). Sous-ensemble latin (français + €).
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-400.ttf
+          weight: 400
+        - asset: assets/fonts/Inter-500.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-600.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-700.ttf
+          weight: 700
+        - asset: assets/fonts/Inter-800.ttf
+          weight: 800
+
 # ── Icônes app (Android/iOS/Web) ──────────────────────────────────────
 # Régénérer après modif de fortress_app_icon.png :
 #   dart run flutter_launcher_icons

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/whatsapp_service.dart';
 import '../../../../core/services/short_link_service.dart';
@@ -160,8 +161,8 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
                   child: Padding(
                     padding: const EdgeInsets.all(14),
                     child: Text(client.notes!,
-                        style: const TextStyle(fontSize: 13,
-                            color: Color(0xFF374151), height: 1.5)),
+                        style: AppTextStyles.body.copyWith(
+                            color: const Color(0xFF374151))),
                   )),
             ],
             const SizedBox(height: 16),
@@ -318,10 +319,11 @@ class _CoordinatesContent extends StatelessWidget {
     addTile(Icons.place_outlined,         'Quartier',  client.district);
 
     if (tiles.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(16),
+      return Padding(
+        padding: const EdgeInsets.all(16),
         child: Center(child: Text('Aucune coordonnée renseignée',
-            style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)))),
+            style: AppTextStyles.bodySm.copyWith(
+                color: const Color(0xFF9CA3AF)))),
       );
     }
     return Column(children: tiles);
@@ -348,8 +350,7 @@ class _HeroHeader extends StatelessWidget {
             decoration: BoxDecoration(color: color.withValues(alpha:0.2),
                 shape: BoxShape.circle),
             child: Center(child: Text(initial,
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800,
-                    color: color)))),
+                style: AppTextStyles.display.copyWith(color: color)))),
         if (client.tag == ClientTag.vip)
           Positioned(right: 0, bottom: 0,
               child: Container(width: 24, height: 24,
@@ -359,12 +360,11 @@ class _HeroHeader extends StatelessWidget {
                       size: 14, color: Colors.white))),
       ]),
       const SizedBox(height: 12),
-      Text(client.name, style: const TextStyle(fontSize: 20,
-          fontWeight: FontWeight.w800, color: Color(0xFF0F172A))),
+      Text(client.name, style: AppTextStyles.title.copyWith(
+          color: const Color(0xFF0F172A))),
       if (client.phone != null) ...[
         const SizedBox(height: 4),
-        Text(client.phone!, style: const TextStyle(
-            fontSize: 13, color: Color(0xFF6B7280))),
+        Text(client.phone!, style: AppTextStyles.bodySecondary),
       ],
       const SizedBox(height: 10),
       Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -389,7 +389,7 @@ class _HeroHeader extends StatelessWidget {
               Text(daysAgo == 0 ? "Actif aujourd'hui"
                   : daysAgo == 1 ? 'Actif hier'
                   : 'Inactif $daysAgo j',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                  style: AppTextStyles.captionBold.copyWith(
                       color: daysAgo! <= 7 ? AppColors.secondary
                           : const Color(0xFF9CA3AF))),
             ]),
@@ -414,11 +414,12 @@ class _KpiCard extends StatelessWidget {
     child: Column(children: [
       Icon(icon, size: 18, color: color),
       const SizedBox(height: 6),
-      Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800,
-          color: color), textAlign: TextAlign.center),
+      Text(value, style: AppTextStyles.bodyBold.copyWith(color: color),
+          textAlign: TextAlign.center),
       const SizedBox(height: 2),
       Text(label, textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 9, color: Color(0xFF9CA3AF))),
+          style: AppTextStyles.micro.copyWith(
+              color: const Color(0xFF9CA3AF))),
     ]),
   );
 }
@@ -434,8 +435,8 @@ class _Section extends StatelessWidget {
     Row(children: [
       Icon(icon, size: 14, color: AppColors.primary),
       const SizedBox(width: 6),
-      Text(title, style: const TextStyle(fontSize: 12,
-          fontWeight: FontWeight.w700, color: Color(0xFF374151))),
+      Text(title, style: AppTextStyles.bodySmBold.copyWith(
+          color: const Color(0xFF374151))),
       if (trailing != null) ...[const Spacer(), trailing!],
     ]),
     const SizedBox(height: 8),
@@ -458,11 +459,11 @@ class _InfoTile extends StatelessWidget {
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-        Text(label, style: const TextStyle(fontSize: 10,
-            color: Color(0xFF9CA3AF), fontWeight: FontWeight.w500)),
+        Text(label, style: AppTextStyles.micro.copyWith(
+            color: const Color(0xFF9CA3AF))),
         const SizedBox(height: 2),
-        Text(value, style: const TextStyle(fontSize: 13,
-            fontWeight: FontWeight.w600, color: Color(0xFF0F172A))),
+        Text(value, style: AppTextStyles.bodyBold.copyWith(
+            color: const Color(0xFF0F172A))),
       ])),
     ]),
   );
@@ -484,9 +485,8 @@ class _ActionTile extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8)),
             child: Icon(icon, size: 16, color: color)),
         const SizedBox(width: 12),
-        Expanded(child: Text(label, style: const TextStyle(
-            fontSize: 13, fontWeight: FontWeight.w600,
-            color: Color(0xFF0F172A)))),
+        Expanded(child: Text(label, style: AppTextStyles.bodyBold.copyWith(
+            color: const Color(0xFF0F172A)))),
         const Icon(Icons.chevron_right_rounded,
             size: 16, color: Color(0xFFD1D5DB)),
       ]),
@@ -511,8 +511,8 @@ class _TagChip extends StatelessWidget {
           Padding(padding: const EdgeInsets.only(right: 4),
               child: Icon(Icons.workspace_premium_rounded,
                   size: 11, color: color)),
-        Text(tag.label, style: TextStyle(fontSize: 11,
-            fontWeight: FontWeight.w700, color: color)),
+        Text(tag.label, style: AppTextStyles.captionBold.copyWith(
+            color: color)),
       ]),
     );
   }
@@ -565,8 +565,8 @@ class _WhatsappComposeDialogState extends State<_WhatsappComposeDialog> {
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   hintText: 'Tape ton message ici…',
-                  hintStyle: const TextStyle(
-                      fontSize: 12, color: AppColors.textHint),
+                  hintStyle: AppTextStyles.bodySm.copyWith(
+                      color: AppColors.textHint),
                   isDense: true,
                   filled: true,
                   fillColor: const Color(0xFFF9FAFB),

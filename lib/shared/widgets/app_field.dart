@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
 import '../../core/utils/country_phone_data.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -172,11 +173,11 @@ class _AppFieldState extends State<AppField> {
   // ── Border helpers ────────────────────────────────────────────────────────
   Color get _borderColor {
     if (widget.isPhone) {
-      if (!_phoneHasInput) return AppColors.primary.withOpacity(0.5);
+      if (!_phoneHasInput) return AppColors.primary.withValues(alpha:0.5);
       return _phoneValid ? AppColors.primary : AppColors.error;
     }
     return _hasValue
-        ? AppColors.primary.withOpacity(0.5)
+        ? AppColors.primary.withValues(alpha:0.5)
         : const Color(0xFFE5E7EB);
   }
 
@@ -231,11 +232,10 @@ class _AppFieldState extends State<AppField> {
             inputFormatters: [
               FilteringTextInputFormatter.allow(RegExp(r'[\d\s\-\(\)]')),
             ],
-            style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A)),
+            style: AppTextStyles.input,
             decoration: InputDecoration(
               hintText: _phoneHint,
-              hintStyle: const TextStyle(
-                  fontSize: 12, color: Color(0xFFBBBBBB)),
+              hintStyle: AppTextStyles.inputHint,
               border:         InputBorder.none,
               enabledBorder:  InputBorder.none,
               focusedBorder:  InputBorder.none,
@@ -282,15 +282,14 @@ class _AppFieldState extends State<AppField> {
       autofocus:    widget.autofocus,
       focusNode:    widget.focusNode,
       enabled:      widget.enabled,
-      style: const TextStyle(fontSize: 13, color: Color(0xFF1A1D2E)),
+      style: AppTextStyles.input,
       inputFormatters: widget.numbersOnly
           ? [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))]
           : null,
       onChanged: widget.onChanged,
       decoration: InputDecoration(
         hintText: widget.hint,
-        hintStyle: const TextStyle(
-            color: Color(0xFFBBBBBB), fontSize: 13),
+        hintStyle: AppTextStyles.inputHint,
         prefixIcon: widget.prefixIcon != null
             ? Icon(widget.prefixIcon, size: 15,
             color: const Color(0xFFAAAAAA))
@@ -408,10 +407,7 @@ class AppFieldLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => RichText(
     text: TextSpan(
-      style: const TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: Color(0xFF6B7280)),
+      style: AppTextStyles.caption,
       children: [
         TextSpan(text: text),
         if (required)
@@ -420,7 +416,7 @@ class AppFieldLabel extends StatelessWidget {
               style: TextStyle(
                   color: Color(0xFFEF4444),
                   fontWeight: FontWeight.w700,
-                  fontSize: 12)),
+                  fontSize: 11)),
       ],
     ),
   );

@@ -7,6 +7,7 @@ import '../../core/database/app_database.dart';
 import '../../core/permisions/subscription_provider.dart';
 import '../../core/router/route_names.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/theme/app_text_styles.dart';
 import '../../core/i18n/app_localizations.dart';
 import '../../features/auth/presentation/bloc/auth_bloc.dart';
 import '../../features/auth/presentation/bloc/auth_event.dart';
@@ -18,7 +19,6 @@ import '../../core/storage/hive_boxes.dart';
 import '../providers/current_shop_provider.dart';
 import '../../core/widgets/fortress_logo.dart';
 import 'app_confirm_dialog.dart';
-import 'app_snack.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Modèle de navigation
@@ -44,6 +44,9 @@ final _navItems = [
       route: (id) => '/shop/$id/crm',       isActive: (c) => c.contains('/crm')),
   _NavDef(icon: Icons.account_balance_rounded, label: (l) => l.navFinances,
       route: (id) => '/shop/$id/finances',  isActive: (c) => c.contains('/finances')),
+  _NavDef(icon: Icons.local_shipping_outlined, label: (l) => 'Partenaires',
+      route: (id) => '/shop/$id/parametres/partner-accounts',
+      isActive: (c) => c.contains('/partner-accounts')),
   _NavDef(icon: Icons.history_rounded,      label: (l) => l.navHistorique,
       route: (id) => '/shop/$id/historique',
       isActive: (c) => c.contains('/historique')),
@@ -70,6 +73,7 @@ bool _canAccess(_NavDef n, String shopId, UserRole? role) {
   if (role == null) return true;
   if (n.route(shopId).contains('/finances')) return role.canViewReports;
   if (n.route(shopId).contains('/crm')) return role.canManageShop;
+  if (n.route(shopId).contains('/partner-accounts')) return role.canManageShop;
   if (n.route(shopId).contains('/inventaire')) return role.canManageInventory;
   // Données financières & audit : admin/propriétaire uniquement
   if (n.route(shopId).contains('/historique')) return role == UserRole.admin;
@@ -99,7 +103,6 @@ class AppDrawer extends ConsumerWidget {
     final shopFromProvider = ref.watch(currentShopProvider);
     final shop = shopFromProvider ?? LocalStorageService.getShop(shopId);
     final current = GoRouterState.of(context).matchedLocation;
-    final l       = context.l10n;
 
     // Source de vérité unique : permissionsProvider (MemberRole canonique).
     final perms = ref.watch(permissionsProvider(shopId));
@@ -129,10 +132,8 @@ class AppDrawer extends ConsumerWidget {
                 // Badge incidents en attente sur l'item Inventaire
                 int badge = 0;
                 if (n.route(shopId).contains('/inventaire')) {
-                  badge = HiveBoxes.incidentsBox.values.where((m) {
-                    final map = m is Map ? m : null;
-                    return map != null
-                        && map['shop_id'] == shopId
+                  badge = HiveBoxes.incidentsBox.values.where((map) {
+                    return map['shop_id'] == shopId
                         && (map['status'] == 'pending' || map['status'] == 'in_progress');
                   }).length;
                 }
@@ -151,7 +152,8 @@ class AppDrawer extends ConsumerWidget {
                 )),
               ],
               // Section admin — visible uniquement pour les admins/propriétaires
-              if (isAdmin) ...[
+              // Section admin (= Hub central) : uniquement en multi-boutique.
+              if (isAdmin && perms.isMultiStore) ...[
                 const _Divider(),
                 _SectionLabel(context.l10n.navAdmin),
                 ..._adminItems.map((n) => _NavTile(
@@ -226,10 +228,8 @@ class AppDrawerRail extends ConsumerWidget {
                   .map((n) {
                 int badge = 0;
                 if (n.route(shopId).contains('/inventaire')) {
-                  badge = HiveBoxes.incidentsBox.values.where((m) {
-                    final map = m is Map ? m : null;
-                    return map != null
-                        && map['shop_id'] == shopId
+                  badge = HiveBoxes.incidentsBox.values.where((map) {
+                    return map['shop_id'] == shopId
                         && (map['status'] == 'pending' || map['status'] == 'in_progress');
                   }).length;
                 }
@@ -368,15 +368,15 @@ class _DrawerHeader extends StatelessWidget {
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    AppColors.primary.withOpacity(0.06),
-                    AppColors.primaryLight.withOpacity(0.04),
+                    AppColors.primary.withValues(alpha:0.06),
+                    AppColors.primaryLight.withValues(alpha:0.04),
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                    color: AppColors.primary.withOpacity(0.12)),
+                    color: AppColors.primary.withValues(alpha:0.12)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -390,7 +390,7 @@ class _DrawerHeader extends StatelessWidget {
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                            color: AppColors.primary.withOpacity(0.2)),
+                            color: AppColors.primary.withValues(alpha:0.2)),
                       ),
                       child: Icon(_icon(shop!.sector),
                           color: AppColors.primary, size: 20),
@@ -403,18 +403,16 @@ class _DrawerHeader extends StatelessWidget {
                           Text(shop!.name,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontSize: 13,
+                              style: AppTextStyles.bodyBold.copyWith(
                                   fontWeight: FontWeight.w800,
-                                  color: Color(0xFF0F172A))),
+                                  color: const Color(0xFF0F172A))),
                           const SizedBox(height: 2),
                           Text(_sectorLabel(shop!.sector),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontSize: 10,
+                              style: AppTextStyles.microSecondary.copyWith(
                                   fontWeight: FontWeight.w500,
-                                  color: Color(0xFF6B7280))),
+                                  color: const Color(0xFF6B7280))),
                         ],
                       ),
                     ),
@@ -430,7 +428,7 @@ class _DrawerHeader extends StatelessWidget {
                     children: [
                       _Chip(
                         icon: Text(_flag(shop!.country),
-                            style: const TextStyle(fontSize: 11)),
+                            style: AppTextStyles.caption),
                         label: shop!.currency,
                       ),
                       if (memberRole != null)
@@ -442,9 +440,8 @@ class _DrawerHeader extends StatelessWidget {
                             borderRadius: BorderRadius.circular(5),
                           ),
                           child: Text(roleLabel,
-                              style: const TextStyle(
+                              style: AppTextStyles.micro.copyWith(
                                   color: Colors.white,
-                                  fontSize: 9,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 0.3)),
                         ),
@@ -498,10 +495,8 @@ class _Chip extends StatelessWidget {
           icon,
           const SizedBox(width: 4),
           Text(label,
-              style: const TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF374151))),
+              style: AppTextStyles.microBold.copyWith(
+                  color: const Color(0xFF374151))),
         ]),
       );
 }
@@ -536,7 +531,7 @@ class _NavTile extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 2),
       decoration: BoxDecoration(
-        color: active ? color.withOpacity(0.08) : Colors.transparent,
+        color: active ? color.withValues(alpha:0.08) : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
       ),
       child: Tooltip(
@@ -573,7 +568,7 @@ class _NavTile extends StatelessWidget {
                     Expanded(
                       child: Text(label,
                           overflow: TextOverflow.ellipsis, maxLines: 1,
-                          style: TextStyle(fontSize: 13,
+                          style: AppTextStyles.body.copyWith(
                               fontWeight: active ? FontWeight.w600 : FontWeight.w500,
                               color: active ? color : const Color(0xFF374151))),
                     ),
@@ -584,7 +579,7 @@ class _NavTile extends StatelessWidget {
                         decoration: BoxDecoration(
                             color: const Color(0xFFEF4444),
                             borderRadius: BorderRadius.circular(8)),
-                        child: Text('$badge', style: const TextStyle(fontSize: 9,
+                        child: Text('$badge', style: AppTextStyles.micro.copyWith(
                             fontWeight: FontWeight.w700, color: Colors.white)),
                       ),
                     ],
@@ -619,9 +614,9 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-    child: Text(text, style: const TextStyle(
-        fontSize: 10, fontWeight: FontWeight.w700,
-        color: Color(0xFF9CA3AF), letterSpacing: 0.5)),
+    child: Text(text, style: AppTextStyles.micro.copyWith(
+        fontWeight: FontWeight.w700,
+        color: const Color(0xFF9CA3AF), letterSpacing: 0.5)),
   );
 }
 
@@ -707,9 +702,9 @@ class _LogoutTile extends ConsumerWidget {
                     const SizedBox(width: 10),
                     Expanded(child: Text(l.navLogout,
                         overflow: TextOverflow.ellipsis, maxLines: 1,
-                        style: const TextStyle(fontSize: 13,
+                        style: AppTextStyles.body.copyWith(
                             fontWeight: FontWeight.w500,
-                            color: Color(0xFFEF4444)))),
+                            color: const Color(0xFFEF4444)))),
                   ],
                 ),
               );
@@ -736,7 +731,8 @@ class _LogoutTile extends ConsumerWidget {
       iconColor: AppColors.error,
       title: l.navLogoutConfirmTitle,
       body: Text(l.navLogoutConfirmBody,
-          style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280))),
+          style: AppTextStyles.bodySecondary.copyWith(
+              color: const Color(0xFF6B7280))),
       cancelLabel: l.cancel,
       confirmLabel: l.navLogoutConfirmBtn,
       confirmColor: AppColors.error,
@@ -813,7 +809,7 @@ class _SyncBeforeLogoutSheetState
           Container(
             width: 56, height: 56,
             decoration: BoxDecoration(
-              color: const Color(0xFFF59E0B).withOpacity(0.12),
+              color: const Color(0xFFF59E0B).withValues(alpha:0.12),
               shape: BoxShape.circle,
             ),
             child: const Icon(Icons.sync_problem_rounded,
@@ -824,9 +820,8 @@ class _SyncBeforeLogoutSheetState
           // Titre
           Text(
             l.logoutSyncTitle,
-            style: const TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w700,
-                color: Color(0xFF0F172A)),
+            style: AppTextStyles.subtitleBold.copyWith(
+                color: const Color(0xFF0F172A)),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
@@ -835,8 +830,8 @@ class _SyncBeforeLogoutSheetState
           Text(
             l.logoutSyncDescription(widget.pending),
             textAlign: TextAlign.center,
-            style: const TextStyle(
-                fontSize: 13, color: Color(0xFF6B7280), height: 1.5),
+            style: AppTextStyles.bodySecondary.copyWith(
+                color: const Color(0xFF6B7280)),
           ),
           const SizedBox(height: 24),
 
@@ -867,8 +862,7 @@ class _SyncBeforeLogoutSheetState
                     : _done
                     ? l.syncDone
                     : l.logoutSyncBtn,
-                style: const TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.w600),
+                style: AppTextStyles.label.copyWith(color: Colors.white),
               ),
             ),
           ),
@@ -885,7 +879,7 @@ class _SyncBeforeLogoutSheetState
               ),
               child: Text(
                 l.logoutAnyway,
-                style: const TextStyle(fontSize: 13),
+                style: AppTextStyles.body.copyWith(color: AppColors.error),
               ),
             ),
           ),
@@ -932,7 +926,7 @@ class _SubscriptionTile extends ConsumerWidget {
     Widget compact() => Center(
         child: Stack(clipBehavior: Clip.none, children: [
           Icon(Icons.workspace_premium_rounded,
-              size: 22, color: cs.onSurface.withOpacity(0.75)),
+              size: 22, color: cs.onSurface.withValues(alpha:0.75)),
           Positioned(
             right: -4, top: -4,
             child: Container(
@@ -962,22 +956,22 @@ class _SubscriptionTile extends ConsumerWidget {
                     ? compact()
                     : Row(children: [
                         Icon(Icons.workspace_premium_rounded,
-                            size: 18, color: cs.onSurface.withOpacity(0.75)),
+                            size: 18, color: cs.onSurface.withValues(alpha:0.75)),
                         const SizedBox(width: 12),
                         Expanded(child: Text(l.drawerSubscription,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 13.5,
+                            style: AppTextStyles.body.copyWith(
                                 fontWeight: FontWeight.w600,
                                 color: cs.onSurface))),
                         Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: badgeColor.withOpacity(0.15),
+                            color: badgeColor.withValues(alpha:0.15),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(badgeText,
-                              style: TextStyle(fontSize: 10,
+                              style: AppTextStyles.micro.copyWith(
                                   fontWeight: FontWeight.w800,
                                   color: badgeColor)),
                         ),

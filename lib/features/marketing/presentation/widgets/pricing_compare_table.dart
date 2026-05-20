@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // PricingCompareTable — tableau comparatif synthétique des 3 plans
@@ -46,8 +47,7 @@ class PricingCompareTable extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Comparatif détaillé',
-                  style: TextStyle(
-                      fontSize: 20,
+                  style: AppTextStyles.title.copyWith(
                       fontWeight: FontWeight.w800,
                       color: theme.colorScheme.onSurface)),
               const SizedBox(height: 16),
@@ -84,16 +84,14 @@ class _HeaderRow extends StatelessWidget {
                 const BorderRadius.vertical(top: Radius.circular(12))),
         child: Row(children: [
           Expanded(flex: 4, child: Text('Fonctionnalité',
-              style: TextStyle(
-                  fontSize: 12,
+              style: AppTextStyles.bodySm.copyWith(
                   fontWeight: FontWeight.w800,
                   color: theme.colorScheme.onSurface))),
           for (final name in ['Starter', 'Pro', 'Business'])
             Expanded(
               child: Center(
                 child: Text(name,
-                    style: TextStyle(
-                        fontSize: 12,
+                    style: AppTextStyles.bodySm.copyWith(
                         fontWeight: FontWeight.w800,
                         color: AppColors.primary)),
               ),
@@ -118,16 +116,14 @@ class _DataRow extends StatelessWidget {
                 : null),
         child: Row(children: [
           Expanded(flex: 4, child: Text(row[0],
-              style: TextStyle(
-                  fontSize: 12,
+              style: AppTextStyles.bodySm.copyWith(
                   color: theme.colorScheme.onSurface
                       .withValues(alpha: 0.85)))),
           for (var i = 1; i <= 3; i++)
             Expanded(
               child: Center(
                 child: Text(row[i],
-                    style: TextStyle(
-                        fontSize: 12,
+                    style: AppTextStyles.bodySm.copyWith(
                         fontWeight: row[i] == '✓'
                             ? FontWeight.w700
                             : FontWeight.w500,

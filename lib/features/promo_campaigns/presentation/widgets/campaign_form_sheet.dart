@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/database/app_database.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_field.dart';
@@ -345,10 +346,8 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
                 Text(
                     'Démarrage planifié au moins 1h après création — '
                     'délai obligatoire pour valider la planification.',
-                    style: TextStyle(
-                        fontSize: 10,
-                        fontStyle: FontStyle.italic,
-                        color: AppColors.textHint)),
+                    style: AppTextStyles.micro
+                        .copyWith(fontStyle: FontStyle.italic)),
               ],
               const SizedBox(height: 14),
               const AppFieldLabel('Valable jusqu\'au'),
@@ -363,8 +362,8 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
               if (_datesError != null) ...[
                 const SizedBox(height: 6),
                 Text(_datesError!,
-                    style: TextStyle(
-                        fontSize: 11, color: AppColors.error)),
+                    style: AppTextStyles.caption
+                        .copyWith(color: AppColors.error)),
               ],
               const SizedBox(height: 14),
               AppFieldLabel(
@@ -375,8 +374,8 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 6),
                   child: Text(_productsError!,
-                      style: TextStyle(
-                          color: AppColors.error, fontSize: 11)),
+                      style: AppTextStyles.caption
+                          .copyWith(color: AppColors.error)),
                 ),
               TextField(
                 onChanged: (v) => setState(() => _searchQuery = v),
@@ -402,8 +401,8 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
                 child: _allProducts.isEmpty
                     ? Center(
                         child: Text('Aucun produit dans cette boutique.',
-                            style: TextStyle(
-                                color: AppColors.textHint, fontSize: 12)),
+                            style: AppTextStyles.bodySm
+                                .copyWith(color: AppColors.textHint)),
                       )
                     : ListView.builder(
                         itemCount: _filteredProducts.length,
@@ -445,8 +444,8 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
                           strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.check_rounded, size: 16),
               label: Text(isEdit ? 'Enregistrer' : 'Créer',
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w700)),
+                  style: AppTextStyles.body.copyWith(
+                      fontWeight: FontWeight.w700, color: Colors.white)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
@@ -499,8 +498,7 @@ class _TypeRadio extends StatelessWidget {
               color: selected ? AppColors.primary : AppColors.textHint),
           const SizedBox(height: 4),
           Text(label,
-              style: TextStyle(
-                  fontSize: 12,
+              style: AppTextStyles.bodySm.copyWith(
                   fontWeight: FontWeight.w700,
                   color:
                       selected ? AppColors.primary : AppColors.textPrimary)),
@@ -555,12 +553,9 @@ class _ProductTile extends StatelessWidget {
               children: [
                 Text(product.name,
                     maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.w700)),
+                    style: AppTextStyles.bodySmBold),
                 Text(CurrencyFormatter.format(price),
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textSecondary)),
+                    style: AppTextStyles.caption),
               ],
             ),
           ),
@@ -618,8 +613,7 @@ class _DateRow extends StatelessWidget {
                     '${v.month.toString().padLeft(2, '0')}/${v.year} '
                     '${v.hour.toString().padLeft(2, '0')}:'
                     '${v.minute.toString().padLeft(2, '0')}',
-              style: TextStyle(
-                  fontSize: 13,
+              style: AppTextStyles.body.copyWith(
                   color: v == null
                       ? AppColors.textHint : AppColors.textPrimary),
             ),

@@ -12,4 +12,13 @@ class DateFormatter {
 
   static String toShortMonth(DateTime date, {String locale = 'fr'}) =>
       DateFormat('MMM yyyy', locale).format(date);
+
+  /// Date numérique `jj/MM/aaaa` par padding manuel — sans dépendance
+  /// `intl`/locale (sûr même si les données de locale ne sont pas
+  /// initialisées). Sortie strictement identique aux anciennes
+  /// implémentations privées `_fmtDate`/`_fmt` éparpillées.
+  static String dayMonthYear(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/'
+      '${d.month.toString().padLeft(2, '0')}/'
+      '${d.year}';
 }

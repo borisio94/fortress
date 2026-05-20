@@ -6,8 +6,10 @@ import 'package:url_launcher/link.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/services/document_service.dart';
+import '../../../../core/services/short_link_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -39,12 +41,19 @@ class ShareCatalogDialog extends StatefulWidget {
   /// assumée : valeur figée à l'instant du partage (snapshot).
   final Map<String, int>? stockSnapshot;
 
+  /// Emplacement du périmètre actif au partage (= « emplacement utilisé
+  /// pour envoyer »). Embarqué dans l'URL via `loc=` → la commande client
+  /// est rattachée à cet emplacement (`orders.delivery_location_id`).
+  /// Null = global/boutique → comportement historique inchangé.
+  final String? locationId;
+
   const ShareCatalogDialog({
     super.key,
     required this.products,
     required this.shopId,
     this.preSelected,
     this.stockSnapshot,
+    this.locationId,
   });
 
   static void show(BuildContext context, {
@@ -52,6 +61,7 @@ class ShareCatalogDialog extends StatefulWidget {
     required String shopId,
     List<Product>? preSelected,
     Map<String, int>? stockSnapshot,
+    String? locationId,
   }) {
     showDialog(
       context: context,
@@ -60,6 +70,7 @@ class ShareCatalogDialog extends StatefulWidget {
         shopId: shopId,
         preSelected: preSelected,
         stockSnapshot: stockSnapshot,
+        locationId: locationId,
       ),
     );
   }
@@ -191,9 +202,22 @@ class _ShareCatalogDialogState extends State<ShareCatalogDialog> {
       }
       if (tokens.isNotEmpty) qp.add('stock=${tokens.join(",")}');
     }
+    if (widget.locationId != null && widget.locationId!.isNotEmpty) {
+      qp.add('loc=${widget.locationId}');
+    }
     final long = qp.isEmpty ? base : '$base?${qp.join("&")}';
     try {
-      final shortened = await UrlShortenerService.shorten(long);
+      // 1. Raccourcisseur maison (Supabase) — même pipeline fiable que les
+      //    campagnes promo. Insensible à la longueur de l'URL longue, donc
+      //    fonctionne même pour un catalogue complet (liste `ids` massive).
+      // 2. Repli tinyurl/is.gd si la DB/réseau Supabase est indisponible.
+      // 3. Dernier recours : l'URL longue (l'envoi n'est jamais bloqué).
+      final maison = await ShortLinkService.createShortLink(
+        longUrl:   long,
+        linkType:  'catalogue',
+        expiresIn: const Duration(days: 90),
+      );
+      final shortened = maison ?? await UrlShortenerService.shorten(long);
       if (mounted) setState(() {
         _shareUrl = shortened;
         _shareUrlShort = shortened != long;
@@ -403,10 +427,8 @@ class _Header extends StatelessWidget {
         const SizedBox(width: 10),
         Expanded(
           child: Text(titles[step],
-              style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF0F172A))),
+              style: AppTextStyles.subtitleBold
+                  .copyWith(color: const Color(0xFF0F172A))),
         ),
         Row(
           mainAxisSize: MainAxisSize.min,
@@ -455,14 +477,12 @@ class _ProductStep extends StatelessWidget {
                 size: 20, color: AppColors.primary),
             const SizedBox(width: 8),
             Text(allSelected ? 'Tout désélectionner' : 'Tout sélectionner',
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.primary)),
+                style: AppTextStyles.bodySmBold
+                    .copyWith(color: AppColors.primary)),
             const Spacer(),
             Text('${selected.length}/${products.length}',
-                style: const TextStyle(
-                    fontSize: 11, color: Color(0xFF9CA3AF))),
+                style: AppTextStyles.captionHint
+                    .copyWith(color: const Color(0xFF9CA3AF))),
           ]),
         ),
       ),
@@ -491,21 +511,19 @@ class _ProductStep extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(p.name,
-                        style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600),
+                        style: AppTextStyles.bodyBold,
                         maxLines: 1, overflow: TextOverflow.ellipsis),
                     Text(
                         p.priceSellPos > 0
                             ? CurrencyFormatter.format(p.priceSellPos)
                             : 'Prix non défini',
-                        style: const TextStyle(
-                            fontSize: 11, color: Color(0xFF9CA3AF))),
+                        style: AppTextStyles.captionHint
+                            .copyWith(color: const Color(0xFF9CA3AF))),
                   ],
                 )),
                 Text('Stock: ${p.totalStock}',
-                    style: const TextStyle(
-                        fontSize: 10, color: Color(0xFF9CA3AF))),
+                    style: AppTextStyles.micro
+                        .copyWith(color: const Color(0xFF9CA3AF))),
               ]),
             ),
           );
@@ -555,8 +573,7 @@ class _RecipientsStep extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: Text(l.catShareOtherNumber.toUpperCase(),
-              style: TextStyle(
-                  fontSize: 10,
+              style: AppTextStyles.microBold.copyWith(
                   fontWeight: FontWeight.w800,
                   letterSpacing: 0.6,
                   color: AppColors.textHint)),
@@ -584,8 +601,8 @@ class _RecipientsStep extends StatelessWidget {
                 elevation: 0,
               ),
               child: Text(l.catShareAddBtn,
-                  style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.w700)),
+                  style: AppTextStyles.bodySmBold
+                      .copyWith(color: Colors.white)),
             ),
           ]),
         ),
@@ -593,8 +610,8 @@ class _RecipientsStep extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
             child: Text(phoneError!,
-                style: TextStyle(
-                    fontSize: 11, color: AppColors.error)),
+                style: AppTextStyles.captionHint
+                    .copyWith(color: AppColors.error)),
           ),
         // Chip-list des numéros libres ajoutés.
         if (freeRecipients.isNotEmpty)
@@ -606,7 +623,8 @@ class _RecipientsStep extends StatelessWidget {
                 for (final r in freeRecipients)
                   Chip(
                     label: Text(r.phoneE164,
-                        style: const TextStyle(fontSize: 11)),
+                        style: AppTextStyles.captionHint
+                            .copyWith(color: AppColors.textPrimary)),
                     deleteIcon:
                         const Icon(Icons.close_rounded, size: 14),
                     onDeleted: () => onRemoveFree(r.id),
@@ -627,25 +645,22 @@ class _RecipientsStep extends StatelessWidget {
           child: Row(children: [
             Expanded(
               child: Text('CLIENTS',
-                  style: TextStyle(
-                      fontSize: 10,
+                  style: AppTextStyles.microBold.copyWith(
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.6,
                       color: AppColors.textHint)),
             ),
             Text('$totalSelected/$maxRecipients',
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textHint)),
+                style: AppTextStyles.captionBold
+                    .copyWith(color: AppColors.textHint)),
           ]),
         ),
         if (clientsWithPhone.isEmpty)
           Padding(
             padding: const EdgeInsets.all(24),
             child: Center(child: Text('Aucun client avec téléphone',
-                style: TextStyle(
-                    fontSize: 12, color: AppColors.textHint))),
+                style: AppTextStyles.bodySm
+                    .copyWith(color: AppColors.textHint))),
           )
         else
           for (final c in clientsWithPhone)
@@ -695,12 +710,11 @@ class _ClientRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(client.name,
-                    style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w600),
+                    style: AppTextStyles.bodyBold,
                     maxLines: 1, overflow: TextOverflow.ellipsis),
                 Text(client.phone ?? '',
-                    style: const TextStyle(
-                        fontSize: 11, color: Color(0xFF9CA3AF))),
+                    style: AppTextStyles.captionHint
+                        .copyWith(color: const Color(0xFF9CA3AF))),
               ],
             )),
           ]),
@@ -740,8 +754,7 @@ class _SendStep extends StatelessWidget {
       children: [
         // Aperçu message éditable.
         Text('MESSAGE',
-            style: TextStyle(
-                fontSize: 10,
+            style: AppTextStyles.microBold.copyWith(
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.6,
                 color: AppColors.textHint)),
@@ -750,7 +763,7 @@ class _SendStep extends StatelessWidget {
           controller: messageCtrl,
           maxLines: 5,
           minLines: 3,
-          style: const TextStyle(fontSize: 13, height: 1.4),
+          style: AppTextStyles.body.copyWith(height: 1.4),
           decoration: InputDecoration(
             hintText: 'Message catalogue...',
             filled: true,
@@ -784,8 +797,7 @@ class _SendStep extends StatelessWidget {
             Expanded(
               child: Text(
                   shareUrlShort ? shareUrl! : l.catShareShortenerError,
-                  style: TextStyle(
-                      fontSize: 10,
+                  style: AppTextStyles.micro.copyWith(
                       color: shareUrlShort
                           ? AppColors.textHint
                           : AppColors.warning),
@@ -800,8 +812,8 @@ class _SendStep extends StatelessWidget {
               onPressed: onCopy,
               icon: const Icon(Icons.copy_rounded, size: 14),
               label: Text(l.catShareCopyBtn,
-                  style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.w600)),
+                  style: AppTextStyles.bodySmBold
+                      .copyWith(color: AppColors.primary)),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.primary,
                 side: BorderSide(
@@ -818,16 +830,13 @@ class _SendStep extends StatelessWidget {
           Expanded(
             child: Text('${l.catShareRecipients.toUpperCase()} '
                 '(${recipients.length})',
-                style: TextStyle(
-                    fontSize: 10,
+                style: AppTextStyles.microBold.copyWith(
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.6,
                     color: AppColors.textHint)),
           ),
           Text(l.catShareCounter(sentIds.length, recipients.length),
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
+              style: AppTextStyles.captionBold.copyWith(
                   color: sentIds.length == recipients.length
                       && recipients.isNotEmpty
                       ? AppColors.secondary
@@ -886,12 +895,11 @@ class _RecipientRow extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(recipient.name,
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w700),
+                style: AppTextStyles.bodySmBold,
                 maxLines: 1, overflow: TextOverflow.ellipsis),
             Text(recipient.phoneE164,
-                style: const TextStyle(
-                    fontSize: 10, color: Color(0xFF9CA3AF))),
+                style: AppTextStyles.micro
+                    .copyWith(color: const Color(0xFF9CA3AF))),
           ],
         )),
         // Bouton "Envoyer" via Link target=blank — sur web, contourne le
@@ -911,8 +919,8 @@ class _RecipientRow extends StatelessWidget {
                 sent ? Icons.check_rounded : Icons.send_rounded,
                 size: 12),
             label: Text(sent ? l.catShareSentBadge : l.catShareSendBtn,
-                style: const TextStyle(
-                    fontSize: 11, fontWeight: FontWeight.w700)),
+                style: AppTextStyles.captionBold
+                    .copyWith(color: Colors.white)),
             style: ElevatedButton.styleFrom(
               backgroundColor:
                   sent ? AppColors.secondary : const Color(0xFF25D366),
@@ -959,8 +967,8 @@ class _FooterBtn extends StatelessWidget {
               ? Icon(icon, size: 16)
               : const SizedBox.shrink(),
           label: Text(label,
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w700)),
+              style: AppTextStyles.bodyBold
+                  .copyWith(color: Colors.white)),
           style: ElevatedButton.styleFrom(
             backgroundColor: color ?? AppColors.primary,
             foregroundColor: Colors.white,

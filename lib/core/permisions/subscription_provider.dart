@@ -41,6 +41,10 @@ class SubscriptionNotifier extends StateNotifier<AsyncValue<UserPlan>> {
         final isSuperAdmin =
             profile?['is_super_admin'] as bool? ?? false;
         if (isSuperAdmin) {
+          // Synchronise le cache lu par AppDatabase.isSubscriptionFrozen
+          // (super-admin → jamais gelé).
+          await AppDatabase.cachePlanMap(
+              uid, UserPlan.superAdmin().toMap());
           state = AsyncValue.data(UserPlan.superAdmin());
           return;
         }
@@ -50,11 +54,18 @@ class SubscriptionNotifier extends StateNotifier<AsyncValue<UserPlan>> {
             .rpc('get_user_plan', params: {'p_user_id': uid});
 
         if (result == null || (result as List).isEmpty) {
+          // Aucun abonnement actif → on persiste un plan "vide" pour que
+          // le verrou (AppDatabase) gèle l'app immédiatement, et qu'un
+          // renouvellement (qui repassera ici avec un résultat) le lève.
+          await AppDatabase.cachePlanMap(uid, UserPlan.empty().toMap());
           state = AsyncValue.data(UserPlan.empty());
           return;
         }
 
         final map = Map<String, dynamic>.from(result[0] as Map);
+        // Rafraîchit le cache plan lu par le verrou abonnement : c'est
+        // CE point qui « dégèle » l'app juste après un renouvellement.
+        await AppDatabase.cachePlanMap(uid, map);
         state = AsyncValue.data(UserPlan.fromMap(map));
         return;
       } catch (_) {
@@ -114,6 +125,18 @@ final currentPlanProvider = Provider<UserPlan>((ref) {
   return ref.watch(subscriptionProvider).valueOrNull ?? UserPlan.empty();
 });
 
+/// `true` quand l'abonnement est GELÉ : expiré/inactif, hors super-admin,
+/// et hors état de chargement (fail-open : pendant le chargement du plan
+/// → `false`, on ne grise jamais par erreur). Miroir UI de
+/// `AppDatabase.isSubscriptionFrozen`. Sert à désactiver/griser les menus
+/// d'action « ⋮ » (le menu AppBar `AppOverflowMenu` reste, lui, actif).
+final subscriptionFrozenProvider = Provider<bool>((ref) {
+  final plan = ref.watch(subscriptionProvider).valueOrNull;
+  if (plan == null) return false;        // loading / error → fail-open
+  if (plan.isSuperAdmin) return false;
+  return !plan.isActive;
+});
+
 // ─── Provider permissions pour une boutique donnée ───────────────────────────
 
 final permissionsProvider = Provider.family<AppPermissions, String>(
@@ -138,11 +161,13 @@ final permissionsProvider = Provider.family<AppPermissions, String>(
     // vide ou absente.
     final uid = Supabase.instance.client.auth.currentUser?.id;
     bool isShopOwner = false;
+    int  shopCount   = 0;
     if (uid != null) {
       final shop = LocalStorageService.getShop(shopId);
       if (shop != null && shop.ownerId == uid) {
         isShopOwner = true;
       }
+      shopCount = LocalStorageService.getShopsForUser(uid).length;
     }
 
     return AppPermissions(
@@ -150,6 +175,7 @@ final permissionsProvider = Provider.family<AppPermissions, String>(
       shopRole:           shopRole,
       customPermissions:  custom,
       isShopOwner:        isShopOwner,
+      isMultiStore:       shopCount > 1,
     );
   },
 );

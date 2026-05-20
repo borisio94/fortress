@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../bloc/shop_selector_bloc.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/country_phone_data.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/widgets/fortress_logo.dart';
@@ -29,6 +30,7 @@ class EditShopPage extends ConsumerStatefulWidget {
 class _EditShopPageState extends ConsumerState<EditShopPage> {
   final _nameCtrl  = TextEditingController();
   final _phoneCtrl = TextEditingController();
+  final _waCtrl    = TextEditingController();
   final _emailCtrl = TextEditingController();
 
   String _sector   = 'retail';
@@ -40,7 +42,7 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
   bool _initialized = false;
 
   // Valeurs d'origine — pour détecter les vraies modifications
-  late String _origName, _origSector, _origPhone, _origEmail;
+  late String _origName, _origSector, _origPhone, _origWa, _origEmail;
 
   // Magasin parent (warehouse) + source de la boutique
   List<StockLocation> _warehouses = [];
@@ -85,6 +87,7 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
     if (_initialized) return;
     _nameCtrl.text  = s.name;
     _phoneCtrl.text = s.phone ?? '';
+    _waCtrl.text    = s.whatsappPhone ?? '';
     _emailCtrl.text = s.email ?? '';
     _sector   = s.sector;
     _country  = s.country;
@@ -92,6 +95,7 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
     _origName   = s.name;
     _origSector = s.sector;
     _origPhone  = s.phone ?? '';
+    _origWa     = s.whatsappPhone ?? '';
     _origEmail  = s.email ?? '';
     _initialized = true;
 
@@ -105,6 +109,7 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
   void dispose() {
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
+    _waCtrl.dispose();
     _emailCtrl.dispose();
     super.dispose();
   }
@@ -129,6 +134,7 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
       _nameCtrl.text.trim()  != _origName.trim()   ||
       _sector                != _origSector        ||
       _phoneCtrl.text.trim() != _origPhone.trim()  ||
+      _waCtrl.text.trim()    != _origWa.trim()     ||
       _emailCtrl.text.trim() != _origEmail.trim()  ||
       (_parentWarehouseId ?? '') != (_origParentWarehouseId ?? '');
 
@@ -136,6 +142,7 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
       _nameCtrl.text.trim()  != _origName.trim()   ||
       _sector                != _origSector        ||
       _phoneCtrl.text.trim() != _origPhone.trim()  ||
+      _waCtrl.text.trim()    != _origWa.trim()     ||
       _emailCtrl.text.trim() != _origEmail.trim();
 
   bool get _hasParentChange =>
@@ -149,6 +156,7 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
   UpdateShopParams _buildParams() {
     final name  = _nameCtrl.text.trim();
     final phone = _phoneCtrl.text.trim();
+    final wa    = _waCtrl.text.trim();
     final email = _emailCtrl.text.trim();
     return UpdateShopParams(
       shopId:   widget.shopId,
@@ -156,6 +164,7 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
       sector:   _sector != _origSector      ? _sector : null,
       // Pays/monnaie non modifiables ici (cohérent avec CreateShopPage)
       phone:    phone != _origPhone.trim()  ? phone : null,
+      whatsappPhone: wa != _origWa.trim()   ? wa : null,
       email:    email != _origEmail.trim()  ? email : null,
     );
   }
@@ -331,16 +340,15 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
                             ),
                           ),
                           const SizedBox(height: 14),
-                          const Center(child: Text('Modifier la boutique',
-                              style: TextStyle(
-                                  fontSize: 19,
+                          Center(child: Text('Modifier la boutique',
+                              style: AppTextStyles.title.copyWith(
                                   fontWeight: FontWeight.w800,
-                                  color: Color(0xFF0F172A)))),
+                                  color: const Color(0xFF0F172A)))),
                           const SizedBox(height: 4),
-                          const Center(child: Text(
+                          Center(child: Text(
                               'Mettez à jour les informations de votre boutique',
-                              style: TextStyle(
-                                  fontSize: 12, color: Color(0xFF6B7280)))),
+                              style: AppTextStyles.bodySm.copyWith(
+                                  color: const Color(0xFF6B7280)))),
                           const SizedBox(height: 28),
 
                           // ── Nom boutique ─────────────────────────
@@ -375,6 +383,27 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
                               controller: _phoneCtrl,
                               isPhone: true,
                               onPhoneChanged: (_, __) => setState(() {}),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+
+                          // ── Numéro WhatsApp dédié ────────────────
+                          AppLabeledField(
+                            label: 'Numéro WhatsApp (commandes)',
+                            child: AppField(
+                              controller: _waCtrl,
+                              isPhone: true,
+                              onPhoneChanged: (_, __) => setState(() {}),
+                            ),
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.only(top: 4, left: 2),
+                            child: Text(
+                              'Numéro qui reçoit les conversations du '
+                              'catalogue et des commandes. Laisser vide '
+                              'pour utiliser le téléphone de la boutique.',
+                              style: TextStyle(
+                                  fontSize: 11, color: Color(0xFF9CA3AF)),
                             ),
                           ),
                           const SizedBox(height: 14),
@@ -416,8 +445,7 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
                             child: GestureDetector(
                               onTap: () => context.pop(),
                               child: Text('← Annuler',
-                                  style: TextStyle(
-                                      fontSize: 12,
+                                  style: AppTextStyles.bodySm.copyWith(
                                       color: AppColors.primary,
                                       fontWeight: FontWeight.w500)),
                             ),
@@ -432,7 +460,7 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
             Positioned(
               top: 12, right: 16,
               child: SafeArea(child: LanguageSwitcher(
-                  backgroundColor: Colors.white.withOpacity(0.92))),
+                  backgroundColor: Colors.white.withValues(alpha:0.92))),
             ),
           ]);
         },
@@ -458,16 +486,16 @@ class _CountryInfo extends StatelessWidget {
     decoration: BoxDecoration(
       color: AppColors.primarySurface,
       borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+      border: Border.all(color: AppColors.primary.withValues(alpha:0.2)),
     ),
     child: Row(children: [
       Icon(Icons.public_rounded, size: 14, color: AppColors.primary),
       const SizedBox(width: 8),
       Expanded(child: Text(_label,
-          style: TextStyle(fontSize: 12,
+          style: AppTextStyles.bodySm.copyWith(
               color: AppColors.primary, fontWeight: FontWeight.w500))),
       Icon(Icons.lock_outline_rounded,
-          size: 12, color: AppColors.primary.withOpacity(0.4)),
+          size: 12, color: AppColors.primary.withValues(alpha:0.4)),
     ]),
   );
 }
@@ -481,7 +509,8 @@ class _ErrText extends StatelessWidget {
     child: Padding(
       padding: const EdgeInsets.only(top: 4, left: 2),
       child: Text(message,
-          style: const TextStyle(fontSize: 10, color: Color(0xFFEF4444))),
+          style: AppTextStyles.micro.copyWith(
+              color: const Color(0xFFEF4444))),
     ),
   );
 }
@@ -514,7 +543,7 @@ class _SectorPicker extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color: selected
-                ? color.withOpacity(0.10) : const Color(0xFFF9FAFB),
+                ? color.withValues(alpha:0.10) : const Color(0xFFF9FAFB),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: selected ? color : const Color(0xFFE5E7EB),
@@ -525,8 +554,7 @@ class _SectorPicker extends StatelessWidget {
             Icon(icon, size: 15,
                 color: selected ? color : const Color(0xFF9CA3AF)),
             const SizedBox(width: 6),
-            Text(label, style: TextStyle(
-                fontSize: 12,
+            Text(label, style: AppTextStyles.bodySm.copyWith(
                 fontWeight:
                 selected ? FontWeight.w600 : FontWeight.normal,
                 color: selected ? color : const Color(0xFF6B7280))),
@@ -562,12 +590,12 @@ class _WarehousePicker extends StatelessWidget {
           const Icon(Icons.info_outline_rounded,
               size: 14, color: Color(0xFF9CA3AF)),
           const SizedBox(width: 8),
-          const Expanded(
+          Expanded(
             child: Text(
                 'Aucun magasin créé. Va dans Paramètres → Emplacements de stock '
                 'pour créer un magasin central qui approvisionnera cette boutique.',
-                style: TextStyle(fontSize: 11,
-                    height: 1.35, color: Color(0xFF6B7280))),
+                style: AppTextStyles.caption.copyWith(
+                    color: const Color(0xFF6B7280))),
           ),
         ]),
       );
@@ -577,11 +605,12 @@ class _WarehousePicker extends StatelessWidget {
     // dans les Row de DropdownMenuItem (casse la mesure quand le dropdown
     // n'a pas encore de contraintes de largeur).
     final items = <DropdownMenuItem<String?>>[
-      const DropdownMenuItem<String?>(
+      DropdownMenuItem<String?>(
         value: null,
         child: Text('— Aucun (boutique indépendante) —',
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 13, color: Color(0xFF6B7280))),
+            style: AppTextStyles.body.copyWith(
+                color: const Color(0xFF6B7280))),
       ),
       ...warehouses.map((w) => DropdownMenuItem<String?>(
             value: w.id,
@@ -593,8 +622,8 @@ class _WarehousePicker extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(w.name,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13,
-                        color: Color(0xFF0F172A))),
+                    style: AppTextStyles.body.copyWith(
+                        color: const Color(0xFF0F172A))),
               ],
             ),
           )),

@@ -21,8 +21,22 @@ import '../../features/caisse/domain/entities/sale.dart' show PaymentMethod;
 import '../../features/auth/data/models/user_model.dart';
 import '../services/activity_log_service.dart';
 import '../services/pending_image_upload_service.dart';
+import '../permisions/user_plan.dart';
 
 typedef OnDataChanged = void Function(String table, String shopId);
+
+/// Levée par toute écriture utilisateur quand l'abonnement du compte
+/// courant est expiré/inactif (gel total : consultation seule, seul le
+/// renouvellement est possible). Son message s'affiche tel quel dans les
+/// SnackBars/dialogs d'erreur existants (les call sites font déjà
+/// `catch (e) => showError(e.toString())`).
+class SubscriptionFrozenException implements Exception {
+  const SubscriptionFrozenException();
+  @override
+  String toString() =>
+      'Abonnement expiré — renouvelez votre forfait pour effectuer '
+      'cette action.';
+}
 
 // ─── Résultat d'une invitation ────────────────────────────────────────────────
 enum InviteOutcome {
@@ -48,8 +62,25 @@ class AppDatabase {
   static String? get _userId => Supabase.instance.client.auth.currentUser?.id;
 
   StreamSubscription? _connectivitySub;
+  Timer? _queueFlushTimer;
   bool _syncing  = false;
   bool _isOnline = false;
+
+  /// Vrai si l'un des résultats connectivity_plus indique une interface
+  /// réseau utilisable. IMPORTANT : sur **web**, connectivity_plus renvoie
+  /// fréquemment `ConnectivityResult.other` (Safari sans Network
+  /// Information API, etc.) au lieu de `wifi/ethernet` → l'ancien prédicat
+  /// (wifi|mobile|ethernet) classait le web comme HORS-LIGNE en
+  /// permanence, donc toutes les écritures partaient en file offline et
+  /// n'étaient flushées que par hasard (délai 15–290 s). On considère
+  /// `other` et `vpn` comme connectés : si c'est en réalité hors-ligne,
+  /// `_executeOp` échouera et remettra l'op en file (filet de sécurité).
+  static bool _hasNetInterface(List<ConnectivityResult> r) => r.any((x) =>
+      x == ConnectivityResult.wifi ||
+      x == ConnectivityResult.mobile ||
+      x == ConnectivityResult.ethernet ||
+      x == ConnectivityResult.vpn ||
+      x == ConnectivityResult.other);
   final Map<String, RealtimeChannel> _channels  = {};
   final List<OnDataChanged>          _listeners = [];
 
@@ -83,6 +114,11 @@ class AppDatabase {
   /// Supabase soit la source de vérité).
   final Map<String, int> _recentLocalStockLevelWrites = {};
 
+  /// Idem pour le livre de comptes partenaires (id entrée → timestamp ms).
+  /// Cf. [_kLedgerEchoKey]. Empêche la purge passthrough d'effacer une
+  /// entrée locale dont le push n'est pas encore confirmé côté Supabase.
+  final Map<String, int> _recentLocalLedgerWrites = {};
+
   /// Tombstones persistants des produits supprimés localement mais dont
   /// la propagation Supabase peut ne pas être encore confirmée (DELETE
   /// en queue, RLS rejet, conflit avec un push concurrent d'un autre
@@ -102,6 +138,22 @@ class AppDatabase {
   static const int _kDeletedProductsTtlMs = 7 * 24 * 60 * 60 * 1000;
   static const String _kStockLevelEchoKey = '_recent_stock_level_writes';
   static const int _kStockLevelEchoTtlMs = 60 * 60 * 1000;
+  /// Échos d'écritures locales du livre partenaire (id → timestamp ms).
+  /// Protège une entrée fraîchement créée/modifiée de la PURGE
+  /// `_syncTablePassthrough` tant que son push Supabase n'est pas confirmé
+  /// — y compris pendant un push ONLINE en vol (qui ne passe PAS par la
+  /// file offline, d'où l'insuffisance du seul garde-fou pendingIds en
+  /// web). TTL 24 h (financier → marge large). Persisté en settingsBox
+  /// pour survivre à un reload navigateur.
+  static const String _kLedgerEchoKey = '_recent_partner_ledger_writes';
+  static const int _kLedgerEchoTtlMs = 24 * 60 * 60 * 1000;
+  /// Tombstones d'entrées du livre partenaire supprimées localement.
+  /// Le modèle est fusion-seule + re-push : sans tombstone, une entrée
+  /// supprimée serait RE-POUSSÉE par tout appareil dont le Hive la
+  /// contient encore (résurrection). Le tombstone bloque la ré-écriture
+  /// Hive ET le re-push pour cet id. TTL 30 j (large — financier).
+  static const String _kDeletedLedgerKey = '_deleted_partner_ledger_pending';
+  static const int _kDeletedLedgerTtlMs = 30 * 24 * 60 * 60 * 1000;
 
   static void addListener(OnDataChanged cb)    => _i._listeners.add(cb);
   static void removeListener(OnDataChanged cb) => _i._listeners.remove(cb);
@@ -219,6 +271,50 @@ class AppDatabase {
     return map != null ? Map<String, dynamic>.from(map as Map) : null;
   }
 
+  /// Verrou abonnement. `true` UNIQUEMENT si on SAIT positivement que
+  /// l'abonnement du compte courant est expiré/inactif.
+  ///
+  /// Fail-open volontaire — retourne `false` (donc on laisse écrire) si :
+  ///   - personne n'est connecté ;
+  ///   - le plan n'est pas encore mis en cache (juste après login) ;
+  ///   - super-admin ;
+  ///   - le moindre doute / erreur.
+  /// Ainsi on ne bloque JAMAIS par erreur un client en règle ; on ne gèle
+  /// que lorsque le plan caché dit explicitement « inactif/expiré ».
+  static bool get isSubscriptionFrozen {
+    try {
+      final uid = _db.auth.currentUser?.id;
+      if (uid == null) return false;
+      final prof = getCachedProfile(uid);
+      if (prof != null && prof['is_super_admin'] == true) return false;
+      final planMap = getCachedPlan(uid);
+      if (planMap == null) return false;
+      final plan = UserPlan.fromMap(planMap);
+      if (plan.isSuperAdmin) return false;
+      return !plan.isActive;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Met à jour le cache plan local lu par [isSubscriptionFrozen]. À
+  /// appeler après CHAQUE lecture fraîche de `get_user_plan` (login,
+  /// renouvellement) pour que le verrou abonnement reflète l'état réel —
+  /// sinon l'app resterait gelée même après un paiement valide.
+  static Future<void> cachePlanMap(
+      String userId, Map<String, dynamic> map) async {
+    try {
+      await HiveBoxes.settingsBox.put('user_plan_$userId', map);
+    } catch (_) {}
+  }
+
+  /// À appeler en tête de chaque méthode d'écriture utilisateur. Lève
+  /// [SubscriptionFrozenException] si l'abonnement est gelé → rien n'est
+  /// écrit (ni Hive ni cloud) et l'UI affiche le message de renouvellement.
+  static void _assertNotFrozen() {
+    if (isSubscriptionFrozen) throw const SubscriptionFrozenException();
+  }
+
   // ══ INIT ══════════════════════════════════════════════════════════
 
   static Future<void> init() async {
@@ -228,11 +324,19 @@ class AppDatabase {
     // L'état d'interface de connectivity_plus suffit pour l'init ;
     // les opérations qui ont besoin d'une vérif réelle appellent isOnline().
     final results = await Connectivity().checkConnectivity();
-    _i._isOnline = results.any((r) =>
-        r == ConnectivityResult.wifi ||
-        r == ConnectivityResult.mobile ||
-        r == ConnectivityResult.ethernet);
+    _i._isOnline = _hasNetInterface(results);
     _i._listenConnectivity();
+    // Filet de sécurité : flush périodique de la file offline. Sans ça,
+    // un flush n'a lieu QUE sur une transition offline→online de
+    // connectivity_plus (rare sur web/connexion stable) → des écritures
+    // pouvaient rester en file plusieurs minutes. 20 s borne le délai.
+    _i._queueFlushTimer?.cancel();
+    _i._queueFlushTimer = Timer.periodic(
+      const Duration(seconds: 20),
+      (_) {
+        if (_i._isOnline) unawaited(flushOfflineQueue());
+      },
+    );
     // Purge unique des entrées notifications au format historique
     // (id aléatoire pré-déterministe). Cf. NotificationService.notify
     // qui utilise désormais `kind|targetId|shopId` pour écraser au lieu
@@ -280,6 +384,19 @@ class AppDatabase {
             Map<String, int>.from(_i._recentLocalStockLevelWrites));
       }
 
+      // Échos livre partenaire : recharger en mémoire (filtre TTL 24 h).
+      final rawLed = box.get(_kLedgerEchoKey);
+      if (rawLed is Map) {
+        for (final e in rawLed.entries) {
+          final ts = e.value is num ? (e.value as num).toInt() : 0;
+          if (now - ts < _kLedgerEchoTtlMs) {
+            _i._recentLocalLedgerWrites[e.key.toString()] = ts;
+          }
+        }
+        await box.put(_kLedgerEchoKey,
+            Map<String, int>.from(_i._recentLocalLedgerWrites));
+      }
+
       // Tombstones produits : purge des entrées expirées.
       final rawDel = box.get(_kDeletedProductsKey);
       if (rawDel is Map) {
@@ -289,8 +406,50 @@ class AppDatabase {
         await box.put(_kDeletedProductsKey, m);
         debugPrint('[DB] Tombstones produits actifs: ${m.length}');
       }
+
+      // Tombstones livre partenaire : purge des entrées expirées (30 j).
+      final rawLedDel = box.get(_kDeletedLedgerKey);
+      if (rawLedDel is Map) {
+        final m = Map<String, dynamic>.from(rawLedDel);
+        m.removeWhere((_, ts) => ts is! num
+            || now - ts.toInt() > _kDeletedLedgerTtlMs);
+        await box.put(_kDeletedLedgerKey, m);
+        debugPrint('[DB] Tombstones livre partenaire actifs: ${m.length}');
+      }
     } catch (e) {
       debugPrint('[DB] _bootstrapAntiStaleMarkers error: $e');
+    }
+  }
+
+  /// Marque une entrée du livre partenaire comme supprimée localement.
+  /// Empêche `syncPartnerLedger` (pull + re-push) et le realtime de la
+  /// ressusciter avant/ après propagation du DELETE. TTL 30 j.
+  static Future<void> markLedgerDeletionPending(String entryId) async {
+    try {
+      final box = HiveBoxes.settingsBox;
+      final raw = box.get(_kDeletedLedgerKey);
+      final m = raw is Map
+          ? Map<String, dynamic>.from(raw)
+          : <String, dynamic>{};
+      m[entryId] = DateTime.now().millisecondsSinceEpoch;
+      await box.put(_kDeletedLedgerKey, m);
+    } catch (e) {
+      debugPrint('[DB] markLedgerDeletionPending error: $e');
+    }
+  }
+
+  /// L'entrée livre partenaire est-elle tombstone (suppression en attente
+  /// de propagation, dans le TTL) ?
+  static bool _isLedgerDeletionPending(String entryId) {
+    try {
+      final raw = HiveBoxes.settingsBox.get(_kDeletedLedgerKey);
+      if (raw is! Map) return false;
+      final ts = raw[entryId];
+      if (ts is! num) return false;
+      final age = DateTime.now().millisecondsSinceEpoch - ts.toInt();
+      return age < _kDeletedLedgerTtlMs;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -349,14 +508,28 @@ class AppDatabase {
     } catch (_) {/* best effort */}
   }
 
+  /// Marque une entrée du livre partenaire comme écrite localement (création
+  /// ou modification). Tant qu'elle est dans la fenêtre TTL [_kLedgerEchoTtlMs],
+  /// `_syncTablePassthrough` ne la purgera PAS même si elle n'est pas encore
+  /// présente côté Supabase (push online en vol, échec transitoire, reload
+  /// web avant flush). Corrige le « solde partenaire qui revient » en web.
+  static Future<void> markLocalLedgerWrite(String entryId) async {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    _i._recentLocalLedgerWrites[entryId] = nowMs;
+    _i._recentLocalLedgerWrites.removeWhere(
+        (_, ts) => nowMs - ts > _kLedgerEchoTtlMs);
+    try {
+      await HiveBoxes.settingsBox.put(
+          _kLedgerEchoKey,
+          Map<String, int>.from(_i._recentLocalLedgerWrites));
+    } catch (_) {/* best effort */}
+  }
+
   void _listenConnectivity() {
     _connectivitySub?.cancel();
     _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
       final wasOnline = _isOnline;
-      _isOnline = results.any((r) =>
-      r == ConnectivityResult.wifi ||
-          r == ConnectivityResult.mobile ||
-          r == ConnectivityResult.ethernet);
+      _isOnline = _hasNetInterface(results);
 
       if (!wasOnline && _isOnline) {
         debugPrint('[DB] ✅ Réseau rétabli');
@@ -414,6 +587,8 @@ class AppDatabase {
 
   static void dispose() {
     _i._connectivitySub?.cancel();
+    _i._queueFlushTimer?.cancel();
+    _i._queueFlushTimer = null;
     _i._channels.forEach((_, ch) => ch.unsubscribe());
     _i._channels.clear();
   }
@@ -590,11 +765,10 @@ class AppDatabase {
   /// Appelé au `subscribeToShop` — idempotent, safe à rappeler.
   /// Fire-and-forget : n'attend pas, ne bloque pas l'UI.
   static Future<void> _initialPullForShop(String shopId) async {
-    // stock_locations + stock_levels en TÊTE DE FILE : si un sync ultérieur
-    // (typiquement syncProducts → migrateShopStocksToLocationsV1) hang sur
-    // web, on ne perd pas la sync des niveaux de stock partenaires —
-    // requis pour que le filtre « Vue partenaire » affiche les produits
-    // transférés depuis un autre appareil.
+    // ── PHASE 1 (séquentielle, OBLIGATOIRE en tête) ──────────────────────
+    // stock_locations puis stock_levels DOIVENT précéder syncProducts
+    // (→ migrateShopStocksToLocationsV1) et scanStockNotifications. Seule
+    // vraie dépendance d'ordre du pull initial.
     try {
       await syncStockLocations();
     } catch (e) { debugPrint('[DB] initial syncStockLocations: $e'); }
@@ -602,57 +776,56 @@ class AppDatabase {
       await syncStockLevels(shopId);
       _notify('stock_levels', shopId);
     } catch (e) { debugPrint('[DB] initial syncStockLevels: $e'); }
-    try {
-      await syncClients(shopId);
-      _notify('clients', shopId);
-    } catch (e) { debugPrint('[DB] initial syncClients: $e'); }
-    try {
-      await syncProducts(shopId);
-      _notify('products', shopId);
-      // Une fois les produits synchronisés, on rejoue les alertes stock pour
-      // les produits déjà bas/épuisés (le Realtime ne notifie que les changements
-      // futurs).
-      scanStockNotifications(shopId);
-    } catch (e) { debugPrint('[DB] initial syncProducts: $e'); }
-    try {
-      await syncOrders(shopId);
-      _notify('orders', shopId);
-    } catch (e) { debugPrint('[DB] initial syncOrders: $e'); }
-    try {
-      await syncExpenses(shopId);
-      _notify('expenses', shopId);
-    } catch (e) { debugPrint('[DB] initial syncExpenses: $e'); }
-    try {
-      await syncMetadata(shopId);
-    } catch (e) { debugPrint('[DB] initial syncMetadata: $e'); }
-    try {
-      await syncSuppliers(shopId);
-    } catch (e) { debugPrint('[DB] initial syncSuppliers: $e'); }
-    try {
-      await syncIncidents(shopId);
-    } catch (e) { debugPrint('[DB] initial syncIncidents: $e'); }
-    try {
-      await syncStockMovements(shopId);
-    } catch (e) { debugPrint('[DB] initial syncStockMovements: $e'); }
-    try {
-      await syncReceptions(shopId);
-    } catch (e) { debugPrint('[DB] initial syncReceptions: $e'); }
-    try {
-      await syncPurchaseOrders(shopId);
-    } catch (e) { debugPrint('[DB] initial syncPurchaseOrders: $e'); }
-    try {
-      await syncStockArrivals(shopId);
-    } catch (e) { debugPrint('[DB] initial syncStockArrivals: $e'); }
-    try {
-      await syncDeliveryTransfers(shopId);
-    } catch (e) { debugPrint('[DB] initial syncDeliveryTransfers: $e'); }
-    try {
-      await syncPartnerLedger(shopId);
-    } catch (e) { debugPrint('[DB] initial syncPartnerLedger: $e'); }
-    try {
-      await syncActivityLogs(shopId);
-      _notify('activity_logs', shopId);
-    } catch (e) { debugPrint('[DB] initial syncActivityLogs: $e'); }
+
+    // ── PHASE 2 (PARALLÈLE) ──────────────────────────────────────────────
+    // Toutes ces synchros écrivent dans des box Hive distinctes et
+    // indépendantes → on les lance en parallèle. Le temps total passe de
+    // « somme des pulls » (~5-6 s) à « durée du pull le plus lent »
+    // (~1-2 s). Chaque tâche est isolée en try/catch (un échec n'affecte
+    // pas les autres) et notifie l'UI dès que SA table est arrivée
+    // (rafraîchissement progressif).
+    Future<void> task(String name, Future<void> Function() body) async {
+      try {
+        await body();
+      } catch (e) {
+        debugPrint('[DB] initial $name: $e');
+      }
+    }
+
+    await Future.wait<void>([
+      task('syncClients', () async {
+        await syncClients(shopId);
+        _notify('clients', shopId);
+      }),
+      task('syncPartnerLedger', () => syncPartnerLedger(shopId)),
+      task('syncProducts', () async {
+        await syncProducts(shopId);
+        _notify('products', shopId);
+        // Rejoue les alertes stock pour les produits déjà bas/épuisés
+        // (le Realtime ne notifie que les changements futurs).
+        scanStockNotifications(shopId);
+      }),
+      task('syncOrders', () async {
+        await syncOrders(shopId);
+        _notify('orders', shopId);
+      }),
+      task('syncExpenses', () async {
+        await syncExpenses(shopId);
+        _notify('expenses', shopId);
+      }),
+      task('syncMetadata', () => syncMetadata(shopId)),
+      task('syncSuppliers', () => syncSuppliers(shopId)),
+      task('syncIncidents', () => syncIncidents(shopId)),
+      task('syncStockMovements', () => syncStockMovements(shopId)),
+      task('syncReceptions', () => syncReceptions(shopId)),
+      task('syncPurchaseOrders', () => syncPurchaseOrders(shopId)),
+      task('syncStockArrivals', () => syncStockArrivals(shopId)),
+      task('syncDeliveryTransfers', () => syncDeliveryTransfers(shopId)),
+      task('syncActivityLogs', () async {
+        await syncActivityLogs(shopId);
+        _notify('activity_logs', shopId);
+      }),
+    ]);
   }
 
   Future<void> _onProductChange(PostgresChangePayload p, String shopId) async {
@@ -787,11 +960,7 @@ class AppDatabase {
     try {
       // connectivity_plus vérifie l'interface réseau (peut donner faux positifs)
       final r = await Connectivity().checkConnectivity();
-      final hasInterface = r.any((x) =>
-      x == ConnectivityResult.wifi ||
-          x == ConnectivityResult.mobile ||
-          x == ConnectivityResult.ethernet);
-      if (!hasInterface) return false;
+      if (!_hasNetInterface(r)) return false;
 
       // Vérification réelle : tenter un appel Supabase léger
       // Si ça répond → vraiment online
@@ -860,12 +1029,23 @@ class AppDatabase {
           continue;
         }
 
-        // Pour les critiques : log persistant à chaque palier de 10 retries
-        // pour que la queue ne soit pas vidée silencieusement.
-        if (isCritical && retries > 0 && retries % 10 == 0) {
+        // Pour les critiques : log persistant dès la 3e tentative puis à
+        // chaque palier de 10, AVEC l'erreur serveur réelle (et non un
+        // message générique « vente bloquée » trompeur). Le libellé
+        // nomme la vraie table (orders=commande, sales=vente,
+        // expenses=dépense) pour ne plus dire « vente » à tort.
+        if (isCritical && (retries == 3 || (retries > 0 && retries % 10 == 0))) {
+          final realErr = op['_last_error']?.toString();
+          final libelle = switch (table) {
+            'expenses' => 'dépense',
+            'orders'   => 'commande',
+            'sales'    => 'vente',
+            _          => table,
+          };
           _logSyncError(op,
-              'CRITIQUE — vente bloquée après $retries tentatives. '
-              'Vérifier réseau ou contacter support.');
+              'CRITIQUE — $libelle ($table) bloquée après $retries '
+              'tentatives. Cause serveur : '
+              '${realErr ?? "inconnue (voir console)"}');
         }
 
         final ok = await _executeOp(op);
@@ -995,6 +1175,10 @@ class AppDatabase {
       return true;
     } catch (e) {
       final err = e.toString();
+      // Mémorise l'erreur Postgres RÉELLE sur l'op (persistée avec elle
+      // dans la queue) → la bannière "Synchro incomplète" peut afficher
+      // la vraie cause au lieu d'un message générique.
+      op['_last_error'] = err;
       debugPrint('[DB] ✗ Op failed table=${op['table']} op=${op['op']} err=$err');
 
       // ── Erreurs PERMANENTES → supprimer de la queue (réessayer ne sert à rien)
@@ -1005,10 +1189,27 @@ class AppDatabase {
         // affichée à vie alors que tout est cohérent côté serveur.
         if (err.contains('23505')) {
           debugPrint('[DB] 23505 ignoré (idempotence) → supprimé de la queue');
-        } else {
-          debugPrint('[DB] Erreur permanente → supprimé de la queue');
-          _logSyncError(op, err); // journaliser pour débogage
+          return true;
         }
+
+        // Tables financières critiques : on n'ABANDONNE JAMAIS en silence
+        // une écriture (sinon perte d'argent invisible). On garde l'op en
+        // file (réessai + bannière "Synchro incomplète" visible) et on
+        // journalise. Le garde-fou anti-purge protège la ligne locale tant
+        // que l'op est en file → le solde ne peut plus revenir en arrière.
+        const neverDropTables = {
+          'partner_ledger_entries', 'orders', 'sales', 'expenses',
+        };
+        final failedTable = op['table'] as String? ?? '';
+        if (neverDropTables.contains(failedTable)) {
+          debugPrint('[DB] Erreur permanente sur table critique '
+              '"$failedTable" → GARDÉE en file (pas d\'abandon silencieux)');
+          _logSyncError(op, err);
+          return false;
+        }
+
+        debugPrint('[DB] Erreur permanente → supprimé de la queue');
+        _logSyncError(op, err); // journaliser pour débogage
         return true;
       }
 
@@ -1111,6 +1312,15 @@ class AppDatabase {
 
   // Écrire en arrière-plan si online, sinon enqueue
   static void _bgWrite(Map<String, dynamic> op) {
+    // Catch-all : couvre les écritures qui ne passent pas par une méthode
+    // utilisateur nommée (commandes/ventes, livre partenaire, liens
+    // courts, etc.). Gelé → on n'exécute ni ne met en file (aucune
+    // persistance cloud). Fail-open si le plan n'est pas connu.
+    if (isSubscriptionFrozen) {
+      debugPrint('[DB] ✗ écriture refusée (abonnement gelé) '
+          'table=${op['table']} op=${op['op']}');
+      return;
+    }
     if (_i._isOnline) {
       _executeOp(op).then((ok) { if (!ok) _enqueue(op); })
           .catchError((e) { _enqueue(op); });
@@ -1124,6 +1334,14 @@ class AppDatabase {
   /// jamais perdus en mode hors-ligne.
   static void bgInsert(String table, Map<String, dynamic> data) {
     _bgWrite({'table': table, 'op': 'insert', 'data': data});
+  }
+
+  /// Upsert (insert-or-update sur la PK) via la file offline. Idempotent :
+  /// un rejeu (echo realtime, double-tap, flush queue) ne provoque pas de
+  /// 23505. À privilégier sur [bgInsert] pour les écritures Hive-first
+  /// rejouables (ex: livre de comptes partenaires).
+  static void bgUpsert(String table, Map<String, dynamic> data) {
+    _bgWrite({'table': table, 'op': 'upsert', 'data': data});
   }
 
   /// Supprime une ligne par sa clé via la file offline.
@@ -1314,6 +1532,7 @@ end \$\$;""",
     required String currency, required String country,
     String? phone, String? email,
   }) async {
+    _assertNotFrozen();
     final userId = _userId;
     if (userId == null) throw Exception('Connexion requise pour créer une boutique');
 
@@ -1362,8 +1581,9 @@ end \$\$;""",
     required String shopId,
     String? name, String? sector,
     String? currency, String? country,
-    String? phone, String? email,
+    String? phone, String? whatsappPhone, String? email,
   }) async {
+    _assertNotFrozen();
     final userId = _userId;
     if (userId == null) throw Exception('Connexion requise pour modifier une boutique');
 
@@ -1381,6 +1601,10 @@ end \$\$;""",
     if (currency != null) payload['currency'] = currency;
     if (country  != null) payload['country']  = country;
     if (phone    != null) payload['phone']    = phone.trim().isEmpty ? null : phone.trim();
+    if (whatsappPhone != null) {
+      payload['whatsapp_phone'] =
+          whatsappPhone.trim().isEmpty ? null : whatsappPhone.trim();
+    }
     if (email    != null) payload['email']    = email.trim().isEmpty ? null : email.trim();
     if (payload.isEmpty) {
       final cached = LocalStorageService.getShop(shopId);
@@ -1420,7 +1644,8 @@ end \$\$;""",
         currency: cached.currency, country: cached.country,
         sector: cached.sector, isActive: active,
         todaySales: cached.todaySales, ownerId: cached.ownerId,
-        phone: cached.phone, email: cached.email,
+        phone: cached.phone, whatsappPhone: cached.whatsappPhone,
+        email: cached.email,
         createdAt: cached.createdAt, members: cached.members,
         kind: cached.kind, parentShopId: cached.parentShopId,
       );
@@ -1478,6 +1703,7 @@ end \$\$;""",
     bool skipStockLog   = false,
     bool forceStockLevelSync = false,
   }) async {
+    _assertNotFrozen();
     if (p.id == null) return;
 
     // 0bis. Cohérence stockQty ↔ variantes : quand un produit a des variantes,
@@ -1765,6 +1991,7 @@ end \$\$;""",
   }
 
   static Future<void> deleteProduct(String productId) async {
+    _assertNotFrozen();
     // Lire le shopId AVANT delete pour pouvoir notifier ensuite
     final raw = HiveBoxes.productsBox.get(productId);
     final shopId = raw is Map ? raw['store_id'] as String? : null;
@@ -1985,12 +2212,14 @@ end \$\$;""",
 
   /// Enregistre une location : Hive immédiat + bg Supabase.
   static Future<void> saveStockLocation(StockLocation loc) async {
+    _assertNotFrozen();
     await HiveBoxes.stockLocationsBox.put(loc.id, loc.toMap());
     _bgWrite({'table': 'stock_locations', 'op': 'upsert', 'data': loc.toMap()});
     _notify('stock_locations', loc.shopId ?? loc.ownerId);
   }
 
   static Future<void> deleteStockLocation(String locId) async {
+    _assertNotFrozen();
     final raw = HiveBoxes.stockLocationsBox.get(locId);
     await HiveBoxes.stockLocationsBox.delete(locId);
     _bgWrite({'table': 'stock_locations', 'op': 'delete',
@@ -2078,6 +2307,7 @@ end \$\$;""",
           .toList();
 
   static Future<void> saveStockLevel(StockLevel lvl) async {
+    _assertNotFrozen();
     await HiveBoxes.stockLevelsBox.put(lvl.id, lvl.toMap());
     // Marqueur d'écho temporel : empêche tout sync remote dans la
     // fenêtre suivante d'écraser cette valeur (cf. _recentLocalStockLevelWrites).
@@ -2147,6 +2377,7 @@ end \$\$;""",
   // ─── Stock transfers ─────────────────────────────────────────────────
 
   static Future<void> saveStockTransfer(StockTransfer t) async {
+    _assertNotFrozen();
     await HiveBoxes.stockTransfersBox.put(t.id, t.toMap());
     _bgWrite({'table': 'stock_transfers', 'op': 'upsert', 'data': t.toMap()});
     _notify('stock_transfers', t.ownerId);
@@ -2464,6 +2695,7 @@ end \$\$;""",
 
   /// Sauver ou mettre à jour une dépense (Hive immédiat + Supabase en queue).
   static Future<void> saveExpense(Expense e) async {
+    _assertNotFrozen();
     if (!Hive.isBoxOpen(HiveBoxes.expenses)) return;
     final map = _expenseToMap(e);
     await HiveBoxes.expensesBox.put(e.id, map);
@@ -2473,6 +2705,7 @@ end \$\$;""",
 
   /// Supprimer une dépense (Hive + Supabase).
   static Future<void> deleteExpense(String id, String shopId) async {
+    _assertNotFrozen();
     await HiveBoxes.expensesBox.delete(id);
     _notify('expenses', shopId);
     _bgWrite({'table': 'expenses', 'op': 'delete',
@@ -2569,13 +2802,51 @@ end \$\$;""",
         remoteIds.add(id);
         await box.put(id, Map<String, dynamic>.from(row));
       }
-      // Purge : supprimer les lignes Hive de ce shop absentes distant.
+      // Garde-fou anti-perte : on ne purge JAMAIS une ligne dont une
+      // écriture (insert/upsert) est encore en attente dans la file
+      // offline. Sans ça, une entrée créée localement mais pas encore
+      // confirmée côté Supabase (push async lent, rechargement web avant
+      // flush, reconnexion) serait effacée définitivement → perte de
+      // données financière silencieuse (bug solde partenaire qui revient).
+      final pendingIds = <String>{};
+      try {
+        for (final raw in HiveBoxes.offlineQueueBox.values) {
+          if (raw is! Map) continue;
+          if (raw['table']?.toString() != tableName) continue;
+          final opType = raw['op']?.toString();
+          if (opType != 'insert' && opType != 'upsert') continue;
+          final d = raw['data'];
+          if (d is Map && d['id'] != null) {
+            pendingIds.add(d['id'].toString());
+          }
+        }
+      } catch (_) {/* best effort — en cas de doute on ne purge pas */}
+
+      // Garde-fou n°2 (web surtout) : un push ONLINE ne passe PAS par la
+      // file offline (_bgWrite exécute direct), donc pendingIds ne le voit
+      // pas pendant que le push est en vol. Pour le livre partenaire
+      // (financier), on protège en plus toute entrée marquée localement
+      // récemment via markLocalLedgerWrite (TTL 24 h, persisté).
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      final ledgerEchoGuard = tableName == 'partner_ledger_entries';
+
+      // Purge : supprimer les lignes Hive de ce shop absentes distant,
+      // SAUF celles dont le push est encore en file (pendingIds) ou
+      // marquées comme écrites localement récemment (echo livre partenaire).
       final staleKeys = <dynamic>[];
       for (final key in box.keys) {
         final raw = box.get(key);
         if (raw is! Map) continue;
         if (raw[shopIdColumn]?.toString() != shopId) continue;
-        if (!remoteIds.contains(key.toString())) staleKeys.add(key);
+        final ks = key.toString();
+        if (pendingIds.contains(ks)) continue;
+        if (ledgerEchoGuard) {
+          final recentMs = _i._recentLocalLedgerWrites[ks];
+          if (recentMs != null && nowMs - recentMs < _kLedgerEchoTtlMs) {
+            continue;
+          }
+        }
+        if (!remoteIds.contains(ks)) staleKeys.add(key);
       }
       for (final k in staleKeys) {
         await box.delete(k);
@@ -2604,10 +2875,31 @@ end \$\$;""",
         case PostgresChangeEvent.update:
           final id = p.newRecord['id']?.toString();
           if (id == null) return;
+          if (tableName == 'partner_ledger_entries') {
+            // Suppression douce propagée depuis un autre appareil :
+            // `deleted_at` renseigné → retirer du Hive (et de l'affichage)
+            // + tombstone durable pour bloquer tout re-push local.
+            final del = p.newRecord['deleted_at'];
+            if (del != null && del.toString().isNotEmpty) {
+              await box.delete(id);
+              await markLedgerDeletionPending(id);
+              break;
+            }
+            // Anti-résurrection : entrée supprimée localement (tombstone)
+            // ne doit pas être ré-insérée par un echo / re-push obsolète.
+            if (_isLedgerDeletionPending(id)) return;
+          }
           await box.put(id, Map<String, dynamic>.from(p.newRecord));
         case PostgresChangeEvent.delete:
           final id = p.oldRecord['id']?.toString();
-          if (id != null) await box.delete(id);
+          if (id != null) {
+            await box.delete(id);
+            // Suppression venue d'un autre appareil → tombstone durable
+            // ici aussi, pour que `syncPartnerLedger` ne la re-pousse pas.
+            if (tableName == 'partner_ledger_entries') {
+              await markLedgerDeletionPending(id);
+            }
+          }
         default: break;
       }
       _notify(tableName, shopId);
@@ -2640,11 +2932,74 @@ end \$\$;""",
   static Future<void> syncDeliveryTransfers(String shopId) =>
       _syncTablePassthrough(tableName: 'delivery_transfers',
           shopId: shopId, box: HiveBoxes.deliveryTransfersBox);
-  /// Sync du livre de comptes partenaires (hotfix_062). Format Supabase
-  /// directement compatible avec Hive — passthrough.
-  static Future<void> syncPartnerLedger(String shopId) =>
-      _syncTablePassthrough(tableName: 'partner_ledger_entries',
-          shopId: shopId, box: HiveBoxes.partnerLedgerBox);
+  /// Sync du livre de comptes partenaires — FUSION-SEULE + RE-PUSH.
+  ///
+  /// Contrairement aux autres tables passthrough, le livre partenaire est
+  /// financier et append-only : on NE PURGE PAS les lignes locales absentes
+  /// du serveur (une purge a déjà causé la perte du solde). À la place :
+  ///   1. pull serveur → écrit dans Hive ;
+  ///   2. RE-PUSH (upsert idempotent) vers Supabase toute entrée locale de
+  ///      ce shop absente du serveur → auto-réparation des entrées bloquées
+  ///      par un échec de push passé (cas « mobile rempli, serveur à 3 »).
+  /// Les suppressions inter-appareils restent propagées par le callback
+  /// realtime DELETE (`_onTablePassthroughChange`) et `deleteEntry`.
+  /// Compromis assumé : une entrée supprimée sur un autre appareil pendant
+  /// que celui-ci était hors-ligne (et a manqué l'event realtime) peut être
+  /// re-poussée — acceptable vs perte d'écriture financière.
+  static Future<void> syncPartnerLedger(String shopId) async {
+    try {
+      final box = HiveBoxes.partnerLedgerBox;
+      if (!box.isOpen) return;
+      final session = _db.auth.currentSession;
+      if (session == null) return;
+      final rows = await _db.from('partner_ledger_entries')
+          .select()
+          .eq('shop_id', shopId)
+          .order('created_at', ascending: false)
+          .limit(1000)
+          .timeout(const Duration(seconds: 10));
+      final list = rows as List;
+      final remoteIds = <String>{};
+      for (final row in list) {
+        final id = row['id']?.toString();
+        if (id == null) continue;
+        remoteIds.add(id);
+        // Suppression douce serveur : si `deleted_at` est renseigné,
+        // l'entrée est supprimée → on la retire du Hive local (et donc
+        // de l'affichage) au lieu de la stocker. Convergence multi-
+        // appareils garantie sans résurrection.
+        final del = row['deleted_at'];
+        if (del != null && del.toString().isNotEmpty) {
+          await box.delete(id);
+          continue;
+        }
+        // Tombstone local encore actif (suppression in-flight) → ne pas
+        // ré-afficher le temps que le `deleted_at` se propage.
+        if (_isLedgerDeletionPending(id)) continue;
+        await box.put(id, Map<String, dynamic>.from(row));
+      }
+      // Re-push des entrées locales manquantes côté serveur (idempotent).
+      // Skip les tombstones : une entrée supprimée ne doit JAMAIS être
+      // re-poussée (sinon résurrection dans le modèle fusion-seule).
+      var pushed = 0;
+      for (final key in box.keys) {
+        final raw = box.get(key);
+        if (raw is! Map) continue;
+        if (raw['shop_id']?.toString() != shopId) continue;
+        final id = key.toString();
+        if (remoteIds.contains(id)) continue;
+        if (_isLedgerDeletionPending(id)) continue;
+        bgUpsert('partner_ledger_entries',
+            Map<String, dynamic>.from(raw));
+        pushed++;
+      }
+      debugPrint('[DB] syncPartnerLedger: $shopId '
+          '(${list.length} remote, $pushed re-push local→serveur)');
+      _notify('partner_ledger_entries', shopId);
+    } catch (e) {
+      debugPrint('[DB] syncPartnerLedger ERROR: $e');
+    }
+  }
 
   /// Callback realtime pour orders. Reprend le format de `syncOrders` :
   /// inclut `fees` et `completed_at` pour éviter l'écrasement de ces
@@ -3163,6 +3518,7 @@ end \$\$;""",
   // ══ CATÉGORIES / MARQUES / UNITÉS ═════════════════════════════════
 
   static Future<void> saveCategory(String shopId, String name) async {
+    _assertNotFrozen();
     final list = LocalStorageService.getCategories(shopId);
     final isNew = !list.contains(name);
     if (isNew) { list.add(name); await HiveBoxes.settingsBox.put('categories_$shopId', list); }
@@ -3178,6 +3534,7 @@ end \$\$;""",
   }
 
   static Future<void> deleteCategory(String shopId, String name) async {
+    _assertNotFrozen();
     if (LocalStorageService.getProductsForShop(shopId).any((p) => p.categoryId == name))
       throw Exception('Impossible de supprimer "$name" : utilisée par des produits.');
     if (_i._isOnline) {
@@ -3213,6 +3570,7 @@ end \$\$;""",
   }
 
   static Future<void> saveBrand(String shopId, String name) async {
+    _assertNotFrozen();
     final list = LocalStorageService.getBrands(shopId);
     final isNew = !list.contains(name);
     if (isNew) { list.add(name); await HiveBoxes.settingsBox.put('brands_$shopId', list); }
@@ -3228,6 +3586,7 @@ end \$\$;""",
   }
 
   static Future<void> deleteBrand(String shopId, String name) async {
+    _assertNotFrozen();
     if (LocalStorageService.getProductsForShop(shopId).any((p) => p.brand?.toLowerCase() == name.toLowerCase()))
       throw Exception('Impossible de supprimer "$name" : utilisée par des produits.');
     if (_i._isOnline) {
@@ -3253,6 +3612,7 @@ end \$\$;""",
   }
 
   static Future<void> saveUnit(String shopId, String name) async {
+    _assertNotFrozen();
     final list = LocalStorageService.getUnits(shopId);
     final isNew = !list.contains(name);
     if (isNew) { list.add(name); await HiveBoxes.settingsBox.put('units_$shopId', list); }
@@ -3268,6 +3628,7 @@ end \$\$;""",
   }
 
   static Future<void> deleteUnit(String shopId, String name) async {
+    _assertNotFrozen();
     final list = LocalStorageService.getUnits(shopId)..remove(name);
     await HiveBoxes.settingsBox.put('units_$shopId', list);
     _bgWrite({'table': 'units', 'op': 'delete', 'col': 'name', 'val': name, 'data': {'shop_id': shopId, 'name': name}});
@@ -3706,6 +4067,7 @@ end \$\$;""",
   // ══ SUPPRIMER BOUTIQUE ════════════════════════════════════════════
 
   static Future<void> deleteShop(String shopId) async {
+    _assertNotFrozen();
     // Pas de garde "stock > 0" ici : la saisie du nom exact dans le dialogue
     // de confirmation suffit comme preuve d'intention. La perte du stock est
     // une conséquence interne à la boutique supprimée — annoncée à
@@ -3928,6 +4290,7 @@ end \$\$;""",
   /// Changer le rôle d'un membre
   static Future<void> updateMemberRole(
       String shopId, String userId, UserRole role) async {
+    _assertNotFrozen();
     // Hive local
     final cached = _getShopMembersLocal(shopId);
     for (final m in cached) {
@@ -3946,6 +4309,7 @@ end \$\$;""",
 
   /// Supprimer un membre d'une boutique
   static Future<void> removeMember(String shopId, String userId) async {
+    _assertNotFrozen();
     final cached = _getShopMembersLocal(shopId)
         .where((m) => m['user_id'] != userId).toList();
     await HiveBoxes.settingsBox.put('members_$shopId', cached);
@@ -4057,7 +4421,9 @@ end \$\$;""",
     sector: r['sector'] as String? ?? 'retail',
     isActive: r['is_active'] as bool? ?? true,
     ownerId: r['owner_id']?.toString(),
-    phone: r['phone'] as String?, email: r['email'] as String?,
+    phone: r['phone'] as String?,
+    whatsappPhone: r['whatsapp_phone'] as String?,
+    email: r['email'] as String?,
     createdAt: r['created_at'] != null
         ? DateTime.tryParse(r['created_at'] as String) : null,
     kind:         ShopKindX.fromKey(r['kind'] as String?),
@@ -4128,6 +4494,7 @@ end \$\$;""",
   /// Sauvegarder un client : Hive immédiat + Supabase background.
   /// Valide l'unicité email/téléphone par boutique (sauf si skipValidation).
   static Future<void> saveClient(Client c, {bool skipValidation = false}) async {
+    _assertNotFrozen();
     // 0. Validation unicité (email + phone par boutique)
     if (!skipValidation) {
       _validateClientLocalUniqueness(c);
@@ -4228,6 +4595,7 @@ end \$\$;""",
   /// Supprimer un client. Règle métier : refusé si le client est lié à
   /// au moins une commande (on préserve l'historique pour les rapports).
   static Future<void> deleteClient(String clientId, String storeId) async {
+    _assertNotFrozen();
     final hasOrders = HiveBoxes.ordersBox.values.any((raw) {
       final m = Map<String, dynamic>.from(raw);
       return m['client_id'] == clientId;

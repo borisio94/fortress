@@ -57,3 +57,7 @@ sentry-wizard.exe
 firebase-debug.log
 firebase-debug.*.log
 .runtimeconfig.json
+
+# Config Supabase (url + anonKey publishable). Gardé hors du dépôt par
+# hygiène — le fichier reste présent en local pour builder/déployer.
+lib/core/config/supabase_config.dart

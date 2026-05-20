@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/country_phone_data.dart';
 import '../../../../core/validators/input_validators.dart';
 import '../../../../core/validators/password_policy.dart';
@@ -330,11 +331,7 @@ class _ProgressHeader extends StatelessWidget {
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           const FortressLogo.light(size: 26),
           const SizedBox(width: 8),
-          Text('Fortress',
-              style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.textPrimary)),
+          Text('Fortress', style: AppTextStyles.subtitleBold),
         ]),
         const SizedBox(height: 16),
         Row(children: List.generate(3, (i) => Expanded(
@@ -350,10 +347,8 @@ class _ProgressHeader extends StatelessWidget {
         ))),
         const SizedBox(height: 10),
         Text('Étape ${step + 1}/3 — ${titles[step]}',
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary)),
+            style: AppTextStyles.bodySmSecondary
+                .copyWith(fontWeight: FontWeight.w600)),
       ]),
     );
   }
@@ -386,10 +381,8 @@ class _BottomBar extends StatelessWidget {
         TextButton(
           onPressed: state._submitting ? null : state._back,
           child: Text(state._step == 0 ? 'Annuler' : 'Précédent',
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textSecondary)),
+              style: AppTextStyles.bodySecondary
+                  .copyWith(fontWeight: FontWeight.w700)),
         ),
         const Spacer(),
         SizedBox(

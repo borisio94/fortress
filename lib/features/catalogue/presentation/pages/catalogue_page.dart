@@ -38,12 +38,20 @@ class CataloguePage extends StatefulWidget {
   /// pas refresh temps réel. Null = comportement historique (cumul).
   final Map<String, int>? stockOverride;
 
+  /// Emplacement de stock choisi par le marchand AU MOMENT DU PARTAGE
+  /// (param `loc` du lien). Propagé à `place_public_order` →
+  /// `orders.delivery_location_id` pour que la commande client soit
+  /// rattachée au bon emplacement (décrément stock côté marchand). Null =
+  /// périmètre global / boutique → comportement historique inchangé.
+  final String? locationId;
+
   const CataloguePage({
     super.key,
     required this.shopId,
     this.initialCategory,
     this.productIds,
     this.stockOverride,
+    this.locationId,
   });
 
   @override
@@ -87,7 +95,7 @@ class _CataloguePageState extends State<CataloguePage> {
   Future<_CatalogueData> _load() async {
     final db = Supabase.instance.client;
     final shopRow = await db
-        .from('shops').select('id,name,phone')
+        .from('shops').select('id,name,phone,whatsapp_phone')
         .eq('id', widget.shopId).maybeSingle();
     if (shopRow == null) {
       throw Exception(
@@ -227,7 +235,13 @@ class _CataloguePageState extends State<CataloguePage> {
     return _CatalogueData(
       shop: _ShopHeaderData(
         name:  shopRow['name'] as String? ?? '',
-        phone: shopRow['phone'] as String?,
+        // Numéro WhatsApp dédié prioritaire ; repli sur le téléphone
+        // boutique s'il est vide/non renseigné.
+        phone: () {
+          final wa = (shopRow['whatsapp_phone'] as String?)?.trim();
+          if (wa != null && wa.isNotEmpty) return wa;
+          return shopRow['phone'] as String?;
+        }(),
       ),
       items:      items,
       categories: categories,
@@ -289,6 +303,7 @@ class _CataloguePageState extends State<CataloguePage> {
         shopId: widget.shopId,
         shopName: data.shop.name,
         items: items,
+        locationId: widget.locationId,
       ),
     );
     if (ok == true && mounted) {
@@ -883,10 +898,12 @@ class _PlaceOrderSheet extends StatefulWidget {
   final String shopId;
   final String shopName;
   final List<_CatalogueItem> items;
+  final String? locationId;
   const _PlaceOrderSheet({
     required this.shopId,
     required this.shopName,
     required this.items,
+    this.locationId,
   });
 
   @override
@@ -1005,6 +1022,7 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
       final orderId = await db.rpc('place_public_order', params: {
         'p_shop_id':         widget.shopId,
         'p_items':           itemsJson,
+        'p_location_id':     widget.locationId,
         'p_client_name':     _nameCtrl.text.trim(),
         'p_client_phone':    _phoneFull.isNotEmpty ? _phoneFull : _phoneCtrl.text.trim(),
         'p_client_city':     city.isEmpty ? null : city,

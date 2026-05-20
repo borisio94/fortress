@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../bloc/shop_selector_bloc.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/country_phone_data.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -56,9 +57,6 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
   // ── Erreurs temps réel ────────────────────────────────────────────────────
   String? _nameError;
   String? _emailError;
-  String? _phoneError;
-  String _phoneFull  = '';
-  bool   _phoneValid = false;
 
   bool get _valid =>
       _nameError == null &&
@@ -215,15 +213,14 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
                           ),
                           const SizedBox(height: 14),
                           Center(child: Text(l.shopNew,
-                              style: const TextStyle(
-                                  fontSize: 19,
+                              style: AppTextStyles.title.copyWith(
                                   fontWeight: FontWeight.w800,
-                                  color: Color(0xFF0F172A)))),
+                                  color: const Color(0xFF0F172A)))),
                           const SizedBox(height: 4),
-                          const Center(child: Text(
+                          Center(child: Text(
                               'Configurez votre espace de vente',
-                              style: TextStyle(
-                                  fontSize: 12, color: Color(0xFF6B7280)))),
+                              style: AppTextStyles.bodySm.copyWith(
+                                  color: const Color(0xFF6B7280)))),
                           const SizedBox(height: 28),
 
                           // ── Nom boutique ─────────────────────────
@@ -258,10 +255,7 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
                             child: AppField(
                               controller: _phoneCtrl,
                               isPhone: true,
-                              onPhoneChanged: (full, valid) => setState(() {
-                                _phoneFull  = full;
-                                _phoneValid = valid;
-                              }),
+                              onPhoneChanged: (full, valid) {},
                             ),
                           ),
                           const SizedBox(height: 14),
@@ -304,8 +298,7 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
                             child: GestureDetector(
                               onTap: () => context.pop(),
                               child: Text('← Retour à mes boutiques',
-                                  style: TextStyle(
-                                      fontSize: 12,
+                                  style: AppTextStyles.bodySm.copyWith(
                                       color: AppColors.primary,
                                       fontWeight: FontWeight.w500)),
                             ),
@@ -320,7 +313,7 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
             Positioned(
               top: 12, right: 16,
               child: SafeArea(child: LanguageSwitcher(
-                  backgroundColor: Colors.white.withOpacity(0.92))),
+                  backgroundColor: Colors.white.withValues(alpha:0.92))),
             ),
           ]);
         },
@@ -346,16 +339,16 @@ class _CountryInfo extends StatelessWidget {
     decoration: BoxDecoration(
       color: AppColors.primarySurface,
       borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+      border: Border.all(color: AppColors.primary.withValues(alpha:0.2)),
     ),
     child: Row(children: [
       Icon(Icons.public_rounded, size: 14, color: AppColors.primary),
       const SizedBox(width: 8),
       Expanded(child: Text(_label,
-          style: TextStyle(fontSize: 12,
+          style: AppTextStyles.bodySm.copyWith(
               color: AppColors.primary, fontWeight: FontWeight.w500))),
       Icon(Icons.lock_outline_rounded,
-          size: 12, color: AppColors.primary.withOpacity(0.4)),
+          size: 12, color: AppColors.primary.withValues(alpha:0.4)),
     ]),
   );
 }
@@ -370,7 +363,8 @@ class _ErrText extends StatelessWidget {
     child: Padding(
       padding: const EdgeInsets.only(top: 4, left: 2),
       child: Text(message,
-          style: const TextStyle(fontSize: 10, color: Color(0xFFEF4444))),
+          style: AppTextStyles.micro.copyWith(
+              color: const Color(0xFFEF4444))),
     ),
   );
 }
@@ -404,7 +398,7 @@ class _SectorPicker extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color: selected
-                ? color.withOpacity(0.10) : const Color(0xFFF9FAFB),
+                ? color.withValues(alpha:0.10) : const Color(0xFFF9FAFB),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: selected ? color : const Color(0xFFE5E7EB),
@@ -415,8 +409,7 @@ class _SectorPicker extends StatelessWidget {
             Icon(icon, size: 15,
                 color: selected ? color : const Color(0xFF9CA3AF)),
             const SizedBox(width: 6),
-            Text(label, style: TextStyle(
-                fontSize: 12,
+            Text(label, style: AppTextStyles.bodySm.copyWith(
                 fontWeight:
                 selected ? FontWeight.w600 : FontWeight.normal,
                 color: selected ? color : const Color(0xFF6B7280))),

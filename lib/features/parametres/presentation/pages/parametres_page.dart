@@ -16,6 +16,7 @@ import '../../../../core/services/pin_service.dart';
 import '../../../../core/widgets/owner_pin_dialog.dart';
 import '../../../../core/widgets/owner_pin_setup_dialog.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/storage/local_storage_service.dart';
@@ -176,17 +177,10 @@ class ParametresPage extends ConsumerWidget {
                   locked: !perms.canEditShopInfo,
                   onTap: () => context.push('/shop/$shopId/parametres/payments'),
                 ),
+                // « Comptes partenaires » déplacé dans le drawer principal
+                // (entrée « Partenaires », icône poignée de main).
                 // Templates de livraison déplacés dans la page « Modèles
                 // WhatsApp » (regroupement des modèles de message).
-                _Tile(
-                  icon: Icons.handshake_outlined,
-                  label: 'Comptes partenaires',
-                  subtitle: 'Soldes, dettes et versements croisés',
-                  color: AppColors.primary,
-                  locked: !perms.canEditShopInfo,
-                  onTap: () => context.push(
-                      '/shop/$shopId/parametres/partner-accounts'),
-                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -257,20 +251,19 @@ class _ProfileHeader extends StatelessWidget {
             border: Border.all(color: Colors.white.withValues(alpha:0.4), width: 2),
           ),
           child: Center(child: Text(initials,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800,
-                  color: Colors.white))),
+              style: AppTextStyles.title.copyWith(color: Colors.white))),
         ),
         const SizedBox(width: 14),
         Expanded(child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(user?.name ?? 'Utilisateur',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700,
+                style: AppTextStyles.subtitleBold.copyWith(
                     color: Colors.white),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
             const SizedBox(height: 2),
             Text(user?.email ?? '',
-                style: TextStyle(fontSize: 12,
+                style: AppTextStyles.bodySm.copyWith(
                     color: Colors.white.withValues(alpha:0.8)),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
             if (shop != null || badge != null) ...[
@@ -288,9 +281,8 @@ class _ProfileHeader extends StatelessWidget {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(shop!,
-                          style: const TextStyle(fontSize: 10,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600),
+                          style: AppTextStyles.microBold.copyWith(
+                              color: Colors.white),
                           maxLines: 1, overflow: TextOverflow.ellipsis),
                     ),
                   if (badge != null)
@@ -302,9 +294,8 @@ class _ProfileHeader extends StatelessWidget {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(badge.label,
-                          style: const TextStyle(fontSize: 10,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700)),
+                          style: AppTextStyles.microBold.copyWith(
+                              color: Colors.white)),
                     ),
                 ],
               ),
@@ -393,13 +384,10 @@ class _SubscriptionTile extends StatelessWidget {
               children: [
                 Text(l.drawerSubscription,
                     maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary)),
+                    style: AppTextStyles.bodyBold),
                 Text(plan,
                     maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11,
-                        color: AppColors.textHint)),
+                    style: AppTextStyles.captionHint),
               ],
             ),
           ),
@@ -412,8 +400,7 @@ class _SubscriptionTile extends StatelessWidget {
               ),
               child: Text(badgeText!,
                   maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10,
-                      fontWeight: FontWeight.w800, color: badgeColor)),
+                  style: AppTextStyles.microBold.copyWith(color: badgeColor)),
             ),
             const SizedBox(width: 6),
           ],
@@ -454,9 +441,8 @@ class _Section extends StatelessWidget {
               child: Icon(icon, size: 11, color: color),
             ),
             const SizedBox(width: 7),
-            Text(label, style: TextStyle(fontSize: 12,
-                fontWeight: FontWeight.w700, color: color,
-                letterSpacing: 0.3)),
+            Text(label, style: AppTextStyles.bodySmBold.copyWith(
+                color: color, letterSpacing: 0.3)),
           ]),
         ),
         // Carte
@@ -541,8 +527,7 @@ class _Tile extends StatelessWidget {
                   Flexible(
                     child: Text(label,
                         maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 13,
-                            fontWeight: FontWeight.w600, color: titleColor)),
+                        style: AppTextStyles.bodyBold.copyWith(color: titleColor)),
                   ),
                   if (locked) ...[
                     const SizedBox(width: 6),
@@ -553,8 +538,7 @@ class _Tile extends StatelessWidget {
                 if (subtitle.isNotEmpty)
                   Text(subtitle,
                       maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11,
-                          color: AppColors.textHint)),
+                      style: AppTextStyles.captionHint),
               ],
             ),
           ),
@@ -638,9 +622,8 @@ class _DangerGateState extends State<_DangerGate> {
                   size: 11, color: AppColors.error),
             ),
             const SizedBox(width: 7),
-            Text(l.paramDangerZone, style: const TextStyle(fontSize: 12,
-                fontWeight: FontWeight.w700, color: AppColors.error,
-                letterSpacing: 0.3)),
+            Text(l.paramDangerZone, style: AppTextStyles.bodySmBold.copyWith(
+                color: AppColors.error, letterSpacing: 0.3)),
           ]),
         ),
         Container(
@@ -673,12 +656,9 @@ class _DangerGateState extends State<_DangerGate> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                   Text('Accéder à la zone dangereuse',
-                      style: TextStyle(fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary)),
+                      style: AppTextStyles.bodyBold),
                   Text('Saisissez votre code PIN pour déverrouiller',
-                      style: TextStyle(fontSize: 11,
-                          color: AppColors.textHint)),
+                      style: AppTextStyles.captionHint),
                 ])),
                 const Icon(Icons.chevron_right_rounded,
                     size: 16, color: AppColors.divider),
@@ -739,9 +719,8 @@ class _DangerSection extends ConsumerWidget {
                   color: AppColors.error),
             ),
             const SizedBox(width: 7),
-            Text(l.paramDangerZone, style: TextStyle(fontSize: 12,
-                fontWeight: FontWeight.w700, color: AppColors.error,
-                letterSpacing: 0.3)),
+            Text(l.paramDangerZone, style: AppTextStyles.bodySmBold.copyWith(
+                color: AppColors.error, letterSpacing: 0.3)),
           ]),
         ),
         Container(
@@ -870,11 +849,8 @@ class _DangerSection extends ConsumerWidget {
             const SizedBox(width: 12),
             Expanded(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(label, style: const TextStyle(fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary)),
-              Text(subtitle, style: const TextStyle(
-                  fontSize: 11, color: AppColors.textHint)),
+              Text(label, style: AppTextStyles.bodyBold),
+              Text(subtitle, style: AppTextStyles.captionHint),
             ])),
             if (trailingChevron)
               const Icon(Icons.chevron_right_rounded,
@@ -1145,9 +1121,7 @@ class _SuperAdminSection extends ConsumerWidget {
             ),
             const SizedBox(width: 7),
             Text('Administration',
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
+                style: AppTextStyles.bodySmBold.copyWith(
                     color: AppColors.primary,
                     letterSpacing: 0.3)),
             const SizedBox(width: 8),
@@ -1158,10 +1132,8 @@ class _SuperAdminSection extends ConsumerWidget {
               decoration: BoxDecoration(
                   color: AppColors.primary,
                   borderRadius: BorderRadius.circular(20)),
-              child: const Text('Super Admin',
-                  style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
+              child: Text('Super Admin',
+                  style: AppTextStyles.microBold.copyWith(
                       color: Colors.white)),
             ),
           ]),
@@ -1195,18 +1167,15 @@ class _SuperAdminSection extends ConsumerWidget {
                       size: 17, color: AppColors.primary),
                 ),
                 const SizedBox(width: 12),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Gérer les utilisateurs',
-                          style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: AppColors.textPrimary)),
+                          style: AppTextStyles.body.copyWith(
+                              fontWeight: FontWeight.w500)),
                       Text('Abonnements, blocages, statistiques',
-                          style: TextStyle(
-                              fontSize: 12,
+                          style: AppTextStyles.bodySm.copyWith(
                               color: AppColors.textHint)),
                     ],
                   ),
@@ -1371,8 +1340,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
                       size: 17, color: AppColors.error)),
               const SizedBox(width: 10),
               const Expanded(child: Text('Supprimer mon compte',
-                  style: TextStyle(fontSize: 15,
-                      fontWeight: FontWeight.w700))),
+                  style: AppTextStyles.label)),
               IconButton(onPressed: () => Navigator.of(context).pop(),
                   icon: const Icon(Icons.close_rounded)),
             ]),
@@ -1433,9 +1401,9 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
                           ? const SizedBox(width: 18, height: 18,
                               child: CircularProgressIndicator(
                                   strokeWidth: 2, color: Colors.white))
-                          : const Text('Supprimer définitivement mon compte',
-                              style: TextStyle(
-                                  fontSize: 13, fontWeight: FontWeight.w700)),
+                          : Text('Supprimer définitivement mon compte',
+                              style: AppTextStyles.bodyBold.copyWith(
+                                  color: Colors.white)),
                     )),
             ]),
           ),
@@ -1449,10 +1417,10 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
     padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
     children: [
       const Text('Pourquoi souhaitez-vous partir ?',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+          style: AppTextStyles.label),
       const SizedBox(height: 4),
       const Text('Votre réponse nous aide à améliorer le produit.',
-          style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          style: AppTextStyles.bodySmSecondary),
       const SizedBox(height: 12),
       for (final r in _kDeleteReasons) _ReasonTile(
         label:    r,
@@ -1465,10 +1433,10 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
           controller: _otherCtrl,
           onChanged: (_) => setState(() {}),
           maxLines: 3,
-          style: const TextStyle(fontSize: 13),
+          style: AppTextStyles.body,
           decoration: InputDecoration(
             hintText: 'Précisez votre raison…',
-            hintStyle: const TextStyle(fontSize: 12, color: AppColors.textHint),
+            hintStyle: AppTextStyles.bodySm.copyWith(color: AppColors.textHint),
             contentPadding: const EdgeInsets.all(12),
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -1491,11 +1459,11 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
     padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
     children: [
       const Text('Avant de continuer',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+          style: AppTextStyles.label),
       const SizedBox(height: 4),
       const Text(
           'Confirmez ces points pour passer à la dernière étape.',
-          style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          style: AppTextStyles.bodySmSecondary),
       const SizedBox(height: 16),
       _SwitchRow(
         label: "J'ai exporté mes données importantes",
@@ -1516,7 +1484,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
     padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
     children: [
       const Text('Confirmation finale',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+          style: AppTextStyles.label),
       const SizedBox(height: 10),
       if (_summary != null)
         Container(
@@ -1528,8 +1496,8 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-            const Text('Vous allez supprimer :',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+            Text('Vous allez supprimer :',
+                style: AppTextStyles.bodySmBold.copyWith(
                     color: AppColors.error)),
             const SizedBox(height: 6),
             Text(
@@ -1537,8 +1505,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
               '${_summary!['products_count']  ?? 0} produit(s), '
               '${_summary!['sales_count']     ?? 0} vente(s), '
               '${_summary!['clients_count']   ?? 0} client(s).',
-              style: const TextStyle(fontSize: 12, color: AppColors.textSecondary,
-                  height: 1.5),
+              style: AppTextStyles.bodySmSecondary.copyWith(height: 1.5),
             ),
           ]),
         )
@@ -1546,17 +1513,17 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
         const Padding(padding: EdgeInsets.symmetric(vertical: 20),
             child: Center(child: CircularProgressIndicator())),
       const SizedBox(height: 16),
-      const Text('Mot de passe actuel',
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-              color: Color(0xFF374151))),
+      Text('Mot de passe actuel',
+          style: AppTextStyles.bodySmBold.copyWith(
+              color: const Color(0xFF374151))),
       const SizedBox(height: 6),
       TextField(
         controller: _pwdCtrl,
         obscureText: _obscure,
-        style: const TextStyle(fontSize: 13),
+        style: AppTextStyles.body,
         decoration: InputDecoration(
           hintText: 'Votre mot de passe',
-          hintStyle: const TextStyle(fontSize: 12, color: AppColors.textHint),
+          hintStyle: AppTextStyles.bodySm.copyWith(color: AppColors.textHint),
           contentPadding: const EdgeInsets.symmetric(
               horizontal: 12, vertical: 12),
           suffixIcon: IconButton(
@@ -1582,7 +1549,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
           const Icon(Icons.error_outline_rounded, size: 14, color: AppColors.error),
           const SizedBox(width: 6),
           Expanded(child: Text(_error!,
-              style: const TextStyle(fontSize: 12, color: AppColors.error))),
+              style: AppTextStyles.bodySm.copyWith(color: AppColors.error))),
         ]),
       ],
     ],
@@ -1646,7 +1613,7 @@ class _ReasonTile extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Expanded(child: Text(label,
-              style: TextStyle(fontSize: 13,
+              style: AppTextStyles.body.copyWith(
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                   color: selected ? AppColors.primary : const Color(0xFF374151)))),
         ]),
@@ -1670,8 +1637,7 @@ class _SwitchRow extends StatelessWidget {
     ),
     child: Row(children: [
       Expanded(child: Text(label,
-          style: const TextStyle(fontSize: 13,
-              color: AppColors.textPrimary, fontWeight: FontWeight.w500))),
+          style: AppTextStyles.body.copyWith(fontWeight: FontWeight.w500))),
       const SizedBox(width: 10),
       AppSwitch(value: value, onChanged: onChanged,
           activeColor: AppColors.error),

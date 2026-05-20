@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/phone_formatter.dart';
 import '../../../crm/domain/entities/client.dart';
 
@@ -134,8 +135,7 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
                 unselectedLabelColor: AppColors.textHint,
                 indicatorColor: AppColors.primary,
                 indicatorWeight: 2,
-                labelStyle: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w700),
+                labelStyle: AppTextStyles.bodySmBold,
                 tabs: const [
                   Tab(text: 'Choisir un client'),
                   Tab(text: 'Saisir un numéro'),
@@ -178,7 +178,7 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFF25D366).withOpacity(0.10),
+              color: const Color(0xFF25D366).withValues(alpha:0.10),
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Icon(Icons.send_rounded,
@@ -187,9 +187,7 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
           const SizedBox(width: 10),
           const Expanded(
             child: Text('Destinataire WhatsApp',
-                style: TextStyle(fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
+                style: AppTextStyles.subtitleBold),
           ),
           IconButton(
             icon: const Icon(Icons.close_rounded, size: 20),
@@ -211,12 +209,12 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
           height: 38,
           child: TextField(
             controller: _searchCtrl,
-            style: const TextStyle(fontSize: 12),
+            style: AppTextStyles.bodySm,
             decoration: InputDecoration(
               isDense: true,
               hintText: 'Rechercher (nom, téléphone, ville…)',
-              hintStyle: const TextStyle(fontSize: 12,
-                  color: AppColors.textHint),
+              hintStyle: AppTextStyles.bodySm
+                  .copyWith(color: AppColors.textHint),
               prefixIcon: const Icon(Icons.search_rounded,
                   size: 16, color: AppColors.textHint),
               suffixIcon: _query.isEmpty ? null : IconButton(
@@ -272,10 +270,10 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
       child: Row(children: [
         CircleAvatar(
           radius: 18,
-          backgroundColor: AppColors.primary.withOpacity(0.12),
+          backgroundColor: AppColors.primary.withValues(alpha:0.12),
           child: Text(
             c.name.isNotEmpty ? c.name[0].toUpperCase() : '?',
-            style: TextStyle(fontSize: 14,
+            style: AppTextStyles.label.copyWith(
                 fontWeight: FontWeight.w800,
                 color: AppColors.primary),
           ),
@@ -286,14 +284,12 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(c.name,
-                  style: const TextStyle(fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary),
+                  style: AppTextStyles.bodyBold,
                   maxLines: 1, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 2),
               Text(c.phone ?? '',
-                  style: const TextStyle(fontSize: 11,
-                      color: AppColors.textSecondary)),
+                  style: AppTextStyles.captionHint
+                      .copyWith(color: AppColors.textSecondary)),
             ],
           ),
         ),
@@ -315,21 +311,19 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text('Numéro WhatsApp du destinataire',
-              style: TextStyle(fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.5,
-                  color: AppColors.textSecondary)),
+              style: AppTextStyles.captionBold
+                  .copyWith(letterSpacing: 0.5)),
           const SizedBox(height: 8),
           TextField(
             controller: _phoneCtrl,
             keyboardType: TextInputType.phone,
             autofocus: true,
-            style: const TextStyle(fontSize: 14,
-                fontWeight: FontWeight.w600),
+            style: AppTextStyles.input
+                .copyWith(fontWeight: FontWeight.w600),
             decoration: InputDecoration(
               hintText: '+237 6XX XX XX XX',
-              hintStyle: const TextStyle(fontSize: 13,
-                  color: AppColors.textHint),
+              hintStyle: AppTextStyles.body
+                  .copyWith(color: AppColors.textHint),
               prefixIcon: const Icon(Icons.phone_outlined,
                   size: 18, color: AppColors.textSecondary),
               filled: true, fillColor: AppColors.inputFill,
@@ -347,25 +341,23 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
           if (preview != null && preview.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text('Sera envoyé à : +$preview',
-                style: const TextStyle(fontSize: 11,
-                    color: AppColors.textHint,
-                    fontStyle: FontStyle.italic)),
+                style: AppTextStyles.captionHint
+                    .copyWith(fontStyle: FontStyle.italic)),
           ],
           const SizedBox(height: 16),
           Text('Indicatif pays automatique : si tu tapes `0XXX...` '
               'ou un numéro local commençant par 6 ou 2, l\'indicatif '
               '+237 (Cameroun) est ajouté.',
-              style: TextStyle(fontSize: 10,
-                  color: AppColors.textHint)),
+              style: AppTextStyles.micro),
           const Spacer(),
           SizedBox(
             height: 46,
             child: ElevatedButton.icon(
               onPressed: canSend ? () => _confirmPhone(raw) : null,
               icon: const Icon(Icons.send_rounded, size: 16),
-              label: const Text('Envoyer à ce numéro',
-                  style: TextStyle(fontSize: 13,
-                      fontWeight: FontWeight.w700)),
+              label: Text('Envoyer à ce numéro',
+                  style: AppTextStyles.bodyBold
+                      .copyWith(color: Colors.white)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF25D366),
                 foregroundColor: Colors.white,
@@ -395,13 +387,10 @@ class _Empty extends StatelessWidget {
           Icon(icon, size: 36, color: AppColors.divider),
           const SizedBox(height: 10),
           Text(title,
-              style: const TextStyle(fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary)),
+              style: AppTextStyles.bodyBold),
           const SizedBox(height: 4),
           Text(subtitle, textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 11,
-                  color: AppColors.textHint)),
+              style: AppTextStyles.captionHint),
         ],
       ),
     ),

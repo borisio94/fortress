@@ -3,9 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../theme/app_text_styles.dart';
+import '../../shared/widgets/adaptive_form_frame.dart';
+import '../../shared/widgets/form_sheet.dart';
 
 // ─── Provider : liste utilisateurs pour le super admin ───────────────────────
 final adminUsersProvider = FutureProvider.autoDispose<List<AdminUser>>((ref) async {
+  // Exclut les comptes super admin de la liste des utilisateurs : un super
+  // admin est propriétaire de la plateforme, pas un client.
+  // FK explicite `subscriptions_plan_id_fkey` pour éviter l'ambiguïté
+  // PostgREST (PGRST201) quand 2 FK existent entre subscriptions et plans.
   final rows = await Supabase.instance.client
       .from('profiles')
       .select('''
@@ -13,9 +20,10 @@ final adminUsersProvider = FutureProvider.autoDispose<List<AdminUser>>((ref) asy
         is_super_admin, blocked_at, blocked_reason, created_at,
         subscriptions (
           sub_status, billing_cycle, expires_at, amount_paid, payment_ref,
-          plans ( name, label, offline_enabled, max_shops )
+          plans!subscriptions_plan_id_fkey ( name, label, offline_enabled, max_shops )
         )
       ''')
+      .eq('is_super_admin', false)
       .order('created_at', ascending: false);
 
   return (rows as List).map((r) => AdminUser.fromMap(r)).toList();
@@ -106,7 +114,7 @@ class _AdminPanelPageState extends ConsumerState<AdminPanelPage>
         foregroundColor: Colors.white,
         elevation: 0,
         title: const Text('Administration',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            style: AppTextStyles.subtitleBold),
         bottom: TabBar(
           controller: _tabs,
           indicatorColor: Colors.white,
@@ -153,11 +161,10 @@ class _UsersTab extends ConsumerWidget {
             height: 36,
             child: TextField(
               onChanged: onSearchChanged,
-              style: const TextStyle(fontSize: 13),
+              style: AppTextStyles.input,
               decoration: InputDecoration(
                 hintText: 'Rechercher par nom, email, téléphone…',
-                hintStyle: const TextStyle(fontSize: 12,
-                    color: Color(0xFF9CA3AF)),
+                hintStyle: AppTextStyles.inputHint,
                 prefixIcon: const Icon(Icons.search, size: 16,
                     color: Color(0xFF9CA3AF)),
                 filled: true, fillColor: const Color(0xFFF9FAFB),
@@ -286,8 +293,7 @@ class _UserCard extends StatelessWidget {
               ),
               child: Center(child: Text(
                 user.name.isNotEmpty ? user.name[0].toUpperCase() : '?',
-                style: TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.w800,
+                style: AppTextStyles.subtitleBold.copyWith(
                     color: user.isBlocked
                         ? const Color(0xFFEF4444)
                         : AppColors.primary),
@@ -301,9 +307,8 @@ class _UserCard extends StatelessWidget {
                 children: [
                   Row(children: [
                     Flexible(child: Text(user.name,
-                        style: const TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w700,
-                            color: Color(0xFF0F172A)))),
+                        style: AppTextStyles.bodyBold
+                            .copyWith(color: const Color(0xFF0F172A)))),
                     const SizedBox(width: 6),
                     if (user.isSuperAdmin)
                       _Badge('Super Admin', AppColors.primary),
@@ -311,12 +316,12 @@ class _UserCard extends StatelessWidget {
                       _Badge('Bloqué', const Color(0xFFEF4444)),
                   ]),
                   Text(user.email,
-                      style: const TextStyle(
-                          fontSize: 11, color: Color(0xFF6B7280))),
+                      style: AppTextStyles.caption
+                          .copyWith(color: const Color(0xFF6B7280))),
                   if (user.phone != null)
                     Text(user.phone!,
-                        style: const TextStyle(
-                            fontSize: 10, color: Color(0xFF9CA3AF))),
+                        style: AppTextStyles.micro
+                            .copyWith(color: const Color(0xFF9CA3AF))),
                 ])),
 
             // Menu actions
@@ -365,15 +370,13 @@ class _UserCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(6),
                   border: Border.all(
                     color: user.subActive
-                        ? AppColors.primary.withOpacity(0.3)
+                        ? AppColors.primary.withValues(alpha:0.3)
                         : const Color(0xFFE5E7EB),
                   ),
                 ),
                 child: Text(
                   user.planLabel ?? 'Aucun plan',
-                  style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
+                  style: AppTextStyles.microBold.copyWith(
                       color: user.subActive
                           ? AppColors.primary
                           : const Color(0xFF9CA3AF)),
@@ -392,12 +395,10 @@ class _UserCard extends StatelessWidget {
                 Column(crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text('Expire le',
-                          style: const TextStyle(
-                              fontSize: 9, color: Color(0xFF9CA3AF))),
+                          style: AppTextStyles.micro
+                              .copyWith(color: const Color(0xFF9CA3AF))),
                       Text(fmt.format(user.expiresAt!),
-                          style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
+                          style: AppTextStyles.microBold.copyWith(
                               color: user.expiresAt!
                                   .isBefore(DateTime.now())
                                   ? const Color(0xFFEF4444)
@@ -416,8 +417,8 @@ class _UserCard extends StatelessWidget {
         child: Row(children: [
           Icon(icon, size: 15, color: color),
           const SizedBox(width: 10),
-          Text(label, style: TextStyle(
-              fontSize: 12, color: color, fontWeight: FontWeight.w500)),
+          Text(label, style: AppTextStyles.bodySm.copyWith(
+              color: color, fontWeight: FontWeight.w500)),
         ]),
       );
 
@@ -431,77 +432,98 @@ class _UserCard extends StatelessWidget {
   }
 
   // ── Bloquer ────────────────────────────────────────────────
+  // Refonte UX : converti en bottom sheet verrouillé (cf. showFormSheet).
   void _confirmBlock(BuildContext context) {
     final reasonCtrl = TextEditingController();
-    showDialog(
+    showFormSheet<bool>(
       context: context,
-      builder: (dc) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
-        title: Row(children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-                color: const Color(0xFFFEE2E2),
-                borderRadius: BorderRadius.circular(8)),
-            child: const Icon(Icons.block_rounded, size: 18,
-                color: Color(0xFFEF4444)),
-          ),
-          const SizedBox(width: 10),
-          const Text('Bloquer le compte',
-              style: TextStyle(fontSize: 14,
-                  fontWeight: FontWeight.w700)),
-        ]),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text('Bloquer « ${user.name} » ?',
-              style: const TextStyle(
-                  fontSize: 13, color: Color(0xFF374151))),
-          const SizedBox(height: 10),
-          TextField(
-            controller: reasonCtrl,
-            maxLines: 2,
-            style: const TextStyle(fontSize: 13),
-            decoration: InputDecoration(
-              hintText: 'Raison du blocage (optionnel)…',
-              hintStyle: const TextStyle(
-                  fontSize: 12, color: Color(0xFF9CA3AF)),
-              filled: true,
-              fillColor: const Color(0xFFF9FAFB),
-              isDense: true,
-              contentPadding: const EdgeInsets.all(10),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(
-                      color: Color(0xFFE5E7EB))),
-              enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(
-                      color: Color(0xFFE5E7EB))),
+      builder: (dc) {
+        final mq = MediaQuery.of(dc);
+        return Padding(
+          padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FormSheetHeader(
+                  title: 'Bloquer le compte',
+                  icon: Icons.block_rounded,
+                  iconColor: const Color(0xFFEF4444),
+                ),
+                const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Bloquer « ${user.name} » ?',
+                          style: AppTextStyles.body
+                              .copyWith(color: const Color(0xFF374151))),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: reasonCtrl,
+                        maxLines: 3,
+                        autofocus: true,
+                        style: AppTextStyles.input,
+                        decoration: InputDecoration(
+                          hintText: 'Raison du blocage (optionnel)…',
+                          hintStyle: AppTextStyles.inputHint,
+                          filled: true,
+                          fillColor: const Color(0xFFF9FAFB),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.all(10),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(
+                                  color: Color(0xFFE5E7EB))),
+                          enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(
+                                  color: Color(0xFFE5E7EB))),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                  child: Row(children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(dc).pop(false),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(0, 44),
+                        ),
+                        child: const Text('Annuler'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          final r = reasonCtrl.text.trim();
+                          Navigator.of(dc).pop(true);
+                          await _blockUser(context, reason: r);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFEF4444),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          minimumSize: const Size(0, 44),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: const Text('Bloquer'),
+                      ),
+                    ),
+                  ]),
+                ),
+              ],
             ),
           ),
-        ]),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(dc).pop(),
-              child: const Text('Annuler',
-                  style: TextStyle(
-                      color: Color(0xFF6B7280)))),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.of(dc).pop();
-              await _blockUser(context,
-                  reason: reasonCtrl.text.trim());
-            },
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFEF4444),
-                foregroundColor: Colors.white, elevation: 0,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10))),
-            child: const Text('Bloquer'),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -541,12 +563,12 @@ class _UserCard extends StatelessWidget {
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16)),
-        title: const Text('Activer le compte',
-            style: TextStyle(fontSize: 14,
-                fontWeight: FontWeight.w700)),
+        title: Text('Activer le compte',
+            style: AppTextStyles.label
+                .copyWith(fontWeight: FontWeight.w700)),
         content: Text(
             'Réactiver le compte de « ${user.name} » ?',
-            style: const TextStyle(fontSize: 13)),
+            style: AppTextStyles.body),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(dc).pop(),
@@ -580,10 +602,9 @@ class _UserCard extends StatelessWidget {
 
   // ── Gérer abonnement ───────────────────────────────────────
   void _showSubscriptionDialog(BuildContext context) {
-    showModalBottomSheet(
+    // Page pleine sur mobile, sheet sur desktop (cf. AdaptiveFormFrame).
+    showAdaptiveFormSheet<void>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
       builder: (ctx) => _SubscriptionSheet(
           user: user, onSaved: onRefresh),
     );
@@ -603,8 +624,7 @@ class _UserCard extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(user.name, style: const TextStyle(
-                  fontSize: 16, fontWeight: FontWeight.w800)),
+              Text(user.name, style: AppTextStyles.subtitleBold),
               const SizedBox(height: 12),
               _DetailLine('ID',         user.id),
               _DetailLine('Email',      user.email),
@@ -732,58 +752,31 @@ class _SubscriptionSheetState extends State<_SubscriptionSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(
-              top: Radius.circular(20))),
-      padding: EdgeInsets.fromLTRB(
-          20, 16, 20,
-          16 + MediaQuery.of(context).padding.bottom),
-      child: Column(mainAxisSize: MainAxisSize.min,
+    return AdaptiveFormFrame(
+      title: 'Gérer l\'abonnement',
+      subtitle: widget.user.name,
+      icon: Icons.card_membership_rounded,
+      actions: [
+        Padding(
+          padding: const EdgeInsets.only(right: 12),
+          child: Center(
+            child: Text('${_price.toStringAsFixed(0)} XAF',
+                style: AppTextStyles.label.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.primary)),
+          ),
+        ),
+      ],
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Poignée
-            Center(child: Container(
-                width: 36, height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                    color: const Color(0xFFE5E7EB),
-                    borderRadius: BorderRadius.circular(2)))),
-
-            Row(children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                    color: AppColors.primarySurface,
-                    borderRadius: BorderRadius.circular(8)),
-                child: Icon(Icons.card_membership_rounded,
-                    size: 18, color: AppColors.primary),
-              ),
-              const SizedBox(width: 10),
-              Expanded(child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Gérer l\'abonnement',
-                        style: TextStyle(fontSize: 14,
-                            fontWeight: FontWeight.w700)),
-                    Text(widget.user.name,
-                        style: const TextStyle(
-                            fontSize: 11,
-                            color: Color(0xFF9CA3AF))),
-                  ])),
-              // Prix live
-              Text('${_price.toStringAsFixed(0)} XAF',
-                  style: TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w800,
-                      color: AppColors.primary)),
-            ]),
-            const SizedBox(height: 16),
-
             // Plan
-            const Text('Plan',
-                style: TextStyle(fontSize: 11,
-                    color: Color(0xFF6B7280))),
+            Text('Plan',
+                style: AppTextStyles.caption
+                    .copyWith(color: const Color(0xFF6B7280))),
             const SizedBox(height: 6),
             Row(children: [
               _PlanBtn('Normal', 'normal', _planName,
@@ -795,9 +788,9 @@ class _SubscriptionSheetState extends State<_SubscriptionSheet> {
             const SizedBox(height: 12),
 
             // Cycle
-            const Text('Cycle',
-                style: TextStyle(fontSize: 11,
-                    color: Color(0xFF6B7280))),
+            Text('Cycle',
+                style: AppTextStyles.caption
+                    .copyWith(color: const Color(0xFF6B7280))),
             const SizedBox(height: 6),
             Row(children: [
               _CycleBtn('Mensuel',     'monthly',   _cycle,
@@ -814,14 +807,14 @@ class _SubscriptionSheetState extends State<_SubscriptionSheet> {
             // Référence paiement
             TextField(
               controller: _payRefCtrl,
-              style: const TextStyle(fontSize: 13),
+              style: AppTextStyles.input,
               decoration: _inputDeco('Référence paiement (optionnel)',
                   Icons.receipt_outlined),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _notesCtrl,
-              style: const TextStyle(fontSize: 13),
+              style: AppTextStyles.input,
               decoration: _inputDeco(
                   'Notes internes (optionnel)', Icons.notes_rounded),
             ),
@@ -843,21 +836,21 @@ class _SubscriptionSheetState extends State<_SubscriptionSheet> {
                     ? const SizedBox(width: 20, height: 20,
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: Colors.white))
-                    : const Text('Enregistrer l\'abonnement',
-                    style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700)),
+                    : Text('Enregistrer l\'abonnement',
+                    style: AppTextStyles.label
+                        .copyWith(fontWeight: FontWeight.w700)),
               ),
             ),
-          ]),
+          ],
+        ),
+      ),
     );
   }
 
   InputDecoration _inputDeco(String hint, IconData icon) =>
       InputDecoration(
         hintText: hint,
-        hintStyle: const TextStyle(
-            fontSize: 12, color: Color(0xFF9CA3AF)),
+        hintStyle: AppTextStyles.inputHint,
         prefixIcon: Icon(icon, size: 16,
             color: const Color(0xFF9CA3AF)),
         filled: true,
@@ -977,8 +970,7 @@ class _FilterChip extends StatelessWidget {
               color: sel
                   ? AppColors.primary : const Color(0xFFE5E7EB)),
         ),
-        child: Text(label, style: TextStyle(
-            fontSize: 11,
+        child: Text(label, style: AppTextStyles.caption.copyWith(
             fontWeight: sel
                 ? FontWeight.w700 : FontWeight.w400,
             color: sel
@@ -996,10 +988,9 @@ class _Badge extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
     decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha:0.12),
         borderRadius: BorderRadius.circular(4)),
-    child: Text(label, style: TextStyle(
-        fontSize: 8, fontWeight: FontWeight.w700, color: color)),
+    child: Text(label, style: AppTextStyles.microBold.copyWith(color: color)),
   );
 }
 
@@ -1019,10 +1010,9 @@ class _SubStatusBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(
           horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
+          color: color.withValues(alpha:0.1),
           borderRadius: BorderRadius.circular(4)),
-      child: Text(label, style: TextStyle(
-          fontSize: 9, fontWeight: FontWeight.w700, color: color)),
+      child: Text(label, style: AppTextStyles.microBold.copyWith(color: color)),
     );
   }
 }
@@ -1043,18 +1033,18 @@ class _StatCard extends StatelessWidget {
       Container(
         width: 38, height: 38,
         decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha:0.1),
             shape: BoxShape.circle),
         child: Icon(icon, size: 18, color: color),
       ),
       const SizedBox(width: 12),
       Column(crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(value, style: TextStyle(
-                fontSize: 20, fontWeight: FontWeight.w800,
+            Text(value, style: AppTextStyles.title.copyWith(
+                fontWeight: FontWeight.w800,
                 color: color)),
-            Text(label, style: const TextStyle(
-                fontSize: 11, color: Color(0xFF6B7280))),
+            Text(label, style: AppTextStyles.caption
+                .copyWith(color: const Color(0xFF6B7280))),
           ]),
     ]),
   );
@@ -1068,12 +1058,11 @@ class _DetailLine extends StatelessWidget {
     padding: const EdgeInsets.symmetric(vertical: 3),
     child: Row(children: [
       SizedBox(width: 100, child: Text(label,
-          style: const TextStyle(
-              fontSize: 11, color: Color(0xFF6B7280)))),
+          style: AppTextStyles.caption
+              .copyWith(color: const Color(0xFF6B7280)))),
       Expanded(child: Text(value,
-          style: const TextStyle(
-              fontSize: 11, fontWeight: FontWeight.w600,
-              color: Color(0xFF0F172A)))),
+          style: AppTextStyles.captionBold
+              .copyWith(color: const Color(0xFF0F172A)))),
     ]),
   );
 }
@@ -1098,8 +1087,7 @@ class _PlanBtn extends StatelessWidget {
                   : const Color(0xFFE5E7EB)),
         ),
         child: Text(label, textAlign: TextAlign.center,
-            style: TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w600,
+            style: AppTextStyles.bodySmBold.copyWith(
                 color: sel ? Colors.white
                     : const Color(0xFF374151))),
       ),
@@ -1128,8 +1116,7 @@ class _CycleBtn extends StatelessWidget {
                   : const Color(0xFFE5E7EB)),
         ),
         child: Text(label, textAlign: TextAlign.center,
-            style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w600,
+            style: AppTextStyles.captionBold.copyWith(
                 color: sel ? AppColors.primary
                     : const Color(0xFF6B7280))),
       ),

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/app_database.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_text_styles.dart';
 
 /// État résumé du sync pour l'UI :
 ///   * `errorsCount` : nombre d'erreurs permanentes journalisées (sync_errors)
@@ -76,8 +77,8 @@ class SyncStatusBanner extends ConsumerWidget {
           const SizedBox(width: 8),
           Expanded(child: Text(
             _label(status),
-            style: const TextStyle(
-                color: Colors.white, fontSize: 12,
+            style: AppTextStyles.bodySm.copyWith(
+                color: Colors.white,
                 fontWeight: FontWeight.w600),
             overflow: TextOverflow.ellipsis,
           )),
@@ -144,22 +145,23 @@ class _SyncErrorsSheetState extends ConsumerState<_SyncErrorsSheet> {
                   borderRadius: BorderRadius.circular(2)),
             )),
             const SizedBox(height: 14),
-            const Text('Synchronisation',
-                style: TextStyle(fontSize: 16,
+            Text('Synchronisation',
+                style: AppTextStyles.subtitleBold.copyWith(
                     fontWeight: FontWeight.w800,
-                    color: Color(0xFF0F172A))),
+                    color: const Color(0xFF0F172A))),
             const SizedBox(height: 4),
             Text('$pend op(s) en attente · $stuck bloquée(s) · '
                 '${errors.length} erreur(s)',
-                style: const TextStyle(fontSize: 12,
-                    color: Color(0xFF6B7280))),
+                style: AppTextStyles.bodySmSecondary.copyWith(
+                    color: const Color(0xFF6B7280))),
             const SizedBox(height: 12),
             if (errors.isEmpty && stuck == 0)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
                 child: Center(child: Text(
                   'Aucune erreur récente. La queue se vide automatiquement.',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+                  style: AppTextStyles.bodySmSecondary.copyWith(
+                      color: const Color(0xFF6B7280)),
                   textAlign: TextAlign.center)),
               )
             else
@@ -177,19 +179,18 @@ class _SyncErrorsSheetState extends ConsumerState<_SyncErrorsSheet> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                       Text('${e['table'] ?? '?'} · ${e['op'] ?? '?'}',
-                          style: const TextStyle(fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF0F172A))),
+                          style: AppTextStyles.bodySmBold.copyWith(
+                              color: const Color(0xFF0F172A))),
                       const SizedBox(height: 2),
                       Text(e['error']?.toString() ?? '',
                           maxLines: 3, overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 11,
-                              color: Color(0xFF6B7280))),
+                          style: AppTextStyles.caption.copyWith(
+                              color: const Color(0xFF6B7280))),
                       if (t != null) ...[
                         const SizedBox(height: 2),
                         Text(t.substring(0, 19).replaceAll('T', ' '),
-                            style: const TextStyle(fontSize: 10,
-                                color: Color(0xFF9CA3AF))),
+                            style: AppTextStyles.micro.copyWith(
+                                color: const Color(0xFF9CA3AF))),
                       ],
                     ]),
                   );
@@ -200,8 +201,9 @@ class _SyncErrorsSheetState extends ConsumerState<_SyncErrorsSheet> {
               Expanded(child: OutlinedButton.icon(
                 onPressed: _busy ? null : _retryAll,
                 icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('Tout réessayer',
-                    style: TextStyle(fontSize: 12)),
+                label: Text('Tout réessayer',
+                    style: AppTextStyles.bodySm.copyWith(
+                        color: AppColors.primary)),
                 style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.primary,
                     side: BorderSide(color: AppColors.primary),
@@ -213,8 +215,9 @@ class _SyncErrorsSheetState extends ConsumerState<_SyncErrorsSheet> {
               Expanded(child: OutlinedButton.icon(
                 onPressed: _busy ? null : _confirmDiscard,
                 icon: const Icon(Icons.delete_sweep_rounded, size: 16),
-                label: const Text('Vider la queue',
-                    style: TextStyle(fontSize: 12)),
+                label: Text('Vider la queue',
+                    style: AppTextStyles.bodySm.copyWith(
+                        color: AppColors.error)),
                 style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.error,
                     side: BorderSide(color: AppColors.error),

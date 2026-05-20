@@ -3,7 +3,6 @@ import 'package:supabase_flutter/supabase_flutter.dart' hide AuthException;
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/services/supabase_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
-import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/secure_storage.dart';
 import '../../../../core/database/app_database.dart';
 import '../models/user_model.dart';
@@ -275,12 +274,6 @@ class AuthSupabaseDataSource {
     if (m.contains('otp') || m.contains('token'))
       return 'Lien expiré — veuillez recommencer';
     return msg.isNotEmpty ? msg : 'Une erreur est survenue, veuillez réessayer';
-  }
-
-  /// Vérifie si un email est déjà enregistré localement (cache Hive)
-  bool _emailExistsLocally(String email) {
-    return LocalStorageService.getAllUsers()
-        .any((u) => u.email.toLowerCase() == email.toLowerCase());
   }
 
   /// Extrait un message lisible depuis n'importe quel type d'exception Supabase

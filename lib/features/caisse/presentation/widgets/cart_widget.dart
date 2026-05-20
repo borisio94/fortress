@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../bloc/caisse_bloc.dart';
 import '../../domain/entities/sale_item.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/database/app_database.dart';
@@ -150,10 +151,9 @@ class _CartHeader extends StatelessWidget {
                 color: AppColors.textSecondary),
             SizedBox(width: isCompact ? 6 : 8),
             Expanded(child: Text(l.caisseCartTitle,
-                style: TextStyle(
+                style: AppTextStyles.body.copyWith(
                     fontSize: isCompact ? 13 : 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary))),
+                    fontWeight: FontWeight.w700))),
             if (state.itemCount > 0)
               Container(
                 padding: EdgeInsets.symmetric(
@@ -162,7 +162,7 @@ class _CartHeader extends StatelessWidget {
                 decoration: BoxDecoration(color: AppColors.primary,
                     borderRadius: BorderRadius.circular(12)),
                 child: Text('${state.itemCount}',
-                    style: TextStyle(
+                    style: AppTextStyles.micro.copyWith(
                         fontSize: isCompact ? 10 : 11,
                         fontWeight: FontWeight.w700,
                         color: Colors.white)),
@@ -180,7 +180,9 @@ class _CartHeader extends StatelessWidget {
                   minimumSize: Size.zero,
                 ),
                 child: Text(l.caisseClear,
-                    style: TextStyle(fontSize: isCompact ? 11 : 12)),
+                    style: AppTextStyles.captionHint.copyWith(
+                        fontSize: isCompact ? 11 : 12,
+                        color: AppColors.error)),
               ),
             ],
           ]),
@@ -218,15 +220,15 @@ class _PriceAlertBanner extends StatelessWidget {
       Expanded(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Alerte marge',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                      color: AppColors.warning)),
+              Text('Alerte marge',
+                  style: AppTextStyles.captionBold
+                      .copyWith(color: AppColors.warning)),
               ...alerts.map((i) => Text(
                 '• ${i.productName}${i.variantName != null ? ' — ${i.variantName}' : ''} : '
                     '${CurrencyFormatter.format(i.effectivePrice)} '
                     '(bénéf. < 50% du normal)',
-                style: const TextStyle(fontSize: 10,
-                    color: AppColors.textPrimary),
+                style: AppTextStyles.micro
+                    .copyWith(color: AppColors.textPrimary),
               )),
             ]),
       ),
@@ -275,13 +277,12 @@ class _CartItemRow extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(item.productName,
-                    style: const TextStyle(fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary),
+                    style: AppTextStyles.bodyBold,
                     maxLines: 1, overflow: TextOverflow.ellipsis),
                 if (item.variantName != null)
                   Text(item.variantName!,
-                      style: TextStyle(fontSize: variantFs,
+                      style: AppTextStyles.bodySm.copyWith(
+                          fontSize: variantFs,
                           color: AppColors.primary,
                           fontWeight: FontWeight.w500),
                       maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -296,20 +297,17 @@ class _CartItemRow extends StatelessWidget {
                     children: [
                       if (priceModified) ...[
                         Text(CurrencyFormatter.format(item.effectivePrice),
-                            style: TextStyle(fontSize: 11,
-                                fontWeight: FontWeight.w700,
+                            style: AppTextStyles.captionBold.copyWith(
                                 color: hasPriceAlert
                                     ? AppColors.warning
                                     : AppColors.primary)),
                         Text(CurrencyFormatter.format(item.unitPrice),
-                            style: const TextStyle(fontSize: 9,
-                                color: AppColors.textHint,
+                            style: AppTextStyles.micro.copyWith(
                                 decoration: TextDecoration.lineThrough)),
                       ] else
                         Text(CurrencyFormatter.format(item.unitPrice),
-                            style: TextStyle(fontSize: 11,
-                                color: AppColors.primary,
-                                fontWeight: FontWeight.w600)),
+                            style: AppTextStyles.captionBold
+                                .copyWith(color: AppColors.primary)),
                       // Bouton arrondi avec fond teinté du primary actif —
                       // visible (vs l'ancienne icône 10px à 50% opacity).
                       // Tailles adaptées au breakpoint 900 (mobile/desktop).
@@ -336,7 +334,8 @@ class _CartItemRow extends StatelessWidget {
         // Sous-total + stepper
         Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
           Text(CurrencyFormatter.format(item.subtotal),
-              style: TextStyle(fontSize: subtotalFs,
+              style: AppTextStyles.body.copyWith(
+                  fontSize: subtotalFs,
                   fontWeight: FontWeight.w700,
                   color: hasPriceAlert
                       ? AppColors.warning
@@ -350,9 +349,9 @@ class _CartItemRow extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Text('${item.quantity}',
-                    style: TextStyle(fontSize: qtyFs,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary)),
+                    style: AppTextStyles.body.copyWith(
+                        fontSize: qtyFs,
+                        fontWeight: FontWeight.w700)),
               ),
               _QtyBtn(icon: Icons.add_rounded, onTap: onIncrement),
             ]),
@@ -382,8 +381,7 @@ class _FeesSection extends StatelessWidget {
         const SizedBox(width: 6),
         const Expanded(
           child: Text('Frais de commande',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary)),
+              style: AppTextStyles.captionBold),
         ),
         GestureDetector(
           onTap: () => _showAddFeeDialog(context, shopId),
@@ -396,7 +394,7 @@ class _FeesSection extends StatelessWidget {
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Icon(Icons.add_rounded, size: 12, color: AppColors.primary),
               const SizedBox(width: 3),
-              Text('Ajouter', style: TextStyle(fontSize: 10,
+              Text('Ajouter', style: AppTextStyles.micro.copyWith(
                   fontWeight: FontWeight.w600, color: AppColors.primary)),
             ]),
           ),
@@ -412,8 +410,8 @@ class _FeesSection extends StatelessWidget {
                 onTap: () => _showEditFeeDialog(context, fee, shopId),
                 child: Row(children: [
                   Expanded(child: Text(fee.label,
-                      style: const TextStyle(fontSize: 11,
-                          color: AppColors.textPrimary),
+                      style: AppTextStyles.captionHint
+                          .copyWith(color: AppColors.textPrimary),
                       overflow: TextOverflow.ellipsis)),
                   const SizedBox(width: 4),
                   Icon(Icons.edit_rounded, size: 10,
@@ -423,9 +421,8 @@ class _FeesSection extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(CurrencyFormatter.format(fee.amount),
-                style: const TextStyle(fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
+                style: AppTextStyles.captionBold
+                    .copyWith(color: AppColors.textPrimary)),
             const SizedBox(width: 4),
             GestureDetector(
               onTap: () => context.read<CaisseBloc>()
@@ -459,7 +456,7 @@ class _FeesSection extends StatelessWidget {
                   size: 16, color: AppColors.primary)),
           const SizedBox(width: 10),
           const Text('Ajouter un frais',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              style: AppTextStyles.subtitleBold),
         ]),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           AutocompleteTextField(
@@ -513,7 +510,7 @@ class _FeesSection extends StatelessWidget {
         contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
         actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         title: const Text('Modifier le frais',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            style: AppTextStyles.subtitleBold),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           AutocompleteTextField(
             controller:  labelCtrl,
@@ -641,9 +638,7 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
           const SizedBox(width: 10),
           const Expanded(
             child: Text('Sélectionner un client',
-                style: TextStyle(fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
+                style: AppTextStyles.subtitleBold),
           ),
           // Bouton nouveau client
           GestureDetector(
@@ -654,14 +649,13 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
               decoration: BoxDecoration(
                   color: AppColors.primary,
                   borderRadius: BorderRadius.circular(8)),
-              child: const Row(
+              child: Row(
                   mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.person_add_rounded,
+                const Icon(Icons.person_add_rounded,
                     size: 13, color: Colors.white),
-                SizedBox(width: 4),
-                Text('Nouveau', style: TextStyle(
-                    fontSize: 11, fontWeight: FontWeight.w600,
-                    color: Colors.white)),
+                const SizedBox(width: 4),
+                Text('Nouveau', style: AppTextStyles.captionBold
+                    .copyWith(color: Colors.white)),
               ]),
             ),
           ),
@@ -673,11 +667,11 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
         padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
         child: TextField(
           onChanged: (v) => setState(() => _query = v),
-          style: const TextStyle(fontSize: 13),
+          style: AppTextStyles.body,
           decoration: InputDecoration(
             hintText: 'Rechercher par nom ou téléphone…',
-            hintStyle: const TextStyle(
-                color: Color(0xFFBBBBBB), fontSize: 12),
+            hintStyle: AppTextStyles.bodySm
+                .copyWith(color: const Color(0xFFBBBBBB)),
             prefixIcon: const Icon(Icons.search_rounded,
                 size: 16, color: AppColors.textHint),
             filled: true, fillColor: const Color(0xFFF9FAFB),
@@ -714,8 +708,8 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
                   _query.isEmpty
                       ? 'Aucun client enregistré'
                       : 'Aucun résultat pour "$_query"',
-                  style: const TextStyle(
-                      fontSize: 13, color: AppColors.textHint)),
+                  style: AppTextStyles.body
+                      .copyWith(color: AppColors.textHint)),
             ]))
             : ListView.separated(
           controller:  sc,
@@ -736,15 +730,13 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
                     shape: BoxShape.circle),
                 child: Center(child: Text(
                   c.name[0].toUpperCase(),
-                  style: TextStyle(
-                      fontSize: 14,
+                  style: AppTextStyles.label.copyWith(
                       fontWeight: FontWeight.w800,
                       color: AppColors.primary),
                 )),
               ),
               title: Text(c.name,
-                  style: TextStyle(
-                      fontSize: 13,
+                  style: AppTextStyles.body.copyWith(
                       fontWeight: sel
                           ? FontWeight.w700 : FontWeight.w500,
                       color: sel
@@ -752,9 +744,7 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
                           : AppColors.textPrimary)),
               subtitle: c.phone != null
                   ? Text(c.phone!,
-                  style: const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.textHint))
+                  style: AppTextStyles.captionHint)
                   : null,
               trailing: sel
                   ? Icon(Icons.check_circle_rounded,
@@ -838,11 +828,11 @@ class _CartFooter extends StatelessWidget {
       const SizedBox(height: 8),
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         Text(l.total.toUpperCase(),
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800,
-                color: AppColors.textPrimary)),
+            style: AppTextStyles.subtitleBold
+                .copyWith(fontWeight: FontWeight.w800)),
         Text(CurrencyFormatter.format(state.total),
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800,
-                color: AppColors.primary)),
+            style: AppTextStyles.subtitleBold.copyWith(
+                fontWeight: FontWeight.w800, color: AppColors.primary)),
       ]),
       const SizedBox(height: 12),
       // Date de livraison déplacée vers le sheet "Enregistrer la commande"
@@ -1032,8 +1022,7 @@ class _TvaLine extends StatelessWidget {
                   size: 17, color: AppColors.primary)),
           const SizedBox(width: 10),
           const Text('Taux de TVA',
-              style: TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w700)),
+              style: AppTextStyles.subtitleBold),
         ]),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           const SizedBox(height: 4),
@@ -1044,17 +1033,14 @@ class _TvaLine extends StatelessWidget {
                 decimal: true),
             inputFormatters: [FilteringTextInputFormatter.allow(
                 RegExp(r'[0-9.]'))],
-            style: const TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w700),
+            style: AppTextStyles.subtitleBold,
             textAlign: TextAlign.center,
             decoration: InputDecoration(
               hintText: '0',
               hintStyle: const TextStyle(color: Color(0xFFBBBBBB)),
               suffixText: '%',
-              suffixStyle: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.primary),
+              suffixStyle: AppTextStyles.label
+                  .copyWith(color: AppColors.primary),
               filled: true,
               fillColor: AppColors.primarySurface,
               isDense: true,
@@ -1077,8 +1063,7 @@ class _TvaLine extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text('Laissez vide ou 0 pour aucune TVA',
-              style: TextStyle(
-                  fontSize: 11, color: AppColors.textHint)),
+              style: AppTextStyles.captionHint),
         ]),
         actions: [
           TextButton(
@@ -1114,14 +1099,12 @@ class _TvaLine extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         const Text('TVA',
-            style: TextStyle(
-                fontSize: 12, color: AppColors.textSecondary)),
+            style: AppTextStyles.bodySmSecondary),
         Row(mainAxisSize: MainAxisSize.min, children: [
           RichText(
             overflow: TextOverflow.ellipsis,
             text: TextSpan(
-              style: TextStyle(
-                  fontSize: 12,
+              style: AppTextStyles.bodySm.copyWith(
                   color: rate > 0
                       ? AppColors.textPrimary
                       : AppColors.textHint),
@@ -1137,19 +1120,18 @@ class _TvaLine extends StatelessWidget {
                 ),
                 TextSpan(
                   text: ' $currency',
-                  style: const TextStyle(
-                      fontSize: 10, fontWeight: FontWeight.w500),
+                  style: AppTextStyles.micro
+                      .copyWith(fontWeight: FontWeight.w500),
                 ),
                 if (rate > 0)
                   const TextSpan(
                     text: '  ',
-                    style: TextStyle(fontSize: 10),
+                    style: AppTextStyles.micro,
                   ),
                 if (rate > 0)
                   TextSpan(
                     text: '(${rate.toStringAsFixed(rate % 1 == 0 ? 0 : 2)}%)',
-                    style: const TextStyle(
-                        fontSize: 10, color: AppColors.textHint),
+                    style: AppTextStyles.micro,
                   ),
               ],
             ),
@@ -1184,10 +1166,10 @@ class _Line extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     mainAxisAlignment: MainAxisAlignment.spaceBetween,
     children: [
-      Text(label, style: TextStyle(fontSize: 12,
-          color: color ?? AppColors.textSecondary)),
-      Text(value,  style: TextStyle(fontSize: 12,
-          color: color ?? AppColors.textPrimary)),
+      Text(label, style: AppTextStyles.bodySm
+          .copyWith(color: color ?? AppColors.textSecondary)),
+      Text(value,  style: AppTextStyles.bodySm
+          .copyWith(color: color ?? AppColors.textPrimary)),
     ],
   );
 }
@@ -1266,13 +1248,12 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
                   size: 17, color: AppColors.warning)),
           const SizedBox(width: 10),
           Expanded(child: Text(l.priceEditConfirmTitle,
-              style: const TextStyle(fontSize: 15,
-                  fontWeight: FontWeight.w700))),
+              style: AppTextStyles.subtitleBold)),
         ]),
         content: Column(mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(l.priceEditConfirmBody,
-              style: const TextStyle(fontSize: 13, height: 1.4)),
+              style: AppTextStyles.body.copyWith(height: 1.4)),
           const SizedBox(height: 10),
           _kvRow(l.priceEditCost,
               CurrencyFormatter.format(_priceBuy),
@@ -1312,10 +1293,9 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
 
   Widget _kvRow(String label, String value, Color valueColor) =>
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(label, style: const TextStyle(fontSize: 12,
-            color: AppColors.textSecondary)),
-        Text(value, style: TextStyle(fontSize: 12,
-            fontWeight: FontWeight.w700, color: valueColor)),
+        Text(label, style: AppTextStyles.bodySmSecondary),
+        Text(value, style: AppTextStyles.bodySmBold
+            .copyWith(color: valueColor)),
       ]);
 
   Future<void> _apply() async {
@@ -1392,14 +1372,12 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
               Text('${widget.item.productName}'
                   '${widget.item.variantName != null
                       ? ' — ${widget.item.variantName}' : ''}',
-                  style: const TextStyle(fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary),
+                  style: AppTextStyles.label
+                      .copyWith(fontWeight: FontWeight.w700),
                   maxLines: 2, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 2),
               Text(l.priceEditSubtitle,
-                  style: const TextStyle(fontSize: 11,
-                      color: AppColors.textHint)),
+                  style: AppTextStyles.captionHint),
             ])),
           ]),
           const SizedBox(height: 16),
@@ -1411,12 +1389,12 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: [FilteringTextInputFormatter.allow(
                 RegExp(r'[0-9.]'))],
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            style: AppTextStyles.title,
             textAlign: TextAlign.center,
             decoration: InputDecoration(
               hintText: '0',
               suffixText: CurrencyFormatter.currentSymbol,
-              suffixStyle: TextStyle(fontSize: 13, color: color),
+              suffixStyle: AppTextStyles.body.copyWith(color: color),
               filled: true,
               fillColor: color.withValues(alpha:0.06),
               isDense: true,
@@ -1495,9 +1473,8 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
                     size: 14, color: color),
                 const SizedBox(width: 6),
                 Expanded(child: Text(message,
-                    style: TextStyle(fontSize: 11,
+                    style: AppTextStyles.captionBold.copyWith(
                         color: color,
-                        fontWeight: FontWeight.w600,
                         height: 1.4))),
               ]),
             ),
@@ -1523,7 +1500,8 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
                         borderRadius: BorderRadius.circular(10)),
                   ),
                   child: Text(l.priceEditReset,
-                      style: const TextStyle(fontSize: 13)),
+                      style: AppTextStyles.body
+                          .copyWith(color: AppColors.textSecondary)),
                 ),
               ),
             if (widget.item.customPrice != null) const SizedBox(width: 10),
@@ -1543,8 +1521,9 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
                       borderRadius: BorderRadius.circular(10)),
                 ),
                 child: Text(l.priceEditApply,
-                    style: const TextStyle(fontSize: 14,
-                        fontWeight: FontWeight.w700)),
+                    style: AppTextStyles.label.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white)),
               ),
             ),
           ]),
@@ -1595,10 +1574,11 @@ class _FeeField extends StatelessWidget {
     inputFormatters: inputType == TextInputType.number
         ? [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))]
         : null,
-    style: const TextStyle(fontSize: 13),
+    style: AppTextStyles.body,
     decoration: InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 12),
+      hintStyle: AppTextStyles.bodySm
+          .copyWith(color: const Color(0xFFBBBBBB)),
       prefixIcon: Icon(icon, size: 16, color: const Color(0xFFAAAAAA)),
       filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
@@ -1622,8 +1602,8 @@ class _EmptyCart extends StatelessWidget {
           size: 40, color: AppColors.divider),
       const SizedBox(height: 10),
       Text(l.caisseEmpty,
-          style: const TextStyle(fontSize: 13,
-              color: AppColors.textHint)),
+          style: AppTextStyles.body
+              .copyWith(color: AppColors.textHint)),
     ]),
   );
 }
@@ -1696,8 +1676,7 @@ class _ScheduledDeliveryField extends StatelessWidget {
               has
                   ? 'Livraison prévue : ${_format(state.deliveryDate!)}'
                   : 'Date de livraison souhaitée (optionnel)',
-              style: TextStyle(
-                  fontSize: 12,
+              style: AppTextStyles.bodySm.copyWith(
                   fontWeight: has ? FontWeight.w600 : FontWeight.w400,
                   color: has
                       ? AppColors.primary : AppColors.textSecondary))),

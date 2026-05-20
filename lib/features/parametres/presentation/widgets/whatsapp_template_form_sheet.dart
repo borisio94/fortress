@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -169,7 +170,7 @@ class _WhatsappTemplateFormSheetState
                         DropdownMenuItem(
                           value: t,
                           child: Text(t.label,
-                              style: const TextStyle(fontSize: 13)),
+                              style: AppTextStyles.body),
                         ),
                     ],
                   ),
@@ -198,8 +199,8 @@ class _WhatsappTemplateFormSheetState
                   hintText:
                       'Tapez votre message. Insérez les variables ci-dessous '
                       'avec {{nom}}.',
-                  hintStyle: const TextStyle(
-                      fontSize: 11, color: Color(0xFFBBBBBB)),
+                  hintStyle: AppTextStyles.caption.copyWith(
+                      color: const Color(0xFFBBBBBB)),
                   filled: true,
                   fillColor: const Color(0xFFF9FAFB),
                   contentPadding: const EdgeInsets.all(12),
@@ -225,8 +226,7 @@ class _WhatsappTemplateFormSheetState
                 child: Row(children: [
                   const Expanded(
                     child: Text('Définir comme défaut pour ce type',
-                        style: TextStyle(
-                            fontSize: 12, fontWeight: FontWeight.w600)),
+                        style: AppTextStyles.bodySmBold),
                   ),
                   AppSwitch(
                     value: _isDefault,
@@ -254,8 +254,8 @@ class _WhatsappTemplateFormSheetState
                           strokeWidth: 2, color: Colors.white))
                   : const Icon(Icons.check_rounded, size: 16),
               label: Text(isEdit ? 'Enregistrer' : 'Créer',
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w700)),
+                  style: AppTextStyles.bodyBold.copyWith(
+                      color: Colors.white)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
@@ -297,9 +297,7 @@ class _VariablesHint extends StatelessWidget {
             child: Text(
                 'Variables disponibles pour ${type.label.toLowerCase()} '
                 '— tap pour insérer',
-                style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
+                style: AppTextStyles.microBold.copyWith(
                     letterSpacing: 0.3,
                     color: AppColors.primary)),
           ),

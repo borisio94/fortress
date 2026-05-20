@@ -29,8 +29,109 @@
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#534AB7">
+
+  <style>
+    /* Splash inline — visible avant que flutter_bootstrap.js charge.
+       Se masque sur l'évènement Flutter `flutter-first-frame`. */
+    html, body { margin: 0; padding: 0; background: #534AB7; }
+    #fortress-splash {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #534AB7 0%, #6B5DD3 100%);
+      z-index: 9999;
+      transition: opacity 280ms ease-out;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #fortress-splash img {
+      width: 96px; height: 96px;
+      border-radius: 22px;
+      box-shadow: 0 12px 36px rgba(0,0,0,0.25);
+      margin-bottom: 28px;
+    }
+    #fortress-splash .label {
+      color: #fff; font-size: 15px; font-weight: 600;
+      letter-spacing: 0.3px; opacity: 0.92; margin-top: 18px;
+    }
+    #fortress-splash .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid rgba(255,255,255,0.25);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: fortress-spin 0.85s linear infinite;
+    }
+    @keyframes fortress-spin { to { transform: rotate(360deg); } }
+    #fortress-splash.hidden { opacity: 0; pointer-events: none; }
+  </style>
 </head>
 <body>
-  <script src="flutter_bootstrap.js" async></script>
+  <!--
+    Purge du service worker hérité. L'ancienne stratégie PWA offline-first
+    de Flutter web enregistrait un SW qui servait obstinément une version
+    obsolète de l'app et ne se mettait jamais à jour (bug bloquant en prod).
+    On build désormais en --pwa-strategy=none (aucun SW enregistré), mais les
+    clients déjà « empoisonnés » gardent l'ancien SW actif tant qu'on ne le
+    désinstalle pas explicitement. Ce script le supprime + vide ses caches,
+    puis recharge UNE fois (garde sessionStorage anti-boucle) pour récupérer
+    les assets frais. Une fois le SW parti, getRegistrations() est vide →
+    no-op aux chargements suivants.
+  -->
+  <script>
+    (function () {
+      if (!('serviceWorker' in navigator)) return;
+      navigator.serviceWorker.getRegistrations().then(function (regs) {
+        if (!regs || !regs.length) return;
+        Promise.all(regs.map(function (r) { return r.unregister(); }))
+          .then(function () {
+            if (window.caches && caches.keys) {
+              return caches.keys().then(function (keys) {
+                return Promise.all(keys.map(function (k) {
+                  return caches.delete(k);
+                }));
+              });
+            }
+          })
+          .then(function () {
+            if (!sessionStorage.getItem('fortress-sw-purged')) {
+              sessionStorage.setItem('fortress-sw-purged', '1');
+              location.reload();
+            }
+          })
+          .catch(function () { /* best-effort, on n'empêche pas le boot */ });
+      });
+    })();
+  </script>
+  <div id="fortress-splash" role="status" aria-label="Chargement de Fortress POS">
+    <img src="icons/Icon-192.png" alt="">
+    <div class="spinner"></div>
+    <div class="label">Fortress POS</div>
+  </div>
+  <script>
+    // Flutter dispatche cet évènement quand le 1er frame est rendu.
+    // Fallback timeout 8s au cas où l'évènement ne firerait pas (erreur boot).
+    (function () {
+      var hideSplash = function () {
+        var s = document.getElementById('fortress-splash');
+        if (!s) return;
+        s.classList.add('hidden');
+        setTimeout(function () { if (s.parentNode) s.parentNode.removeChild(s); }, 320);
+      };
+      window.addEventListener('flutter-first-frame', hideSplash);
+      setTimeout(hideSplash, 8000);
+    })();
+  </script>
+  <!--
+    Cache buster — query string `v` change à chaque build (timestamp en
+    centièmes de seconde). Force le navigateur à re-fetcher
+    flutter_bootstrap.js (qui charge ensuite main.dart.js avec son propre
+    hash interne Flutter). Sans ce buster, un cache HTTP `immutable`
+    obsolète bloquait l'invalidation après chaque deploy.
+  -->
+  <script>
+    document.write(
+      '<script src="flutter_bootstrap.js?v=' +
+      Date.now() + '" async><\/script>'
+    );
+  </script>
 </body>
 </html>

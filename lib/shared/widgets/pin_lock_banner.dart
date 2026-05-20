@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/i18n/app_localizations.dart';
 import '../../core/services/pin_service.dart';
+import '../../core/theme/app_text_styles.dart';
 import '../../core/theme/app_theme.dart';
 
 /// Bannière globale affichée tant que [PinService.isLocked] est `true`.
@@ -89,8 +90,7 @@ class _PinLockBannerState extends State<PinLockBanner> {
             Expanded(
               child: Text(
                 l10n.pinLockBannerMessage(minutes),
-                style: TextStyle(
-                  fontSize: 12,
+                style: AppTextStyles.bodySm.copyWith(
                   fontWeight: FontWeight.w600,
                   color: scheme.onSurface,
                 ),

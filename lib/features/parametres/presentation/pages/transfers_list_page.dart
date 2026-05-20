@@ -5,7 +5,7 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
-import '../../../../shared/widgets/app_product_image.dart';
+import '../../../../shared/widgets/product_image_card.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
 import '../../../../features/inventaire/domain/entities/stock_location.dart';
@@ -101,17 +101,15 @@ class _TransfersListPageState extends ConsumerState<TransfersListPage> {
                     horizontal: 16, vertical: 6),
                 child: Row(children: [
                   Text('${list.length} transfert${list.length > 1 ? 's' : ''}',
-                      style: const TextStyle(fontSize: 11,
-                          color: AppColors.textSecondary,
-                          fontWeight: FontWeight.w500)),
+                      style: AppTextStyles.caption),
                   const Spacer(),
                   if (_filterLocationId != null)
                     TextButton.icon(
                       onPressed: () =>
                           setState(() => _filterLocationId = null),
                       icon: const Icon(Icons.clear_rounded, size: 14),
-                      label: const Text('Réinitialiser',
-                          style: TextStyle(fontSize: 11)),
+                      label: Text('Réinitialiser',
+                          style: AppTextStyles.caption),
                     ),
                 ]),
               ),
@@ -179,10 +177,8 @@ class _FilterBar extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
     child: Row(children: [
-      const Text('Emplacement :',
-          style: TextStyle(fontSize: 11,
-              color: AppColors.textSecondary,
-              fontWeight: FontWeight.w500)),
+      Text('Emplacement :',
+          style: AppTextStyles.caption),
       const SizedBox(width: 8),
       Expanded(
         child: DropdownButtonFormField<String?>(
@@ -190,7 +186,7 @@ class _FilterBar extends StatelessWidget {
           items: [
             const DropdownMenuItem<String?>(
               value: null,
-              child: Text('Tous', style: TextStyle(fontSize: 13)),
+              child: Text('Tous', style: AppTextStyles.body),
             ),
             ...locations.map((l) => DropdownMenuItem<String?>(
                   value: l.id,
@@ -203,7 +199,7 @@ class _FilterBar extends StatelessWidget {
                       child: Text(l.name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13)),
+                          style: AppTextStyles.body),
                     ),
                   ]),
                 )),
@@ -287,12 +283,10 @@ class _TransferCard extends StatelessWidget {
                   size: 11, color: AppColors.textHint),
               const SizedBox(width: 4),
               Text(dateStr,
-                  style: const TextStyle(fontSize: 10,
-                      color: AppColors.textHint)),
+                  style: AppTextStyles.micro),
               const Spacer(),
               Text('$lines ligne${lines > 1 ? 's' : ''} · $units unités',
-                  style: const TextStyle(fontSize: 11,
-                      fontWeight: FontWeight.w600,
+                  style: AppTextStyles.captionBold.copyWith(
                       color: AppColors.textPrimary)),
             ]),
             if ((transfer.notes ?? '').isNotEmpty) ...[
@@ -300,9 +294,8 @@ class _TransferCard extends StatelessWidget {
               Text(transfer.notes!,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11,
-                      fontStyle: FontStyle.italic,
-                      color: AppColors.textSecondary)),
+                  style: AppTextStyles.caption.copyWith(
+                      fontStyle: FontStyle.italic)),
             ],
           ],
         ),
@@ -318,8 +311,8 @@ class _LocationChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (loc == null) {
-      return const Text('Emplacement supprimé',
-          style: TextStyle(fontSize: 11, color: AppColors.textHint,
+      return Text('Emplacement supprimé',
+          style: AppTextStyles.captionHint.copyWith(
               fontStyle: FontStyle.italic));
     }
     final color = switch (loc!.type) {
@@ -335,7 +328,7 @@ class _LocationChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
+        color: color.withValues(alpha:0.10),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -346,8 +339,7 @@ class _LocationChip extends StatelessWidget {
           child: Text(loc!.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11,
-                  fontWeight: FontWeight.w600, color: color)),
+              style: AppTextStyles.captionBold.copyWith(color: color)),
         ),
       ]),
     );
@@ -373,12 +365,11 @@ class _StatusChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha:0.12),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(label,
-          style: TextStyle(fontSize: 9,
-              fontWeight: FontWeight.w700, color: color)),
+          style: AppTextStyles.microBold.copyWith(color: color)),
     );
   }
 }
@@ -418,7 +409,7 @@ class _TransferDetailsSheet extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.10),
+                  color: AppColors.primary.withValues(alpha:0.10),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(Icons.swap_horiz_rounded,
@@ -427,9 +418,7 @@ class _TransferDetailsSheet extends StatelessWidget {
               const SizedBox(width: 10),
               const Expanded(
                 child: Text('Détails du transfert',
-                    style: TextStyle(fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary)),
+                    style: AppTextStyles.label),
               ),
               _StatusChip(status: transfer.status),
             ]),
@@ -444,12 +433,10 @@ class _TransferDetailsSheet extends StatelessWidget {
             ]),
             const SizedBox(height: 10),
             Text(dateStr,
-                style: const TextStyle(fontSize: 11,
-                    color: AppColors.textHint)),
+                style: AppTextStyles.captionHint),
             if ((transfer.createdBy ?? '').isNotEmpty)
               Text('Par ${transfer.createdBy}',
-                  style: const TextStyle(fontSize: 11,
-                      color: AppColors.textHint)),
+                  style: AppTextStyles.captionHint),
             if ((transfer.notes ?? '').isNotEmpty) ...[
               const SizedBox(height: 10),
               Container(
@@ -460,16 +447,13 @@ class _TransferDetailsSheet extends StatelessWidget {
                   border: Border.all(color: AppColors.divider),
                 ),
                 child: Text(transfer.notes!,
-                    style: const TextStyle(fontSize: 12,
-                        fontStyle: FontStyle.italic,
-                        color: AppColors.textSecondary)),
+                    style: AppTextStyles.bodySmSecondary.copyWith(
+                        fontStyle: FontStyle.italic)),
               ),
             ],
             const SizedBox(height: 16),
             const Text('Lignes',
-                style: TextStyle(fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary)),
+                style: AppTextStyles.bodySmBold),
             const SizedBox(height: 8),
             Flexible(
               child: ListView.separated(
@@ -482,7 +466,7 @@ class _TransferDetailsSheet extends StatelessWidget {
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Row(children: [
-                      AppProductImage(
+                      ProductImageCard(
                         imageUrl: imagesByVariantId[l.variantId],
                         width: 36, height: 36,
                         borderRadius: BorderRadius.circular(8),
@@ -495,13 +479,10 @@ class _TransferDetailsSheet extends StatelessWidget {
                             Text(l.productName ?? '—',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.textPrimary)),
+                                style: AppTextStyles.bodyBold),
                             if ((l.variantName ?? '').isNotEmpty)
                               Text(l.variantName!,
-                                  style: const TextStyle(fontSize: 11,
-                                      color: AppColors.textHint)),
+                                  style: AppTextStyles.captionHint),
                           ],
                         ),
                       ),
@@ -509,12 +490,11 @@ class _TransferDetailsSheet extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
-                          color: AppColors.primary.withOpacity(0.10),
+                          color: AppColors.primary.withValues(alpha:0.10),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text('× ${l.quantity}',
-                            style: TextStyle(fontSize: 12,
-                                fontWeight: FontWeight.w700,
+                            style: AppTextStyles.bodySmBold.copyWith(
                                 color: AppColors.primary)),
                       ),
                     ]),
