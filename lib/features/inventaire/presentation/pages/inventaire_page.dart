@@ -3999,27 +3999,35 @@ class _CatalogueShareDialogState extends State<_CatalogueShareDialog> {
 // AUDIT STOCK (Couche 3) — bouton + dialog rapport
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Bouton 38×38 cohérent avec « + produit » / boutons popup de la topbar.
-/// Tooltip explicite : la fonctionnalité est exotique (utilisateur la voit
-/// rarement) — sans le tooltip, l'icône reste opaque.
+/// Bouton 32×32 calé sur le style de `_StatusFilterPopupBtn` / `_MultiChip` —
+/// même surface, même bordure, même taille d'icône, pour une rangée de
+/// filtres visuellement homogène. Pas d'état "active" (déclencheur one-shot).
 class _AuditStockBtn extends StatelessWidget {
   final VoidCallback onTap;
   const _AuditStockBtn({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: 'Audit stock — détecte les divergences et crée des incidents',
-      child: SizedBox(
-        width: 38, height: 38,
-        child: Material(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(10),
-            onTap: onTap,
-            child: Icon(Icons.fact_check_outlined,
-                size: 18, color: AppColors.primary),
+    final theme = Theme.of(context);
+    final cs    = theme.colorScheme;
+    final sem   = theme.semantic;
+    return SizedBox(
+      width: 32, height: 32,
+      child: Tooltip(
+        message: 'Audit stock — détecte les divergences',
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            decoration: BoxDecoration(
+              color: sem.elevatedSurface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: sem.borderSubtle),
+            ),
+            child: Center(
+              child: Icon(Icons.fact_check_outlined, size: 15,
+                  color: cs.onSurface.withValues(alpha: 0.7)),
+            ),
           ),
         ),
       ),
