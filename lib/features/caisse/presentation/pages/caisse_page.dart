@@ -361,6 +361,19 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     if (mounted) setState(() {});
   }
 
+  /// Index de l'onglet filtre correspondant à un statut. `null` si pas
+  /// d'onglet dédié (cas `refunded`) — on laisse alors l'onglet courant.
+  /// Doit rester synchronisé avec `_filters` (l'ordre est : Toutes,
+  /// Programmée, En cours, Complétée, Annulée, Refusée).
+  int? _tabIndexForStatus(SaleStatus s) => switch (s) {
+    SaleStatus.scheduled  => 1,
+    SaleStatus.processing => 2,
+    SaleStatus.completed  => 3,
+    SaleStatus.cancelled  => 4,
+    SaleStatus.refused    => 5,
+    SaleStatus.refunded   => null,
+  };
+
   /// Ouvre le scope selector puis génère le CSV/PDF des commandes.
   /// La permission `canExportOrders` est déjà vérifiée par le bouton qui
   /// appelle cette méthode (le bouton n'est rendu que si l'utilisateur
@@ -849,7 +862,23 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 
               await _ds.updateOrderStatus(order.id!, status,
                   completedAt: completedAt);
-              if (mounted) setState(() {});
+              if (!mounted) return;
+              // Auto-switch vers l'onglet du nouveau statut si on est
+              // sur un filtre dédié — sans ça la commande disparaissait
+              // de l'onglet d'origine et l'opérateur croyait que la
+              // transition avait été annulée (« ça revient à programmée »).
+              // On laisse l'onglet « Toutes » tranquille : il liste déjà
+              // tous les statuts. Pour `refunded`, pas d'onglet dédié →
+              // on retombe sur « Toutes ».
+              final newIdx = _tabIndexForStatus(status);
+              if (_filter.index != 0
+                  && newIdx != null
+                  && _filter.index != newIdx) {
+                _filter.animateTo(newIdx);
+              }
+              AppSnack.success(context,
+                  'Commande passée à « ${status.label} »');
+              setState(() {});
             },
             onCancelWithReason: (reason) async {
               await _ds.cancelOrderWithReason(_orders[i].id!, reason);
