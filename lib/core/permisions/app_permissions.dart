@@ -155,6 +155,9 @@ class AppPermissions {
   /// (= validées par un supérieur). Owner et admin l'ont par défaut.
   bool get canViewAllOrders =>
       _grain(EmployeePermission.caisseViewAllOrders, legacy: isShopAdmin);
+  /// Exporter les commandes (CSV/PDF). Donnée sensible : expose le CA.
+  bool get canExportOrders =>
+      _grain(EmployeePermission.caisseExport, legacy: isShopAdmin);
 
   // ── Clients ───────────────────────────────────────────────────────────────
   bool get canViewClients   => isMember
@@ -163,6 +166,9 @@ class AppPermissions {
       && _grain(EmployeePermission.crmWrite, legacy: isMember);
   bool get canDeleteClient  => hasActiveSubscription
       && _grain(EmployeePermission.crmDelete, legacy: isShopAdmin);
+  /// Exporter le carnet clients (CSV). Donnée RGPD : liste nominative.
+  bool get canExportClients =>
+      _grain(EmployeePermission.crmExport, legacy: isShopAdmin);
 
   // ── Finances ──────────────────────────────────────────────────────────────
   bool get canViewFinances    =>

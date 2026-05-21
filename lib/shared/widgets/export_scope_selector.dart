@@ -9,12 +9,11 @@ import '../../features/inventaire/domain/entities/stock_location.dart';
 /// les types (Produits, Commandes, Clients, Logs).
 ///
 /// Choix offerts à l'utilisateur :
-///   * **Scope** — Globale (multi-shop) / Boutique / Partenaire (dropdown
-///     des emplacements `StockLocationType.partner` de la boutique).
+///   * **Scope** — Globale (toutes mes boutiques) / Boutique courante /
+///     Partenaire (dropdown des emplacements `StockLocationType.partner`).
 ///   * **Format** — CSV ou PDF (toggle).
-/// Si [allowGlobal] est `false`, l'option « Globale » est masquée
-/// (utile pour les types qui ne supportent pas le multi-shop, ex. CRM
-/// limité à shop/global mais pas partenaire — cf. spec PR-2).
+/// L'option « Partenaire » se masque si [allowPartner] est `false` ou
+/// si la liste passée est vide (CRM par exemple).
 ///
 /// Le selector ne fait AUCUN appel data. Le caller passe la liste des
 /// partenaires déjà chargée depuis `stockLocationsBox` (ou autre) et
@@ -24,7 +23,6 @@ class ExportScopeSelector extends StatefulWidget {
   final String                shopId;
   final String?               shopName;
   final List<StockLocation>   partnerLocations;
-  final bool                  allowGlobal;
   final bool                  allowPartner;
   /// Formats supportés par le type d'export courant (ex: Clients ne
   /// supporte que CSV en PR-2). Si vide → [ExportFormat.csv] seul.
@@ -36,7 +34,6 @@ class ExportScopeSelector extends StatefulWidget {
     required this.shopId,
     this.shopName,
     this.partnerLocations = const [],
-    this.allowGlobal = false,
     this.allowPartner = true,
     this.supportedFormats = const [ExportFormat.csv, ExportFormat.pdf],
   });
@@ -49,7 +46,6 @@ class ExportScopeSelector extends StatefulWidget {
     required String shopId,
     String? shopName,
     List<StockLocation> partnerLocations = const [],
-    bool allowGlobal = false,
     bool allowPartner = true,
     List<ExportFormat> supportedFormats = const [
       ExportFormat.csv,
@@ -68,7 +64,6 @@ class ExportScopeSelector extends StatefulWidget {
         shopId: shopId,
         shopName: shopName,
         partnerLocations: partnerLocations,
-        allowGlobal: allowGlobal,
         allowPartner: allowPartner,
         supportedFormats: supportedFormats,
       ),
@@ -89,9 +84,10 @@ class _ExportScopeSelectorState extends State<ExportScopeSelector> {
   @override
   void initState() {
     super.initState();
-    // Préselection : Boutique par défaut (le cas le plus courant).
-    // Si l'utilisateur n'a accès qu'au scope global on bascule dessus.
-    _scope = widget.allowGlobal && widget.shopId.isEmpty
+    // Préselection : Boutique courante par défaut. Si pas de shopId
+    // disponible (cas exotique : page exports en mode hub global), on
+    // bascule sur Globale.
+    _scope = widget.shopId.isEmpty
         ? _ScopeChoice.global
         : _ScopeChoice.shop;
     _format = widget.supportedFormats.isNotEmpty
@@ -182,18 +178,26 @@ class _ExportScopeSelectorState extends State<ExportScopeSelector> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Column(children: [
-                if (widget.allowGlobal)
-                  _scopeTile(
-                    choice:    _ScopeChoice.global,
-                    icon:      Icons.public_outlined,
-                    title:     'Globale',
-                    subtitle:  'Toutes mes boutiques',
-                  ),
+                // Globale TOUJOURS visible (même si l'utilisateur n'a
+                // qu'une seule boutique — « Globale » = tout son
+                // périmètre accessible). Le data source agrège
+                // simplement la liste des shops du membership.
+                _scopeTile(
+                  choice:    _ScopeChoice.global,
+                  icon:      Icons.public_outlined,
+                  title:     'Globale',
+                  subtitle:  'Toutes mes boutiques',
+                ),
+                // Title = nom de la boutique pour identifier
+                // explicitement le périmètre (vs « Boutique » générique
+                // qui forçait l'utilisateur à lire le subtitle).
                 _scopeTile(
                   choice:    _ScopeChoice.shop,
                   icon:      Icons.store_outlined,
-                  title:     'Boutique',
-                  subtitle:  widget.shopName ?? 'Boutique courante',
+                  title:     widget.shopName?.trim().isNotEmpty == true
+                      ? widget.shopName!
+                      : 'Boutique courante',
+                  subtitle:  'Données de cette boutique uniquement',
                 ),
                 if (widget.allowPartner &&
                     widget.partnerLocations.isNotEmpty)
@@ -201,7 +205,7 @@ class _ExportScopeSelectorState extends State<ExportScopeSelector> {
                     choice:    _ScopeChoice.partner,
                     icon:      Icons.local_shipping_outlined,
                     title:     'Partenaire',
-                    subtitle:  'Dépôt de livraison',
+                    subtitle:  'Dépôt de livraison spécifique',
                     trailing: _scope == _ScopeChoice.partner
                         ? _partnerDropdown(theme)
                         : null,

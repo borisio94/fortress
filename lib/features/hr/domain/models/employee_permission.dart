@@ -30,11 +30,18 @@ enum EmployeePermission {
   /// employé ne voit que ses propres commandes (createdByUserId == self) +
   /// celles déjà finalisées (status == completed = validées par un supérieur).
   caisseViewAllOrders,
+  /// Exporter les commandes (CSV/PDF). Donnée sensible : expose le CA,
+  /// la liste des clients, les statuts. Admin/owner par défaut ;
+  /// employé requiert un grant explicite.
+  caisseExport,
 
   // ── Clients (CRM) ────────────────────────────────────────────────────────
   crmView,
   crmWrite,
   crmDelete,
+  /// Exporter le carnet d'adresses CRM (CSV). Donnée RGPD/sensible :
+  /// liste complète des clients + leur valeur. Admin/owner par défaut.
+  crmExport,
 
   // ── Finances ─────────────────────────────────────────────────────────────
   financeView,
@@ -101,9 +108,11 @@ extension EmployeePermissionX on EmployeePermission {
     EmployeePermission.caisseEditOrders => 'caisse.edit_orders',
     EmployeePermission.caisseScheduled  => 'caisse.scheduled',
     EmployeePermission.caisseViewAllOrders => 'caisse.view_all_orders',
+    EmployeePermission.caisseExport     => 'caisse.export',
     EmployeePermission.crmView          => 'crm.view',
     EmployeePermission.crmWrite         => 'crm.write',
     EmployeePermission.crmDelete        => 'crm.delete',
+    EmployeePermission.crmExport        => 'crm.export',
     EmployeePermission.financeView      => 'finance.view',
     EmployeePermission.financeExpenses  => 'finance.expenses',
     EmployeePermission.financeExport    => 'finance.export',
@@ -132,12 +141,14 @@ extension EmployeePermissionX on EmployeePermission {
     EmployeePermission.caisseEditOrders ||
     EmployeePermission.caisseScheduled  ||
     EmployeePermission.caisseViewAllOrders ||
+    EmployeePermission.caisseExport     ||
     EmployeePermission.salesCancel      ||
     EmployeePermission.salesDiscount    ||
     EmployeePermission.deliveryWhatsApp => EmployeePermissionGroup.caisse,
     EmployeePermission.crmView          ||
     EmployeePermission.crmWrite         ||
-    EmployeePermission.crmDelete        => EmployeePermissionGroup.crm,
+    EmployeePermission.crmDelete        ||
+    EmployeePermission.crmExport        => EmployeePermissionGroup.crm,
     EmployeePermission.financeView      ||
     EmployeePermission.financeExpenses  ||
     EmployeePermission.financeExport    => EmployeePermissionGroup.finance,

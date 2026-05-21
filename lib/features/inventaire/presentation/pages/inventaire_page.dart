@@ -421,9 +421,6 @@ class _InventairePageState extends ConsumerState<InventairePage>
   Future<void> _openExport() async {
     if (!mounted) return;
     final shop = LocalStorageService.getShop(widget.shopId);
-    final me   = LocalStorageService.getCurrentUser();
-    final isMultiShop = me != null
-        && LocalStorageService.getShopsForUser(me.id).length > 1;
     final partners =
         ProductsExportSource.partnerLocationsForShop(widget.shopId);
     final config = await ExportScopeSelector.show(
@@ -432,7 +429,6 @@ class _InventairePageState extends ConsumerState<InventairePage>
       shopId:           widget.shopId,
       shopName:         shop?.name,
       partnerLocations: partners,
-      allowGlobal:      isMultiShop,
     );
     if (!mounted || config == null) return;
     final rows = ProductsExportSource.collect(config.scope);
@@ -4119,6 +4115,10 @@ class _ExportBtn extends StatelessWidget {
     final theme = Theme.of(context);
     final cs    = theme.colorScheme;
     final sem   = theme.semantic;
+    // Icône `download_rounded` au lieu de `file_download_outlined` :
+    // certaines variantes outlined Material ne sont pas embarquées par
+    // le tree-shaker → glyphe invisible en web. Taille 18 (vs 15 sur
+    // _AuditStockBtn) pour qu'on voie clairement que c'est cliquable.
     return SizedBox(
       width: 32, height: 32,
       child: Tooltip(
@@ -4133,8 +4133,8 @@ class _ExportBtn extends StatelessWidget {
               border: Border.all(color: sem.borderSubtle),
             ),
             child: Center(
-              child: Icon(Icons.file_download_outlined, size: 15,
-                  color: cs.onSurface.withValues(alpha: 0.7)),
+              child: Icon(Icons.download_rounded, size: 18,
+                  color: cs.primary),
             ),
           ),
         ),

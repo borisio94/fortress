@@ -17,7 +17,12 @@ import '../../../../shared/widgets/blocked_delete_dialog.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../core/services/danger_action_service.dart';
+import '../../../../core/services/export_models.dart';
+import '../../../../core/services/export_service.dart';
+import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/permisions/subscription_provider.dart';
+import '../../../../shared/widgets/export_scope_selector.dart';
+import '../../data/exports/clients_export_source.dart';
 
 class ClientsPage extends StatefulWidget {
   final String shopId;
@@ -65,6 +70,34 @@ class _ClientsPageState extends State<ClientsPage> {
   Future<void> _syncInBackground() async {
     await AppDatabase.syncClients(widget.shopId);
     if (mounted) _load();
+  }
+
+  /// Ouvre le scope selector (Globale ou Boutique — pas de Partenaire
+  /// pour CRM) puis génère le CSV des clients. La permission
+  /// `canExportClients` est gatée par le bouton appelant.
+  Future<void> _openExport() async {
+    if (!mounted) return;
+    final shop = LocalStorageService.getShop(widget.shopId);
+    final config = await ExportScopeSelector.show(
+      context,
+      type:             ExportType.clients,
+      shopId:           widget.shopId,
+      shopName:         shop?.name,
+      allowPartner:     false, // n/a pour un carnet d'adresses
+      supportedFormats: const [ExportFormat.csv],
+    );
+    if (!mounted || config == null) return;
+    final rows = ClientsExportSource.collect(config.scope);
+    if (rows.isEmpty) {
+      AppSnack.info(context, 'Aucun client dans ce périmètre');
+      return;
+    }
+    await ExportService.exportToCsv(
+      context,
+      config: config,
+      header: ClientsExportSource.header,
+      rows:   rows,
+    );
   }
 
   List<Client> get _filtered {
@@ -131,6 +164,35 @@ class _ClientsPageState extends State<ClientsPage> {
               ),
             ),
             const SizedBox(width: 8),
+            // Bouton "Exporter" — visible si canExportClients (Consumer
+            // ponctuel : la page n'est pas Consumer mais on a besoin
+            // d'un ref pour lire la permission).
+            Consumer(builder: (_, ref, __) {
+              final perms =
+                  ref.watch(permissionsProvider(widget.shopId));
+              if (!perms.canExportClients) {
+                return const SizedBox.shrink();
+              }
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Tooltip(
+                  message: 'Exporter les clients (CSV)',
+                  child: SizedBox(
+                    width: 42, height: 42,
+                    child: Material(
+                      color: AppColors.primary.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(10),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: _openExport,
+                        child: Icon(Icons.download_rounded,
+                            size: 20, color: AppColors.primary),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
             // Bouton "Ajouter client" inline — extrême droite. Remplace
             // l'ancien FAB draggable + le bouton "+" topbar.
             Tooltip(

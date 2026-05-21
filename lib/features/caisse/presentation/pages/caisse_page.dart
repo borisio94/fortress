@@ -32,6 +32,11 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/permisions/app_permissions.dart';
 import '../../../../core/permisions/subscription_provider.dart';
+import '../../../../core/services/export_models.dart';
+import '../../../../core/services/export_service.dart';
+import '../../../../core/storage/local_storage_service.dart';
+import '../../../../shared/widgets/export_scope_selector.dart';
+import '../../data/exports/orders_export_source.dart';
 import '../../../../shared/providers/current_shop_provider.dart';
 import '../../domain/entities/sale.dart';
 import '../../data/repositories/sale_local_datasource.dart';
@@ -353,6 +358,45 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     if (mounted) setState(() {});
   }
 
+  /// Ouvre le scope selector puis génère le CSV/PDF des commandes.
+  /// La permission `canExportOrders` est déjà vérifiée par le bouton qui
+  /// appelle cette méthode (le bouton n'est rendu que si l'utilisateur
+  /// a la permission). On n'attend donc pas l'autorisation ici.
+  Future<void> _openExport() async {
+    if (!mounted) return;
+    final shop = LocalStorageService.getShop(widget.shopId);
+    final partners =
+        OrdersExportSource.partnerLocationsForShop(widget.shopId);
+    final config = await ExportScopeSelector.show(
+      context,
+      type:             ExportType.orders,
+      shopId:           widget.shopId,
+      shopName:         shop?.name,
+      partnerLocations: partners,
+    );
+    if (!mounted || config == null) return;
+    final rows = OrdersExportSource.collect(config.scope);
+    if (rows.isEmpty) {
+      AppSnack.info(context, 'Aucune commande dans ce périmètre');
+      return;
+    }
+    if (config.format == ExportFormat.csv) {
+      await ExportService.exportToCsv(
+        context,
+        config: config,
+        header: OrdersExportSource.header,
+        rows:   rows,
+      );
+    } else {
+      await ExportService.exportToPdf(
+        context,
+        config: config,
+        header: OrdersExportSource.header,
+        rows:   rows,
+      );
+    }
+  }
+
   String _normalize(String s) => s
       .toLowerCase()
       .replaceAll('à', 'a').replaceAll('â', 'a').replaceAll('ä', 'a')
@@ -585,6 +629,32 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               ),
             ],
             const Spacer(),
+            if (ref.watch(permissionsProvider(widget.shopId))
+                .canExportOrders) ...[
+              InkWell(
+                onTap: _openExport,
+                borderRadius: BorderRadius.circular(20),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                        color: AppColors.primary.withValues(alpha: 0.4)),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.download_rounded, size: 12,
+                        color: AppColors.primary),
+                    const SizedBox(width: 5),
+                    Text('Exporter',
+                        style: AppTextStyles.captionBold.copyWith(
+                            color: AppColors.primary)),
+                  ]),
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
             Text('${_orders.length} résultat${_orders.length > 1 ? 's' : ''}',
                 style: AppTextStyles.micro
                     .copyWith(fontWeight: FontWeight.w600)),
