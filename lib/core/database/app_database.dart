@@ -4580,6 +4580,10 @@ end \$\$;""",
 
   static ShopSummary _rowToShop(Map<String, dynamic> r) => ShopSummary(
     id: r['id'] as String, name: r['name'] as String,
+    // `logo_url` est nullable côté DB (colonne ajoutée par hotfix_087).
+    // Sans cette ligne, le sync écrasait le logo en local par null à
+    // chaque pull → l'utilisateur perdait son logo au reload.
+    logoUrl: r['logo_url'] as String?,
     currency: r['currency'] as String? ?? 'XAF',
     country: r['country'] as String? ?? 'CM',
     sector: r['sector'] as String? ?? 'retail',
