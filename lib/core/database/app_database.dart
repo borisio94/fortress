@@ -1217,6 +1217,38 @@ class AppDatabase {
           return true;
         }
 
+        // CAS PARTICULIER : `transition_interdite` sur orders.
+        // Ce n'est PAS une vraie erreur — c'est un conflit multi-device :
+        // un autre appareil a déjà fait avancer la commande dans le
+        // workflow (ex: completed) pendant qu'on essayait de la pousser
+        // dans un état antérieur (ex: processing). Le trigger serveur a
+        // raison : l'état local Hive est obsolète. Le bon réflexe est de
+        // pull depuis Supabase pour aligner Hive (best-effort, async) et
+        // de DROPPER l'op locale (la rejouer ne marchera jamais). Pas de
+        // bannière critique pour ce cas — c'est une réconciliation
+        // normale, pas une perte d'écriture.
+        final failedTable = op['table'] as String? ?? '';
+        if (failedTable == 'orders'
+            && err.contains('P0001')
+            && err.contains('transition_interdite')) {
+          final shopId = (op['data'] as Map?)?['shop_id'] as String?;
+          if (shopId != null && shopId.isNotEmpty) {
+            // Fire-and-forget : on n'attend pas le sync pour rendre la
+            // décision « drop ». Erreur de sync silencieuse — Hive sera
+            // aligné à la prochaine tentative si celle-ci échoue.
+            Future.microtask(() async {
+              try {
+                await syncOrders(shopId);
+              } catch (e) {
+                debugPrint('[DB] resync après transition_interdite: $e');
+              }
+            });
+          }
+          debugPrint('[DB] transition_interdite (conflit multi-device) '
+              '→ drop op + resync orders($shopId)');
+          return true;
+        }
+
         // Tables financières critiques : on n'ABANDONNE JAMAIS en silence
         // une écriture (sinon perte d'argent invisible). On garde l'op en
         // file (réessai + bannière "Synchro incomplète" visible) et on
@@ -1225,7 +1257,6 @@ class AppDatabase {
         const neverDropTables = {
           'partner_ledger_entries', 'orders', 'sales', 'expenses',
         };
-        final failedTable = op['table'] as String? ?? '';
         if (neverDropTables.contains(failedTable)) {
           debugPrint('[DB] Erreur permanente sur table critique '
               '"$failedTable" → GARDÉE en file (pas d\'abandon silencieux)');
