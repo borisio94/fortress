@@ -246,9 +246,17 @@ class InvoiceService {
         3: pw.FixedColumnWidth(80),
       },
       children: [
-        // Header
+        // Header — fond blanc, texte noir + ligne basse primary (1.2 pt)
+        // pour conserver l'accent thème sans aplat coloré. La signature
+        // visuelle reste : seul un trait fin marque la limite header/body,
+        // ce qui laisse la couleur primaire comme accent et non comme bloc.
         pw.TableRow(
-          decoration: pw.BoxDecoration(color: theme.primary),
+          decoration: pw.BoxDecoration(
+            color: InvoiceTheme.pageBackground,
+            border: pw.Border(
+              bottom: pw.BorderSide(color: theme.primary, width: 1.2),
+            ),
+          ),
           children: [
             _headerCell('Désignation', pw.TextAlign.left),
             _headerCell('Qté',         pw.TextAlign.center),
@@ -281,14 +289,15 @@ class InvoiceService {
 
   static pw.Widget _headerCell(String text, pw.TextAlign align) =>
       pw.Padding(
-        padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 7),
         child: pw.Text(
           text,
           textAlign: align,
           style: pw.TextStyle(
               fontSize: 10,
               fontWeight: pw.FontWeight.bold,
-              color: InvoiceTheme.white),
+              letterSpacing: 0.4,
+              color: InvoiceTheme.textPrimary),
         ),
       );
 
