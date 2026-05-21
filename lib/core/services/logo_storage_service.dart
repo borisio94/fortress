@@ -30,18 +30,25 @@ class LogoStorageService {
   // ── API publique ────────────────────────────────────────────────
 
   /// Compresse [rawBytes], upload vers Supabase et persiste cache + URL.
-  /// Retourne l'URL publique (avec cache-buster) ou `null` en cas d'échec.
+  ///
+  /// Retourne `null` UNIQUEMENT quand la compression échoue (image
+  /// indécodable ou trop lourde même en JPEG 70 après resize 512 px).
+  /// Toute autre erreur (bucket manquant, policy RLS, CORS, réseau) est
+  /// **propagée** au caller : sans ça, le snack UI affichait toujours
+  /// « Logo trop volumineux ou format non supporté », même quand la
+  /// vraie cause était côté infra Supabase — diagnostic impossible.
   static Future<String?> uploadLogo({
     required String shopId,
     required Uint8List rawBytes,
   }) async {
+    final compressed = _compress(rawBytes);
+    if (compressed == null) {
+      debugPrint('[LogoStorage] compression échouée '
+          '(image indécodable ou > 200 KB en JPEG 70)');
+      return null;
+    }
+    final path = '$shopId/logo.png';
     try {
-      final compressed = _compress(rawBytes);
-      if (compressed == null) {
-        debugPrint('[LogoStorage] compression échouée');
-        return null;
-      }
-      final path = '$shopId/logo.png';
       await _storage.from(_bucket).uploadBinary(
         path,
         compressed.bytes,
@@ -50,22 +57,22 @@ class LogoStorageService {
           upsert: true,
         ),
       );
-      // Cache-buster : sans `?v=<ts>` le navigateur (et `Image.network`
-      // côté Flutter web) sert l'ancien logo depuis son cache HTTP, et
-      // l'utilisateur a l'impression que le changement n'a pas été pris
-      // en compte. La timestamp invalide aussi le cache CDN Supabase.
-      final base = _storage.from(_bucket).getPublicUrl(path);
-      final v    = DateTime.now().millisecondsSinceEpoch;
-      final url  = '$base?v=$v';
-      // Persiste bytes + URL côté local pour usage immédiat (PDF facture,
-      // preview paramètres) sans re-fetch.
-      await _cacheBytes(shopId, compressed.bytes);
-      await _cacheUrl(shopId, url);
-      return url;
     } catch (e) {
-      debugPrint('[LogoStorage] upload échoué : $e');
-      return null;
+      debugPrint('[LogoStorage] uploadBinary échoué : $e');
+      rethrow;
     }
+    // Cache-buster : sans `?v=<ts>` le navigateur (et `Image.network`
+    // côté Flutter web) sert l'ancien logo depuis son cache HTTP, et
+    // l'utilisateur a l'impression que le changement n'a pas été pris
+    // en compte. La timestamp invalide aussi le cache CDN Supabase.
+    final base = _storage.from(_bucket).getPublicUrl(path);
+    final v    = DateTime.now().millisecondsSinceEpoch;
+    final url  = '$base?v=$v';
+    // Persiste bytes + URL côté local pour usage immédiat (PDF facture,
+    // preview paramètres) sans re-fetch.
+    await _cacheBytes(shopId, compressed.bytes);
+    await _cacheUrl(shopId, url);
+    return url;
   }
 
   /// Supprime le logo côté Storage + nettoie le cache local. Retourne
