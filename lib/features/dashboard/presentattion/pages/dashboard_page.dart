@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1234,9 +1236,18 @@ class _TopProductThumb extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(6),
       child: SizedBox(width: 30, height: 30,
+        // `CachedNetworkImage` pour le cache persistant (mobile : fichiers,
+        // web : IndexedDB) — la vignette restait sinon en placeholder à
+        // chaque reload web. `memCacheWidth` omis sur web (décodage canvas
+        // peu fiable), conservé en natif pour économiser la mémoire ×4.
         child: url.startsWith('http')
-            ? Image.network(url, fit: BoxFit.cover,
-                cacheWidth: 60, errorBuilder: (_, __, ___) => _placeholder())
+            ? CachedNetworkImage(
+                imageUrl: url,
+                cacheKey: url,
+                memCacheWidth: kIsWeb ? null : 60,
+                fit: BoxFit.cover,
+                placeholder: (_, __) => _placeholder(),
+                errorWidget: (_, __, ___) => _placeholder())
             : Image.file(File(url), fit: BoxFit.cover,
                 cacheWidth: 60, errorBuilder: (_, __, ___) => _placeholder()),
       ),

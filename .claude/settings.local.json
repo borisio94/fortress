@@ -125,7 +125,8 @@
       "Bash(Select-String -NotMatch \"^.. .claude\")",
       "Bash(Measure-Object)",
       "Bash(Select-Object Count)",
-      "PowerShell(flutter *)"
+      "PowerShell(flutter *)",
+      "Bash(sort -t_ -k2 -n)"
     ]
   }
 }

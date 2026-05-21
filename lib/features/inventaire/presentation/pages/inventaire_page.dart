@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -2828,10 +2829,20 @@ class _VariantSwatch extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
         child: SizedBox(
           width: 24, height: 24,
+          // `CachedNetworkImage` pour le cache disque/IndexedDB persistant —
+          // sans ça, le swatch reflashait à chaque reload web (cf. fix
+          // images produit). Le fallback `_initials` couvre à la fois le
+          // chargement (placeholder) et l'erreur réseau (errorWidget) :
+          // c'est un repère lisible qui évite un trou visuel.
           child: url.startsWith('http')
-              ? Image.network(url, fit: BoxFit.cover,
+              ? CachedNetworkImage(
+                  imageUrl: url,
+                  cacheKey: url,
+                  fit: BoxFit.cover,
                   filterQuality: FilterQuality.high,
-                  errorBuilder: (_, __, ___) => _initials(context))
+                  placeholder:  (_, __) => _initials(context),
+                  errorWidget:  (_, __, ___) => _initials(context),
+                )
               : Image.file(File(url), fit: BoxFit.cover,
                   filterQuality: FilterQuality.high,
                   errorBuilder: (_, __, ___) => _initials(context)),

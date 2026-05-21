@@ -121,29 +121,23 @@ class ProductImageCard extends StatelessWidget {
   }
 
   // ── Image distante ──────────────────────────────────────────────────────
-  // Mobile : `CachedNetworkImage` pour le cache disque persistant (offline).
-  // Web    : `Image.network` direct — `CachedNetworkImage` a des soucis
-  //          connus sur Flutter web (CORS, décodage memCacheWidth) qui
-  //          masquent silencieusement l'image. Le navigateur a son propre
-  //          cache HTTP, donc on perd peu.
+  // `CachedNetworkImage` partout (mobile + web) — cache persistant via
+  // `flutter_cache_manager` (fichiers sur mobile, IndexedDB sur web). Sans
+  // ce cache côté web, le simple `Image.network` n'a aucune persistance :
+  // l'`ImageCache` Flutter est en mémoire et est vidé à chaque reload, et
+  // le seul cache HTTP du navigateur ne suffit pas (hard refresh ou
+  // Cache-Control faible → re-décodage des bytes → placeholder qui s'affiche
+  // au démarrage tant que l'image n'est pas re-téléchargée).
+  //
+  // `memCacheWidth` est volontairement omis sur web : le décodage
+  // canvas-based de Flutter web ne le respecte pas de manière fiable et
+  // peut renvoyer une frame vide silencieusement. Sur mobile/desktop, on
+  // le garde — économie mémoire ×4 typique (source 1600 px → cible 400 px).
   Widget _network(ThemeData theme, String url, int cachePx) {
-    if (kIsWeb) {
-      return Image.network(
-        url,
-        fit:           BoxFit.cover,
-        width:         double.infinity,
-        height:        double.infinity,
-        cacheWidth:    cachePx,
-        filterQuality: FilterQuality.high,
-        loadingBuilder: (_, child, p) =>
-            p == null ? child : _skeleton(theme),
-        errorBuilder:  (_, __, ___) => _placeholder(theme),
-      );
-    }
     return CachedNetworkImage(
       imageUrl:       url,
       cacheKey:       url,
-      memCacheWidth:  cachePx,
+      memCacheWidth:  kIsWeb ? null : cachePx,
       fit:            BoxFit.cover,
       width:          double.infinity,
       height:         double.infinity,

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/logo_theme_builder.dart';
 import '../../../../core/theme/theme_palette.dart';
 import '../../../../core/theme/theme_mode_provider.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
@@ -64,6 +65,17 @@ class ThemePage extends ConsumerWidget {
                 ),
               ]),
               const SizedBox(height: 14),
+              // Card « Généré depuis votre logo » — visible uniquement
+              // si l'utilisateur a déjà importé un logo et qu'on a pu
+              // en dériver une palette exploitable (cache présent).
+              _LogoGeneratedCard(
+                current: current,
+                onTap: (palette) {
+                  HapticFeedback.selectionClick();
+                  ref.read(themePaletteProvider.notifier)
+                      .setPalette(palette);
+                },
+              ),
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -243,6 +255,138 @@ class _MiniDot extends StatelessWidget {
           border: Border.all(color: Colors.white, width: 1.5),
         ),
       );
+}
+
+// ─── Card « Généré depuis votre logo » ──────────────────────────────────────
+//
+// N'apparaît que si une palette dérivée d'un logo est mise en cache
+// (cf. `ShopLogoSection._applyLogoToTheme`). Au tap, applique cette
+// palette via `setPalette(palette)`. Si l'utilisateur supprime son
+// logo, le cache est purgé et la card disparaît.
+class _LogoGeneratedCard extends StatelessWidget {
+  final ThemePalette current;
+  final void Function(ThemePalette palette) onTap;
+  const _LogoGeneratedCard({required this.current, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = ThemePaletteNotifier.cachedLogoPalette();
+    if (palette == null) return const SizedBox.shrink();
+    final selected = current.id == LogoThemeBuilder.generatedId;
+    final theme = Theme.of(context);
+    final primary = palette.primary;
+    final secondary = palette.previewGradient.length > 1
+        ? palette.previewGradient[1]
+        : palette.primaryLight;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => onTap(palette),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: selected
+                    ? primary.withValues(alpha: 0.6)
+                    : Colors.black.withValues(alpha: 0.06),
+                width: selected ? 2 : 1,
+              ),
+              boxShadow: selected
+                  ? [
+                      BoxShadow(
+                        color: primary.withValues(alpha: 0.18),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Row(children: [
+              // Cercle bicolore : 2 demi-disques (primary + secondary).
+              SizedBox(
+                width: 56, height: 56,
+                child: Stack(children: [
+                  // Disque secondary (fond)
+                  Positioned.fill(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: secondary,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                  // Demi-disque primary (clipé moitié gauche)
+                  Positioned.fill(
+                    child: ClipPath(
+                      clipper: _HalfCircleClipper(),
+                      child: Container(color: primary),
+                    ),
+                  ),
+                  // Bordure
+                  Positioned.fill(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                            color: Colors.white, width: 2),
+                      ),
+                    ),
+                  ),
+                ]),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Votre logo',
+                        style: AppTextStyles.bodyBold.copyWith(
+                            color: theme.colorScheme.onSurface)),
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: primary.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        'Généré depuis votre logo',
+                        style: AppTextStyles.caption.copyWith(
+                            color: primary,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (selected)
+                Icon(Icons.check_circle_rounded,
+                    color: primary, size: 22),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Clipper qui ne garde que la moitié gauche d'un cercle — utilisé
+/// pour le rendu bicolore primary/secondary de la card logo.
+class _HalfCircleClipper extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) {
+    return Path()
+      ..addRect(Rect.fromLTWH(0, 0, size.width / 2, size.height));
+  }
+
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
 }
 
 // ─── Card de palette individuelle avec mini-mockup UI ───────────────────────

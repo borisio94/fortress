@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -9,7 +10,11 @@ import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../core/widgets/owner_pin_dialog.dart';
+import '../../../../core/services/logo_color_extractor.dart';
+import '../../../../core/services/logo_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/logo_theme_builder.dart';
+import '../../../../core/theme/theme_palette.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/permisions/subscription_provider.dart';
@@ -19,7 +24,6 @@ import '../../../../features/shop_selector/domain/entities/shop_summary.dart';
 import '../../../../features/inventaire/domain/entities/product.dart';
 import '../../../subscription/presentation/widgets/subscription_guard.dart';
 import '../../../hr/presentation/pages/employees_page.dart';
-import '../widgets/shop_logo_section.dart';
 
 /// Onglets exposés. `overview` (Boutique) est conditionnel : visible
 /// uniquement quand `showOverviewTab == true` (entrée via le tile
@@ -336,16 +340,14 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // ── Hero card (fond primary + avatar + badges + actions) ────
+        // ── Hero card (fond blanc + logo + badges + actions) ────────
+        //   Le logo s'intègre directement dans l'avatar de la card ;
+        //   plus de section logo séparée (compaction de l'espace).
         _ShopHeroCard(
           shop: s,
           onShare: () => _shareShop(context, s),
           onEdit:  () => _editShop(context, s),
         ),
-        const SizedBox(height: 16),
-
-        // ── Logo + identité visuelle facture ────────────────────────
-        ShopLogoSection(shopId: widget.shopId),
         const SizedBox(height: 16),
 
         // ── Informations enrichies — ordre spec round 3 :
@@ -457,12 +459,48 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
   }
 }
 
-class _ShopHeroCard extends StatelessWidget {
+/// Card identité de la boutique — fond blanc + logo cliquable + boutons
+/// Partager/Modifier. Le tap sur l'avatar permet d'ajouter/changer/supprimer
+/// le logo (image_picker → LogoStorageService → extraction couleurs +
+/// application au thème actif). Logique reprise de l'ancien
+/// `ShopLogoSection`, désormais intégrée à la card pour éviter de dupliquer
+/// l'avatar et libérer de l'espace vertical.
+class _ShopHeroCard extends ConsumerStatefulWidget {
   final ShopSummary shop;
   final VoidCallback onShare;
   final VoidCallback onEdit;
-  const _ShopHeroCard({required this.shop,
-      required this.onShare, required this.onEdit});
+  const _ShopHeroCard({
+    required this.shop,
+    required this.onShare,
+    required this.onEdit,
+  });
+
+  @override
+  ConsumerState<_ShopHeroCard> createState() => _ShopHeroCardState();
+}
+
+class _ShopHeroCardState extends ConsumerState<_ShopHeroCard> {
+  /// Bytes du logo en cache mémoire — affichage instantané sans I/O.
+  /// Hydraté synchrone via `LogoStorageService.cachedBytes`, puis HTTP
+  /// en background si seule l'URL est connue.
+  Uint8List? _logoBytes;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _logoBytes = LogoStorageService.cachedBytes(widget.shop.id);
+    if (_logoBytes == null) _hydrateFromUrl();
+  }
+
+  Future<void> _hydrateFromUrl() async {
+    final url = widget.shop.logoUrl;
+    if (url == null || url.isEmpty) return;
+    final bytes = await LogoStorageService.fetchBytes(
+        shopId: widget.shop.id, url: url);
+    if (!mounted || bytes == null) return;
+    setState(() => _logoBytes = bytes);
+  }
 
   String _sectorLabel(String s) => switch (s) {
     'retail'      => 'Commerce',
@@ -479,97 +517,313 @@ class _ShopHeroCard extends StatelessWidget {
     _             => Icons.storefront_rounded,
   };
 
+  Future<void> _pickAndUpload() async {
+    if (_busy) return;
+    final picker = ImagePicker();
+    final XFile? file;
+    try {
+      file = await picker.pickImage(source: ImageSource.gallery);
+    } catch (e) {
+      if (mounted) AppSnack.error(context, 'Sélection annulée : $e');
+      return;
+    }
+    if (file == null) return;
+    setState(() => _busy = true);
+    try {
+      final raw = await file.readAsBytes();
+      final url = await LogoStorageService.uploadLogo(
+          shopId: widget.shop.id, rawBytes: raw);
+      if (url == null) {
+        if (mounted) {
+          AppSnack.error(context,
+              'Logo trop volumineux ou format non supporté.');
+        }
+        return;
+      }
+      final cachedBytes = LogoStorageService.cachedBytes(widget.shop.id);
+      await LogoColorExtractor.extractAndCache(
+          shopId: widget.shop.id, bytes: cachedBytes);
+      await AppDatabase.updateShopLogoUrl(widget.shop.id, url);
+      ref.invalidate(currentShopProvider);
+      await _applyLogoToTheme(cachedBytes);
+      if (mounted) {
+        setState(() => _logoBytes = cachedBytes);
+        AppSnack.success(context, 'Logo mis à jour');
+      }
+    } catch (e) {
+      if (mounted) AppSnack.error(context, 'Échec upload : $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Pipeline « thème depuis logo ». `null` → laisse le thème intact (le
+  /// logo sert quand même à la facture). Monochrome → palette Midnight.
+  /// Sinon → palette générée + snack. Fallback catalogue → snack discret.
+  Future<void> _applyLogoToTheme(Uint8List? bytes) async {
+    if (bytes == null) return;
+    final logoPalette = await LogoColorExtractor.extractForTheme(bytes);
+    if (!mounted || logoPalette == null) return;
+    if (logoPalette.isMonochrome) {
+      await ref.read(themePaletteProvider.notifier)
+          .setPalette(paletteById('midnight'));
+      if (mounted) {
+        AppSnack.info(context,
+            'Logo monochrome — palette Midnight appliquée');
+      }
+      return;
+    }
+    final palette = LogoThemeBuilder.buildFromLogo(logoPalette);
+    await ref.read(themePaletteProvider.notifier).setPalette(palette);
+    if (!mounted) return;
+    if (logoPalette.fellBackToCatalog) {
+      AppSnack.info(context,
+          'Thème ajusté pour la lisibilité (${palette.labelFr}).');
+    } else {
+      AppSnack.success(context, 'Thème mis à jour depuis votre logo');
+    }
+  }
+
+  Future<void> _deleteLogo() async {
+    if (_busy) return;
+    bool confirm = false;
+    await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.delete_outline_rounded,
+      iconColor: AppColors.error,
+      title: 'Supprimer le logo ?',
+      body: const Text(
+          'La facture utilisera les couleurs par défaut.',
+          style: TextStyle(fontSize: 13,
+              color: AppColors.textSecondary)),
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Supprimer',
+      confirmColor: AppColors.error,
+      onConfirm: () => confirm = true,
+    );
+    if (!confirm) return;
+    setState(() => _busy = true);
+    try {
+      await LogoStorageService.deleteLogo(widget.shop.id);
+      await AppDatabase.updateShopLogoUrl(widget.shop.id, null);
+      ref.invalidate(currentShopProvider);
+      // Si la palette active a été générée depuis ce logo, on revient à
+      // la dernière palette manuelle (ou Violet par défaut).
+      final activePalette = ref.read(themePaletteProvider);
+      if (activePalette.id == LogoThemeBuilder.generatedId) {
+        await ref.read(themePaletteProvider.notifier)
+            .resetToManualOrDefault();
+      }
+      if (mounted) {
+        setState(() => _logoBytes = null);
+        AppSnack.success(context, 'Logo supprimé');
+      }
+    } catch (e) {
+      if (mounted) AppSnack.error(context, 'Échec suppression : $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Tap sur l'avatar — pas de logo : ouvre directement le picker. Sinon
+  /// bottom sheet « Changer / Supprimer » pour éviter un upload accidentel.
+  void _onAvatarTap() {
+    if (_busy) return;
+    if (_logoBytes == null) {
+      _pickAndUpload();
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.refresh_rounded, color: AppColors.primary),
+              title: const Text('Changer le logo',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              onTap: () { Navigator.pop(ctx); _pickAndUpload(); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded,
+                  color: AppColors.error),
+              title: const Text('Supprimer le logo',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
+                      color: AppColors.error)),
+              onTap: () { Navigator.pop(ctx); _deleteLogo(); },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [AppColors.primary, AppColors.primaryDark],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.divider),
         boxShadow: [
-          BoxShadow(color: AppColors.primary.withValues(alpha:0.25),
-              blurRadius: 12, offset: const Offset(0, 4)),
+          BoxShadow(color: Colors.black.withValues(alpha:0.04),
+              blurRadius: 10, offset: const Offset(0, 2)),
         ],
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          // Avatar (logo ou initiale secteur)
-          Container(
-            width: 56, height: 56,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha:0.22),
-              borderRadius: BorderRadius.circular(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            _LogoAvatar(
+              bytes: _logoBytes,
+              sectorIcon: _sectorIcon(widget.shop.sector),
+              busy: _busy,
+              onTap: _onAvatarTap,
             ),
-            child: Icon(_sectorIcon(shop.sector),
-                color: Colors.white, size: 28),
-          ),
-          const SizedBox(width: 14),
-          Expanded(child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(shop.name, style: const TextStyle(
-                  fontSize: 19, fontWeight: FontWeight.w800,
-                  color: Colors.white, letterSpacing: -0.3),
-                  maxLines: 2, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 6),
-              Wrap(spacing: 6, runSpacing: 4, children: [
-                _HeroBadge(
-                  text: shop.isActive
-                      ? l.shopStatusActive : l.shopStatusInactive,
-                  dotColor: shop.isActive
-                      ? AppColors.secondary : AppColors.error,
-                ),
-                _HeroBadge(text: shop.currency),
-                _HeroBadge(text: _sectorLabel(shop.sector)),
-              ]),
-            ],
-          )),
-        ]),
-        const SizedBox(height: 14),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            OutlinedButton.icon(
-              onPressed: onShare,
-              icon: const Icon(Icons.ios_share_rounded, size: 16),
-              label: Text(l.shopActionShare),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: BorderSide(color: Colors.white.withValues(alpha:0.5)),
-                minimumSize: const Size(0, 38),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-                textStyle: const TextStyle(fontSize: 12,
-                    fontWeight: FontWeight.w700),
-              ),
-            ),
-            const SizedBox(width: 10),
-            ElevatedButton.icon(
-              onPressed: onEdit,
-              icon: const Icon(Icons.edit_rounded, size: 16),
-              label: Text(l.shopActionEdit),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: AppColors.primary,
-                elevation: 0,
-                minimumSize: const Size(0, 38),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-                textStyle: const TextStyle(fontSize: 12,
-                    fontWeight: FontWeight.w800),
-              ),
-            ),
+            const SizedBox(width: 14),
+            Expanded(child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(widget.shop.name, style: const TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.w800,
+                    color: AppColors.textPrimary, letterSpacing: -0.3),
+                    maxLines: 2, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 6),
+                Wrap(spacing: 6, runSpacing: 4, children: [
+                  _HeroBadge(
+                    text: widget.shop.isActive
+                        ? l.shopStatusActive : l.shopStatusInactive,
+                    dotColor: widget.shop.isActive
+                        ? AppColors.secondary : AppColors.error,
+                  ),
+                  _HeroBadge(text: widget.shop.currency),
+                  _HeroBadge(text: _sectorLabel(widget.shop.sector)),
+                ]),
+              ],
+            )),
           ]),
-      ]),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              OutlinedButton.icon(
+                onPressed: widget.onShare,
+                icon: const Icon(Icons.ios_share_rounded, size: 16),
+                label: Text(l.shopActionShare),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  side: BorderSide(
+                      color: AppColors.primary.withValues(alpha:0.4)),
+                  minimumSize: const Size(0, 38),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                  textStyle: const TextStyle(fontSize: 12,
+                      fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(width: 10),
+              ElevatedButton.icon(
+                onPressed: widget.onEdit,
+                icon: const Icon(Icons.edit_rounded, size: 16),
+                label: Text(l.shopActionEdit),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  minimumSize: const Size(0, 38),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                  textStyle: const TextStyle(fontSize: 12,
+                      fontWeight: FontWeight.w800),
+                ),
+              ),
+            ]),
+        ],
+      ),
+    );
+  }
+}
+
+/// Avatar 56×56 — logo si dispo, icône secteur sinon. Overlay badge en
+/// bas-droite (édit / ajout / spinner busy) pour signaler le tap.
+class _LogoAvatar extends StatelessWidget {
+  final Uint8List? bytes;
+  final IconData sectorIcon;
+  final bool busy;
+  final VoidCallback onTap;
+  const _LogoAvatar({
+    required this.bytes,
+    required this.sectorIcon,
+    required this.busy,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasLogo = bytes != null;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: busy ? null : onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              width: 56, height: 56,
+              decoration: BoxDecoration(
+                color: AppColors.primarySurface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                    color: AppColors.primary.withValues(alpha:0.2)),
+              ),
+              clipBehavior: Clip.antiAlias,
+              alignment: Alignment.center,
+              child: hasLogo
+                  ? Image.memory(bytes!, fit: BoxFit.contain,
+                      gaplessPlayback: true)
+                  : Icon(sectorIcon, color: AppColors.primary, size: 26),
+            ),
+            // Pastille en bas-droite — édit / ajout / spinner busy.
+            Positioned(
+              right: -2, bottom: -2,
+              child: Container(
+                width: 22, height: 22,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+                alignment: Alignment.center,
+                child: busy
+                    ? const SizedBox(
+                        width: 10, height: 10,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          valueColor: AlwaysStoppedAnimation(Colors.white),
+                        ),
+                      )
+                    : Icon(
+                        hasLogo
+                            ? Icons.edit_rounded
+                            : Icons.add_a_photo_rounded,
+                        size: 11, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -583,8 +837,9 @@ class _HeroBadge extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
     decoration: BoxDecoration(
-      color: Colors.white.withValues(alpha:0.22),
+      color: AppColors.primarySurface,
       borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: AppColors.primary.withValues(alpha:0.15)),
     ),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
       if (dotColor != null) ...[
@@ -593,8 +848,8 @@ class _HeroBadge extends StatelessWidget {
               color: dotColor, shape: BoxShape.circle)),
         const SizedBox(width: 5),
       ],
-      Text(text, style: const TextStyle(fontSize: 10,
-          color: Colors.white, fontWeight: FontWeight.w700)),
+      Text(text, style: TextStyle(fontSize: 10,
+          color: AppColors.primary, fontWeight: FontWeight.w700)),
     ]),
   );
 }
