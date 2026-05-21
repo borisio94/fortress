@@ -20,6 +20,7 @@ import 'features/shop_selector/presentation/bloc/shop_selector_bloc.dart';
 import 'features/caisse/presentation/bloc/caisse_bloc.dart';
 import 'features/hub_central/presentation/bloc/hub_bloc.dart';
 import 'shared/widgets/alerts/scheduled_alerts_overlay.dart';
+import 'core/services/notification_service.dart';
 import 'core/services/stock_service.dart';
 import 'features/onboarding/presentation/providers/onboarding_seen_provider.dart';
 
@@ -97,6 +98,12 @@ class _PosAppState extends ConsumerState<PosApp> {
         listener: (context, state) {
           notifier.update(state);
           if (state is AuthAuthenticated) {
+            // Positionne le scope notifications du compte authentifié.
+            // Le `shopId` est complété plus tard par `AdaptiveScaffold`
+            // (au premier rendu du shell). Sans ça, une notif émise
+            // entre login et entrée shell serait taguée userId mais
+            // shopId=null → invisible (acceptable).
+            NotificationService.setCurrentScope(userId: state.user.id);
             // Démarre heartbeat + listener kick. Le callback `onKicked`
             // affiche un snack, force le logout et redirige vers /login.
             SessionService.start(onKicked: () {
@@ -117,6 +124,9 @@ class _PosAppState extends ConsumerState<PosApp> {
                 StockService.runBootReconciliation);
           } else if (state is AuthUnauthenticated) {
             SessionService.stop();
+            // Purge le scope notifications — empêche la cloche d'un autre
+            // compte de réafficher l'inbox du précédent sur le même device.
+            NotificationService.onLogout();
           }
         },
         child: MaterialApp.router(

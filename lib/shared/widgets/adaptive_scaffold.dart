@@ -150,6 +150,13 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
     final notifEnabled = perms.isMember;
     final wasEnabled   = NotificationService.enabledForCurrentUser.value;
     NotificationService.enabledForCurrentUser.value = notifEnabled;
+    // Pousse le shopId courant dans le scope de lecture du centre de
+    // notifs. Sans ça, la cloche affichait l'inbox de TOUTES les
+    // boutiques du device (cross-contamination cf. fix). Reset effectif
+    // au switch de boutique : la box Hive partagée est filtrée à la
+    // lecture, pas vidée (les notifs hors-shop restent en cache pour
+    // un retour ultérieur).
+    NotificationService.setCurrentShop(widget.shopId);
     // Sur transition false→true (premier rendu membre), rejoue les
     // alertes stock pour les produits déjà bas/épuisés. La fonction
     // gate elle-même le rôle (admin/owner uniquement) ; pour un vendeur

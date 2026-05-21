@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/database/app_database.dart';
 import '../../core/permisions/permission_guard.dart';
+import '../../core/services/notification_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/i18n/app_localizations.dart';
@@ -58,6 +59,9 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
     // Charge la devise du shop courant (lit shop_<id>_currency_code dans
     // Hive et met à jour CurrencyFormatter.current).
     CurrencyFormatter.loadForShop(widget.shopId);
+    // Pousse aussi le scope notifications — utile quand AppScaffold est
+    // root (sub-page directement attachée sans AdaptiveScaffold ancêtre).
+    NotificationService.setCurrentShop(widget.shopId);
   }
 
   @override
@@ -69,6 +73,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
       // Recharge la devise au switch de shop (chaque shop a sa propre
       // préférence de devise persistée).
       CurrencyFormatter.loadForShop(widget.shopId);
+      NotificationService.setCurrentShop(widget.shopId);
     }
   }
 
