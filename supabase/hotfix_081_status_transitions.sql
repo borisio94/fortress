@@ -54,26 +54,32 @@ BEGIN
   END;
 
   IF NOT v_allowed THEN
-    RAISE EXCEPTION 'transition_interdite'
-      USING ERRCODE = 'P0001',
-            MESSAGE = format('Transition interdite : %s → %s',
-                             OLD.status, NEW.status),
-            DETAIL  = jsonb_build_object(
-                        'order_id', NEW.id::text,
-                        'from',     OLD.status,
-                        'to',       NEW.status)::text;
+    -- ATTENTION : ne PAS mettre de format string derrière RAISE EXCEPTION
+    -- quand on passe `USING MESSAGE = ...` — Postgres interprète le texte
+    -- comme un MESSAGE par défaut, et le `USING MESSAGE` devient une
+    -- DEUXIÈME définition → 42601 « RAISE option already specified »
+    -- (bug observé en prod sur upsert orders). Le code lisible
+    -- `transition_interdite` est préfixé dans le MESSAGE.
+    RAISE EXCEPTION USING
+      ERRCODE = 'P0001',
+      MESSAGE = format('transition_interdite : %s → %s',
+                       OLD.status, NEW.status),
+      DETAIL  = jsonb_build_object(
+                  'order_id', NEW.id::text,
+                  'from',     OLD.status,
+                  'to',       NEW.status)::text;
   END IF;
 
   -- GF-4 bis : motif obligatoire pour passer à `cancelled`.
   IF NEW.status = 'cancelled'
      AND (NEW.cancellation_reason IS NULL
           OR length(trim(NEW.cancellation_reason)) = 0) THEN
-    RAISE EXCEPTION 'motif_required'
-      USING ERRCODE = 'P0001',
-            MESSAGE = 'Motif obligatoire pour annuler une commande.',
-            DETAIL  = jsonb_build_object(
-                        'order_id', NEW.id::text,
-                        'to',       'cancelled')::text;
+    RAISE EXCEPTION USING
+      ERRCODE = 'P0001',
+      MESSAGE = 'motif_required : motif obligatoire pour annuler une commande.',
+      DETAIL  = jsonb_build_object(
+                  'order_id', NEW.id::text,
+                  'to',       'cancelled')::text;
   END IF;
 
   RETURN NEW;
