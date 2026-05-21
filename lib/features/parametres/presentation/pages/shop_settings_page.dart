@@ -332,10 +332,50 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
-    if (widget.shop == null) {
-      return const Center(child: CircularProgressIndicator());
+    // Fallback Hive direct si `currentShopProvider` n'a pas (encore)
+    // fourni la boutique au moment du build — évite un spinner infini
+    // quand le provider est resté à null pour une raison transitoire
+    // (cache Hive corrompu sur ce shopId, exception silencieuse au
+    // boot, etc.). On a déjà le `widget.shopId` du router : on peut
+    // toujours retomber dessus.
+    final s = widget.shop
+        ?? LocalStorageService.getShop(widget.shopId);
+    if (s == null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.storefront_outlined,
+                size: 40, color: AppColors.textHint),
+            const SizedBox(height: 12),
+            const Text('Boutique introuvable',
+                style: TextStyle(fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                  'Aucune donnée locale pour cette boutique. '
+                  'Vérifiez votre connexion et réessayez.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12,
+                      color: AppColors.textSecondary)),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.refresh_rounded, size: 16),
+              label: const Text('Réessayer'),
+              onPressed: () => ref.invalidate(currentShopProvider),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      );
     }
-    final s = widget.shop!;
 
     return ListView(
       padding: const EdgeInsets.all(16),

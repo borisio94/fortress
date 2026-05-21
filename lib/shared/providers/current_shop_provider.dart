@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../features/shop_selector/domain/entities/shop_summary.dart';
 import '../../features/auth/domain/entities/user.dart';
@@ -18,21 +19,28 @@ class CurrentShopNotifier extends Notifier<ShopSummary?> {
     // Survivre aux navigations — jamais recréé tant que ProviderScope vit
     ref.keepAlive();
 
-    final userId = SupabaseClientService.currentUserId
-        ?? LocalStorageService.getCurrentUser()?.id;
-    if (userId == null) return null;
+    // Tout le chemin de lecture est wrapped : si Hive renvoie une map
+    // corrompue / un cast échoue, on retourne null plutôt que de propager
+    // une exception qui mettrait le provider en état d'erreur permanent
+    // (et bloquerait la page paramètres sur un spinner).
+    try {
+      final userId = SupabaseClientService.currentUserId
+          ?? LocalStorageService.getCurrentUser()?.id;
+      if (userId == null) return null;
 
-    // 1. Essayer l'activeShopId sauvegardé
-    final lastId = LocalStorageService.getActiveShopId(userId);
-    if (lastId != null) {
-      final shop = LocalStorageService.getShop(lastId);
-      if (shop != null) return shop;
+      // 1. Essayer l'activeShopId sauvegardé
+      final lastId = LocalStorageService.getActiveShopId(userId);
+      if (lastId != null) {
+        final shop = LocalStorageService.getShop(lastId);
+        if (shop != null) return shop;
+      }
+
+      // 2. Fallback : première boutique dans Hive
+      final shops = LocalStorageService.getShopsForUser(userId);
+      if (shops.isNotEmpty) return shops.first;
+    } catch (e) {
+      debugPrint('[CurrentShopProvider] build error: $e');
     }
-
-    // 2. Fallback : première boutique dans Hive
-    final shops = LocalStorageService.getShopsForUser(userId);
-    if (shops.isNotEmpty) return shops.first;
-
     return null;
   }
 
@@ -82,7 +90,10 @@ class MyShopsNotifier extends Notifier<List<ShopSummary>> {
   }
 
   /// Reçoit les boutiques depuis Supabase.
-  /// Sauvegarde boutiques ET memberships dans Hive de manière synchrone.
+  /// Sauvegarde boutiques ET memberships dans Hive de manière synchrone
+  /// via `LocalStorageService.saveShop` (sérialisation complète, incluant
+  /// whatsapp_phone, kind, parent_shop_id, logo_url — l'ancienne version
+  /// dupliquée localement perdait ces champs au refresh).
   void setFromSupabase(List<ShopSummary> shops, {String? userId}) {
     if (shops.isEmpty) return;
     state = shops;
@@ -93,9 +104,7 @@ class MyShopsNotifier extends Notifier<List<ShopSummary>> {
     if (uid == null) return;
 
     for (final shop in shops) {
-      // saveShop : synchrone dans la cache Hive (persiste en async)
-      HiveBoxes.shopsBox.put(shop.id, _shopToMap(shop));
-      // saveMembership : synchrone dans la cache Hive
+      LocalStorageService.saveShop(shop);
       HiveBoxes.membershipsBox.put('${uid}_${shop.id}', {
         'user_id': uid, 'shop_id': shop.id, 'shop_name': shop.name,
         'role': UserRole.admin.name,
@@ -109,18 +118,10 @@ class MyShopsNotifier extends Notifier<List<ShopSummary>> {
     }
   }
 
-  Map<String, dynamic> _shopToMap(ShopSummary s) => {
-    'id': s.id, 'name': s.name, 'logo_url': s.logoUrl,
-    'currency': s.currency, 'country': s.country, 'sector': s.sector,
-    'is_active': s.isActive, 'today_sales': s.todaySales,
-    'owner_id': s.ownerId, 'phone': s.phone, 'email': s.email,
-    'created_at': s.createdAt?.toIso8601String(),
-  };
-
   void addShop(ShopSummary shop) {
     if (!state.any((s) => s.id == shop.id)) {
       state = [...state, shop];
-      HiveBoxes.shopsBox.put(shop.id, _shopToMap(shop));
+      LocalStorageService.saveShop(shop);
     }
   }
 
@@ -134,7 +135,7 @@ class MyShopsNotifier extends Notifier<List<ShopSummary>> {
     final next = [...state];
     next[idx] = shop;
     state = next;
-    HiveBoxes.shopsBox.put(shop.id, _shopToMap(shop));
+    LocalStorageService.saveShop(shop);
   }
 
   void clear() => state = [];

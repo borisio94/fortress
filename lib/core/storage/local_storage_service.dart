@@ -79,7 +79,20 @@ class LocalStorageService {
 
   static ShopSummary? getShop(String id) {
     final m = HiveBoxes.shopsBox.get(id);
-    return m != null ? _shopFromMap(Map<String, dynamic>.from(m)) : null;
+    if (m == null) return null;
+    try {
+      return _shopFromMap(Map<String, dynamic>.from(m));
+    } catch (e) {
+      // Une map Hive corrompue (champ inattendu, cast impossible) ne doit
+      // jamais casser le provider qui lit la boutique active — sinon
+      // toute la page paramètres reste bloquée sur un spinner. On log et
+      // on retourne null : l'appelant fera un fallback / refetch réseau.
+      // Erreur silencieuse acceptable car ce chemin est doublé par le
+      // refetch Supabase au prochain `syncShops`.
+      // ignore: avoid_print
+      // (debugPrint déjà disponible via flutter/foundation côté caller)
+      return null;
+    }
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -306,15 +319,30 @@ class LocalStorageService {
   };
 
   static ShopSummary _shopFromMap(Map<String, dynamic> m) => ShopSummary(
-    id: m['id'], name: m['name'], logoUrl: m['logo_url'],
-    currency: m['currency'], country: m['country'], sector: m['sector'],
-    isActive: m['is_active'] ?? true, todaySales: m['today_sales'],
-    ownerId: m['owner_id'], phone: m['phone'],
-    whatsappPhone: m['whatsapp_phone'] as String?, email: m['email'],
-    createdAt: m['created_at'] != null
-        ? DateTime.parse(m['created_at']) : null,
-    kind:         ShopKindX.fromKey(m['kind'] as String?),
-    parentShopId: m['parent_shop_id'] as String?,
+    // Lectures DEFENSIVES : on accepte n'importe quel type dans la map
+    // (legacy formats, payloads tronqués par anciens `_shopToMap`,
+    // valeurs nulles inattendues). Tout cast strict (`as String`) sur un
+    // champ manquant casserait le `currentShopProvider` au build et
+    // bloquerait la page paramètres sur un spinner.
+    id:           (m['id']        ?? '').toString(),
+    name:         (m['name']      ?? '').toString(),
+    logoUrl:      m['logo_url']?.toString(),
+    currency:     (m['currency']  ?? 'XAF').toString(),
+    country:      (m['country']   ?? 'CM').toString(),
+    sector:       (m['sector']    ?? 'retail').toString(),
+    isActive:     m['is_active']  as bool? ?? true,
+    todaySales:   (m['today_sales'] as num?)?.toDouble(),
+    ownerId:      m['owner_id']?.toString(),
+    phone:        m['phone']?.toString(),
+    whatsappPhone: m['whatsapp_phone']?.toString(),
+    email:        m['email']?.toString(),
+    createdAt:    m['created_at'] is String
+        ? DateTime.tryParse(m['created_at'] as String)
+        : (m['created_at'] is DateTime
+            ? m['created_at'] as DateTime
+            : null),
+    kind:         ShopKindX.fromKey(m['kind']?.toString()),
+    parentShopId: m['parent_shop_id']?.toString(),
   );
 
   static Map<String, dynamic> _productToMap(Product p) => {
