@@ -597,13 +597,25 @@ class _ShopHeroCardState extends ConsumerState<_ShopHeroCard> {
     }
   }
 
-  /// Pipeline « thème depuis logo ». `null` → laisse le thème intact (le
-  /// logo sert quand même à la facture). Monochrome → palette Midnight.
-  /// Sinon → palette générée + snack. Fallback catalogue → snack discret.
+  /// Pipeline « thème depuis logo ». `null` → on prévient l'utilisateur
+  /// au lieu de rester silencieux (le caller pensait que le thème allait
+  /// changer). Monochrome → palette Midnight. Sinon → palette générée +
+  /// snack. Fallback catalogue → snack discret.
   Future<void> _applyLogoToTheme(Uint8List? bytes) async {
     if (bytes == null) return;
     final logoPalette = await LogoColorExtractor.extractForTheme(bytes);
-    if (!mounted || logoPalette == null) return;
+    if (!mounted) return;
+    if (logoPalette == null) {
+      debugPrint('[LogoTheme] extractForTheme retourné null '
+          '(${bytes.length} bytes)');
+      AppSnack.info(context,
+          'Couleurs du logo indétectables — thème non modifié.');
+      return;
+    }
+    debugPrint('[LogoTheme] primary=${logoPalette.primary} '
+        'secondary=${logoPalette.secondary} '
+        'mono=${logoPalette.isMonochrome} '
+        'fallback=${logoPalette.fellBackToCatalog}');
     if (logoPalette.isMonochrome) {
       await ref.read(themePaletteProvider.notifier)
           .setPalette(paletteById('midnight'));
@@ -618,7 +630,8 @@ class _ShopHeroCardState extends ConsumerState<_ShopHeroCard> {
     if (!mounted) return;
     if (logoPalette.fellBackToCatalog) {
       AppSnack.info(context,
-          'Thème ajusté pour la lisibilité (${palette.labelFr}).');
+          'Couleurs du logo peu lisibles — palette ${palette.labelFr} '
+          'appliquée à la place.');
     } else {
       AppSnack.success(context, 'Thème mis à jour depuis votre logo');
     }

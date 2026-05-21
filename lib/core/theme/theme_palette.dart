@@ -224,7 +224,14 @@ class ThemePaletteNotifier extends Notifier<ThemePalette> {
   }
 
   Future<void> setPalette(ThemePalette p) async {
-    if (state.id == p.id) return;
+    // Comparaison id+primary plutôt que id seul : la palette générée
+    // depuis un logo porte toujours l'id `logo_generated` mais ses
+    // couleurs changent à chaque upload différent. Sans cette nuance,
+    // un changement de logo ne mettait pas à jour le thème (early
+    // return sur l'id identique) et l'utilisateur ne voyait rien
+    // bouger. On compare aussi `primary` pour préserver l'optim sur
+    // les palettes catalogue (id unique = couleurs fixes).
+    if (state.id == p.id && state.primary == p.primary) return;
     state = p;
     try {
       final prefs = await SharedPreferences.getInstance();
