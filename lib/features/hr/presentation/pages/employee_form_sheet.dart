@@ -505,6 +505,10 @@ class _PermissionGroup extends StatelessWidget {
     EmployeePermission.inventoryWrite   => l.permInventoryWrite,
     EmployeePermission.inventoryDelete  => l.permInventoryDelete,
     EmployeePermission.inventoryStock   => l.permInventoryStock,
+    // PR exports — pas encore d'entrée ARB dédiée pour rester strict
+    // PR-1. Fallback FR direct (le projet est francophone) ; ajouter
+    // un permInventoryExport dans app_fr/en.arb dans une PR i18n.
+    EmployeePermission.inventoryExport  => 'Exporter le catalogue',
     EmployeePermission.caisseAccess     => l.permCaisseAccess,
     EmployeePermission.caisseSell       => l.permCaisseSell,
     EmployeePermission.caisseEditOrders => l.permCaisseEditOrders,

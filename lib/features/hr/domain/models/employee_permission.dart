@@ -16,6 +16,10 @@ enum EmployeePermission {
   inventoryWrite,
   inventoryDelete,
   inventoryStock,
+  /// Exporter le catalogue produits (CSV/PDF). Par défaut admin/owner ;
+  /// utilisateur requiert un grant explicite. Vu comme "donnée
+  /// sensible" car expose le prix d'achat et l'inventaire complet.
+  inventoryExport,
 
   // ── Caisse / Ventes ──────────────────────────────────────────────────────
   caisseAccess,
@@ -91,6 +95,7 @@ extension EmployeePermissionX on EmployeePermission {
     EmployeePermission.inventoryWrite   => 'inventory.write',
     EmployeePermission.inventoryDelete  => 'inventory.delete',
     EmployeePermission.inventoryStock   => 'inventory.stock',
+    EmployeePermission.inventoryExport  => 'inventory.export',
     EmployeePermission.caisseAccess     => 'caisse.access',
     EmployeePermission.caisseSell       => 'caisse.sell',
     EmployeePermission.caisseEditOrders => 'caisse.edit_orders',
@@ -120,7 +125,8 @@ extension EmployeePermissionX on EmployeePermission {
     EmployeePermission.inventoryView    ||
     EmployeePermission.inventoryWrite   ||
     EmployeePermission.inventoryDelete  ||
-    EmployeePermission.inventoryStock   => EmployeePermissionGroup.inventory,
+    EmployeePermission.inventoryStock   ||
+    EmployeePermission.inventoryExport  => EmployeePermissionGroup.inventory,
     EmployeePermission.caisseAccess     ||
     EmployeePermission.caisseSell       ||
     EmployeePermission.caisseEditOrders ||

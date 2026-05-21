@@ -131,6 +131,11 @@ class AppPermissions {
       && _grain(EmployeePermission.inventoryDelete, legacy: isShopAdmin);
   bool get canManageStock   => hasActiveSubscription
       && _grain(EmployeePermission.inventoryStock, legacy: isShopAdmin);
+  /// Exporter le catalogue produits (CSV/PDF). Par défaut admin/owner ;
+  /// un user simple peut recevoir un grant explicite via le formulaire RH.
+  /// L'export n'écrit pas — lecture seule du cache Hive + Supabase.
+  bool get canExportProducts =>
+      _grain(EmployeePermission.inventoryExport, legacy: isShopAdmin);
 
   // ── Caisse ────────────────────────────────────────────────────────────────
   bool get canAccessCaisse   => isMember

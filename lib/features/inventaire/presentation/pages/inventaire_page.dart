@@ -4,6 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/services/danger_action_service.dart';
+import '../../../../core/services/export_models.dart';
+import '../../../../core/services/export_service.dart';
+import '../../../../shared/widgets/export_scope_selector.dart';
+import '../../data/exports/products_export_source.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/app_switch.dart';
@@ -410,6 +414,49 @@ class _InventairePageState extends ConsumerState<InventairePage>
 
   /// Audit stock — Couche 3 du plan « sécurise le stock ».
   /// Lance la réconciliation manuelle, affiche un dialog récapitulatif,
+  /// Ouvre le selector de scope puis exporte le catalogue selon le
+  /// format choisi (CSV/PDF). Lit Hive uniquement (offline-first) via
+  /// `ProductsExportSource`. La permission `canExportProducts` a déjà
+  /// été vérifiée par le bouton qui appelle cette méthode.
+  Future<void> _openExport() async {
+    if (!mounted) return;
+    final shop = LocalStorageService.getShop(widget.shopId);
+    final me   = LocalStorageService.getCurrentUser();
+    final isMultiShop = me != null
+        && LocalStorageService.getShopsForUser(me.id).length > 1;
+    final partners =
+        ProductsExportSource.partnerLocationsForShop(widget.shopId);
+    final config = await ExportScopeSelector.show(
+      context,
+      type:             ExportType.products,
+      shopId:           widget.shopId,
+      shopName:         shop?.name,
+      partnerLocations: partners,
+      allowGlobal:      isMultiShop,
+    );
+    if (!mounted || config == null) return;
+    final rows = ProductsExportSource.collect(config.scope);
+    if (rows.isEmpty) {
+      AppSnack.info(context, 'Aucun produit dans ce périmètre');
+      return;
+    }
+    if (config.format == ExportFormat.csv) {
+      await ExportService.exportToCsv(
+        context,
+        config: config,
+        header: ProductsExportSource.header,
+        rows:   rows,
+      );
+    } else {
+      await ExportService.exportToPdf(
+        context,
+        config: config,
+        header: ProductsExportSource.header,
+        rows:   rows,
+      );
+    }
+  }
+
   /// et propose la navigation vers la page Incidents si des drifts sont
   /// détectés (les incidents sont créés automatiquement par
   /// `StockService.reconcileShop`).
@@ -1019,6 +1066,14 @@ class _InventairePageState extends ConsumerState<InventairePage>
                   // `after_available` enregistré dans stock_movements.
                   // Crée un Incident `audit_drift` par variante divergente.
                   _AuditStockBtn(onTap: _runStockAudit),
+                  // Export catalogue (CSV/PDF). Visible uniquement si
+                  // l'utilisateur a `inventory.export`. Ouvre directement
+                  // le scope selector — pas besoin de passer par /exports.
+                  if (ref.watch(permissionsProvider(widget.shopId))
+                      .canExportProducts) ...[
+                    const SizedBox(width: 6),
+                    _ExportBtn(onTap: _openExport),
+                  ],
                 ]),
               ),
             ),
@@ -4043,6 +4098,42 @@ class _AuditStockBtn extends StatelessWidget {
             ),
             child: Center(
               child: Icon(Icons.fact_check_rounded, size: 15,
+                  color: cs.onSurface.withValues(alpha: 0.7)),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Bouton de téléchargement catalogue (CSV/PDF) dans la topbar
+/// inventaire. Ouvre directement le `ExportScopeSelector` — pas de
+/// passage par la page /exports pour ce raccourci.
+class _ExportBtn extends StatelessWidget {
+  final VoidCallback onTap;
+  const _ExportBtn({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs    = theme.colorScheme;
+    final sem   = theme.semantic;
+    return SizedBox(
+      width: 32, height: 32,
+      child: Tooltip(
+        message: 'Exporter le catalogue (CSV/PDF)',
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            decoration: BoxDecoration(
+              color: sem.elevatedSurface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: sem.borderSubtle),
+            ),
+            child: Center(
+              child: Icon(Icons.file_download_outlined, size: 15,
                   color: cs.onSurface.withValues(alpha: 0.7)),
             ),
           ),

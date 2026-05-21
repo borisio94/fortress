@@ -83,6 +83,18 @@ class ParametresPage extends ConsumerWidget {
                 // Membres : déplacé dans l'item « Employés & permissions »
                 // du drawer. Tuiles retirées d'ici pour éviter les doublons.
                 // Emplacements de stock : accessible depuis Inventaire.
+                // Exports CSV/PDF — visible aux profils habilités. La
+                // page filtre elle-même les types accessibles via les
+                // permissions canExport* par enabled de card.
+                if (perms.canExportProducts || perms.canExportFinances)
+                  _Tile(
+                    icon: Icons.file_download_outlined,
+                    label: 'Exports',
+                    subtitle: 'Télécharger vos données en CSV ou PDF',
+                    color: AppColors.primary,
+                    onTap: () =>
+                        context.push('/shop/$shopId/parametres/exports'),
+                  ),
               ],
             ),
             const SizedBox(height: 12),

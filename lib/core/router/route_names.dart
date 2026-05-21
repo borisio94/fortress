@@ -45,6 +45,8 @@ class RouteNames {
   static const notificationsPage = '/shop/:shopId/parametres/notifications';
   static const paymentsPage      = '/shop/:shopId/parametres/payments';
   static const pinDeletePage     = '/shop/:shopId/parametres/pin/delete';
+  /// Page centralisée des exports (CSV/PDF) — une card par type.
+  static const exportsPage       = '/shop/:shopId/parametres/exports';
 
   // Onboarding (PR-1 + PR-2) — flow nouveau utilisateur.
   /// Slides marketing 1ʳᵉ ouverture (3 cartes).

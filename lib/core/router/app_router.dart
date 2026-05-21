@@ -69,6 +69,7 @@ import '../../features/parametres/presentation/pages/theme_page.dart';
 import '../../features/parametres/presentation/pages/caisse_config_page.dart';
 import '../../features/parametres/presentation/pages/whatsapp_templates_page.dart';
 import '../../features/parametres/presentation/pages/notifications_page.dart';
+import '../../features/parametres/presentation/pages/exports_page.dart';
 import '../../features/parametres/presentation/pages/payments_page.dart';
 import '../../features/parametres/presentation/pages/delivery_templates_page.dart';
 import '../../features/parametres/presentation/pages/partner_accounts_page.dart';
@@ -760,6 +761,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/pin/delete',
               builder: (c, s) => PinDeletePage(
+                  shopId: s.pathParameters['shopId']!)),
+          GoRoute(path: '/shop/:shopId/parametres/exports',
+              builder: (c, s) => ExportsPage(
                   shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/sessions',
               builder: (c, s) => SessionsPage(
