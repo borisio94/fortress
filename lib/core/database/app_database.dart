@@ -1653,6 +1653,25 @@ end \$\$;""",
     return updated;
   }
 
+  /// Met à jour `shops.logo_url` (Supabase → Hive). Distinct de
+  /// [updateShop] qui ignore les `null` : ici `null` signifie
+  /// EXPLICITEMENT « supprimer le logo » (le user a cliqué Supprimer).
+  ///
+  /// Le bucket Storage `shop_logos` est nettoyé par
+  /// `LogoStorageService.deleteLogo` côté caller — cette méthode ne
+  /// touche QUE la colonne SQL.
+  static Future<void> updateShopLogoUrl(
+      String shopId, String? url) async {
+    _assertNotFrozen();
+    final row = await _db.from('shops').update({'logo_url': url})
+        .eq('id', shopId).select().single();
+    final updated = _rowToShop(row);
+    await LocalStorageService.saveShop(updated);
+    _notify('shops', shopId);
+    debugPrint('[DB] 🖼  shops.logo_url mis à jour pour $shopId : '
+        '${url ?? "<null>"}');
+  }
+
   /// Active / désactive une boutique (Hive immédiat + Supabase background).
   static Future<void> setShopActive(String shopId, bool active) async {
     final cached = LocalStorageService.getShop(shopId);

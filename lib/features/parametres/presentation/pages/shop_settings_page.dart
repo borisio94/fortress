@@ -19,6 +19,7 @@ import '../../../../features/shop_selector/domain/entities/shop_summary.dart';
 import '../../../../features/inventaire/domain/entities/product.dart';
 import '../../../subscription/presentation/widgets/subscription_guard.dart';
 import '../../../hr/presentation/pages/employees_page.dart';
+import '../widgets/shop_logo_section.dart';
 
 /// Onglets exposés. `overview` (Boutique) est conditionnel : visible
 /// uniquement quand `showOverviewTab == true` (entrée via le tile
@@ -341,6 +342,10 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
           onShare: () => _shareShop(context, s),
           onEdit:  () => _editShop(context, s),
         ),
+        const SizedBox(height: 16),
+
+        // ── Logo + identité visuelle facture ────────────────────────
+        ShopLogoSection(shopId: widget.shopId),
         const SizedBox(height: 16),
 
         // ── Informations enrichies — ordre spec round 3 :

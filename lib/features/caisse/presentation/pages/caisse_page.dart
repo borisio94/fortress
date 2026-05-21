@@ -46,7 +46,10 @@ import '../../../../core/services/partner_ledger_service.dart';
 import '../../../parametres/domain/entities/partner_debt_info.dart';
 import '../../../parametres/domain/entities/partner_ledger_entry.dart';
 import '../../../../core/services/document_service.dart';
+import '../../../../core/services/invoice_service.dart';
 import '../../../../core/services/invoice_storage_service.dart';
+import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../../../core/services/short_link_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
 import '../../../../core/services/whatsapp/whatsapp_template_renderer.dart';
@@ -1616,8 +1619,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       _ActionBtn(
                         icon: Icons.picture_as_pdf_rounded,
                         color: AppColors.primary,
-                        tooltip: 'Imprimer / PDF',
-                        onTap: () => DocumentService.previewInvoice(widget.order, context),
+                        tooltip: 'Facture (PDF avec logo)',
+                        onTap: () => _previewBrandedInvoice(context),
                       ),
                       const SizedBox(width: 6),
                       _ActionBtn(
@@ -2260,6 +2263,50 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => _FormatPickerSheet(order: widget.order),
     );
+  }
+
+  /// Aperçu de la facture personnalisée (logo + couleurs dérivées).
+  /// Diffère du legacy `DocumentService.previewInvoice` qui utilise le
+  /// template Fortress violet ; ce flow passe par `InvoiceService` →
+  /// `Printing.layoutPdf` qui propose nativement impression + share.
+  Future<void> _previewBrandedInvoice(BuildContext context) async {
+    final shop = LocalStorageService.getShop(widget.order.shopId);
+    if (shop == null) {
+      // Filet : si la shop n'est pas en cache local (cas improbable
+      // sur cette page qui ne s'ouvre que dans un shop courant), on
+      // retombe sur l'ancien template pour ne pas bloquer l'opérateur.
+      await DocumentService.previewInvoice(widget.order, context);
+      return;
+    }
+    try {
+      await Printing.layoutPdf(
+        name: 'Facture-${widget.order.id ?? "POS"}',
+        onLayout: (format) =>
+            InvoiceService.generatePdf(sale: widget.order, shop: shop),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      // Si `Printing.layoutPdf` n'est pas dispo (web sans support
+      // imprimante ou popup bloquée), on partage les bytes directement
+      // via share_plus → l'utilisateur peut télécharger ou ouvrir
+      // dans un viewer externe.
+      try {
+        final bytes = await InvoiceService.generatePdf(
+            sale: widget.order, shop: shop);
+        if (bytes.isEmpty) {
+          AppSnack.error(context, 'Erreur génération facture');
+          return;
+        }
+        final filename = 'facture_${widget.order.id ?? "pos"}.pdf';
+        final xfile = XFile.fromData(bytes,
+            name: filename, mimeType: 'application/pdf');
+        await Share.shareXFiles([xfile], subject: filename);
+      } catch (e2) {
+        if (context.mounted) {
+          AppSnack.error(context, 'Erreur facture : $e2');
+        }
+      }
+    }
   }
 
   Future<void> _confirmDelete(BuildContext context) async {

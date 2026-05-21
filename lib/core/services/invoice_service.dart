@@ -1,0 +1,470 @@
+import 'package:flutter/foundation.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+
+import '../../features/caisse/domain/entities/sale.dart';
+import '../../features/caisse/domain/entities/sale_item.dart';
+import '../../features/caisse/domain/invoice_theme.dart';
+import '../../features/shop_selector/domain/entities/shop_summary.dart';
+import '../utils/currency_formatter.dart';
+import 'logo_color_extractor.dart';
+import 'logo_storage_service.dart';
+
+/// Génération de la facture PDF A4 personnalisée — logo de la
+/// boutique + palette dérivée. Lecture seule (aucune écriture
+/// Supabase). Le caller récupère les bytes et les passe à
+/// `printing.layoutPdf` (aperçu/impression) ou à `share_plus`
+/// (partage).
+///
+/// La spec (couleurs, tailles, layout) vit dans `InvoiceTheme` —
+/// rien n'est codé en dur dans ce service en dehors des libellés
+/// français de la mise en page (« Facturer à », « TOTAL TTC », etc.).
+class InvoiceService {
+  const InvoiceService._();
+
+  /// Génère la facture PDF de [sale] selon l'identité visuelle de
+  /// [shop]. Charge le logo depuis le cache Hive si présent, sinon
+  /// tente un fetch HTTP. Si tout échoue → PDF sans logo + couleurs
+  /// fallback. Cette méthode ne lève jamais — toute erreur est
+  /// journalisée et le PDF est retourné vide (Uint8List(0)) en cas
+  /// d'échec total de la composition.
+  static Future<Uint8List> generatePdf({
+    required Sale sale,
+    required ShopSummary shop,
+  }) async {
+    // 1. Charger les bytes du logo (cache → fetch). Si null, on
+    //    génère sans logo (fallback gracieux).
+    Uint8List? logoBytes;
+    try {
+      logoBytes = await LogoStorageService.fetchBytes(
+          shopId: shop.id, url: shop.logoUrl);
+    } catch (e) {
+      debugPrint('[InvoiceService] logo fetch : $e');
+      logoBytes = null;
+    }
+    // 2. Si le logo vient d'être chargé pour la première fois, on
+    //    s'assure que les couleurs sont extraites (idempotent).
+    if (logoBytes != null) {
+      final cached = LogoColorExtractor.cached(shop.id);
+      // Heuristique : si les couleurs cachées sont au fallback
+      // (#1A1A1A + #555555) et qu'on a maintenant un logo, on
+      // tente l'extraction. Sinon on garde le cache.
+      final isFallback =
+          cached.primary  == LogoColorExtractor.defaultPrimary &&
+          cached.secondary == LogoColorExtractor.defaultSecondary;
+      if (isFallback) {
+        await LogoColorExtractor.extractAndCache(
+            shopId: shop.id, bytes: logoBytes);
+      }
+    }
+    final theme = InvoiceTheme.fromCache(
+        shopId: shop.id, logoBytes: logoBytes);
+    try {
+      final doc = pw.Document();
+      doc.addPage(_buildPage(sale: sale, shop: shop, theme: theme));
+      return doc.save();
+    } catch (e, st) {
+      debugPrint('[InvoiceService] genération PDF échouée : $e\n$st');
+      return Uint8List(0);
+    }
+  }
+
+  // ── Page A4 unique avec MultiPage pour gérer les longues listes ──
+
+  static pw.Page _buildPage({
+    required Sale         sale,
+    required ShopSummary  shop,
+    required InvoiceTheme theme,
+  }) {
+    return pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.fromLTRB(28, 28, 28, 28),
+      // Fond page constant via PageTheme — ne dépend pas du logo.
+      pageTheme: pw.PageTheme(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.fromLTRB(28, 28, 28, 28),
+        buildBackground: (_) => pw.FullPage(
+          ignoreMargins: true,
+          child: pw.Container(color: InvoiceTheme.pageBackground),
+        ),
+      ),
+      header: (ctx) => ctx.pageNumber == 1
+          ? _header(sale: sale, shop: shop, theme: theme)
+          : pw.SizedBox(height: 12),
+      footer: (ctx) => _footer(shop: shop, theme: theme,
+          pageNumber: ctx.pageNumber, pagesCount: ctx.pagesCount),
+      build: (ctx) => [
+        pw.SizedBox(height: 8),
+        _clientBlock(sale: sale, theme: theme),
+        pw.SizedBox(height: 14),
+        _itemsTable(sale: sale, shop: shop, theme: theme),
+        pw.SizedBox(height: 10),
+        _totalsBlock(sale: sale, shop: shop, theme: theme),
+        if ((sale.notes ?? '').trim().isNotEmpty) ...[
+          pw.SizedBox(height: 14),
+          _notesBlock(sale.notes!.trim(), theme),
+        ],
+      ],
+    );
+  }
+
+  // ── En-tête : logo + nom + ligne « FACTURE N° + date » ─────────
+
+  static pw.Widget _header({
+    required Sale         sale,
+    required ShopSummary  shop,
+    required InvoiceTheme theme,
+  }) {
+    final shopAddress = [
+      if ((shop.phone ?? '').isNotEmpty) 'Tél : ${shop.phone}',
+      if ((shop.email ?? '').isNotEmpty) shop.email,
+      shop.country,
+    ].where((s) => s != null && s.toString().trim().isNotEmpty)
+     .join(' · ');
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            if (theme.logoBytes != null)
+              pw.Container(
+                margin: const pw.EdgeInsets.only(right: 14),
+                constraints: const pw.BoxConstraints(
+                  maxWidth: 80, maxHeight: 80,
+                ),
+                child: pw.Image(
+                  pw.MemoryImage(theme.logoBytes!),
+                  fit: pw.BoxFit.contain,
+                ),
+              ),
+            pw.Expanded(
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(shop.name,
+                      style: pw.TextStyle(
+                          fontSize: 18,
+                          fontWeight: pw.FontWeight.bold,
+                          color: theme.primary)),
+                  if (shopAddress.isNotEmpty) ...[
+                    pw.SizedBox(height: 3),
+                    pw.Text(shopAddress,
+                        style: const pw.TextStyle(
+                            fontSize: 10,
+                            color: InvoiceTheme.textSecondary)),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 10),
+        pw.Container(height: 1, color: theme.primary),
+        pw.SizedBox(height: 10),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            pw.Text('FACTURE',
+                style: pw.TextStyle(
+                    fontSize: 11,
+                    fontWeight: pw.FontWeight.bold,
+                    letterSpacing: 1.5,
+                    color: theme.primary)),
+            pw.Text(_invoiceMeta(sale),
+                style: const pw.TextStyle(
+                    fontSize: 10, color: InvoiceTheme.textPrimary)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  static String _invoiceMeta(Sale sale) {
+    final id = (sale.id ?? '').isEmpty
+        ? '—'
+        : (sale.id!.length > 8
+            ? sale.id!.substring(0, 8).toUpperCase()
+            : sale.id!.toUpperCase());
+    final d = sale.createdAt.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final date = '${two(d.day)}/${two(d.month)}/${d.year}';
+    return 'N° $id  ·  $date';
+  }
+
+  // ── Bloc client ───────────────────────────────────────────────
+
+  static pw.Widget _clientBlock({
+    required Sale         sale,
+    required InvoiceTheme theme,
+  }) {
+    final name = (sale.clientName ?? '').trim();
+    final infos = [
+      if ((sale.clientPhone ?? '').trim().isNotEmpty) sale.clientPhone!.trim(),
+      if ((sale.deliveryCity ?? '').trim().isNotEmpty) sale.deliveryCity!.trim(),
+      if ((sale.deliveryAddress ?? '').trim().isNotEmpty) sale.deliveryAddress!.trim(),
+    ].join(' · ');
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text('FACTURER À',
+            style: pw.TextStyle(
+                fontSize: 9,
+                letterSpacing: 1.0,
+                color: theme.secondary,
+                fontWeight: pw.FontWeight.bold)),
+        pw.SizedBox(height: 4),
+        pw.Text(name.isEmpty ? '—' : name,
+            style: pw.TextStyle(
+                fontSize: 12,
+                fontWeight: pw.FontWeight.bold,
+                color: InvoiceTheme.textPrimary)),
+        if (infos.isNotEmpty) ...[
+          pw.SizedBox(height: 2),
+          pw.Text(infos,
+              style: const pw.TextStyle(
+                  fontSize: 10, color: InvoiceTheme.textSecondary)),
+        ],
+      ],
+    );
+  }
+
+  // ── Tableau articles ──────────────────────────────────────────
+
+  static pw.Widget _itemsTable({
+    required Sale         sale,
+    required ShopSummary  shop,
+    required InvoiceTheme theme,
+  }) {
+    final items = sale.items;
+    return pw.Table(
+      columnWidths: const {
+        0: pw.FlexColumnWidth(5),
+        1: pw.FixedColumnWidth(40),
+        2: pw.FixedColumnWidth(80),
+        3: pw.FixedColumnWidth(80),
+      },
+      children: [
+        // Header
+        pw.TableRow(
+          decoration: pw.BoxDecoration(color: theme.primary),
+          children: [
+            _headerCell('Désignation', pw.TextAlign.left),
+            _headerCell('Qté',         pw.TextAlign.center),
+            _headerCell('Prix unit.',  pw.TextAlign.right),
+            _headerCell('Total',       pw.TextAlign.right),
+          ],
+        ),
+        // Body rows (alternance)
+        for (var i = 0; i < items.length; i++)
+          pw.TableRow(
+            decoration: pw.BoxDecoration(
+              color: i.isEven
+                  ? InvoiceTheme.pageBackground
+                  : InvoiceTheme.rowAltBackground,
+            ),
+            children: [
+              _bodyCell(_itemLabel(items[i]),
+                  align: pw.TextAlign.left, bold: true),
+              _bodyCell('${items[i].quantity}',
+                  align: pw.TextAlign.center),
+              _bodyCell(_money(items[i].effectivePrice, shop),
+                  align: pw.TextAlign.right),
+              _bodyCell(_money(items[i].subtotal, shop),
+                  align: pw.TextAlign.right),
+            ],
+          ),
+      ],
+    );
+  }
+
+  static pw.Widget _headerCell(String text, pw.TextAlign align) =>
+      pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: pw.Text(
+          text,
+          textAlign: align,
+          style: pw.TextStyle(
+              fontSize: 10,
+              fontWeight: pw.FontWeight.bold,
+              color: InvoiceTheme.white),
+        ),
+      );
+
+  static pw.Widget _bodyCell(String text,
+      {required pw.TextAlign align, bool bold = false}) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      child: pw.Text(
+        text,
+        textAlign: align,
+        style: pw.TextStyle(
+          fontSize: 10,
+          color: InvoiceTheme.textPrimary,
+          fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+        ),
+      ),
+    );
+  }
+
+  static String _itemLabel(SaleItem item) {
+    final base = item.productName;
+    final variant = (item.variantName ?? '').trim();
+    return variant.isEmpty ? base : '$base — $variant';
+  }
+
+  // ── Totaux ────────────────────────────────────────────────────
+
+  static pw.Widget _totalsBlock({
+    required Sale         sale,
+    required ShopSummary  shop,
+    required InvoiceTheme theme,
+  }) {
+    final hasDiscount = sale.discountAmount > 0;
+    final hasDue      = sale.amountDue > 0;
+    final hasPaid     = sale.amountPaid > 0;
+    return pw.Row(
+      mainAxisAlignment: pw.MainAxisAlignment.end,
+      children: [
+        pw.SizedBox(
+          width: 240,
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: [
+              _totalLine('Sous-total', _money(sale.subtotal, shop),
+                  size: 10, color: InvoiceTheme.textSecondary),
+              if (hasDiscount)
+                _totalLine('Remise', '− ${_money(sale.discountAmount, shop)}',
+                    size: 10, color: theme.secondary),
+              if (sale.taxRate > 0)
+                _totalLine('TVA (${sale.taxRate.toStringAsFixed(1)} %)',
+                    _money(sale.taxAmount, shop),
+                    size: 10, color: InvoiceTheme.textSecondary),
+              pw.SizedBox(height: 4),
+              pw.Container(height: 1, color: InvoiceTheme.divider),
+              pw.SizedBox(height: 4),
+              _totalLine('TOTAL TTC', _money(sale.total, shop),
+                  size: 14,
+                  color: theme.primary,
+                  fontWeight: pw.FontWeight.bold,
+                  letterSpacing: 0.5),
+              if (hasPaid)
+                _totalLine('Paiement reçu', _money(sale.amountPaid, shop),
+                    size: 10, color: InvoiceTheme.textSecondary),
+              if (hasDue)
+                _totalLine('Reste dû', _money(sale.amountDue, shop),
+                    size: 11,
+                    color: theme.secondary,
+                    fontWeight: pw.FontWeight.bold),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  static pw.Widget _totalLine(
+    String label,
+    String value, {
+    required double size,
+    required PdfColor color,
+    pw.FontWeight fontWeight = pw.FontWeight.normal,
+    double letterSpacing = 0.0,
+  }) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 2),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(label,
+              style: pw.TextStyle(
+                  fontSize: size,
+                  color: color,
+                  fontWeight: fontWeight,
+                  letterSpacing: letterSpacing)),
+          pw.Text(value,
+              style: pw.TextStyle(
+                  fontSize: size,
+                  color: color,
+                  fontWeight: fontWeight)),
+        ],
+      ),
+    );
+  }
+
+  // ── Notes éventuelles ─────────────────────────────────────────
+
+  static pw.Widget _notesBlock(String notes, InvoiceTheme theme) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.all(8),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: InvoiceTheme.divider, width: 0.5),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text('NOTES',
+              style: pw.TextStyle(
+                  fontSize: 8,
+                  letterSpacing: 1.0,
+                  color: theme.secondary,
+                  fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 3),
+          pw.Text(notes,
+              style: const pw.TextStyle(
+                  fontSize: 10, color: InvoiceTheme.textPrimary)),
+        ],
+      ),
+    );
+  }
+
+  // ── Pied de page ──────────────────────────────────────────────
+
+  static pw.Widget _footer({
+    required ShopSummary  shop,
+    required InvoiceTheme theme,
+    required int pageNumber,
+    required int pagesCount,
+  }) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.Container(height: 0.5, color: theme.primary),
+        pw.SizedBox(height: 6),
+        pw.Center(
+          child: pw.Text('Merci pour votre confiance',
+              style: pw.TextStyle(
+                  fontSize: 9,
+                  color: theme.primary,
+                  fontWeight: pw.FontWeight.bold)),
+        ),
+        pw.SizedBox(height: 2),
+        pw.Center(
+          child: pw.Text(
+              'Édité depuis Fortress POS',
+              style: const pw.TextStyle(
+                  fontSize: 8, color: InvoiceTheme.footerBrand)),
+        ),
+        if (pagesCount > 1) ...[
+          pw.SizedBox(height: 2),
+          pw.Align(
+            alignment: pw.Alignment.centerRight,
+            child: pw.Text('Page $pageNumber / $pagesCount',
+                style: const pw.TextStyle(
+                    fontSize: 8, color: InvoiceTheme.footerSubtle)),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────
+
+  /// Formatage monétaire selon le format de la boutique. On utilise le
+  /// `CurrencyFormatter` qui suit déjà la devise active (XAF par
+  /// défaut) — pas de symbole codé en dur dans la facture.
+  static String _money(double v, ShopSummary shop) {
+    return CurrencyFormatter.format(v);
+  }
+}
