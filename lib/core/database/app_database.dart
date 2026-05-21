@@ -96,6 +96,19 @@ class AppDatabase {
   final Map<String, int> _recentLocalProductWrites = {};
   static const int _localWriteEchoWindowMs = 10000;
 
+  /// Anti-écho realtime côté ORDERS — même rôle que `_recentLocalProductWrites`.
+  ///
+  /// Sans ça, une transition scheduled → processing ne tenait pas : le flow
+  /// caisse fait 2-3 writes en cascade (updateOrderDelivery + recordPayment +
+  /// updateOrderStatus). Chaque write déclenche un upsert Supabase + un
+  /// snapshot realtime. Les events peuvent arriver dans le désordre, et
+  /// l'event de pré-update (status='scheduled' encore) peut écraser le
+  /// status='processing' fraîchement écrit en Hive → l'opérateur voyait la
+  /// commande « revenir » à programmée. On marque l'id à chaque
+  /// `bgWriteOrder` et on ignore l'event realtime tant que l'écho est
+  /// dans la fenêtre (10 s).
+  final Map<String, int> _recentLocalOrderWrites = {};
+
   /// Échos temporels pour les `stock_levels` — même rôle que pour les
   /// produits, mais clé = `lvl.id` (déterministe via `_stockLevelId`).
   ///
@@ -3176,6 +3189,19 @@ end \$\$;""",
         case PostgresChangeEvent.update:
           final id = p.newRecord['id']?.toString();
           if (id == null) return;
+          // Anti-écho temporel : on vient d'écrire localement, l'event
+          // realtime peut être le nôtre (OK, valeur identique) OU un
+          // snapshot pré-update arrivé après notre commit (KO, écrase
+          // notre nouvel état). Pendant la fenêtre, on garde la version
+          // locale ; au-delà on accepte les events (sync inter-device).
+          final recentMs = _recentLocalOrderWrites[id];
+          if (recentMs != null) {
+            final age = DateTime.now().millisecondsSinceEpoch - recentMs;
+            if (age < _localWriteEchoWindowMs) {
+              debugPrint('[DB] ⏭️ _onOrderChange écho ${age}ms order=$id');
+              return;
+            }
+          }
           final row = p.newRecord;
           // Idem syncOrders : conserver TOUS les champs livraison/expédition
           // pour préserver le snapshot de localisation côté Hive (sinon les
@@ -4745,8 +4771,15 @@ end \$\$;""",
     return raw.replaceAll(RegExp(r'[\s\-\.]'), '').trim();
   }
 
-  /// Sync une commande vers Supabase en arrière-plan
+  /// Sync une commande vers Supabase en arrière-plan.
+  /// Marque l'id dans `_recentLocalOrderWrites` pour bloquer les events
+  /// realtime qui pourraient ramener un snapshot stale (cf.
+  /// `_recentLocalOrderWrites` doc).
   static void bgWriteOrder(Map<String, dynamic> orderMap) {
+    final id = orderMap['id'] as String?;
+    if (id != null && id.isNotEmpty) {
+      _i._recentLocalOrderWrites[id] = DateTime.now().millisecondsSinceEpoch;
+    }
     _bgWrite({'table': 'orders', 'op': 'upsert', 'data': orderMap});
   }
 
