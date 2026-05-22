@@ -1111,7 +1111,7 @@ class _InventairePageState extends ConsumerState<InventairePage>
                 child: Material(
                   color: _selectMode
                       ? AppColors.primary.withValues(alpha:0.10)
-                      : Colors.white,
+                      : Theme.of(context).colorScheme.surface,
                   borderRadius: BorderRadius.circular(10),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(10),
@@ -1124,7 +1124,7 @@ class _InventairePageState extends ConsumerState<InventairePage>
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: _selectMode
                             ? AppColors.primary.withValues(alpha:0.45)
-                            : AppColors.divider),
+                            : Theme.of(context).semantic.borderSubtle),
                       ),
                       child: Icon(
                         _selectMode
@@ -1153,14 +1153,14 @@ class _InventairePageState extends ConsumerState<InventairePage>
                         .copyWith(color: AppColors.textHint),
                     prefixIcon: const Icon(Icons.search_rounded,
                         size: 18, color: AppColors.textHint),
-                    filled: true, fillColor: Colors.white, isDense: true,
+                    filled: true, fillColor: Theme.of(context).colorScheme.surface, isDense: true,
                     contentPadding: EdgeInsets.zero,
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: AppColors.divider)),
+                        borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
                     enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: AppColors.divider)),
+                        borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
                     focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
                         borderSide: BorderSide(color: AppColors.primary,
@@ -1211,15 +1211,15 @@ class _InventairePageState extends ConsumerState<InventairePage>
                   const SizedBox(width: 6),
                   Theme(
                     data: Theme.of(context).copyWith(
-                      canvasColor: Colors.white,
+                      canvasColor: Theme.of(context).colorScheme.surface,
                       colorScheme: Theme.of(context).colorScheme.copyWith(
-                          surface: Colors.white,
-                          onSurface: AppColors.textPrimary),
+                          surface: Theme.of(context).colorScheme.surface,
+                          onSurface: Theme.of(context).colorScheme.onSurface),
                     ),
                     child: DropdownButton<int>(
                       value: _perPage, isDense: true,
                       underline: const SizedBox.shrink(),
-                      dropdownColor: Colors.white,
+                      dropdownColor: Theme.of(context).colorScheme.surface,
                       borderRadius: BorderRadius.circular(8),
                       style: AppTextStyles.bodySm,
                       items: [10, 25, 50].map((n) => DropdownMenuItem(
@@ -1791,7 +1791,7 @@ class _InlineMultiMenuState extends State<_InlineMultiMenu> {
                                 fontWeight: sel
                                     ? FontWeight.w600 : FontWeight.w400,
                                 color: sel ? AppColors.primary
-                                    : AppColors.textPrimary))),
+                                    : Theme.of(context).colorScheme.onSurface))),
                       ]),
                     ),
                   ),
@@ -1841,10 +1841,10 @@ class _SortBtn extends StatelessWidget {
     child: Container(
       height: 36, width: 36,
       decoration: BoxDecoration(
-        color: active ? AppColors.primarySurface : Colors.white,
+        color: active ? AppColors.primarySurface : Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-            color: active ? AppColors.primary : AppColors.divider),
+            color: active ? AppColors.primary : Theme.of(context).semantic.borderSubtle),
       ),
       child: Icon(Icons.sort_rounded, size: 18,
           color: active ? AppColors.primary : AppColors.textSecondary),
@@ -1891,9 +1891,9 @@ class _DesktopRowState extends ConsumerState<_DesktopRow> {
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
       child: Column(children: [
         Padding(
@@ -1930,7 +1930,7 @@ class _DesktopRowState extends ConsumerState<_DesktopRow> {
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(l.invStock, style: AppTextStyles.micro),
               Text('$stock', style: AppTextStyles.bodySmBold.copyWith(
-                  color: isLow ? AppColors.error : AppColors.textPrimary)),
+                  color: isLow ? AppColors.error : Theme.of(context).colorScheme.onSurface)),
             ])),
             Expanded(flex: 2, child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2030,9 +2030,9 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
       duration: const Duration(milliseconds: 200),
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         // Liseré gauche coloré : orange si stock bas, rouge si sans prix.
         // Implémenté via un BorderSide épais à gauche (préservant le radius).
       ),
@@ -2062,7 +2062,7 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
                     Row(children: [
                       Expanded(child: Text(p.name,
                           style: AppTextStyles.captionBold
-                              .copyWith(color: AppColors.textPrimary),
+                              .copyWith(color: Theme.of(context).colorScheme.onSurface),
                           maxLines: 1, overflow: TextOverflow.ellipsis)),
                       if (p.rating > 0) ...[
                         const SizedBox(width: 6),
@@ -2140,7 +2140,7 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
 
         // Détails expandés
         if (_expanded) ...[
-          const Divider(height: 1, color: AppColors.divider),
+          Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
             child: Column(children: [
@@ -2150,7 +2150,7 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
                 decoration: BoxDecoration(
                     color: const Color(0xFFF9FAFB),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.divider)),
+                    border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
                 child: Column(children: [
                   _DetailRow('Prix achat',
                       p.priceBuy > 0 ? CurrencyFormatter.format(p.priceBuy) : '—'),
@@ -2351,7 +2351,7 @@ class _VariantsSummary extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(11, 8, 11, 10),
       decoration: BoxDecoration(
         color: AppColors.background, // gris très clair du thème
-        border: Border(top: BorderSide(color: AppColors.divider)),
+        border: Border(top: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
       ),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         // Pills scrollables si trop de variantes pour tenir sur une ligne
@@ -2400,9 +2400,9 @@ class _VariantPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         // Puce colorée statut
@@ -2415,7 +2415,7 @@ class _VariantPill extends StatelessWidget {
         Text(variant.name,
             style: AppTextStyles.micro.copyWith(
                 fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary)),
+                color: Theme.of(context).colorScheme.onSurface)),
         const SizedBox(width: 5),
         Text('· ${variant.stockAvailable}',
             style: AppTextStyles.microBold.copyWith(color: statusColor)),
@@ -2668,12 +2668,12 @@ class _VariantRow extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
             color: variant.isMain
                 ? AppColors.primary.withValues(alpha:0.5)
-                : AppColors.divider,
+                : Theme.of(context).semantic.borderSubtle,
             width: variant.isMain ? 1.2 : 1),
       ),
       clipBehavior: Clip.antiAlias,
@@ -2695,7 +2695,7 @@ class _VariantRow extends StatelessWidget {
                   Expanded(child: Text(variant.name,
                       maxLines: 1, overflow: TextOverflow.ellipsis,
                       style: AppTextStyles.captionBold
-                          .copyWith(color: AppColors.textPrimary))),
+                          .copyWith(color: Theme.of(context).colorScheme.onSurface))),
                   if (variant.isMain) ...[
                     const SizedBox(width: 3),
                     Icon(Icons.star_rounded, size: 11,
@@ -3004,7 +3004,7 @@ class _DetailRow extends StatelessWidget {
       const Spacer(),
       Flexible(child: Text(value,
           style: AppTextStyles.bodySmBold
-              .copyWith(color: valueColor ?? AppColors.textPrimary),
+              .copyWith(color: valueColor ?? Theme.of(context).colorScheme.onSurface),
           textAlign: TextAlign.right, overflow: TextOverflow.ellipsis)),
     ]),
   );
@@ -3083,7 +3083,7 @@ class _Pagination extends StatelessWidget {
       padding: EdgeInsets.symmetric(horizontal: 12, vertical: vPad),
       decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
-          border: Border(top: BorderSide(color: AppColors.divider, width: 0.5))),
+          border: Border(top: BorderSide(color: Theme.of(context).semantic.borderSubtle, width: 0.5))),
       child: Row(children: [
         TextButton(
           onPressed: onPrev,
@@ -3496,7 +3496,7 @@ class _QuickPromoDialogState extends State<_QuickPromoDialog> {
     final variants = widget.product.variants;
     final single = variants.length == 1;
     return AlertDialog(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
       contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
@@ -3551,7 +3551,7 @@ class _QuickPromoDialogState extends State<_QuickPromoDialog> {
                       style: AppTextStyles.bodySmBold.copyWith(
                           color: _end == null
                               ? AppColors.textSecondary
-                              : AppColors.textPrimary),
+                              : Theme.of(context).colorScheme.onSurface),
                     ),
                   ),
                   if (_end != null)
@@ -3649,7 +3649,7 @@ class _QuickPromoDialogState extends State<_QuickPromoDialog> {
               hintText: 'Prix promo',
               suffixText: 'FCFA',
               filled: true,
-              fillColor: Colors.white,
+              fillColor: Theme.of(context).colorScheme.surface,
               contentPadding: const EdgeInsets.symmetric(
                   horizontal: 12, vertical: 10),
               enabledBorder: OutlineInputBorder(
@@ -3715,7 +3715,7 @@ class _ShareVariantsPickerDialogState
     final variants = widget.product.variants;
     final allSelected = _selected.length == variants.length;
     return AlertDialog(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16)),
       titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
@@ -3763,7 +3763,7 @@ class _ShareVariantsPickerDialogState
               ]),
             ),
           ),
-          const Divider(height: 12, color: AppColors.divider),
+          Divider(height: 12, color: Theme.of(context).semantic.borderSubtle),
           Flexible(
             child: ListView.builder(
               shrinkWrap: true,
@@ -3886,7 +3886,7 @@ class _PickOneVariantDialogState extends State<_PickOneVariantDialog> {
                   '${p.totalStock > 1 ? 's' : ''} au total',
                   style: AppTextStyles.captionHint),
             ),
-            const Divider(height: 8, color: AppColors.divider),
+            Divider(height: 8, color: Theme.of(context).semantic.borderSubtle),
             for (final v in p.variants)
               RadioListTile<String?>(
                 value: v.id,
@@ -3972,7 +3972,7 @@ class _CatalogueShareDialogState extends State<_CatalogueShareDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14)),
       titlePadding:   const EdgeInsets.fromLTRB(20, 20, 20, 4),
@@ -4203,7 +4203,7 @@ class _StockAuditReportDialogState extends State<_StockAuditReportDialog> {
   Widget build(BuildContext context) {
     final ok = _drifts.isEmpty;
     return AlertDialog(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
       contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),

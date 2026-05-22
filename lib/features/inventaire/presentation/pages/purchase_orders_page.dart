@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/database/app_database.dart';
@@ -78,8 +79,8 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                       decoration: BoxDecoration(
-                          color: Colors.white, borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppColors.divider)),
+                          color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         Icon(Icons.local_shipping_rounded, size: 15,
                             color: AppColors.primary),
@@ -129,7 +130,7 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => StatefulBuilder(
@@ -139,7 +140,7 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
           builder: (_, sc) => Column(children: [
             Center(child: Container(width: 36, height: 4,
                 margin: const EdgeInsets.only(top: 10, bottom: 14),
-                decoration: BoxDecoration(color: AppColors.divider,
+                decoration: BoxDecoration(color: Theme.of(ctx).semantic.borderSubtle,
                     borderRadius: BorderRadius.circular(2)))),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -166,7 +167,7 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                     filled: true, fillColor: const Color(0xFFF9FAFB),
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: AppColors.divider)),
+                        borderSide: BorderSide(color: Theme.of(ctx).semantic.borderSubtle)),
                   ),
                   items: _suppliers.map((s) => DropdownMenuItem(
                       value: s.id, child: Text(s.name,
@@ -191,7 +192,7 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                     color: qty > 0 ? AppColors.primarySurface : const Color(0xFFF9FAFB),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: qty > 0
-                        ? AppColors.primary.withValues(alpha:0.3) : AppColors.divider)),
+                        ? AppColors.primary.withValues(alpha:0.3) : Theme.of(ctx).semantic.borderSubtle)),
                   child: Row(children: [
                     Expanded(child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -371,8 +372,8 @@ class _POCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider)),
+        color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         // Header
         Row(children: [

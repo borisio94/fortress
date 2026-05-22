@@ -255,8 +255,8 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                           horizontal: 12, vertical: 11),
                       border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(
-                              color: AppColors.divider)),
+                          borderSide: BorderSide(
+                              color: Theme.of(context).semantic.borderSubtle)),
                       focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide(
@@ -296,8 +296,8 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                         fillColor: const Color(0xFFF9FAFB),
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(
-                                color: Color(0xFFE5E7EB))),
+                            borderSide: BorderSide(
+                                color: Theme.of(context).semantic.borderSubtle)),
                       ),
                       onChanged: (_) => setState(() {}),
                     ),

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../../../core/services/stock_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../domain/entities/product.dart';
@@ -119,10 +120,10 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Variante : ${widget.variant.name}',
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary)),
+                        color: Theme.of(context).colorScheme.onSurface)),
                 const SizedBox(height: 2),
                 Text('Stock disponible actuel : $_current',
                     style: const TextStyle(
@@ -161,8 +162,8 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
                         horizontal: 12, vertical: 11),
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(
-                            color: AppColors.divider)),
+                        borderSide: BorderSide(
+                            color: Theme.of(context).semantic.borderSubtle)),
                     focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(
@@ -221,8 +222,8 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
                         horizontal: 12, vertical: 10),
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(
-                            color: AppColors.divider)),
+                        borderSide: BorderSide(
+                            color: Theme.of(context).semantic.borderSubtle)),
                     focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(

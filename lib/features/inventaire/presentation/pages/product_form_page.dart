@@ -679,7 +679,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
                   title: title,
                   icon: Icons.add_box_outlined,
                 ),
-                const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                Divider(height: 1, color: Theme.of(dc).semantic.borderSubtle),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
                   child: TextFormField(
@@ -698,12 +698,12 @@ class _ProductFormPageState extends State<ProductFormPage> {
                           horizontal: 12, vertical: 11),
                       border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(
-                              color: AppColors.divider)),
+                          borderSide: BorderSide(
+                              color: Theme.of(dc).semantic.borderSubtle)),
                       enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(
-                              color: AppColors.divider)),
+                          borderSide: BorderSide(
+                              color: Theme.of(dc).semantic.borderSubtle)),
                       focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide(
@@ -1019,7 +1019,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
             padding: const EdgeInsets.symmetric(vertical: 12),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.divider),
+              border: Border.all(color: Theme.of(context).semantic.borderSubtle),
               color: const Color(0xFFF9FAFB),
             ),
             child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -1101,7 +1101,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                        color: isMain ? AppColors.primary : AppColors.divider,
+                        color: isMain ? AppColors.primary : Theme.of(context).semantic.borderSubtle,
                         width: isMain ? 2 : 1),
                   ),
                   child: Stack(fit: StackFit.expand, children: [
@@ -1150,11 +1150,11 @@ class _ProductFormPageState extends State<ProductFormPage> {
         _ToggleRow(l.prodIsActive, l.caisseActiveHint,
             _isActive, AppColors.secondary,
                 (v) => setState(() => _isActive = v)),
-        const Divider(height: 18, color: Color(0xFFF0F0F0)),
+        Divider(height: 18, color: Theme.of(context).semantic.borderSubtle),
         _ToggleRow(l.prodIsVisibleWeb, l.webShopVisibleHint,
             _isVisibleWeb, AppColors.primary,
                 (v) => setState(() => _isVisibleWeb = v)),
-        const Divider(height: 18, color: Color(0xFFF0F0F0)),
+        Divider(height: 18, color: Theme.of(context).semantic.borderSubtle),
         _LF(l.prodRating,
             child: _Stars(_rating, (v) => setState(() => _rating = v))),
       ]),
@@ -1229,7 +1229,7 @@ class _VariantFullCard extends StatelessWidget {
         border: Border.all(
             color: isMain
                 ? AppColors.primary.withValues(alpha:0.4)
-                : AppColors.divider,
+                : Theme.of(context).semantic.borderSubtle,
             width: isMain ? 1.5 : 1),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1366,7 +1366,7 @@ class _VariantFullCard extends StatelessWidget {
                                 decoration: BoxDecoration(
                                     color: AppColors.inputFill,
                                     borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: AppColors.divider)),
+                                    border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
                                 child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
@@ -1821,7 +1821,7 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => StatefulBuilder(
@@ -1831,7 +1831,7 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               Center(child: Container(width: 36, height: 4,
-                  decoration: BoxDecoration(color: AppColors.divider,
+                  decoration: BoxDecoration(color: Theme.of(ctx).semantic.borderSubtle,
                       borderRadius: BorderRadius.circular(2)))),
               const SizedBox(height: 16),
               Row(children: [
@@ -1906,9 +1906,9 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
                   fillColor: const Color(0xFFF9FAFB),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: AppColors.divider)),
+                      borderSide: BorderSide(color: Theme.of(ctx).semantic.borderSubtle)),
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: AppColors.divider))),
+                      borderSide: BorderSide(color: Theme.of(ctx).semantic.borderSubtle))),
                 items: ArrivalCause.values.map((c) => DropdownMenuItem(
                     value: c, child: Text(c.label,
                         style: const TextStyle(fontSize: 13)))).toList(),
@@ -1923,9 +1923,9 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
                   hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: AppColors.divider)),
+                      borderSide: BorderSide(color: Theme.of(ctx).semantic.borderSubtle)),
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: AppColors.divider)),
+                      borderSide: BorderSide(color: Theme.of(ctx).semantic.borderSubtle)),
                   focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: AppColors.primary, width: 1.5)))),
               const SizedBox(height: 20),
@@ -2135,7 +2135,7 @@ class _StockIndicatorsState extends State<_StockIndicators> {
       decoration: BoxDecoration(
         color: const Color(0xFFF8F7FC),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
       child: Column(children: [
         Row(children: [
@@ -2225,7 +2225,7 @@ class _StockIndicatorsState extends State<_StockIndicators> {
       decoration: BoxDecoration(
         color: const Color(0xFFF8F7FC),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
       child: Column(children: [
         Row(children: [
@@ -2313,10 +2313,10 @@ class _LocationChip extends StatelessWidget {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? _color.withValues(alpha:0.12) : Colors.white,
+          color: selected ? _color.withValues(alpha:0.12) : Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: selected ? _color : AppColors.divider,
+            color: selected ? _color : Theme.of(context).semantic.borderSubtle,
             width: selected ? 1.4 : 1,
           ),
         ),
@@ -2334,7 +2334,7 @@ class _LocationChip extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 11,
                         fontWeight: FontWeight.w600,
-                        color: selected ? _color : AppColors.textPrimary)),
+                        color: selected ? _color : Theme.of(context).colorScheme.onSurface)),
               ),
               Text('${data.available} dispo',
                   style: const TextStyle(fontSize: 9,
@@ -2391,7 +2391,7 @@ class _StatusChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: active ? color.withValues(alpha:0.1) : const Color(0xFFF9FAFB),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: active ? color : AppColors.divider,
+          border: Border.all(color: active ? color : Theme.of(context).semantic.borderSubtle,
               width: active ? 1.5 : 1)),
         child: Text(label, style: TextStyle(fontSize: 11,
             fontWeight: active ? FontWeight.w700 : FontWeight.w500,
@@ -2432,7 +2432,7 @@ class _ExpandSectionState extends State<_ExpandSection> {
       decoration: BoxDecoration(
         color: const Color(0xFFF9FAFB),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
       child: Column(children: [
         GestureDetector(
@@ -2606,8 +2606,8 @@ class _StepBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-    decoration: const BoxDecoration(color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0)))),
+    decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface,
+        border: Border(bottom: BorderSide(color: Theme.of(context).semantic.borderSubtle))),
     child: Row(children: List.generate(total, (i) {
       final done   = i < current;
       final active = i == current;
@@ -2618,7 +2618,7 @@ class _StepBar extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Row(children: [
             if (i > 0) Expanded(child: Container(height: 2,
-                color: done ? AppColors.secondary : AppColors.divider)),
+                color: done ? AppColors.secondary : Theme.of(context).semantic.borderSubtle)),
             Container(
               width: 26, height: 26,
               decoration: BoxDecoration(
@@ -2634,7 +2634,7 @@ class _StepBar extends StatelessWidget {
                       : done ? AppColors.secondary : AppColors.textHint),
             ),
             if (i < total - 1) Expanded(child: Container(height: 2,
-                color: done ? AppColors.secondary : AppColors.divider)),
+                color: done ? AppColors.secondary : Theme.of(context).semantic.borderSubtle)),
           ]),
           const SizedBox(height: 3),
           Text(titles[i], maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -2665,8 +2665,8 @@ class _BottomNav extends StatelessWidget {
     final isLast = step == total - 1;
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
-      decoration: const BoxDecoration(color: Colors.white,
-          border: Border(top: BorderSide(color: Color(0xFFF0F0F0)))),
+      decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface,
+          border: Border(top: BorderSide(color: Theme.of(context).semantic.borderSubtle))),
       child: Row(children: [
         if (step > 0)
           OutlinedButton.icon(
@@ -2675,7 +2675,7 @@ class _BottomNav extends StatelessWidget {
             label: Text(l.prodPrev),
             style: OutlinedButton.styleFrom(
               foregroundColor: const Color(0xFF374151),
-              side: const BorderSide(color: AppColors.divider),
+              side: BorderSide(color: Theme.of(context).semantic.borderSubtle),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               minimumSize: Size.zero,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -2825,8 +2825,8 @@ class _ToggleRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(children: [
     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: const TextStyle(fontSize: 13,
-          fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+      Text(label, style: TextStyle(fontSize: 13,
+          fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
       Text(sub, style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
     ])),
     AppSwitch(value: value, onChanged: onChange),
@@ -2865,7 +2865,7 @@ class _DateBtn extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
       decoration: BoxDecoration(color: const Color(0xFFF9FAFB),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: AppColors.divider)),
+          border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
       child: Row(children: [
         Icon(Icons.calendar_today_rounded, size: 14, color: AppColors.primary),
         const SizedBox(width: 8),
@@ -2876,7 +2876,7 @@ class _DateBtn extends StatelessWidget {
           style: TextStyle(fontSize: 12,
               color: date == null
                   ? const Color(0xFFBBBBBB)
-                  : AppColors.textPrimary),
+                  : Theme.of(context).colorScheme.onSurface),
         )),
       ]),
     ),
@@ -3033,9 +3033,9 @@ class _TF extends StatelessWidget {
       filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppColors.divider)),
+          borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppColors.divider)),
+          borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
       errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
@@ -3074,7 +3074,7 @@ class _SupplierPickField extends StatelessWidget {
     final picked = await showModalBottomSheet<Supplier>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (_) => _SupplierPickerSheet(suppliers: suppliers),
@@ -3115,9 +3115,9 @@ class _SupplierPickField extends StatelessWidget {
         filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: AppColors.divider)),
+            borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: AppColors.divider)),
+            borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
       ),
@@ -3165,13 +3165,13 @@ class _SupplierPickerSheetState extends State<_SupplierPickerSheet> {
               // Poignée
               Center(child: Container(width: 36, height: 4,
                   decoration: BoxDecoration(
-                      color: AppColors.divider,
+                      color: Theme.of(context).semantic.borderSubtle,
                       borderRadius: BorderRadius.circular(2)))),
               const SizedBox(height: 12),
-              const Text('Choisir un fournisseur',
+              Text('Choisir un fournisseur',
                   style: TextStyle(fontSize: 15,
                       fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
+                      color: Theme.of(context).colorScheme.onSurface)),
               const SizedBox(height: 12),
               TextField(
                 autofocus: true,
@@ -3188,7 +3188,7 @@ class _SupplierPickerSheetState extends State<_SupplierPickerSheet> {
                       horizontal: 12, vertical: 11),
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: AppColors.divider)),
+                      borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
                 ),
               ),
               const SizedBox(height: 12),
@@ -3207,7 +3207,7 @@ class _SupplierPickerSheetState extends State<_SupplierPickerSheet> {
                         shrinkWrap: true,
                         itemCount: items.length,
                         separatorBuilder: (_, __) =>
-                            const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                            Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
                         itemBuilder: (_, i) {
                           final s = items[i];
                           return InkWell(
@@ -3232,10 +3232,10 @@ class _SupplierPickerSheetState extends State<_SupplierPickerSheet> {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(s.name,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                               fontSize: 13,
                                               fontWeight: FontWeight.w600,
-                                              color: AppColors.textPrimary)),
+                                              color: Theme.of(context).colorScheme.onSurface)),
                                       if ((s.phone ?? '').isNotEmpty ||
                                           (s.email ?? '').isNotEmpty)
                                         Text(
@@ -3346,9 +3346,9 @@ class _SupplierInfoRow extends StatelessWidget {
       ),
       Expanded(
         child: Text(value,
-            style: const TextStyle(fontSize: 12,
+            style: TextStyle(fontSize: 12,
                 fontWeight: FontWeight.w500,
-                color: AppColors.textPrimary)),
+                color: Theme.of(context).colorScheme.onSurface)),
       ),
     ],
   );

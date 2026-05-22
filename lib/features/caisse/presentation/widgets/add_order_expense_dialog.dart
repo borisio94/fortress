@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../domain/entities/sale.dart';
 
@@ -164,10 +165,12 @@ class _AddOrderExpenseDialogState extends State<AddOrderExpenseDialog> {
               fillColor: const Color(0xFFF9FAFB),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+                  borderSide:
+                      BorderSide(color: theme.semantic.borderSubtle)),
               enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+                  borderSide:
+                      BorderSide(color: theme.semantic.borderSubtle)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide:
@@ -192,10 +195,12 @@ class _AddOrderExpenseDialogState extends State<AddOrderExpenseDialog> {
               fillColor: const Color(0xFFF9FAFB),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+                  borderSide:
+                      BorderSide(color: theme.semantic.borderSubtle)),
               enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+                  borderSide:
+                      BorderSide(color: theme.semantic.borderSubtle)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide:

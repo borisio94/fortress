@@ -5,6 +5,7 @@ import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/whatsapp_service.dart';
 import '../../../../core/services/short_link_service.dart';
@@ -339,7 +340,8 @@ class _HeroHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    width: double.infinity, color: Colors.white,
+    width: double.infinity,
+    color: Theme.of(context).colorScheme.surface,
     padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
     child: Column(children: [
       Stack(alignment: Alignment.center, children: [
@@ -361,7 +363,7 @@ class _HeroHeader extends StatelessWidget {
       ]),
       const SizedBox(height: 12),
       Text(client.name, style: AppTextStyles.title.copyWith(
-          color: const Color(0xFF0F172A))),
+          color: Theme.of(context).colorScheme.onSurface)),
       if (client.phone != null) ...[
         const SizedBox(height: 4),
         Text(client.phone!, style: AppTextStyles.bodySecondary),
@@ -440,9 +442,10 @@ class _Section extends StatelessWidget {
       if (trailing != null) ...[const Spacer(), trailing!],
     ]),
     const SizedBox(height: 8),
-    Container(decoration: BoxDecoration(color: Colors.white,
+    Container(decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE5E7EB))),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
         child: child),
   ]);
 }
@@ -463,7 +466,7 @@ class _InfoTile extends StatelessWidget {
             color: const Color(0xFF9CA3AF))),
         const SizedBox(height: 2),
         Text(value, style: AppTextStyles.bodyBold.copyWith(
-            color: const Color(0xFF0F172A))),
+            color: Theme.of(context).colorScheme.onSurface)),
       ])),
     ]),
   );
@@ -486,7 +489,7 @@ class _ActionTile extends StatelessWidget {
             child: Icon(icon, size: 16, color: color)),
         const SizedBox(width: 12),
         Expanded(child: Text(label, style: AppTextStyles.bodyBold.copyWith(
-            color: const Color(0xFF0F172A)))),
+            color: Theme.of(context).colorScheme.onSurface))),
         const Icon(Icons.chevron_right_rounded,
             size: 16, color: Color(0xFFD1D5DB)),
       ]),
@@ -569,16 +572,16 @@ class _WhatsappComposeDialogState extends State<_WhatsappComposeDialog> {
                       color: AppColors.textHint),
                   isDense: true,
                   filled: true,
-                  fillColor: const Color(0xFFF9FAFB),
+                  fillColor: Theme.of(context).colorScheme.surface,
                   contentPadding: const EdgeInsets.all(12),
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide:
-                          BorderSide(color: AppColors.divider)),
+                      borderSide: BorderSide(
+                          color: Theme.of(context).semantic.borderSubtle)),
                   enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide:
-                          BorderSide(color: AppColors.divider)),
+                      borderSide: BorderSide(
+                          color: Theme.of(context).semantic.borderSubtle)),
                   focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                       borderSide: const BorderSide(

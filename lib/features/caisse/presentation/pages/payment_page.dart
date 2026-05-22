@@ -9,6 +9,7 @@ import '../../../../core/database/app_database.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/services/invoice_storage_service.dart';
@@ -95,9 +96,10 @@ class _PaymentView extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFE5E7EB)),
+                border: Border.all(
+                    color: Theme.of(context).semantic.borderSubtle),
                 boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.04),
                     blurRadius: 8, offset: const Offset(0, 2))],
               ),
@@ -110,7 +112,7 @@ class _PaymentView extends StatelessWidget {
                     style: AppTextStyles.display
                         .copyWith(color: AppColors.primary)),
                 const SizedBox(height: 12),
-                const Divider(color: Color(0xFFF0F0F0)),
+                Divider(color: Theme.of(context).semantic.borderSubtle),
                 const SizedBox(height: 8),
                 _SummaryLine('Sous-total',
                     CurrencyFormatter.format(state.subtotal)),
@@ -384,7 +386,7 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
     final shopId = widget.shopId;
     final onNewSale = widget.onNewSale;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),

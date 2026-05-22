@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/widgets/back_dated_picker.dart';
 import '../../../../core/storage/local_storage_service.dart';
@@ -139,7 +140,7 @@ class _ReceptionPageState extends State<ReceptionPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => StatefulBuilder(
@@ -150,7 +151,7 @@ class _ReceptionPageState extends State<ReceptionPage> {
             // Poignée
             Center(child: Container(width: 36, height: 4,
                 margin: const EdgeInsets.only(top: 10, bottom: 14),
-                decoration: BoxDecoration(color: const Color(0xFFE5E7EB),
+                decoration: BoxDecoration(color: Theme.of(ctx).semantic.borderSubtle,
                     borderRadius: BorderRadius.circular(2)))),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -186,7 +187,7 @@ class _ReceptionPageState extends State<ReceptionPage> {
                   decoration: BoxDecoration(
                     color: const Color(0xFFF9FAFB),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                    border: Border.all(color: Theme.of(ctx).semantic.borderSubtle),
                   ),
                   child: Row(children: [
                     Icon(Icons.event_rounded,
@@ -224,7 +225,7 @@ class _ReceptionPageState extends State<ReceptionPage> {
                     color: qty > 0 ? AppColors.primarySurface : const Color(0xFFF9FAFB),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: qty > 0
-                        ? AppColors.primary.withValues(alpha:0.3) : const Color(0xFFE5E7EB))),
+                        ? AppColors.primary.withValues(alpha:0.3) : Theme.of(ctx).semantic.borderSubtle)),
                   child: Row(children: [
                     Expanded(child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -308,7 +309,7 @@ class _ReceptionPageState extends State<ReceptionPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => _ValidateSheet(
@@ -376,7 +377,7 @@ class _ValidateSheetState extends State<_ValidateSheet> {
       builder: (_, sc) => Column(children: [
         Center(child: Container(width: 36, height: 4,
             margin: const EdgeInsets.only(top: 10, bottom: 14),
-            decoration: BoxDecoration(color: const Color(0xFFE5E7EB),
+            decoration: BoxDecoration(color: Theme.of(context).semantic.borderSubtle,
                 borderRadius: BorderRadius.circular(2)))),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 20),
@@ -398,8 +399,8 @@ class _ValidateSheetState extends State<_ValidateSheet> {
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.white, borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFE5E7EB))),
+                color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(s.item.productName, style: AppTextStyles.bodyBold),
                 Text('Attendu : ${s.item.expectedQty}',
@@ -525,7 +526,7 @@ class _ValidateSheetState extends State<_ValidateSheet> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(ctx).colorScheme.surface,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16)),
         title: const Row(children: [
@@ -665,8 +666,8 @@ class _ReceptionCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 4, offset: const Offset(0, 2))]),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

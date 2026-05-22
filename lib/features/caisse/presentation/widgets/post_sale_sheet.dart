@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/services/document_service.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -17,7 +18,7 @@ class PostSaleSheet extends StatefulWidget {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => PostSaleSheet(sale: sale),
@@ -125,7 +126,9 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
                     color: sel ? AppColors.primary : const Color(0xFFF9FAFB),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                        color: sel ? AppColors.primary : const Color(0xFFE5E7EB)),
+                        color: sel
+                            ? AppColors.primary
+                            : Theme.of(context).semantic.borderSubtle),
                   ),
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
                     Icon(f.$3, size: 20,

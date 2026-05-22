@@ -268,8 +268,8 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                     decoration: BoxDecoration(
                       color: const Color(0xFFF9FAFB),
                       borderRadius: BorderRadius.circular(8),
-                      border:
-                          Border.all(color: const Color(0xFFE5E7EB)),
+                      border: Border.all(
+                          color: Theme.of(context).semantic.borderSubtle),
                     ),
                     child: Row(children: [
                       Icon(Icons.event_rounded,

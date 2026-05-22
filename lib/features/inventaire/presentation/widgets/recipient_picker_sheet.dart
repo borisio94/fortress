@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/phone_formatter.dart';
 import '../../../crm/domain/entities/client.dart';
 
@@ -30,7 +31,7 @@ Future<String?> pickWhatsappRecipient(
     isScrollControlled: true,
     isDismissible: false,
     enableDrag: false,
-    backgroundColor: Colors.white,
+    backgroundColor: Theme.of(context).colorScheme.surface,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
@@ -128,7 +129,7 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
             mainAxisSize: MainAxisSize.max,
             children: [
               _header(),
-              const Divider(height: 1, color: AppColors.divider),
+              Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
               TabBar(
                 controller: _tabs,
                 labelColor: AppColors.primary,
@@ -141,7 +142,7 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
                   Tab(text: 'Saisir un numéro'),
                 ],
               ),
-              const Divider(height: 1, color: AppColors.divider),
+              Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
               Expanded(
                 child: TabBarView(
                   controller: _tabs,
@@ -168,7 +169,7 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
           child: Container(
             width: 36, height: 4,
             decoration: BoxDecoration(
-              color: AppColors.divider,
+              color: Theme.of(context).semantic.borderSubtle,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -227,7 +228,7 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
               filled: true, fillColor: AppColors.inputFill,
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: AppColors.divider)),
+                  borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(color: AppColors.primary)),
@@ -253,7 +254,7 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
                     padding: EdgeInsets.zero,
                     itemCount: _filtered.length,
                     separatorBuilder: (_, __) =>
-                        const Divider(height: 1, color: AppColors.divider),
+                        Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
                     itemBuilder: (_, i) {
                       final c = _filtered[i];
                       return _clientTile(c);
@@ -332,7 +333,7 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
                   horizontal: 14, vertical: 14),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: AppColors.divider)),
+                  borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide(color: AppColors.primary, width: 1.5)),

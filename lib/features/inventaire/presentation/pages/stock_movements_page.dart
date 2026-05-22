@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/database/app_database.dart';
@@ -142,7 +143,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => StatefulBuilder(
@@ -152,7 +153,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               Center(child: Container(width: 36, height: 4,
-                  decoration: BoxDecoration(color: AppColors.divider,
+                  decoration: BoxDecoration(color: Theme.of(ctx).semantic.borderSubtle,
                       borderRadius: BorderRadius.circular(2)))),
               const SizedBox(height: 16),
               Row(children: [
@@ -176,7 +177,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                       color: isPositive ? AppColors.secondary.withValues(alpha:0.1) : const Color(0xFFF9FAFB),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: isPositive
-                          ? AppColors.secondary : AppColors.divider)),
+                          ? AppColors.secondary : Theme.of(ctx).semantic.borderSubtle)),
                     child: Column(children: [
                       Icon(Icons.add_circle_rounded, size: 24,
                           color: isPositive ? AppColors.secondary : const Color(0xFFD1D5DB)),
@@ -195,7 +196,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                       color: !isPositive ? AppColors.error.withValues(alpha:0.1) : const Color(0xFFF9FAFB),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: !isPositive
-                          ? AppColors.error : AppColors.divider)),
+                          ? AppColors.error : Theme.of(ctx).semantic.borderSubtle)),
                     child: Column(children: [
                       Icon(Icons.remove_circle_rounded, size: 24,
                           color: !isPositive ? AppColors.error : const Color(0xFFD1D5DB)),
@@ -216,7 +217,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                   hintText: '0', labelText: 'Quantité',
                   filled: true, fillColor: const Color(0xFFF9FAFB),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: AppColors.divider)),
+                      borderSide: BorderSide(color: Theme.of(ctx).semantic.borderSubtle)),
                 ),
               ),
               const SizedBox(height: 10),
@@ -228,7 +229,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                   labelText: 'Notes',
                   filled: true, fillColor: const Color(0xFFF9FAFB),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: AppColors.divider)),
+                      borderSide: BorderSide(color: Theme.of(ctx).semantic.borderSubtle)),
                 ),
               ),
               const SizedBox(height: 20),
@@ -305,21 +306,21 @@ class _Summary extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider)),
+        color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
       child: Row(children: [
         Expanded(child: Column(children: [
           Text('$entries', style: AppTextStyles.subtitleBold.copyWith(
               fontWeight: FontWeight.w800, color: AppColors.secondary)),
           const Text('Entrées', style: AppTextStyles.micro),
         ])),
-        Container(width: 1, height: 28, color: AppColors.divider),
+        Container(width: 1, height: 28, color: Theme.of(context).semantic.borderSubtle),
         Expanded(child: Column(children: [
           Text('$exits', style: AppTextStyles.subtitleBold.copyWith(
               fontWeight: FontWeight.w800, color: AppColors.error)),
           const Text('Sorties', style: AppTextStyles.micro),
         ])),
-        Container(width: 1, height: 28, color: AppColors.divider),
+        Container(width: 1, height: 28, color: Theme.of(context).semantic.borderSubtle),
         Expanded(child: Column(children: [
           Text('${movements.length}', style: AppTextStyles.subtitleBold.copyWith(
               fontWeight: FontWeight.w800, color: AppColors.primary)),
@@ -362,8 +363,8 @@ class _MovementCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFF0F0F0))),
+        color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
           width: 34, height: 34,
@@ -487,9 +488,9 @@ class _FilterChip extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: active ? AppColors.primary : Colors.white,
+            color: active ? AppColors.primary : Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: active ? AppColors.primary : AppColors.divider)),
+            border: Border.all(color: active ? AppColors.primary : Theme.of(context).semantic.borderSubtle)),
           child: Text(label, style: AppTextStyles.captionBold.copyWith(
               color: active ? Colors.white : AppColors.textSecondary)),
         ),

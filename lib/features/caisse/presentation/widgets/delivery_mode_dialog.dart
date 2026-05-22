@@ -3,6 +3,7 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../domain/entities/sale.dart';
 import '../../../../features/inventaire/domain/entities/stock_location.dart';
 
@@ -37,7 +38,7 @@ Future<DeliveryModeChoice?> askDeliveryMode(
     isScrollControlled: true,
     isDismissible: false,
     enableDrag: false,
-    backgroundColor: Colors.white,
+    backgroundColor: Theme.of(context).colorScheme.surface,
     shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
     builder: (_) => _DeliveryModeSheet(
@@ -277,7 +278,8 @@ class _DeliveryModeSheetState extends State<_DeliveryModeSheet> {
             horizontal: 12, vertical: 10),
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+            borderSide:
+                BorderSide(color: Theme.of(context).semantic.borderSubtle)),
       ),
     ),
   );
@@ -301,7 +303,8 @@ class _DeliveryModeSheetState extends State<_DeliveryModeSheet> {
             horizontal: 12, vertical: 10),
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+            borderSide:
+                BorderSide(color: Theme.of(context).semantic.borderSubtle)),
       ),
     ),
   );
@@ -326,10 +329,14 @@ class _Tile extends StatelessWidget {
       duration: const Duration(milliseconds: 150),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: selected ? color.withValues(alpha:0.08) : Colors.white,
+        color: selected
+            ? color.withValues(alpha:0.08)
+            : Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: selected ? color : const Color(0xFFE5E7EB),
+          color: selected
+              ? color
+              : Theme.of(context).semantic.borderSubtle,
           width: selected ? 1.5 : 1,
         ),
       ),

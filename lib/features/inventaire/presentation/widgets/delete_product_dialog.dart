@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/usecases/delete_product_usecase.dart';
 
@@ -340,7 +341,7 @@ class _PlaceholderImg extends StatelessWidget {
   const _PlaceholderImg();
   @override
   Widget build(BuildContext context) => Container(
-        color: AppColors.divider,
+        color: Theme.of(context).semantic.borderSubtle,
         child: const Icon(Icons.image_outlined,
             color: AppColors.textHint, size: 22),
       );

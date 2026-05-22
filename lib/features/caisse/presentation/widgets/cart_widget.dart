@@ -65,7 +65,9 @@ class CartWidget extends ConsumerWidget {
                       horizontal: 12, vertical: 8),
                   itemCount: state.items.length,
                   separatorBuilder: (_, __) => Divider(
-                      height: 1, color: AppColors.divider, indent: 16),
+                      height: 1,
+                      color: Theme.of(context).semantic.borderSubtle,
+                      indent: 16),
                   itemBuilder: (ctx, i) {
                     final item = state.items[i];
                     return _CartItemRow(
@@ -111,7 +113,7 @@ class CartWidget extends ConsumerWidget {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => _PriceEditorSheet(
@@ -137,7 +139,8 @@ class _CartHeader extends StatelessWidget {
     final isCompact = MediaQuery.of(context).size.width < 900;
     return Container(
       decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: AppColors.divider))),
+          border: Border(bottom: BorderSide(
+              color: Theme.of(context).semantic.borderSubtle))),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
 
         // ── Titre + badge + vider ──────────────────────────────────
@@ -228,7 +231,7 @@ class _PriceAlertBanner extends StatelessWidget {
                     '${CurrencyFormatter.format(i.effectivePrice)} '
                     '(bénéf. < 50% du normal)',
                 style: AppTextStyles.micro
-                    .copyWith(color: AppColors.textPrimary),
+                    .copyWith(color: Theme.of(context).colorScheme.onSurface),
               )),
             ]),
       ),
@@ -373,7 +376,8 @@ class _FeesSection extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
     decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: AppColors.divider))),
+        border: Border(top: BorderSide(
+            color: Theme.of(context).semantic.borderSubtle))),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         const Icon(Icons.local_shipping_outlined,
@@ -410,8 +414,8 @@ class _FeesSection extends StatelessWidget {
                 onTap: () => _showEditFeeDialog(context, fee, shopId),
                 child: Row(children: [
                   Expanded(child: Text(fee.label,
-                      style: AppTextStyles.captionHint
-                          .copyWith(color: AppColors.textPrimary),
+                      style: AppTextStyles.captionHint.copyWith(
+                          color: Theme.of(context).colorScheme.onSurface),
                       overflow: TextOverflow.ellipsis)),
                   const SizedBox(width: 4),
                   Icon(Icons.edit_rounded, size: 10,
@@ -421,8 +425,8 @@ class _FeesSection extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(CurrencyFormatter.format(fee.amount),
-                style: AppTextStyles.captionBold
-                    .copyWith(color: AppColors.textPrimary)),
+                style: AppTextStyles.captionBold.copyWith(
+                    color: Theme.of(context).colorScheme.onSurface)),
             const SizedBox(width: 4),
             GestureDetector(
               onTap: () => context.read<CaisseBloc>()
@@ -443,7 +447,7 @@ class _FeesSection extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dc) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
         contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
@@ -504,7 +508,7 @@ class _FeesSection extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dc) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
         contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
@@ -573,7 +577,8 @@ class _ClientTaxSection extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 6),
       decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: AppColors.divider))),
+          border: Border(top: BorderSide(
+              color: Theme.of(context).semantic.borderSubtle))),
       child: _TvaLine(state: state),
     );
   }
@@ -680,12 +685,12 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
                 horizontal: 12, vertical: 10),
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(
-                    color: AppColors.divider)),
+                borderSide: BorderSide(
+                    color: Theme.of(context).semantic.borderSubtle)),
             enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(
-                    color: AppColors.divider)),
+                borderSide: BorderSide(
+                    color: Theme.of(context).semantic.borderSubtle)),
             focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
                 borderSide: BorderSide(
@@ -693,7 +698,7 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
           ),
         ),
       ),
-      const Divider(height: 1, color: Color(0xFFF0F0F0)),
+      Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
 
       // Liste clients
       Expanded(
@@ -741,7 +746,7 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
                           ? FontWeight.w700 : FontWeight.w500,
                       color: sel
                           ? AppColors.primary
-                          : AppColors.textPrimary)),
+                          : Theme.of(context).colorScheme.onSurface)),
               subtitle: c.phone != null
                   ? Text(c.phone!,
                   style: AppTextStyles.captionHint)
@@ -809,8 +814,10 @@ class _CartFooter extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(color: Colors.white,
-        border: Border(top: BorderSide(color: AppColors.divider))),
+    decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(top: BorderSide(
+            color: Theme.of(context).semantic.borderSubtle))),
     child: Column(children: [
       _Line(l.caisseSubtotal, CurrencyFormatter.format(state.subtotal)),
       if (state.totalFees > 0) ...[
@@ -824,7 +831,7 @@ class _CartFooter extends StatelessWidget {
             color: AppColors.warning),
       ],
       const SizedBox(height: 8),
-      Divider(height: 1, color: AppColors.divider),
+      Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
       const SizedBox(height: 8),
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         Text(l.total.toUpperCase(),
@@ -1006,7 +1013,7 @@ class _TvaLine extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dc) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16)),
         titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
@@ -1106,7 +1113,7 @@ class _TvaLine extends StatelessWidget {
             text: TextSpan(
               style: AppTextStyles.bodySm.copyWith(
                   color: rate > 0
-                      ? AppColors.textPrimary
+                      ? Theme.of(context).colorScheme.onSurface
                       : AppColors.textHint),
               children: [
                 TextSpan(
@@ -1169,7 +1176,7 @@ class _Line extends StatelessWidget {
       Text(label, style: AppTextStyles.bodySm
           .copyWith(color: color ?? AppColors.textSecondary)),
       Text(value,  style: AppTextStyles.bodySm
-          .copyWith(color: color ?? AppColors.textPrimary)),
+          .copyWith(color: color ?? Theme.of(context).colorScheme.onSurface)),
     ],
   );
 }
@@ -1420,7 +1427,8 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
             decoration: BoxDecoration(
                 color: AppColors.background,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.divider)),
+                border: Border.all(
+                    color: Theme.of(context).semantic.borderSubtle)),
             child: Column(children: [
               _kvRow(l.priceEditOriginal,
                   CurrencyFormatter.format(original),
@@ -1494,7 +1502,8 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
                   },
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.textSecondary,
-                    side: const BorderSide(color: AppColors.divider),
+                    side: BorderSide(
+                        color: Theme.of(context).semantic.borderSubtle),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10)),
@@ -1551,10 +1560,13 @@ class _QtyBtn extends StatelessWidget {
       borderRadius: BorderRadius.circular(8),
       child: Container(
         constraints: BoxConstraints(minWidth: boxSize, minHeight: boxSize),
-        decoration: BoxDecoration(color: Colors.white,
+        decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(isCompact ? 7 : 8),
-            border: Border.all(color: AppColors.divider)),
-        child: Icon(icon, size: iconSize, color: AppColors.textPrimary),
+            border: Border.all(
+                color: Theme.of(context).semantic.borderSubtle)),
+        child: Icon(icon, size: iconSize,
+            color: Theme.of(context).colorScheme.onSurface),
       ),
     );
   }
@@ -1583,9 +1595,11 @@ class _FeeField extends StatelessWidget {
       filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppColors.divider)),
+          borderSide: BorderSide(
+              color: Theme.of(context).semantic.borderSubtle)),
       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppColors.divider)),
+          borderSide: BorderSide(
+              color: Theme.of(context).semantic.borderSubtle)),
       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
     ),
@@ -1664,7 +1678,7 @@ class _ScheduledDeliveryField extends StatelessWidget {
           border: Border.all(
             color: has
                 ? AppColors.primary.withValues(alpha:0.30)
-                : AppColors.divider,
+                : Theme.of(context).semantic.borderSubtle,
           ),
         ),
         child: Row(children: [

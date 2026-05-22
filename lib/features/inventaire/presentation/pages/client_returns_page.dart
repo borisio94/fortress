@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
@@ -63,7 +64,7 @@ class _ClientReturnsPageState extends State<ClientReturnsPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => _ReturnSheet(
@@ -79,7 +80,7 @@ class _ClientReturnsPageState extends State<ClientReturnsPage> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(ctx).colorScheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(children: [
           Container(
@@ -134,8 +135,8 @@ class _OrderReturnCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider)),
+        color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
       child: Row(children: [
         Container(
           width: 38, height: 38,
@@ -216,7 +217,7 @@ class _ReturnSheetState extends State<_ReturnSheet> {
       builder: (_, sc) => Column(children: [
         Center(child: Container(width: 36, height: 4,
             margin: const EdgeInsets.only(top: 10, bottom: 14),
-            decoration: BoxDecoration(color: AppColors.divider,
+            decoration: BoxDecoration(color: Theme.of(context).semantic.borderSubtle,
                 borderRadius: BorderRadius.circular(2)))),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -249,8 +250,8 @@ class _ReturnSheetState extends State<_ReturnSheet> {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.white, borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.divider)),
+                color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
                   Expanded(child: Column(
@@ -400,7 +401,7 @@ class _StatePill extends StatelessWidget {
         color: active ? color.withValues(alpha:0.1) : const Color(0xFFF9FAFB),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
-            color: active ? color : AppColors.divider,
+            color: active ? color : Theme.of(context).semantic.borderSubtle,
             width: active ? 1.5 : 1)),
       child: Text(label, style: AppTextStyles.captionHint.copyWith(
           fontWeight: active ? FontWeight.w700 : FontWeight.w500,

@@ -8,6 +8,7 @@ import '../../domain/entities/sale_item.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../features/dashboard/data/dashboard_providers.dart';
@@ -327,7 +328,7 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
     final pickerNavigator = Navigator.of(context);
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -425,9 +426,10 @@ class _ProductCard extends StatelessWidget {
         opacity: outOfStockAt ? 0.4 : 1.0,
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE5E7EB)),
+            border: Border.all(
+                color: Theme.of(context).semantic.borderSubtle),
             boxShadow: [
               BoxShadow(
                   color: Colors.black.withValues(alpha:0.03),
@@ -771,10 +773,14 @@ class _Chip extends StatelessWidget {
       duration: const Duration(milliseconds: 120),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       decoration: BoxDecoration(
-        color: selected ? AppColors.primary : Colors.white,
+        color: selected
+            ? AppColors.primary
+            : Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-            color: selected ? AppColors.primary : const Color(0xFFE5E7EB)),
+            color: selected
+                ? AppColors.primary
+                : Theme.of(context).semantic.borderSubtle),
       ),
       child: Text(label,
           style: AppTextStyles.captionBold.copyWith(
@@ -1121,7 +1127,7 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
         ]),
       ),
 
-      const Divider(height: 1, color: AppColors.divider),
+      Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
 
       // ── Produits : grille OU liste selon _viewMode ───────────────
       Expanded(
@@ -1237,7 +1243,7 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
     // Variantes → sheet (fallback legacy ou tap sur image quand pas de chip sélectionné)
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -1299,7 +1305,7 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
                           : FontWeight.w500,
                       color: _sort == o.$1
                           ? AppColors.primary
-                          : AppColors.textPrimary))),
+                          : Theme.of(context).colorScheme.onSurface))),
               if (_sort == o.$1)
                 Icon(Icons.check_rounded,
                     size: 14, color: AppColors.primary),
@@ -1358,7 +1364,7 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
                           : FontWeight.w500,
                       color: _stockFilter == o.$1
                           ? AppColors.primary
-                          : AppColors.textPrimary))),
+                          : Theme.of(context).colorScheme.onSurface))),
               if (_stockFilter == o.$1)
                 Icon(Icons.check_rounded,
                     size: 14, color: AppColors.primary),
@@ -1516,9 +1522,9 @@ class _PosProductListTileState extends State<_PosProductListTile> {
       onTap: outOfStock ? null : widget.onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.divider),
+          border: Border.all(color: Theme.of(context).semantic.borderSubtle),
           boxShadow: [
             BoxShadow(color: Colors.black.withValues(alpha:0.03),
                 blurRadius: 4, offset: const Offset(0, 1)),
@@ -1660,7 +1666,9 @@ class _ViewModeBtn extends StatelessWidget {
           duration: const Duration(milliseconds: 140),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: active ? Colors.white : Colors.transparent,
+            color: active
+                ? Theme.of(context).colorScheme.surface
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(6),
             boxShadow: active ? [
               BoxShadow(color: Colors.black.withValues(alpha:0.05),
@@ -1701,10 +1709,12 @@ class _ToolbarButton extends StatelessWidget {
           decoration: BoxDecoration(
             color: active
                 ? AppColors.primarySurface
-                : Colors.white,
+                : Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-                color: active ? AppColors.primary : AppColors.divider),
+                color: active
+                    ? AppColors.primary
+                    : Theme.of(context).semantic.borderSubtle),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(icon, size: 15,
@@ -1712,7 +1722,9 @@ class _ToolbarButton extends StatelessWidget {
             const SizedBox(width: 5),
             Text(label,
                 style: AppTextStyles.captionBold.copyWith(
-                    color: active ? AppColors.primary : AppColors.textPrimary)),
+                    color: active
+                        ? AppColors.primary
+                        : Theme.of(context).colorScheme.onSurface)),
             if (badge > 0) ...[
               const SizedBox(width: 5),
               Container(
@@ -1782,12 +1794,12 @@ class _VariantChipRow extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: isSel
                       ? AppColors.primarySurface
-                      : Colors.white,
+                      : Theme.of(context).colorScheme.surface,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: isSel
                         ? AppColors.primary
-                        : AppColors.divider,
+                        : Theme.of(context).semantic.borderSubtle,
                     width: isSel ? 1.2 : 1,
                   ),
                 ),

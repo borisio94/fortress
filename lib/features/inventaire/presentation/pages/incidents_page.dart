@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -81,7 +82,7 @@ class _IncidentsPageState extends State<IncidentsPage>
           ),
         // Tabs
         Container(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           child: TabBar(
             controller: _tab,
             labelColor: AppColors.primary,
@@ -108,7 +109,7 @@ class _IncidentsPageState extends State<IncidentsPage>
             ],
           ),
         ),
-        const Divider(height: 1, color: Color(0xFFF0F0F0)),
+        Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
         // Contenu
         Expanded(child: TabBarView(controller: _tab, children: [
           _IncidentList(incidents: _pending, onAction: _showResolveSheet,
@@ -176,7 +177,7 @@ class _IncidentsPageState extends State<IncidentsPage>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => _ResolveSheet(
@@ -201,8 +202,8 @@ class _SummaryBar extends StatelessWidget {
     margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
-      color: Colors.white, borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: AppColors.divider),
+      color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: Theme.of(context).semantic.borderSubtle),
     ),
     child: Row(children: [
       _Kpi('En attente', '$pending', AppColors.error),
@@ -304,8 +305,8 @@ class _IncidentCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
+        color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
       child: Row(children: [
         Container(
@@ -412,7 +413,7 @@ class _ResolveSheetState extends State<_ResolveSheet> {
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Center(child: Container(width: 36, height: 4,
-              decoration: BoxDecoration(color: AppColors.divider,
+              decoration: BoxDecoration(color: Theme.of(context).semantic.borderSubtle,
                   borderRadius: BorderRadius.circular(2)))),
           const SizedBox(height: 16),
 
@@ -476,7 +477,7 @@ class _ResolveSheetState extends State<_ResolveSheet> {
               decoration: BoxDecoration(
                 color: const Color(0xFFF9FAFB),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFE5E7EB)),
+                border: Border.all(color: Theme.of(context).semantic.borderSubtle),
               ),
               child: Row(children: [
                 Icon(Icons.event_rounded,
@@ -502,7 +503,7 @@ class _ResolveSheetState extends State<_ResolveSheet> {
               onPressed: () => Navigator.of(context).pop(),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.textSecondary,
-                side: const BorderSide(color: AppColors.divider),
+                side: BorderSide(color: Theme.of(context).semantic.borderSubtle),
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
               child: const Text('Annuler'),
@@ -630,7 +631,7 @@ class _ResolutionTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? color.withValues(alpha:0.08) : const Color(0xFFF9FAFB),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: selected ? color : AppColors.divider,
+          border: Border.all(color: selected ? color : Theme.of(context).semantic.borderSubtle,
               width: selected ? 1.5 : 1),
         ),
         child: Row(children: [
@@ -674,9 +675,9 @@ class _Field extends StatelessWidget {
           filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: AppColors.divider)),
+              borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
           enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: AppColors.divider)),
+              borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
           focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
         ),

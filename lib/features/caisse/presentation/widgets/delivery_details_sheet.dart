@@ -3,6 +3,7 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/autocomplete_text_field.dart';
 import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../data/repositories/sale_local_datasource.dart';
@@ -75,7 +76,7 @@ Future<DeliveryDetailsResult?> showDeliveryDetailsSheet(
     isScrollControlled: true,
     isDismissible: false,
     enableDrag: false,
-    backgroundColor: Colors.white,
+    backgroundColor: Theme.of(context).colorScheme.surface,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
@@ -315,7 +316,8 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
             mainAxisSize: MainAxisSize.max,
             children: [
               _header(),
-              const Divider(height: 1, color: AppColors.divider),
+              Divider(
+                  height: 1, color: Theme.of(context).semantic.borderSubtle),
               Expanded(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
@@ -385,7 +387,8 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
                   ),
                 ),
               ),
-              const Divider(height: 1, color: AppColors.divider),
+              Divider(
+                  height: 1, color: Theme.of(context).semantic.borderSubtle),
               _bottomBar(),
             ],
           ),
@@ -614,7 +617,7 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
           border: Border.all(
             color: has
                 ? AppColors.primary.withValues(alpha:0.30)
-                : AppColors.divider,
+                : Theme.of(context).semantic.borderSubtle,
           ),
         ),
         child: Row(children: [
@@ -720,7 +723,8 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
             horizontal: 12, vertical: 10),
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+            borderSide:
+                BorderSide(color: Theme.of(context).semantic.borderSubtle)),
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
@@ -747,10 +751,14 @@ class _ModeTile extends StatelessWidget {
       duration: const Duration(milliseconds: 150),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: selected ? color.withValues(alpha:0.08) : Colors.white,
+        color: selected
+            ? color.withValues(alpha:0.08)
+            : Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: selected ? color : const Color(0xFFE5E7EB),
+          color: selected
+              ? color
+              : Theme.of(context).semantic.borderSubtle,
           width: selected ? 1.5 : 1,
         ),
       ),

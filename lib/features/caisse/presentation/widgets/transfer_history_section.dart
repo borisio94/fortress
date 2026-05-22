@@ -7,6 +7,7 @@ import 'package:url_launcher/link.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../data/repositories/delivery_transfer_repository.dart';
 import '../../domain/entities/delivery_transfer.dart';
 
@@ -42,7 +43,7 @@ class TransferHistorySection extends ConsumerWidget {
           decoration: BoxDecoration(
             color: const Color(0xFFF9FAFB),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AppColors.divider),
+            border: Border.all(color: Theme.of(context).semantic.borderSubtle),
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -93,9 +94,9 @@ class _TransferTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 4),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
       child: Row(children: [
         Icon(_isGroup ? Icons.group_rounded : _iconFor(transfer.targetType),

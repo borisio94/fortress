@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/activity_log_service.dart';
@@ -111,7 +112,7 @@ class _SuppliersPageState extends State<SuppliersPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => Padding(
@@ -120,7 +121,7 @@ class _SuppliersPageState extends State<SuppliersPage> {
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Center(child: Container(width: 36, height: 4,
-                decoration: BoxDecoration(color: AppColors.divider,
+                decoration: BoxDecoration(color: Theme.of(ctx).semantic.borderSubtle,
                     borderRadius: BorderRadius.circular(2)))),
             const SizedBox(height: 16),
             Row(children: [
@@ -281,7 +282,7 @@ class _SupplierCard extends StatelessWidget {
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
       color: AppColors.surface, borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: AppColors.divider)),
+      border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
     child: Row(children: [
       Container(width: 38, height: 38,
           decoration: BoxDecoration(color: AppColors.primarySurface,

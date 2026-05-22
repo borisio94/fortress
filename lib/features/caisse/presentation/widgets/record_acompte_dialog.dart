@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../domain/entities/sale.dart';
 
@@ -143,11 +144,11 @@ class _RecordAcompteDialogState extends State<RecordAcompteDialog> {
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide:
-                      const BorderSide(color: Color(0xFFE5E7EB))),
+                      BorderSide(color: theme.semantic.borderSubtle)),
               enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide:
-                      const BorderSide(color: Color(0xFFE5E7EB))),
+                      BorderSide(color: theme.semantic.borderSubtle)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide:

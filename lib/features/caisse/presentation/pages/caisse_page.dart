@@ -207,7 +207,7 @@ class _CaissePageState extends ConsumerState<CaissePage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius:
           BorderRadius.vertical(top: Radius.circular(20))),
@@ -545,7 +545,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 
       // ── Filtres ─────────────────────────────────────────────
       Container(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         child: TabBar(
           controller: _filter,
           isScrollable: true,
@@ -560,11 +560,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               .toList(),
         ),
       ),
-      const Divider(height: 1, color: Color(0xFFF0F0F0)),
+      Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
 
       // ── Recherche + filtre plage de dates ────────────────────
       Container(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
         child: Column(children: [
           // Barre de recherche
@@ -590,7 +590,8 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                 filled: true, fillColor: AppColors.inputFill,
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: AppColors.divider)),
+                    borderSide: BorderSide(
+                        color: Theme.of(context).semantic.borderSubtle)),
                 focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide: BorderSide(color: AppColors.primary)),
@@ -614,7 +615,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                   border: Border.all(
                       color: _dateRange != null
                           ? AppColors.primary.withValues(alpha:0.4)
-                          : AppColors.divider),
+                          : Theme.of(context).semantic.borderSubtle),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   Icon(Icons.event_rounded, size: 12,
@@ -677,7 +678,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
           ]),
         ]),
       ),
-      const Divider(height: 1, color: Color(0xFFF0F0F0)),
+      Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
 
       // ── Liste commandes ──────────────────────────────────────
       Expanded(
@@ -1067,7 +1068,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     final amount = await showDialog<double>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16)),
         title: const Text('Livraison refusée',
@@ -1229,12 +1230,12 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         curve: Curves.easeInOut,
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
               color: _expanded
                   ? color.withValues(alpha:0.35)
-                  : AppColors.divider),
+                  : sem.borderSubtle),
           boxShadow: [BoxShadow(
               color: Colors.black.withValues(alpha:0.03),
               blurRadius: 6, offset: const Offset(0, 2))],
@@ -2225,7 +2226,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       showDialog(
         context: context,
         builder: (dc) => AlertDialog(
-          backgroundColor: Colors.white,
+          backgroundColor: Theme.of(context).colorScheme.surface,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16)),
           title: Row(children: [
@@ -2443,7 +2444,7 @@ class _FormatPickerSheetState extends State<_FormatPickerSheet> {
                         decoration: BoxDecoration(
                           color: sel
                               ? AppColors.primarySurface
-                              : Colors.white,
+                              : Theme.of(context).colorScheme.surface,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
                             color: sel
@@ -2475,7 +2476,8 @@ class _FormatPickerSheetState extends State<_FormatPickerSheet> {
                                     style: AppTextStyles.bodySmBold.copyWith(
                                         color: sel
                                             ? AppColors.primary
-                                            : AppColors.textPrimary)),
+                                            : Theme.of(context)
+                                                .colorScheme.onSurface)),
                                 Text(f.description,
                                     style: AppTextStyles.micro),
                               ],
@@ -2579,7 +2581,7 @@ class _FormatPreview extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha:0.08),
               blurRadius: 8, offset: const Offset(0, 3)),
@@ -2734,12 +2736,12 @@ class _ActionBtn extends StatelessWidget {
           width: 30, height: 30,
           decoration: BoxDecoration(
             color: disabled
-                ? AppColors.divider
+                ? Theme.of(context).semantic.borderSubtle
                 : (bgColor ?? color.withValues(alpha:0.1)),
             borderRadius: BorderRadius.circular(7),
             border: Border.all(
                 color: disabled
-                    ? AppColors.divider
+                    ? Theme.of(context).semantic.borderSubtle
                     : color.withValues(alpha:0.25)),
           ),
           child: Icon(icon,
@@ -2783,7 +2785,7 @@ class _StatusMenu extends StatelessWidget {
   Widget build(BuildContext context) =>
       PopupMenuButton<SaleStatus>(
         onSelected: onSelect,
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10)),
         elevation: 3,
@@ -3103,7 +3105,7 @@ class _DetailRow extends StatelessWidget {
       Expanded(
         child: Text(value,
             style: AppTextStyles.captionHint.copyWith(
-                color: AppColors.textPrimary,
+                color: Theme.of(context).colorScheme.onSurface,
                 fontWeight: FontWeight.w600)),
       ),
     ],
@@ -3127,7 +3129,7 @@ class _MoneyLine extends StatelessWidget {
               fontSize: bold ? 12 : 10,
               fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
               color: color ?? (bold
-                  ? AppColors.textPrimary
+                  ? Theme.of(context).colorScheme.onSurface
                   : AppColors.textSecondary))),
       Text(value,
           style: AppTextStyles.body.copyWith(
@@ -3135,7 +3137,7 @@ class _MoneyLine extends StatelessWidget {
               fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
               color: color ?? (bold
                   ? AppColors.primary
-                  : AppColors.textPrimary))),
+                  : Theme.of(context).colorScheme.onSurface))),
     ]),
   );
 }
@@ -3176,7 +3178,7 @@ class _ReasonBanner extends StatelessWidget {
               const SizedBox(height: 2),
               Text(text,
                   style: AppTextStyles.captionHint.copyWith(
-                      color: AppColors.textPrimary,
+                      color: Theme.of(context).colorScheme.onSurface,
                       fontStyle: FontStyle.italic)),
             ],
           ),
@@ -3262,12 +3264,12 @@ class _ReasonDialogState extends State<_ReasonDialog> {
                   contentPadding: const EdgeInsets.all(12),
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide:
-                          BorderSide(color: AppColors.divider)),
+                      borderSide: BorderSide(
+                          color: Theme.of(context).semantic.borderSubtle)),
                   enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide:
-                          BorderSide(color: AppColors.divider)),
+                      borderSide: BorderSide(
+                          color: Theme.of(context).semantic.borderSubtle)),
                   focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                       borderSide: BorderSide(

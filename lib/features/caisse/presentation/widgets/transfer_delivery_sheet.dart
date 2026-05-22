@@ -10,6 +10,7 @@ import 'package:url_launcher/link.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/storage/local_storage_service.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
@@ -323,7 +324,8 @@ class _TransferDeliverySheetState
                     style: AppTextStyles.captionHint
                         .copyWith(color: AppColors.error)),
               ),
-            const Divider(height: 1, color: Color(0xFFF0F0F0)),
+            Divider(
+                height: 1, color: Theme.of(context).semantic.borderSubtle),
             SafeArea(
               top: false,
               child: Padding(
@@ -565,12 +567,12 @@ class _TransferDeliverySheetState
               fillColor: const Color(0xFFF9FAFB),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide:
-                      const BorderSide(color: Color(0xFFE5E7EB))),
+                  borderSide: BorderSide(
+                      color: Theme.of(context).semantic.borderSubtle)),
               enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide:
-                      const BorderSide(color: Color(0xFFE5E7EB))),
+                  borderSide: BorderSide(
+                      color: Theme.of(context).semantic.borderSubtle)),
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(
@@ -584,7 +586,8 @@ class _TransferDeliverySheetState
             decoration: BoxDecoration(
               color: const Color(0xFFF9FAFB),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.divider),
+              border: Border.all(
+                  color: Theme.of(context).semantic.borderSubtle),
             ),
             child: Text(_messageCtrl.text,
                 style: const TextStyle(
@@ -803,7 +806,7 @@ class _PartnerRow extends StatelessWidget {
           border: Border.all(
             color: selected
                 ? AppColors.primary
-                : AppColors.divider,
+                : Theme.of(context).semantic.borderSubtle,
             width: selected ? 1.5 : 1,
           ),
         ),
@@ -861,7 +864,9 @@ class _EmployeeRow extends StatelessWidget {
             : const Color(0xFFF9FAFB),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: selected ? AppColors.primary : AppColors.divider,
+          color: selected
+              ? AppColors.primary
+              : Theme.of(context).semantic.borderSubtle,
           width: selected ? 1.5 : 1,
         ),
       ),

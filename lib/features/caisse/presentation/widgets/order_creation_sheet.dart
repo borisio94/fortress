@@ -155,7 +155,7 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
     final picked = await showModalBottomSheet<Client>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (_) => _MiniClientPicker(shopId: widget.shopId),
@@ -378,8 +378,8 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
                         fillColor: const Color(0xFFF9FAFB),
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(
-                                color: Color(0xFFE5E7EB))),
+                            borderSide: BorderSide(
+                                color: sem.borderSubtle)),
                       ),
                       onChanged: (_) => setState(() {}),
                     ),
@@ -522,9 +522,11 @@ class _LabeledField extends StatelessWidget {
         contentPadding: const EdgeInsets.symmetric(
             horizontal: 12, vertical: 11),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: AppColors.divider)),
+            borderSide:
+                BorderSide(color: Theme.of(context).semantic.borderSubtle)),
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: AppColors.divider)),
+            borderSide:
+                BorderSide(color: Theme.of(context).semantic.borderSubtle)),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
       ),
@@ -562,7 +564,7 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (formCtx) => ClientFormSheet(
@@ -624,10 +626,10 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
                     horizontal: 12, vertical: 10),
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.divider)),
+                    borderSide: BorderSide(color: sem.borderSubtle)),
                 enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppColors.divider)),
+                    borderSide: BorderSide(color: sem.borderSubtle)),
                 focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide: BorderSide(
@@ -653,7 +655,7 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
             ),
           ]),
         ),
-        const Divider(height: 1, color: Color(0xFFF0F0F0)),
+        Divider(height: 1, color: sem.borderSubtle),
         // Liste clients (scroll vertical sur cette zone uniquement)
         Expanded(
           child: _filtered.isEmpty
@@ -663,8 +665,8 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
               : ListView.separated(
                   controller: sc,
                   itemCount: _filtered.length,
-                  separatorBuilder: (_, __) => const Divider(
-                      height: 1, color: Color(0xFFF0F0F0)),
+                  separatorBuilder: (_, __) => Divider(
+                      height: 1, color: sem.borderSubtle),
                   itemBuilder: (_, i) {
                     final c = _filtered[i];
                     return ListTile(

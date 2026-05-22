@@ -10,6 +10,7 @@ import '../../../../core/services/short_link_service.dart';
 import '../../../../core/services/url_shortener_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -289,7 +290,7 @@ class _ShareCatalogDialogState extends State<ShareCatalogDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
       child: ConstrainedBox(
@@ -300,7 +301,7 @@ class _ShareCatalogDialogState extends State<ShareCatalogDialog> {
         child: Column(children: [
           _Header(step: _step,
               onBack: _step > 0 ? () => setState(() => _step--) : null),
-          const Divider(height: 1, color: Color(0xFFF0F0F0)),
+          Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
           Expanded(child: switch (_step) {
             0 => _ProductStep(
                   products: _sendableProducts,
@@ -354,7 +355,7 @@ class _ShareCatalogDialogState extends State<ShareCatalogDialog> {
                   buildWaUri: _buildWaUri,
                 ),
           }),
-          const Divider(height: 1, color: Color(0xFFF0F0F0)),
+          Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
           Padding(
             padding: const EdgeInsets.all(14),
             child: switch (_step) {
@@ -436,7 +437,7 @@ class _Header extends StatelessWidget {
             width: i == step ? 16 : 6, height: 6,
             margin: const EdgeInsets.only(left: 4),
             decoration: BoxDecoration(
-                color: i == step ? AppColors.primary : const Color(0xFFE5E7EB),
+                color: i == step ? AppColors.primary : Theme.of(context).semantic.borderSubtle,
                 borderRadius: BorderRadius.circular(3)),
           )),
         ),
@@ -624,7 +625,7 @@ class _RecipientsStep extends StatelessWidget {
                   Chip(
                     label: Text(r.phoneE164,
                         style: AppTextStyles.captionHint
-                            .copyWith(color: AppColors.textPrimary)),
+                            .copyWith(color: Theme.of(context).colorScheme.onSurface)),
                     deleteIcon:
                         const Icon(Icons.close_rounded, size: 14),
                     onDeleted: () => onRemoveFree(r.id),
@@ -772,11 +773,11 @@ class _SendStep extends StatelessWidget {
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide:
-                    const BorderSide(color: Color(0xFFE5E7EB))),
+                    BorderSide(color: Theme.of(context).semantic.borderSubtle)),
             enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide:
-                    const BorderSide(color: Color(0xFFE5E7EB))),
+                    BorderSide(color: Theme.of(context).semantic.borderSubtle)),
             focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide:
@@ -881,7 +882,7 @@ class _RecipientRow extends StatelessWidget {
         border: Border.all(
           color: sent
               ? AppColors.secondary.withValues(alpha: 0.4)
-              : const Color(0xFFE5E7EB),
+              : Theme.of(context).semantic.borderSubtle,
         ),
       ),
       child: Row(children: [

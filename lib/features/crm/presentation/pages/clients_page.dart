@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/database/app_database.dart';
@@ -147,15 +148,19 @@ class _ClientsPageState extends State<ClientsPage> {
                     onPressed: () => setState(() => _query = ''),
                   )
                       : null,
-                  filled: true, fillColor: Colors.white, isDense: true,
+                  filled: true,
+                  fillColor: Theme.of(context).colorScheme.surface,
+                  isDense: true,
                   contentPadding: const EdgeInsets.symmetric(
                       horizontal: 14, vertical: 11),
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: AppColors.divider)),
+                      borderSide: BorderSide(
+                          color: Theme.of(context).semantic.borderSubtle)),
                   enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: AppColors.divider)),
+                      borderSide: BorderSide(
+                          color: Theme.of(context).semantic.borderSubtle)),
                   focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                       borderSide: BorderSide(
@@ -366,23 +371,23 @@ class _KpiStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    color: Colors.white,
+    color: Theme.of(context).colorScheme.surface,
     padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
     child: Row(children: [
       _Kpi(icon: Icons.people_rounded, color: AppColors.primary,
           label: 'Clients', value: '$clientCount'),
-      _divider(),
+      _divider(context),
       _Kpi(icon: Icons.workspace_premium_rounded,
           color: AppColors.warning, label: 'VIP', value: '$vipCount'),
-      _divider(),
+      _divider(context),
       _Kpi(icon: Icons.payments_rounded, color: AppColors.secondary,
           label: 'CA total', value: _fmt(totalRevenue)),
     ]),
   );
 
-  Widget _divider() => Container(width: 1, height: 32,
+  Widget _divider(BuildContext context) => Container(width: 1, height: 32,
       margin: const EdgeInsets.symmetric(horizontal: 12),
-      color: AppColors.divider);
+      color: Theme.of(context).semantic.borderSubtle);
 
   String _fmt(double n) {
     final sym = CurrencyFormatter.currentSymbol;
@@ -428,10 +433,14 @@ class _FilterChip extends StatelessWidget {
       duration: const Duration(milliseconds: 150),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: selected ? AppColors.primary : Colors.white,
+        color: selected
+            ? AppColors.primary
+            : Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-            color: selected ? AppColors.primary : AppColors.divider),
+            color: selected
+                ? AppColors.primary
+                : Theme.of(context).semantic.borderSubtle),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Text(label, style: AppTextStyles.captionBold.copyWith(
@@ -476,9 +485,9 @@ class _ClientCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.divider),
+          border: Border.all(color: Theme.of(context).semantic.borderSubtle),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
               blurRadius: 6, offset: const Offset(0, 2))],
         ),
@@ -511,7 +520,7 @@ class _ClientCard extends StatelessWidget {
                   Expanded(child: Text(client.name,
                       maxLines: 1, overflow: TextOverflow.ellipsis,
                       style: AppTextStyles.captionBold.copyWith(
-                          color: AppColors.textPrimary))),
+                          color: Theme.of(context).colorScheme.onSurface))),
                   if (client.tag != ClientTag.none)
                     _TagBadge(client.tag),
                 ]),
@@ -1133,7 +1142,8 @@ class ClientFormSheetState extends State<ClientFormSheet> {
                   icon: Icons.delete_outline_rounded,
                   iconColor: AppColors.error,
                 ),
-                const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                Divider(height: 1,
+                    color: Theme.of(dc).semantic.borderSubtle),
                 const Padding(
                   padding: EdgeInsets.fromLTRB(20, 14, 20, 0),
                   child: Text('Cette action est irréversible.',
