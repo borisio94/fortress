@@ -3736,6 +3736,9 @@ end \$\$;""",
       }
       debugPrint('[DB] syncOrders: ${rowList.length} remote, '
           '${staleKeys.length} purgés');
+      // Rattrapage : aligne le snapshot client_name/phone des commandes sur
+      // les coordonnées actuelles de leur client (historique périmé + dérive).
+      _reconcileOrderClientCoords(shopId);
       _notify('orders', shopId);
     } catch (e) {
       final err = e.toString();
@@ -3745,6 +3748,58 @@ end \$\$;""",
       } else {
         debugPrint('[DB] syncOrders ERROR: $e');
       }
+    }
+  }
+
+  /// Rattrapage : aligne le snapshot figé `client_name`/`client_phone` de
+  /// chaque commande en cache sur les coordonnées ACTUELLES de son client.
+  ///
+  /// Appelé en fin de [syncOrders], après le pull serveur. Ne fait du travail
+  /// que s'il existe une divergence → no-op une fois tout aligné (converge en
+  /// 1-2 syncs, sans flag de migration). Couvre l'historique périmé avant
+  /// l'introduction de la cascade [_cascadeClientCoordsToOrders] ET toute
+  /// dérive future (commande créée sur un autre appareil avec un client
+  /// modifié depuis). Un seul `UPDATE` serveur par client divergent corrige
+  /// toutes ses commandes, y compris celles hors du cache local.
+  static void _reconcileOrderClientCoords(String shopId) {
+    // Index des coordonnées clients de la boutique.
+    final coords = <String, ({String? name, String? phone})>{};
+    for (final raw in HiveBoxes.clientsBox.values) {
+      final m = Map<String, dynamic>.from(raw);
+      if (m['store_id'] != shopId) continue;
+      final id = m['id'] as String?;
+      if (id == null) continue;
+      coords[id] = (name: m['name'] as String?, phone: m['phone'] as String?);
+    }
+    if (coords.isEmpty) return;
+
+    final drifted = <String>{};
+    for (final key in HiveBoxes.ordersBox.keys) {
+      final raw = HiveBoxes.ordersBox.get(key);
+      if (raw == null) continue;
+      final m = Map<String, dynamic>.from(raw);
+      if (m['shop_id'] != shopId) continue;
+      final cid = m['client_id'] as String?;
+      if (cid == null) continue;
+      final cur = coords[cid];
+      if (cur == null) continue; // client archivé/supprimé : on n'y touche pas
+      if (m['client_name'] == cur.name && m['client_phone'] == cur.phone) {
+        continue;
+      }
+      m['client_name']  = cur.name;
+      m['client_phone'] = cur.phone;
+      HiveBoxes.ordersBox.put(key, m);
+      drifted.add(cid);
+    }
+
+    for (final cid in drifted) {
+      final cur = coords[cid]!;
+      _bgWrite({
+        'table': 'orders',
+        'op':    'update',
+        'data':  {'client_name': cur.name, 'client_phone': cur.phone},
+        'match': {'client_id': cid, 'shop_id': shopId},
+      });
     }
   }
 
