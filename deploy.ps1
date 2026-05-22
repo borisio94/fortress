@@ -20,8 +20,13 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
 # ── Étape 1/2 : build Flutter web ─────────────────────────────────────
+# --no-tree-shake-icons : embarque la police MaterialIcons COMPLÈTE.
+#   Sans ça, Flutter sous-ensemble la police et casse certaines icônes
+#   (carré vide), notamment celles du plan Unicode supplémentaire (> U+FFFF)
+#   comme `handshake` (0xf06a4), et le subset diffère selon la cible
+#   (web/desktop/mobile) → icônes incohérentes d'une plateforme à l'autre.
 Write-Host "[1/2] Build Flutter web (release)..." -ForegroundColor Yellow
-flutter build web --release
+flutter build web --release --no-tree-shake-icons
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Host "[ECHEC] flutter build web a échoué (code $LASTEXITCODE)" -ForegroundColor Red

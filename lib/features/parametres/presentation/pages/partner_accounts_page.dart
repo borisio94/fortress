@@ -79,7 +79,7 @@ class _PartnerAccountsPageState extends ConsumerState<PartnerAccountsPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.handshake_outlined, size: 56,
+              Icon(Icons.local_shipping_outlined, size: 56,
                   color: AppColors.textHint),
               const SizedBox(height: 12),
               Text('Aucun compte ouvert',
@@ -142,7 +142,7 @@ class _PartnerCard extends StatelessWidget {
               color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(Icons.handshake_outlined, size: 20, color: color),
+            child: Icon(Icons.local_shipping_outlined, size: 20, color: color),
           ),
           const SizedBox(width: 12),
           Expanded(child: Column(
