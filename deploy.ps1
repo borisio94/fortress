@@ -26,7 +26,9 @@ Write-Host ""
 #   comme `handshake` (0xf06a4), et le subset diffère selon la cible
 #   (web/desktop/mobile) → icônes incohérentes d'une plateforme à l'autre.
 Write-Host "[1/2] Build Flutter web (release)..." -ForegroundColor Yellow
-flutter build web --release --no-tree-shake-icons
+# --pwa-strategy=none : aucun service worker enregistré (le SW a été supprimé,
+#   index.html purge le SW hérité). À conserver TOUJOURS.
+flutter build web --release --no-tree-shake-icons --pwa-strategy=none
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Host "[ECHEC] flutter build web a échoué (code $LASTEXITCODE)" -ForegroundColor Red
