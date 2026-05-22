@@ -52,6 +52,17 @@ class ShopSummary extends Equatable {
   /// catalogue. NULL pour main.
   final String? parentShopId;
 
+  /// Statut administratif (cf. SA-1) — `'active'` | `'suspended'`.
+  /// Distinct de [isActive] : `isActive` est le toggle de l'owner
+  /// (visibilité), `status='suspended'` est une suspension imposée par le
+  /// super-admin qui bloque TOTALEMENT l'accès des membres.
+  final String status;
+  final DateTime? suspendedAt;
+  final String? suspendedReason;
+
+  /// True si la boutique a été suspendue par le super-admin.
+  bool get isSuspended => status == 'suspended';
+
   const ShopSummary({
     required this.id,
     required this.name,
@@ -69,6 +80,9 @@ class ShopSummary extends Equatable {
     this.members = const [],
     this.kind = ShopKind.main,
     this.parentShopId,
+    this.status = 'active',
+    this.suspendedAt,
+    this.suspendedReason,
   });
 
   /// Trouver le rôle d'un utilisateur dans cette boutique

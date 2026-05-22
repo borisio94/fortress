@@ -84,6 +84,7 @@ import '../services/session_validator.dart';
 import '../../shared/widgets/offline_banner_widget.dart'
     show tokenRefreshFailedProvider, isOfflineProvider;
 import '../storage/local_storage_service.dart';
+import '../../shared/widgets/suspended_shop_screen.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../storage/hive_boxes.dart';
@@ -806,6 +807,16 @@ class ShopShell extends ConsumerWidget {
     // CTAs topbar : calculés en fonction de la route active (spec round 9).
     // Stock/Clients exposent un bouton « + » dans la topbar shell, déplaçant
     // les CTAs précédemment inline dans le body.
+    // ── Guard suspension (SA-1) ───────────────────────────────────────
+    // Si la boutique courante a été suspendue par le super-admin, on
+    // bloque TOUT le contenu derrière un écran « Compte suspendu ». Les
+    // super-admins passent (ils doivent pouvoir gérer la suspension).
+    final shop    = LocalStorageService.getShop(shopId);
+    final isSuper = LocalStorageService.getCurrentUser()?.isSuperAdmin ?? false;
+    if (shop != null && shop.isSuspended && !isSuper) {
+      return SuspendedShopScreen(reason: shop.suspendedReason);
+    }
+
     final goState = GoRouterState.of(context);
     final loc      = goState.matchedLocation;
     final tabQuery = goState.uri.queryParameters['tab'];

@@ -790,6 +790,74 @@ class _ShopsSection extends ConsumerStatefulWidget {
 class _ShopsSectionState extends ConsumerState<_ShopsSection> {
   String _search = '', _filter = 'all';
 
+  /// Suspend (avec motif) ou réactive une boutique via les RPC super-admin.
+  Future<void> _toggleSuspend(Map<String, dynamic> shop) async {
+    final id = shop['id'] as String;
+    final suspended = shop['status'] == 'suspended';
+    try {
+      if (suspended) {
+        await AppDatabase.reactivateShop(id);
+        if (mounted) {
+          AppSnack.success(context, 'Boutique réactivée');
+        }
+      } else {
+        final reason = await _promptSuspendReason(shop['name'] as String? ?? '');
+        if (reason == null) return;
+        await AppDatabase.suspendShop(id, reason);
+        if (mounted) {
+          AppSnack.success(context, 'Boutique suspendue');
+        }
+      }
+      ref.invalidate(_saShopsProvider);
+      ref.invalidate(_saStatsProvider);
+    } catch (e) {
+      if (mounted) AppSnack.error(context, 'Échec : $e');
+    }
+  }
+
+  /// Dialog motif de suspension — retourne le motif (non vide) ou null
+  /// si annulé. Le motif est obligatoire (cf. RPC suspend_shop).
+  Future<String?> _promptSuspendReason(String shopName) async {
+    final ctrl = TextEditingController();
+    final theme = Theme.of(context);
+    return showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: theme.colorScheme.surface,
+        title: const Text('Suspendre la boutique'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('« $shopName » sera totalement bloquée : ses membres verront '
+              'un écran « Compte suspendu ».',
+              style: AppTextStyles.bodySmSecondary),
+          const SizedBox(height: 12),
+          TextField(
+            controller: ctrl,
+            autofocus: true,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              labelText: 'Motif (obligatoire)',
+              hintText: 'Ex : impayé, abus, demande du propriétaire…',
+            ),
+          ),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(c).pop(),
+              child: const Text('Annuler')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () {
+              final r = ctrl.text.trim();
+              if (r.isEmpty) return;
+              Navigator.of(c).pop(r);
+            },
+            child: const Text('Suspendre'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(_saShopsProvider);
@@ -827,6 +895,7 @@ class _ShopsSectionState extends ConsumerState<_ShopsSection> {
                   ref.invalidate(_saShopsProvider);
                   ref.invalidate(_saStatsProvider);
                 },
+                onToggleSuspend: () => _toggleSuspend(list[i]),
                 onDelete: () => showDialog(context: context, builder: (_) => _ConfirmDialog(
                   title: 'Supprimer la boutique',
                   body: 'Supprimer « ${list[i]['name']} » ? Irréversible.',
@@ -1810,12 +1879,14 @@ class _UserCard extends StatelessWidget {
 
 class _ShopRow extends StatelessWidget {
   final Map<String,dynamic> shop;
-  final VoidCallback? onToggle, onDelete;
-  const _ShopRow({required this.shop, required this.onToggle, required this.onDelete});
+  final VoidCallback? onToggle, onDelete, onToggleSuspend;
+  const _ShopRow({required this.shop, required this.onToggle,
+      required this.onDelete, this.onToggleSuspend});
 
   @override
   Widget build(BuildContext context) {
     final isActive = shop['is_active'] as bool? ?? true;
+    final suspended = shop['status'] == 'suspended';
     final owner    = (shop['owner_profile'] ?? shop['profiles']) as Map?;
     final fmt      = DateFormat('dd/MM/yy');
     final created  = shop['created_at'] != null ? DateTime.tryParse(shop['created_at']) : null;
@@ -1824,8 +1895,10 @@ class _ShopRow extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: isActive
-              ? AppColors.inputBorder : AppColors.error.withValues(alpha:0.3))),
+          border: Border.all(color: suspended
+              ? AppColors.error.withValues(alpha:0.5)
+              : (isActive
+                  ? AppColors.inputBorder : AppColors.error.withValues(alpha:0.3)))),
       child: Row(children: [
         Container(width: 36, height: 36,
             decoration: BoxDecoration(
@@ -1835,17 +1908,40 @@ class _ShopRow extends StatelessWidget {
                 color: isActive ? AppColors.primary : AppColors.error)),
         const SizedBox(width: 10),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(shop['name'] ?? '—', style: AppTextStyles.bodyBold),
+          Row(children: [
+            Flexible(child: Text(shop['name'] ?? '—',
+                style: AppTextStyles.bodyBold,
+                overflow: TextOverflow.ellipsis)),
+            if (suspended) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                    color: AppColors.error.withValues(alpha:0.12),
+                    borderRadius: BorderRadius.circular(5)),
+                child: Text('Suspendu', style: AppTextStyles.microBold
+                    .copyWith(color: AppColors.error)),
+              ),
+            ],
+          ]),
           Text(owner != null
               ? '${owner['name'] ?? ''} · ${shop['sector'] ?? ''}' : shop['sector'] ?? '—',
               style: AppTextStyles.caption),
-          if (created != null)
+          if (suspended && (shop['suspended_reason'] as String?)?.isNotEmpty == true)
+            Text('Motif : ${shop['suspended_reason']}',
+                maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.micro.copyWith(color: AppColors.error))
+          else if (created != null)
             Text('Créée le ${fmt.format(created)}', style: AppTextStyles
                 .micro.copyWith(color: const Color(0xFFD1D5DB))),
         ])),
         if (onToggle != null)
           PopupMenuButton<String>(
-            onSelected: (v) { if (v == 't') onToggle?.call(); if (v == 'd') onDelete?.call(); },
+            onSelected: (v) {
+              if (v == 't') onToggle?.call();
+              if (v == 'd') onDelete?.call();
+              if (v == 's') onToggleSuspend?.call();
+            },
             color: Theme.of(context).colorScheme.surface,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             itemBuilder: (_) => [
@@ -1857,6 +1953,15 @@ class _ShopRow extends StatelessWidget {
                     style: AppTextStyles.bodySm.copyWith(
                         color: isActive ? AppColors.warning : AppColors.secondary)),
               ])),
+              if (onToggleSuspend != null)
+                PopupMenuItem(value: 's', child: Row(children: [
+                  Icon(suspended ? Icons.lock_open_rounded : Icons.block_rounded,
+                      size: 15, color: suspended ? AppColors.secondary : AppColors.error),
+                  const SizedBox(width: 8),
+                  Text(suspended ? 'Réactiver (lever suspension)' : 'Suspendre',
+                      style: AppTextStyles.bodySm.copyWith(
+                          color: suspended ? AppColors.secondary : AppColors.error)),
+                ])),
               PopupMenuItem(value: 'd', child: Row(children: [
                 const Icon(Icons.delete_outline, size: 15, color: AppColors.error),
                 const SizedBox(width: 8),

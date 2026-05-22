@@ -316,6 +316,9 @@ class LocalStorageService {
     'created_at': s.createdAt?.toIso8601String(),
     'kind':           s.kind.key,
     'parent_shop_id': s.parentShopId,
+    'status':           s.status,
+    'suspended_at':     s.suspendedAt?.toIso8601String(),
+    'suspended_reason': s.suspendedReason,
   };
 
   static ShopSummary _shopFromMap(Map<String, dynamic> m) => ShopSummary(
@@ -343,6 +346,10 @@ class LocalStorageService {
             : null),
     kind:         ShopKindX.fromKey(m['kind']?.toString()),
     parentShopId: m['parent_shop_id']?.toString(),
+    status:          (m['status'] ?? 'active').toString(),
+    suspendedAt:     m['suspended_at'] is String
+        ? DateTime.tryParse(m['suspended_at'] as String) : null,
+    suspendedReason: m['suspended_reason']?.toString(),
   );
 
   static Map<String, dynamic> _productToMap(Product p) => {

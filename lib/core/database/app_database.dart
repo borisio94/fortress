@@ -1728,6 +1728,76 @@ end \$\$;""",
         '${url ?? "<null>"}');
   }
 
+  // ══ SUPER-ADMIN (SA-1 / SA-2) ════════════════════════════════════
+  // RPC réservées super-admin (vérif `_is_super_admin()` côté serveur,
+  // cf. hotfix_088). On re-pull la ligne shop après pour rafraîchir le
+  // cache local (status/suspended_*).
+
+  /// Suspend une boutique (super-admin). [reason] obligatoire (≥ 1 car).
+  static Future<void> suspendShop(String shopId, String reason) async {
+    await _db.rpc('suspend_shop', params: {
+      'p_shop_id': shopId,
+      'p_reason':  reason,
+    });
+    await _refreshShopFromRemote(shopId);
+  }
+
+  /// Réactive une boutique suspendue (super-admin).
+  static Future<void> reactivateShop(String shopId) async {
+    await _db.rpc('reactivate_shop', params: {'p_shop_id': shopId});
+    await _refreshShopFromRemote(shopId);
+  }
+
+  /// Crée (id null) ou met à jour un plan d'abonnement (super-admin).
+  /// Retourne l'id du plan. Les `null` côté serveur conservent la valeur
+  /// existante (COALESCE) — on envoie donc explicitement chaque champ.
+  static Future<String> upsertPlan({
+    String?            id,
+    required String    name,
+    required String    label,
+    required num       priceMonthly,
+    required num       priceQuarterly,
+    required num       priceYearly,
+    required int       maxProducts,
+    required int       maxUsersPerShop,
+    required int       maxShops,
+    required List<String> features,
+    required bool      offlineEnabled,
+    required int       trialDays,
+    required bool      isActive,
+  }) async {
+    final res = await _db.rpc('upsert_plan', params: {
+      'p_id':                 id,
+      'p_name':               name.trim(),
+      'p_label':              label.trim(),
+      'p_price_monthly':      priceMonthly,
+      'p_price_quarterly':    priceQuarterly,
+      'p_price_yearly':       priceYearly,
+      'p_max_products':       maxProducts,
+      'p_max_users_per_shop': maxUsersPerShop,
+      'p_max_shops':          maxShops,
+      'p_features':           features,
+      'p_offline_enabled':    offlineEnabled,
+      'p_trial_days':         trialDays,
+      'p_is_active':          isActive,
+    });
+    return res.toString();
+  }
+
+  /// Re-pull une boutique depuis Supabase → Hive (après une RPC qui modifie
+  /// la ligne côté serveur). Best-effort : si offline, l'écho realtime
+  /// finira par rafraîchir.
+  static Future<void> _refreshShopFromRemote(String shopId) async {
+    try {
+      final row = await _db.from('shops').select().eq('id', shopId).single();
+      final updated = _rowToShop(row);
+      await LocalStorageService.saveShop(updated);
+      _notify('shops', shopId);
+    } catch (e) {
+      debugPrint('[DB] _refreshShopFromRemote($shopId) : $e');
+    }
+  }
+
   /// Active / désactive une boutique (Hive immédiat + Supabase background).
   static Future<void> setShopActive(String shopId, bool active) async {
     final cached = LocalStorageService.getShop(shopId);
@@ -4720,6 +4790,10 @@ end \$\$;""",
         ? DateTime.tryParse(r['created_at'] as String) : null,
     kind:         ShopKindX.fromKey(r['kind'] as String?),
     parentShopId: r['parent_shop_id'] as String?,
+    status:          r['status'] as String? ?? 'active',
+    suspendedAt:     r['suspended_at'] != null
+        ? DateTime.tryParse(r['suspended_at'] as String) : null,
+    suspendedReason: r['suspended_reason'] as String?,
   );
 
   static UserRole _parseRole(String r) => switch (r) {
