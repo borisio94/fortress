@@ -337,8 +337,8 @@ class _PartnerLedgerDetailPageState
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                   itemCount: entries.length,
-                  separatorBuilder: (_, __) => const Divider(
-                      height: 1, color: Color(0xFFF0F0F0)),
+                  separatorBuilder: (_, __) => Divider(
+                      height: 1, color: Theme.of(context).semantic.borderSubtle),
                   itemBuilder: (_, i) => _MovementTile(
                     entry: entries[i],
                     onEdit: AppDatabase.isSubscriptionFrozen
@@ -567,7 +567,7 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide:
-                            const BorderSide(color: AppColors.divider)),
+                            BorderSide(color: Theme.of(context).semantic.borderSubtle)),
                     focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(
@@ -585,8 +585,8 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
                     decoration: BoxDecoration(
                       color: const Color(0xFFF9FAFB),
                       borderRadius: BorderRadius.circular(8),
-                      border: const Border.fromBorderSide(
-                          BorderSide(color: AppColors.divider)),
+                      border: Border.fromBorderSide(
+                          BorderSide(color: Theme.of(context).semantic.borderSubtle)),
                     ),
                     child: Row(children: [
                       Icon(Icons.event_rounded,
@@ -621,7 +621,7 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide:
-                            const BorderSide(color: AppColors.divider)),
+                            BorderSide(color: Theme.of(context).semantic.borderSubtle)),
                     focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(
@@ -776,7 +776,7 @@ class _ChargeSheetState extends State<_ChargeSheet> {
                                       : FontWeight.w500,
                                   color: _category == c
                                       ? sem.brandText
-                                      : const Color(0xFF111827))),
+                                      : Theme.of(context).colorScheme.onSurface)),
                         ),
                       ),
                   ],
@@ -798,7 +798,7 @@ class _ChargeSheetState extends State<_ChargeSheet> {
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide:
-                            const BorderSide(color: AppColors.divider)),
+                            BorderSide(color: Theme.of(context).semantic.borderSubtle)),
                     focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(
@@ -816,8 +816,8 @@ class _ChargeSheetState extends State<_ChargeSheet> {
                     decoration: BoxDecoration(
                       color: const Color(0xFFF9FAFB),
                       borderRadius: BorderRadius.circular(8),
-                      border: const Border.fromBorderSide(
-                          BorderSide(color: AppColors.divider)),
+                      border: Border.fromBorderSide(
+                          BorderSide(color: Theme.of(context).semantic.borderSubtle)),
                     ),
                     child: Row(children: [
                       Icon(Icons.event_rounded,
@@ -852,7 +852,7 @@ class _ChargeSheetState extends State<_ChargeSheet> {
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide:
-                            const BorderSide(color: AppColors.divider)),
+                            BorderSide(color: Theme.of(context).semantic.borderSubtle)),
                     focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(
@@ -953,7 +953,7 @@ class _DirRow extends StatelessWidget {
                 style: AppTextStyles.body.copyWith(
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                     color: selected ? sem.brandText
-                                    : const Color(0xFF111827))),
+                                    : Theme.of(context).colorScheme.onSurface)),
             const SizedBox(height: 1),
             Text(hint,
                 style: AppTextStyles.captionHint),
@@ -1085,7 +1085,7 @@ class _EditEntrySheetState extends State<_EditEntrySheet> {
                                         : FontWeight.w500,
                                     color: _category == c
                                         ? sem.brandText
-                                        : const Color(0xFF111827))),
+                                        : Theme.of(context).colorScheme.onSurface)),
                           ),
                         ),
                     ],
@@ -1108,7 +1108,7 @@ class _EditEntrySheetState extends State<_EditEntrySheet> {
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide:
-                            const BorderSide(color: AppColors.divider)),
+                            BorderSide(color: Theme.of(context).semantic.borderSubtle)),
                     focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(
@@ -1126,8 +1126,8 @@ class _EditEntrySheetState extends State<_EditEntrySheet> {
                     decoration: BoxDecoration(
                       color: const Color(0xFFF9FAFB),
                       borderRadius: BorderRadius.circular(8),
-                      border: const Border.fromBorderSide(
-                          BorderSide(color: AppColors.divider)),
+                      border: Border.fromBorderSide(
+                          BorderSide(color: Theme.of(context).semantic.borderSubtle)),
                     ),
                     child: Row(children: [
                       Icon(Icons.event_rounded,
@@ -1162,7 +1162,7 @@ class _EditEntrySheetState extends State<_EditEntrySheet> {
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide:
-                            const BorderSide(color: AppColors.divider)),
+                            BorderSide(color: Theme.of(context).semantic.borderSubtle)),
                     focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(

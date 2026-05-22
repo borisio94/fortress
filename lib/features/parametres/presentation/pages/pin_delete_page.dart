@@ -183,10 +183,10 @@ class _WarningBanner extends StatelessWidget {
           Expanded(
             child: Text(
               message,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 height: 1.45,
-                color: AppColors.textPrimary,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
           ),
@@ -219,8 +219,8 @@ class _StepConfirm extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: AppColors.divider),
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
@@ -302,8 +302,8 @@ class _StepPin extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: AppColors.divider),
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
@@ -374,10 +374,10 @@ class _StepHeader extends StatelessWidget {
       const SizedBox(width: 10),
       Expanded(
         child: Text(title,
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary)),
+                color: Theme.of(context).colorScheme.onSurface)),
       ),
     ]);
   }

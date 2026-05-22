@@ -163,16 +163,16 @@ class _LangDropdown extends ConsumerWidget {
     final current = ref.watch(localeProvider);
     return Theme(
         data: Theme.of(context).copyWith(
-          canvasColor: Colors.white,
+          canvasColor: Theme.of(context).colorScheme.surface,
           colorScheme: Theme.of(context).colorScheme.copyWith(
-            surface: Colors.white,
-            onSurface: const Color(0xFF1A1D2E),
+            surface: Theme.of(context).colorScheme.surface,
+            onSurface: Theme.of(context).colorScheme.onSurface,
           ),
         ),
         child: DropdownButton<Locale>(
           value: current,
           underline: const SizedBox.shrink(),
-          dropdownColor: Colors.white,
+          dropdownColor: Theme.of(context).colorScheme.surface,
           menuMaxHeight: 300,
           borderRadius: BorderRadius.circular(12),
           icon: Icon(Icons.keyboard_arrow_down,

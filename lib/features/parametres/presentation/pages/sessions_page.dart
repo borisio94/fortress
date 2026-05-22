@@ -205,12 +205,12 @@ class _SessionTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
             color: isCurrent
                 ? AppColors.primary.withValues(alpha: 0.5)
-                : AppColors.divider,
+                : Theme.of(context).semantic.borderSubtle,
             width: isCurrent ? 1.5 : 1),
       ),
       child: Row(children: [
@@ -231,10 +231,10 @@ class _SessionTile extends StatelessWidget {
           children: [
             Row(children: [
               Text(_platformLabel(),
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary)),
+                      color: Theme.of(context).colorScheme.onSurface)),
               if (isCurrent) ...[
                 const SizedBox(width: 6),
                 Container(

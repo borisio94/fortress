@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -185,7 +186,7 @@ class _DeliveryTemplateFormSheetState
                     decoration: BoxDecoration(
                       color: const Color(0xFFF9FAFB),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.divider),
+                      border: Border.all(color: Theme.of(context).semantic.borderSubtle),
                     ),
                     child: Row(children: [
                       Expanded(
@@ -205,7 +206,7 @@ class _DeliveryTemplateFormSheetState
                 ],
               ),
             ),
-            const Divider(height: 1, color: Color(0xFFF0F0F0)),
+            Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
             Padding(
               padding: const EdgeInsets.all(14),
               child: SizedBox(
@@ -299,7 +300,7 @@ class _VariablesHint extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.surface,
                     borderRadius: BorderRadius.circular(4),
                     border: Border.all(
                         color: AppColors.primary.withValues(alpha: 0.3))),

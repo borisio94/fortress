@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/theme/app_theme.dart';
 
 /// Donnée d'affichage d'un KPI. Format neutre réutilisable partout
 /// (dashboard, finances, etc.).
@@ -250,9 +251,9 @@ class KpiCard extends StatelessWidget {
     // `BorderSide(width: 0)` avec `borderRadius` (interdit par Flutter).
     final decorated = Container(
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 4, offset: const Offset(0, 2))],
       ),

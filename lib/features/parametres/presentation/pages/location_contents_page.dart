@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/product_image_card.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
@@ -205,7 +206,7 @@ class _LocationContentsPageState extends ConsumerState<LocationContentsPage> {
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide:
-                                const BorderSide(color: Color(0xFFE5E7EB))),
+                                BorderSide(color: Theme.of(context).semantic.borderSubtle)),
                       ),
                     ),
                   ),
@@ -332,9 +333,9 @@ class _ItemTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
       child: Row(children: [
         ProductImageCard(

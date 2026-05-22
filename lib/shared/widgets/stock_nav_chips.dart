@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/i18n/app_localizations.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/theme/app_theme.dart';
 
 /// Chips de navigation Stock. Chips horizontaux scrollables qui pushent
 /// vers les sous-pages d'Inventaire :
@@ -54,7 +55,8 @@ class StockNavChips extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         border: Border(
-            bottom: BorderSide(color: AppColors.divider, width: 0.5)),
+            bottom: BorderSide(
+                color: theme.semantic.borderSubtle, width: 0.5)),
       ),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,

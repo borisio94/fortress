@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/theme/app_theme.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // AutocompleteTextField — champ texte avec menu de suggestions filtrées.
@@ -178,8 +179,8 @@ class _AutocompleteTextFieldState extends State<AutocompleteTextField> {
                       const SizedBox(width: 8),
                       Expanded(child: Text(v,
                           maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13,
-                              color: Color(0xFF0F172A)))),
+                          style: TextStyle(fontSize: 13,
+                              color: Theme.of(context).colorScheme.onSurface))),
                     ]),
                   ),
                 );
@@ -222,10 +223,12 @@ class _AutocompleteTextFieldState extends State<AutocompleteTextField> {
               horizontal: 14, vertical: 12),
           border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+              borderSide: BorderSide(
+                  color: Theme.of(context).semantic.borderSubtle)),
           enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+              borderSide: BorderSide(
+                  color: Theme.of(context).semantic.borderSubtle)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: BorderSide(color: AppColors.primary, width: 1.5)),

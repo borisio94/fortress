@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/app_switch.dart';
 
@@ -165,12 +166,12 @@ class _DangerActionPageState extends State<DangerActionPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       // resizeToAvoidBottomInset = true par défaut — la page se redimensionne
       // quand le clavier monte, le PageView ListView reste scrollable.
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        foregroundColor: AppColors.textPrimary,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        foregroundColor: Theme.of(context).colorScheme.onSurface,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.close_rounded),
@@ -398,9 +399,9 @@ class _SwitchRow extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
     decoration: BoxDecoration(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: AppColors.divider),
+      border: Border.all(color: Theme.of(context).semantic.borderSubtle),
     ),
     child: Row(children: [
       Expanded(child: Text(label,
@@ -435,9 +436,9 @@ class _Footer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: AppColors.divider)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(top: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
       ),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       child: Row(children: [

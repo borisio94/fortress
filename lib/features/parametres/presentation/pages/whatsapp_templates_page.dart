@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -329,8 +330,8 @@ class _TypeFilterBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: AppColors.divider)),
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(bottom: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -373,7 +374,7 @@ class _DeliveryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -385,7 +386,7 @@ class _DeliveryCard extends StatelessWidget {
             border: Border.all(
                 color: template.isDefault
                     ? AppColors.primary.withValues(alpha: 0.4)
-                    : AppColors.divider),
+                    : Theme.of(context).semantic.borderSubtle),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -512,7 +513,7 @@ class _TemplateCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -524,7 +525,7 @@ class _TemplateCard extends StatelessWidget {
             border: Border.all(
                 color: template.isDefault
                     ? AppColors.primary.withValues(alpha: 0.4)
-                    : AppColors.divider),
+                    : Theme.of(context).semantic.borderSubtle),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

@@ -319,7 +319,7 @@ class _CountryPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) => PopupMenuButton<CountryPhoneData>(
     onSelected: onSelected,
-    color: Colors.white,
+    color: Theme.of(context).colorScheme.surface,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
     elevation: 4,
     offset: const Offset(0, 40),

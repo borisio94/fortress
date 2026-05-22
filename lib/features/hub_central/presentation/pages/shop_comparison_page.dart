@@ -12,7 +12,7 @@ class ShopComparisonPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = context.l10n;
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.surface, elevation: 0, scrolledUnderElevation: 0,
         leading: IconButton(

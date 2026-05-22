@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/theme/app_theme.dart';
 import 'form_sheet.dart';
 
 /// Largeur en dessous de laquelle un formulaire s'ouvre en **page pleine**
@@ -88,10 +89,10 @@ class AdaptiveFormFrame extends StatelessWidget {
       // Si la page interne a déjà son propre scroll, ce SingleChildScrollView
       // imbriqué reste safe (le scroll interne prend précédence).
       return Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: theme.scaffoldBackgroundColor,
         appBar: AppBar(
-          backgroundColor: Colors.white,
-          surfaceTintColor: Colors.white,
+          backgroundColor: scheme.surface,
+          surfaceTintColor: scheme.surface,
           elevation: 0.5,
           leading: IconButton(
             icon: Icon(Icons.arrow_back_rounded,
@@ -142,7 +143,7 @@ class AdaptiveFormFrame extends StatelessWidget {
                 iconColor: iconColor,
                 trailing: actions,
               ),
-              const Divider(height: 1, color: Color(0xFFF0F0F0)),
+              Divider(height: 1, color: theme.semantic.borderSubtle),
               Flexible(
                 child: SingleChildScrollView(child: body),
               ),

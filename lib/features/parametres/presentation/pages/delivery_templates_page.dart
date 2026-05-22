@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -176,7 +177,7 @@ class _TemplateCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = context.l10n;
     return Material(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -188,7 +189,7 @@ class _TemplateCard extends StatelessWidget {
             border: Border.all(
                 color: template.isDefault
                     ? AppColors.primary.withValues(alpha: 0.4)
-                    : AppColors.divider),
+                    : Theme.of(context).semantic.borderSubtle),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

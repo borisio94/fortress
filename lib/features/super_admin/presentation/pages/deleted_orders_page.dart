@@ -7,6 +7,7 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
@@ -523,9 +524,9 @@ class _DeletedOrderCard extends StatelessWidget {
         : '—';
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(

@@ -10,6 +10,7 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
@@ -538,9 +539,9 @@ class _DeletedProductCard extends StatelessWidget {
     final hasSnapshot = row.archivedSnapshot != null;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
@@ -654,7 +655,7 @@ class _PlaceholderImg extends StatelessWidget {
   const _PlaceholderImg();
   @override
   Widget build(BuildContext context) => Container(
-        color: AppColors.divider,
+        color: Theme.of(context).semantic.borderSubtle,
         child: const Icon(Icons.image_outlined,
             color: AppColors.textHint, size: 20),
       );
@@ -711,9 +712,9 @@ class _SnapshotSheet extends StatelessWidget {
     final size = MediaQuery.of(context).size;
     return Container(
       constraints: BoxConstraints(maxHeight: size.height * 0.85),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -778,11 +779,11 @@ class _SnapshotSheet extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               child: SelectableText(
                 pretty,
-                style: const TextStyle(
+                style: TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 12,
                   height: 1.45,
-                  color: AppColors.textPrimary,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
             ),

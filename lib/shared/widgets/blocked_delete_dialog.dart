@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/theme/app_theme.dart';
 import 'form_sheet.dart';
 
 /// Réponse de l'utilisateur face à une suppression bloquée.
@@ -39,7 +40,7 @@ Future<BlockedDeleteChoice?> showBlockedDeleteDialog(
                 icon: Icons.warning_amber_rounded,
                 iconColor: AppColors.warning,
               ),
-              const Divider(height: 1, color: Color(0xFFF0F0F0)),
+              Divider(height: 1, color: Theme.of(ctx).semantic.borderSubtle),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
                 child: Column(
@@ -49,7 +50,7 @@ Future<BlockedDeleteChoice?> showBlockedDeleteDialog(
                     Text('« $itemLabel »',
                         style: AppTextStyles.bodyBold.copyWith(
                             fontWeight: FontWeight.w600,
-                            color: const Color(0xFF0F172A))),
+                            color: Theme.of(ctx).colorScheme.onSurface)),
                     const SizedBox(height: 6),
                     Text(reason,
                         style: AppTextStyles.bodySmSecondary.copyWith(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/theme/app_theme.dart';
 import 'form_sheet.dart';
 
 // ─── Widget bouton déclencheur ────────────────────────────────────────────────
@@ -42,7 +43,7 @@ class AppSelectField extends StatelessWidget {
           border: Border.all(
             color: hasError
                 ? AppColors.error
-                : const Color(0xFFE5E7EB),
+                : Theme.of(context).semantic.borderSubtle,
             width: hasError ? 1.5 : 1,
           ),
         ),
@@ -198,7 +199,7 @@ class _MenuContainerState extends State<_MenuContainer> {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
@@ -234,7 +235,7 @@ class _MenuContainerState extends State<_MenuContainer> {
                     : (widget.selected == item);
                 // Alternance de fond : pair = blanc, impair = très léger violet
                 final bg = idx.isEven
-                    ? Colors.white
+                    ? Theme.of(context).colorScheme.surface
                     : AppColors.primarySurface.withValues(alpha:0.5);
                 return _MenuItem(
                   label: item,
@@ -270,7 +271,8 @@ class _MenuContainerState extends State<_MenuContainer> {
 
             // Bouton Ajouter
             if (widget.onAdd != null) ...[
-              const Divider(height: 1, color: Color(0xFFF0F0F0)),
+              Divider(
+                  height: 1, color: Theme.of(context).semantic.borderSubtle),
               InkWell(
                 onTap: () async {
                   // Pop le menu d'abord
@@ -280,7 +282,7 @@ class _MenuContainerState extends State<_MenuContainer> {
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(
                       horizontal: 16, vertical: 12),
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.surface,
                   child: Row(children: [
                     Container(
                       width: 20, height: 20,
@@ -491,7 +493,8 @@ class _AppSelectWidgetState extends State<AppSelectWidget> {
                   title: 'Renommer',
                   icon: Icons.edit_rounded,
                 ),
-                const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                Divider(
+                    height: 1, color: Theme.of(dc).semantic.borderSubtle),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
                   child: TextFormField(
@@ -509,12 +512,12 @@ class _AppSelectWidgetState extends State<AppSelectWidget> {
                           horizontal: 12, vertical: 11),
                       border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(
-                              color: Color(0xFFE5E7EB))),
+                          borderSide: BorderSide(
+                              color: Theme.of(dc).semantic.borderSubtle)),
                       enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(
-                              color: Color(0xFFE5E7EB))),
+                          borderSide: BorderSide(
+                              color: Theme.of(dc).semantic.borderSubtle)),
                       focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide(
@@ -635,7 +638,7 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
       context: ctx,
       builder: (dc) => StatefulBuilder(
         builder: (ctx2, setSt) => AlertDialog(
-          backgroundColor: Colors.white,
+          backgroundColor: Theme.of(dc).colorScheme.surface,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14)),
           titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -659,7 +662,7 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
                 final item = widget.items[i];
                 final sel = temp.contains(item);
                 final bg = i.isEven
-                    ? Colors.white
+                    ? Theme.of(dc).colorScheme.surface
                     : AppColors.primarySurface.withValues(alpha:0.4);
                 return InkWell(
                   onTap: () => setSt(() {
@@ -749,11 +752,13 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
           color: count > 0
-              ? AppColors.primarySurface : Colors.white,
+              ? AppColors.primarySurface
+              : Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: count > 0
-                ? AppColors.primary : const Color(0xFFE5E7EB),
+                ? AppColors.primary
+                : Theme.of(context).semantic.borderSubtle,
           ),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [

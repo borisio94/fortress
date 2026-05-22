@@ -13,6 +13,7 @@ import '../../../../core/widgets/owner_pin_dialog.dart';
 import '../../../../core/services/logo_color_extractor.dart';
 import '../../../../core/services/logo_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/logo_theme_builder.dart';
 import '../../../../core/theme/theme_palette.dart';
 import '../../../../core/database/app_database.dart';
@@ -204,7 +205,7 @@ class _TabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -228,7 +229,7 @@ class _TabBar extends StatelessWidget {
               ),
             )).toList(),
           ),
-          Container(height: 1, color: const Color(0xFFF0F0F0)),
+          Container(height: 1, color: Theme.of(context).semantic.borderSubtle),
         ],
       ),
     );
@@ -348,10 +349,10 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
             const Icon(Icons.storefront_outlined,
                 size: 40, color: AppColors.textHint),
             const SizedBox(height: 12),
-            const Text('Boutique introuvable',
+            Text('Boutique introuvable',
                 style: TextStyle(fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
+                    color: Theme.of(context).colorScheme.onSurface)),
             const SizedBox(height: 8),
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 32),
@@ -688,7 +689,7 @@ class _ShopHeroCardState extends ConsumerState<_ShopHeroCard> {
     }
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -722,9 +723,9 @@ class _ShopHeroCardState extends ConsumerState<_ShopHeroCard> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha:0.04),
               blurRadius: 10, offset: const Offset(0, 2)),
@@ -744,9 +745,9 @@ class _ShopHeroCardState extends ConsumerState<_ShopHeroCard> {
             Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(widget.shop.name, style: const TextStyle(
+                Text(widget.shop.name, style: TextStyle(
                     fontSize: 18, fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary, letterSpacing: -0.3),
+                    color: Theme.of(context).colorScheme.onSurface, letterSpacing: -0.3),
                     maxLines: 2, overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 6),
                 Wrap(spacing: 6, runSpacing: 4, children: [
@@ -927,7 +928,7 @@ class _MembersStat extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min, children: [
@@ -972,7 +973,7 @@ class _MembersSection extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         // Liseré gauche 3px primary pour la section Propriétaire (spec).
         // Géré via un BoxDecoration avec border non-uniforme : seul le
         // côté gauche est renforcé. Material n'autorise pas border-left
@@ -1095,7 +1096,7 @@ class _CopyTab extends StatelessWidget {
               decoration: BoxDecoration(
                 color: AppColors.background,        // background-secondary
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.divider),
+                border: Border.all(color: Theme.of(context).semantic.borderSubtle),
               ),
               child: Row(children: [
                 Container(
@@ -1112,9 +1113,9 @@ class _CopyTab extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(l.shopCopyCardTitle,
-                          style: const TextStyle(fontSize: 14,
+                          style: TextStyle(fontSize: 14,
                               fontWeight: FontWeight.w700,
-                              color: AppColors.textPrimary)),
+                              color: Theme.of(context).colorScheme.onSurface)),
                       const SizedBox(height: 2),
                       Text(l.shopCopyCardSubtitle,
                           style: const TextStyle(fontSize: 12,
@@ -1156,7 +1157,7 @@ class _CopyTab extends StatelessWidget {
       context: context,
       builder: (dc) => StatefulBuilder(
         builder: (ctx, setSt) => AlertDialog(
-          backgroundColor: Colors.white,
+          backgroundColor: Theme.of(ctx).colorScheme.surface,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
           contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
@@ -1244,9 +1245,9 @@ class _Card extends StatelessWidget {
     padding: padding ?? const EdgeInsets.symmetric(
         horizontal: 16, vertical: 8),
     decoration: BoxDecoration(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: AppColors.divider),
+      border: Border.all(color: Theme.of(context).semantic.borderSubtle),
     ),
     child: child,
   );
@@ -1255,7 +1256,7 @@ class _Card extends StatelessWidget {
 class _Divider extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
-      const Divider(height: 1, color: AppColors.divider);
+      Divider(height: 1, color: Theme.of(context).semantic.borderSubtle);
 }
 
 class _InfoRow extends StatelessWidget {
@@ -1353,9 +1354,9 @@ class _SectionHeader extends StatelessWidget {
       Expanded(child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(
+            Text(title, style: TextStyle(
                 fontSize: 15, fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary)),
+                color: Theme.of(context).colorScheme.onSurface)),
             const SizedBox(height: 3),
             Text(subtitle, style: const TextStyle(
                 fontSize: 12, color: AppColors.textSecondary, height: 1.4)),
@@ -1428,9 +1429,9 @@ class _RoleCard extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: AppColors.divider),
+      border: Border.all(color: Theme.of(context).semantic.borderSubtle),
     ),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Container(
@@ -1443,9 +1444,9 @@ class _RoleCard extends StatelessWidget {
       ),
       const SizedBox(height: 8),
       Text(role.label,
-          style: const TextStyle(fontSize: 12,
+          style: TextStyle(fontSize: 12,
               fontWeight: FontWeight.w800,
-              color: AppColors.textPrimary)),
+              color: Theme.of(context).colorScheme.onSurface)),
       const SizedBox(height: 2),
       Text(description,
           style: const TextStyle(fontSize: 10,
@@ -1557,7 +1558,7 @@ class _MemberRow extends StatelessWidget {
                           fontWeight: isMobile
                               ? FontWeight.w500
                               : FontWeight.w600,
-                          color: AppColors.textPrimary))),
+                          color: Theme.of(context).colorScheme.onSurface))),
                   if (isSelf) ...[
                     const SizedBox(width: 6),
                     Container(
@@ -1709,9 +1710,9 @@ class _EmptyMembers extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
       child: Column(children: [
         Container(
@@ -1725,9 +1726,9 @@ class _EmptyMembers extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         Text(l.shopEmptyMembersTitle,
-            style: const TextStyle(fontSize: 15,
+            style: TextStyle(fontSize: 15,
                 fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary)),
+                color: Theme.of(context).colorScheme.onSurface)),
         const SizedBox(height: 6),
         Text(l.shopEmptyMembersSubtitle,
             textAlign: TextAlign.center,
@@ -1796,8 +1797,8 @@ class _InfoBanner extends StatelessWidget {
       const Icon(Icons.info_outline, size: 16, color: AppColors.info),
       const SizedBox(width: 8),
       Expanded(child: Text(text,
-          style: const TextStyle(fontSize: 11,
-              color: AppColors.textPrimary, height: 1.4))),
+          style: TextStyle(fontSize: 11,
+              color: Theme.of(context).colorScheme.onSurface, height: 1.4))),
     ]),
   );
 }
@@ -1833,10 +1834,10 @@ class _InviteField extends StatelessWidget {
           horizontal: 12, vertical: 11),
       border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppColors.divider)),
+          borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
       enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppColors.divider)),
+          borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
       focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide:
@@ -1927,10 +1928,10 @@ class _StyledDropdown<T> extends StatelessWidget {
           horizontal: 12, vertical: 10),
       border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppColors.divider)),
+          borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
       enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppColors.divider)),
+          borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
       focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
@@ -2022,7 +2023,7 @@ class _PendingInvitationsState extends State<_PendingInvitations> {
         ),
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: const Color(0xFFFED7AA)),
           ),
@@ -2046,9 +2047,9 @@ class _PendingInvitationsState extends State<_PendingInvitations> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                       Text(inv['email'] as String? ?? '—',
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontSize: 13, fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary)),
+                              color: Theme.of(context).colorScheme.onSurface)),
                       const SizedBox(height: 2),
                       Row(children: [
                         Container(

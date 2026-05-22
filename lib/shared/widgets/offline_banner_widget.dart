@@ -8,6 +8,7 @@ import '../../core/permisions/subscription_provider.dart';
 import '../../core/storage/hive_boxes.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
 
 // ── Provider connectivité — détection via connectivity_plus uniquement ──────
@@ -137,7 +138,7 @@ class _OfflineTap extends StatelessWidget {
   void _showSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => _OfflineSheet(pendingOps: pendingOps),
@@ -163,7 +164,7 @@ class _OfflineSheet extends StatelessWidget {
           Container(
             width: 36, height: 4,
             decoration: BoxDecoration(
-              color: const Color(0xFFE5E7EB),
+              color: Theme.of(context).semantic.borderSubtle,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -185,7 +186,7 @@ class _OfflineSheet extends StatelessWidget {
           Text(
             l.offlineMode.split('—').first.trim(),
             style: AppTextStyles.subtitleBold.copyWith(
-                color: const Color(0xFF0F172A)),
+                color: Theme.of(context).colorScheme.onSurface),
           ),
           const SizedBox(height: 8),
 
@@ -231,7 +232,7 @@ class _OfflineSheet extends StatelessWidget {
               onPressed: () => Navigator.of(context).pop(),
               style: OutlinedButton.styleFrom(
                 foregroundColor: const Color(0xFF6B7280),
-                side: const BorderSide(color: Color(0xFFE5E7EB)),
+                side: BorderSide(color: Theme.of(context).semantic.borderSubtle),
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
@@ -300,7 +301,7 @@ class OfflineBlockGuard extends ConsumerWidget {
                 Text('Connexion requise',
                     style: AppTextStyles.title.copyWith(
                         fontWeight: FontWeight.w800,
-                        color: const Color(0xFF0F172A))),
+                        color: Theme.of(context).colorScheme.onSurface)),
                 const SizedBox(height: 8),
                 Text(
                     "Votre plan Normal nécessite une connexion internet. "

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/theme/app_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AppPrimaryButton — bouton principal de l'app (pleine largeur)
@@ -178,9 +179,9 @@ class AppOutlineIconButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         ),
         child: Icon(icon, size: 18, color: const Color(0xFF374151)),
       ),

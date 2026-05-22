@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/database/app_database.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/theme/app_theme.dart';
 
 /// État résumé du sync pour l'UI :
 ///   * `errorsCount` : nombre d'erreurs permanentes journalisées (sync_errors)
@@ -141,14 +142,14 @@ class _SyncErrorsSheetState extends ConsumerState<_SyncErrorsSheet> {
             Center(child: Container(
               width: 36, height: 4,
               decoration: BoxDecoration(
-                  color: const Color(0xFFE5E7EB),
+                  color: Theme.of(context).semantic.borderSubtle,
                   borderRadius: BorderRadius.circular(2)),
             )),
             const SizedBox(height: 14),
             Text('Synchronisation',
                 style: AppTextStyles.subtitleBold.copyWith(
                     fontWeight: FontWeight.w800,
-                    color: const Color(0xFF0F172A))),
+                    color: Theme.of(context).colorScheme.onSurface)),
             const SizedBox(height: 4),
             Text('$pend op(s) en attente · $stuck bloquée(s) · '
                 '${errors.length} erreur(s)',
@@ -168,8 +169,8 @@ class _SyncErrorsSheetState extends ConsumerState<_SyncErrorsSheet> {
               Flexible(child: ListView.separated(
                 shrinkWrap: true,
                 itemCount: errors.length,
-                separatorBuilder: (_, __) => const Divider(
-                    height: 1, color: Color(0xFFF0F0F0)),
+                separatorBuilder: (_, __) => Divider(
+                    height: 1, color: Theme.of(context).semantic.borderSubtle),
                 itemBuilder: (_, i) {
                   final e = Map<String, dynamic>.from(errors[i]);
                   final t = e['time'] as String?;
@@ -180,7 +181,7 @@ class _SyncErrorsSheetState extends ConsumerState<_SyncErrorsSheet> {
                         children: [
                       Text('${e['table'] ?? '?'} · ${e['op'] ?? '?'}',
                           style: AppTextStyles.bodySmBold.copyWith(
-                              color: const Color(0xFF0F172A))),
+                              color: Theme.of(context).colorScheme.onSurface)),
                       const SizedBox(height: 2),
                       Text(e['error']?.toString() ?? '',
                           maxLines: 3, overflow: TextOverflow.ellipsis,

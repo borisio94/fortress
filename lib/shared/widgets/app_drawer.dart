@@ -116,7 +116,7 @@ class AppDrawer extends ConsumerWidget {
     final isAdmin = perms.isShopAdmin;
 
     return Drawer(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(),
       child: Column(children: [
         _DrawerHeader(shop: shop, expanded: true,
@@ -214,7 +214,7 @@ class AppDrawerRail extends ConsumerWidget {
     final isAdmin = perms.isShopAdmin;
 
     return Container(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       child: Column(children: [
         _DrawerHeader(shop: shop, expanded: expanded,
             isOwner: isOwner, memberRole: memberRole),
@@ -303,10 +303,11 @@ class _DrawerHeader extends StatelessWidget {
       return Container(
         width: double.infinity,
         padding: EdgeInsets.only(top: topPad + 16, bottom: 16),
-        decoration: const BoxDecoration(
-          color: Colors.white,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
           border: Border(
-              bottom: BorderSide(color: Color(0xFFF0F0F0), width: 1)),
+              bottom: BorderSide(
+                  color: Theme.of(context).semantic.borderSubtle, width: 1)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -349,10 +350,11 @@ class _DrawerHeader extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: EdgeInsets.fromLTRB(12, topPad + 14, 12, 14),
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
         border: Border(
-            bottom: BorderSide(color: Color(0xFFF0F0F0), width: 1)),
+            bottom: BorderSide(
+                color: Theme.of(context).semantic.borderSubtle, width: 1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -387,7 +389,7 @@ class _DrawerHeader extends StatelessWidget {
                       width: 40,
                       height: 40,
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
                             color: AppColors.primary.withValues(alpha:0.2)),
@@ -405,7 +407,7 @@ class _DrawerHeader extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: AppTextStyles.bodyBold.copyWith(
                                   fontWeight: FontWeight.w800,
-                                  color: const Color(0xFF0F172A))),
+                                  color: Theme.of(context).colorScheme.onSurface)),
                           const SizedBox(height: 2),
                           Text(_sectorLabel(shop!.sector),
                               maxLines: 1,
@@ -487,9 +489,9 @@ class _Chip extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(5),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           icon,
@@ -604,8 +606,9 @@ class _Divider extends StatelessWidget {
   const _Divider();
   @override
   Widget build(BuildContext context) =>
-      const Padding(padding: EdgeInsets.symmetric(vertical: 6),
-          child: Divider(color: Color(0xFFF0F0F0), thickness: 1));
+      Padding(padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Divider(
+              color: Theme.of(context).semantic.borderSubtle, thickness: 1));
 }
 
 class _SectionLabel extends StatelessWidget {
@@ -639,7 +642,8 @@ class _Footer extends ConsumerWidget {
       padding: EdgeInsets.fromLTRB(
           expanded ? 8 : 6, 0, expanded ? 8 : 6, 16),
       child: Column(children: [
-        const Divider(color: Color(0xFFF0F0F0), thickness: 1),
+        Divider(
+            color: Theme.of(context).semantic.borderSubtle, thickness: 1),
         const SizedBox(height: 4),
         _NavTile(
           nav: _NavDef(
@@ -744,7 +748,7 @@ class _LogoutTile extends ConsumerWidget {
       AppLocalizations l, int pending) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => _SyncBeforeLogoutSheet(pending: pending),
@@ -799,7 +803,7 @@ class _SyncBeforeLogoutSheetState
           Container(
             width: 36, height: 4,
             decoration: BoxDecoration(
-              color: const Color(0xFFE5E7EB),
+              color: Theme.of(context).semantic.borderSubtle,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -821,7 +825,7 @@ class _SyncBeforeLogoutSheetState
           Text(
             l.logoutSyncTitle,
             style: AppTextStyles.subtitleBold.copyWith(
-                color: const Color(0xFF0F172A)),
+                color: Theme.of(context).colorScheme.onSurface),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),

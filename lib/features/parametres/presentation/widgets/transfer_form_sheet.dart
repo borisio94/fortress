@@ -7,6 +7,7 @@ import '../../../../core/utils/uuid.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/widgets/back_dated_picker.dart';
 import '../../../../shared/widgets/product_image_card.dart';
@@ -124,7 +125,7 @@ class _TransferFormSheetState extends State<TransferFormSheet> {
     final picked = await showModalBottomSheet<StockTransferLine>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (_) => _VariantPickerSheet(
@@ -252,7 +253,7 @@ class _TransferFormSheetState extends State<TransferFormSheet> {
                           decoration: BoxDecoration(
                             color: const Color(0xFFF9FAFB),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFE5E7EB)),
+                            border: Border.all(color: Theme.of(context).semantic.borderSubtle),
                           ),
                           child: const Text(
                               'Aucune ligne. Clique "+ Ajouter une ligne" '
@@ -463,7 +464,7 @@ class _LineTile extends StatelessWidget {
     decoration: BoxDecoration(
       color: const Color(0xFFF9FAFB),
       borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: const Color(0xFFE5E7EB)),
+      border: Border.all(color: Theme.of(context).semantic.borderSubtle),
     ),
     child: Row(children: [
       ProductImageCard(
@@ -653,7 +654,7 @@ class _VariantPickerSheetState extends State<_VariantPickerSheet> {
             children: [
               Center(child: Container(width: 36, height: 4,
                   decoration: BoxDecoration(
-                      color: const Color(0xFFE5E7EB),
+                      color: Theme.of(context).semantic.borderSubtle,
                       borderRadius: BorderRadius.circular(2)))),
               const SizedBox(height: 10),
               const Text('Ajouter une variante',
@@ -685,7 +686,7 @@ class _VariantPickerSheetState extends State<_VariantPickerSheet> {
                         shrinkWrap: true,
                         itemCount: list.length,
                         separatorBuilder: (_, __) =>
-                            const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                            Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
                         itemBuilder: (_, i) {
                           final e = list[i];
                           final selected = _selected?.variant.id == e.variant.id;
@@ -865,7 +866,7 @@ class _DatePickerTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: const Color(0xFFF9FAFB),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         ),
         child: Row(children: [
           Icon(Icons.event_rounded, size: 16, color: AppColors.primary),

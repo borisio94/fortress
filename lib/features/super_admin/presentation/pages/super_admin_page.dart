@@ -8,6 +8,7 @@ import '../../../../core/router/route_names.dart';
 import 'super_admin_deleted_hub_page.dart' show superAdminDeletedTotalProvider;
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../shared/widgets/app_switch.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -263,9 +264,9 @@ class _SAAppBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final alertCount = (stats?.expireSoon ?? 0) + (stats?.blocked ?? 0);
     return Container(
-      decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0)))),
+      decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          border: Border(bottom: BorderSide(color: Theme.of(context).semantic.borderSubtle))),
       padding: EdgeInsets.fromLTRB(
           16, MediaQuery.of(context).padding.top + 10, 12, 10),
       child: Row(children: [
@@ -313,7 +314,7 @@ class _SAAvatar extends ConsumerWidget {
     final init  = email.isNotEmpty ? email[0].toUpperCase() : 'A';
     return GestureDetector(
       onTap: () => showModalBottomSheet(
-        context: context, backgroundColor: Colors.white,
+        context: context, backgroundColor: Theme.of(context).colorScheme.surface,
         shape: const RoundedRectangleBorder(
             borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
         builder: (_) => Padding(
@@ -364,7 +365,7 @@ class _SADrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Drawer(
-    backgroundColor: Colors.white,
+    backgroundColor: Theme.of(context).colorScheme.surface,
     shape: const RoundedRectangleBorder(),
     child: _SADrawerContent(current: current, onNavigate: onNavigate,
         stats: stats, onRefresh: onRefresh),
@@ -388,9 +389,9 @@ class _SADrawerContent extends ConsumerWidget {
         Container(
           padding: EdgeInsets.fromLTRB(
               16, MediaQuery.of(context).padding.top + 16, 16, 16),
-          decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0)))),
+          decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              border: Border(bottom: BorderSide(color: Theme.of(context).semantic.borderSubtle))),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const FortressLogo.light(size: 22),
             const SizedBox(height: 12),
@@ -488,7 +489,7 @@ class _SADrawerContent extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(ctx).colorScheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         icon: Container(width: 48, height: 48,
             decoration: BoxDecoration(
@@ -571,8 +572,8 @@ class _Divider extends StatelessWidget {
   const _Divider();
   @override
   Widget build(BuildContext context) =>
-      const Padding(padding: EdgeInsets.symmetric(vertical: 6),
-          child: Divider(color: Color(0xFFF0F0F0), thickness: 1));
+      Padding(padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Divider(color: Theme.of(context).semantic.borderSubtle, thickness: 1));
 }
 
 class _DrawerTile extends StatelessWidget {
@@ -868,7 +869,7 @@ class _PaymentsSectionState extends ConsumerState<_PaymentsSection> {
         data: (payments) {
           final list = _filterPays(payments);
           final total = list.fold<double>(0, (s, p) => s + ((p['amount_paid'] as num?)?.toDouble() ?? 0));
-          return Container(color: Colors.white,
+          return Container(color: Theme.of(context).colorScheme.surface,
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: Row(children: [
               Text('${list.length} paiement(s)',
@@ -1372,9 +1373,9 @@ class _KpiCard extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha:0.05),
@@ -1558,7 +1559,7 @@ class _FilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    color: Colors.white,
+    color: Theme.of(context).colorScheme.surface,
     padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
     child: Column(children: [
       if (showSearch) ...[
@@ -1592,7 +1593,7 @@ class _FilterBar extends StatelessWidget {
               margin: const EdgeInsets.only(right: 6),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
               decoration: BoxDecoration(
-                color: sel ? AppColors.primarySurface : Colors.white,
+                color: sel ? AppColors.primarySurface : Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: sel ? AppColors.primary : AppColors.inputBorder),
               ),
@@ -1644,7 +1645,7 @@ class _UserCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(12),
+          color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12),
           border: Border.all(
               color: isBlocked ? AppColors.error.withValues(alpha:0.4) : AppColors.inputBorder,
               width: isBlocked ? 1.5 : 1)),
@@ -1688,7 +1689,7 @@ class _UserCard extends StatelessWidget {
             const Text('Sans plan', style: AppTextStyles.microSecondary),
           PopupMenuButton<String>(
             onSelected: (v) => _action(context, v),
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             itemBuilder: (_) => [
               if (!isSA) ...[
@@ -1781,7 +1782,7 @@ class _UserCard extends StatelessWidget {
     final fmt  = DateFormat('dd/MM/yyyy HH:mm');
     final sub  = (user['subscriptions'] as List?)?.firstOrNull as Map?;
     final plan = sub?['plans'] as Map?;
-    showModalBottomSheet(context: ctx, backgroundColor: Colors.white,
+    showModalBottomSheet(context: ctx, backgroundColor: Theme.of(ctx).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => Padding(
@@ -1822,7 +1823,7 @@ class _ShopRow extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(12),
+          color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12),
           border: Border.all(color: isActive
               ? AppColors.inputBorder : AppColors.error.withValues(alpha:0.3))),
       child: Row(children: [
@@ -1845,7 +1846,7 @@ class _ShopRow extends StatelessWidget {
         if (onToggle != null)
           PopupMenuButton<String>(
             onSelected: (v) { if (v == 't') onToggle?.call(); if (v == 'd') onDelete?.call(); },
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             itemBuilder: (_) => [
               PopupMenuItem(value: 't', child: Row(children: [
@@ -1891,7 +1892,7 @@ class _PaymentRow extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(color: Colors.white,
+      decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: AppColors.inputBorder)),
       child: Row(children: [
@@ -1933,7 +1934,7 @@ class _PaymentCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white,
+      decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppColors.inputBorder)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2110,7 +2111,7 @@ class _LogTile extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(color: Colors.white,
+      decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: AppColors.inputBorder)),
       child: Row(children: [
@@ -2162,8 +2163,8 @@ class _SubSheetState extends State<_SubSheet> {
 
   @override
   Widget build(BuildContext context) => Container(
-    decoration: const BoxDecoration(color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20))),
     padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + MediaQuery.of(context).padding.bottom),
     child: Column(mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2293,8 +2294,8 @@ class _EditPlanSheetState extends State<_EditPlanSheet> {
 
   @override
   Widget build(BuildContext context) => Container(
-    decoration: const BoxDecoration(color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20))),
     padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + MediaQuery.of(context).padding.bottom),
     child: SingleChildScrollView(child: Column(
         mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2384,7 +2385,7 @@ class _SettingsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(14),
+        color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.inputBorder),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 8, offset: const Offset(0, 2))]),
@@ -2420,7 +2421,7 @@ class _SettingsTile extends StatelessWidget {
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label, style: AppTextStyles.body.copyWith(
               fontWeight: FontWeight.w500,
-              color: color ?? AppColors.textPrimary)),
+              color: color ?? Theme.of(context).colorScheme.onSurface)),
           Text(subtitle, style: AppTextStyles.caption),
         ])),
         Icon(Icons.chevron_right_rounded, size: 16,
@@ -2473,7 +2474,7 @@ class _Btn extends StatelessWidget {
         duration: const Duration(milliseconds: 120),
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-            color: sel ? AppColors.primary : Colors.white,
+            color: sel ? AppColors.primary : Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: sel ? AppColors.primary : AppColors.inputBorder)),
         child: Text(label, textAlign: TextAlign.center,
@@ -2533,7 +2534,7 @@ class _ConfirmDialog extends StatelessWidget {
     required this.confirmLabel, required this.confirmColor, required this.onConfirm});
   @override
   Widget build(BuildContext context) => AlertDialog(
-    backgroundColor: Colors.white,
+    backgroundColor: Theme.of(context).colorScheme.surface,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     title: Text(title, style: AppTextStyles.label
         .copyWith(fontWeight: FontWeight.w700)),
@@ -2643,7 +2644,7 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
       actionsPadding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
@@ -2705,8 +2706,8 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
         children: [
           const TextSpan(text: 'Pour réinitialiser le mot de passe de '),
           TextSpan(text: widget.targetName,
-              style: const TextStyle(fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary)),
+              style: TextStyle(fontWeight: FontWeight.w700,
+                  color: Theme.of(context).colorScheme.onSurface)),
           const TextSpan(text: ", vous devez d'abord confirmer votre identité."),
         ],
       )),
@@ -2805,8 +2806,8 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
         children: [
           const TextSpan(text: 'Un lien de réinitialisation sera envoyé à '),
           TextSpan(text: widget.targetEmail,
-              style: const TextStyle(fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary)),
+              style: TextStyle(fontWeight: FontWeight.w700,
+                  color: Theme.of(context).colorScheme.onSurface)),
           const TextSpan(text: ".\n\nL'utilisateur devra cliquer sur ce lien pour définir un nouveau mot de passe."),
         ],
       )),
@@ -2894,7 +2895,7 @@ class _SaDangerReauthDialogState extends State<_SaDangerReauthDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
       actionsPadding: const EdgeInsets.fromLTRB(20, 8, 20, 16),

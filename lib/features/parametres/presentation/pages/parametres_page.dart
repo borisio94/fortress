@@ -16,6 +16,7 @@ import '../../../../core/services/pin_service.dart';
 import '../../../../core/widgets/owner_pin_dialog.dart';
 import '../../../../core/widgets/owner_pin_setup_dialog.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/i18n/app_localizations.dart';
@@ -462,7 +463,7 @@ class _Section extends StatelessWidget {
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.divider),
+            border: Border.all(color: Theme.of(context).semantic.borderSubtle),
             boxShadow: [
               BoxShadow(color: Colors.black.withValues(alpha:0.03),
                   blurRadius: 8, offset: const Offset(0, 2)),
@@ -509,7 +510,7 @@ class _Tile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color titleColor =
-        locked ? AppColors.textHint : AppColors.textPrimary;
+        locked ? AppColors.textHint : Theme.of(context).colorScheme.onSurface;
     final Color iconBg = locked
         ? AppColors.inputFill
         : color.withValues(alpha:0.10);
@@ -640,7 +641,7 @@ class _DangerGateState extends State<_DangerGate> {
         ),
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.error.withValues(alpha:0.2)),
             boxShadow: [
@@ -737,7 +738,7 @@ class _DangerSection extends ConsumerWidget {
         ),
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.error.withValues(alpha:0.2)),
             boxShadow: [
@@ -817,7 +818,7 @@ class _DangerSection extends ConsumerWidget {
                 onTap: () => showModalBottomSheet(
                   context: context,
                   isScrollControlled: true,
-                  backgroundColor: Colors.white,
+                  backgroundColor: Theme.of(context).colorScheme.surface,
                   shape: const RoundedRectangleBorder(
                       borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
                   builder: (_) => const _DeleteAccountSheet(),
@@ -1153,9 +1154,9 @@ class _SuperAdminSection extends ConsumerWidget {
         // Carte — même style que les autres sections
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.divider),
+            border: Border.all(color: Theme.of(context).semantic.borderSubtle),
             boxShadow: [
               BoxShadow(
                   color: Colors.black.withValues(alpha:0.03),
@@ -1579,7 +1580,7 @@ class _StepIndicator extends StatelessWidget {
           duration: const Duration(milliseconds: 200),
           width: i == step ? 24 : 6, height: 6,
           decoration: BoxDecoration(
-              color: i <= step ? AppColors.error : AppColors.divider,
+              color: i <= step ? AppColors.error : Theme.of(context).semantic.borderSubtle,
               borderRadius: BorderRadius.circular(3)),
         ),
         if (i < 2) const SizedBox(width: 5),
@@ -1602,10 +1603,10 @@ class _ReasonTile extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
-          color: selected ? AppColors.primary.withValues(alpha:0.06) : Colors.white,
+          color: selected ? AppColors.primary.withValues(alpha:0.06) : Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-              color: selected ? AppColors.primary : AppColors.divider,
+              color: selected ? AppColors.primary : Theme.of(context).semantic.borderSubtle,
               width: selected ? 1.5 : 1),
         ),
         child: Row(children: [
@@ -1617,7 +1618,7 @@ class _ReasonTile extends StatelessWidget {
               border: Border.all(
                   color: selected ? AppColors.primary : const Color(0xFFD1D5DB),
                   width: 2),
-              color: selected ? AppColors.primary : Colors.white,
+              color: selected ? AppColors.primary : Theme.of(context).colorScheme.surface,
             ),
             child: selected
                 ? const Icon(Icons.check_rounded, size: 10, color: Colors.white)
@@ -1643,9 +1644,9 @@ class _SwitchRow extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
     decoration: BoxDecoration(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: AppColors.divider),
+      border: Border.all(color: Theme.of(context).semantic.borderSubtle),
     ),
     child: Row(children: [
       Expanded(child: Text(label,

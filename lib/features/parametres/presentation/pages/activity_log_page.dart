@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/i18n/app_localizations.dart';
@@ -318,11 +319,11 @@ class _FilterBar extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: active ? AppColors.primary : Colors.white,
+              color: active ? AppColors.primary : Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: active
                   ? AppColors.primary
-                  : AppColors.divider),
+                  : Theme.of(context).semantic.borderSubtle),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Icon(f.$3, size: 13,
@@ -433,7 +434,7 @@ class _LogTile extends StatelessWidget {
       decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppColors.divider, width: 0.5)),
+          border: Border.all(color: Theme.of(context).semantic.borderSubtle, width: 0.5)),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
             width: iconBox, height: iconBox,
@@ -451,7 +452,7 @@ class _LogTile extends StatelessWidget {
               style: AppTextStyles.bodySm.copyWith(
                   fontSize: titleFs,
                   fontWeight: isMobile ? FontWeight.w500 : FontWeight.w600,
-                  color: AppColors.textPrimary)),
+                  color: Theme.of(context).colorScheme.onSurface)),
           if (hasSubtitle) ...[
             const SizedBox(height: 2),
             Text(entry.subtitle!,

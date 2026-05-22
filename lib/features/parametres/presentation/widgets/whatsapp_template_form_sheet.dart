@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_field.dart';
@@ -142,7 +143,7 @@ class _WhatsappTemplateFormSheetState
                 decoration: BoxDecoration(
                   color: const Color(0xFFF9FAFB),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                  border: Border.all(color: Theme.of(context).semantic.borderSubtle),
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<WhatsappTemplateType>(
@@ -221,7 +222,7 @@ class _WhatsappTemplateFormSheetState
                 decoration: BoxDecoration(
                   color: const Color(0xFFF9FAFB),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.divider),
+                  border: Border.all(color: Theme.of(context).semantic.borderSubtle),
                 ),
                 child: Row(children: [
                   const Expanded(
@@ -239,7 +240,7 @@ class _WhatsappTemplateFormSheetState
             ],
           ),
         ),
-        const Divider(height: 1, color: Color(0xFFF0F0F0)),
+        Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
         Padding(
           padding: const EdgeInsets.all(14),
           child: SizedBox(
@@ -316,7 +317,7 @@ class _VariablesHint extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                         borderRadius: BorderRadius.circular(4),
                         border: Border.all(
                             color: AppColors.primary

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/providers/auth_provider.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/i18n/app_localizations.dart';
 
@@ -19,10 +20,10 @@ class LanguagePage extends ConsumerWidget {
         ...supportedLocales.map((loc) => Container(
           margin: const EdgeInsets.only(bottom: 10),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: loc == locale ? AppColors.primary : const Color(0xFFE5E7EB),
+              color: loc == locale ? AppColors.primary : Theme.of(context).semantic.borderSubtle,
               width: loc == locale ? 1.5 : 1,
             ),
           ),

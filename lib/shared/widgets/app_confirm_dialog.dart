@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_theme.dart';
 import 'form_sheet.dart';
 
 /// Bottom sheet de confirmation réutilisable.
@@ -66,7 +67,7 @@ class AppConfirmDialog extends StatelessWidget {
               icon: icon,
               iconColor: color,
             ),
-            const Divider(height: 1, color: Color(0xFFF0F0F0)),
+            Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
             if (body != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),

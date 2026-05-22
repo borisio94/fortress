@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/i18n/app_localizations.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/theme/app_theme.dart';
 import '../../features/dashboard/data/dashboard_providers.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -67,7 +68,7 @@ class PeriodSelector extends ConsumerWidget {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => _BottomSheet(ref: ref),
@@ -125,12 +126,14 @@ class _Chips extends StatelessWidget {
               padding: const EdgeInsets.symmetric(
                   horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: active ? AppColors.primary : Colors.white,
+                color: active
+                    ? AppColors.primary
+                    : Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
                     color: active
                         ? AppColors.primary
-                        : const Color(0xFFE5E7EB)),
+                        : Theme.of(context).semantic.borderSubtle),
               ),
               child: Text(it.$2,
                   style: AppTextStyles.bodySm.copyWith(
@@ -232,7 +235,8 @@ class _BottomSheetState extends State<_BottomSheet> {
           MediaQuery.of(context).viewInsets.bottom + 20),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Container(width: 36, height: 4,
-            decoration: BoxDecoration(color: const Color(0xFFE5E7EB),
+            decoration: BoxDecoration(
+                color: Theme.of(context).semantic.borderSubtle,
                 borderRadius: BorderRadius.circular(2))),
         const SizedBox(height: 16),
         Text(l.periodCustomTitle,
@@ -339,7 +343,7 @@ class _DateBtn extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFFF9FAFB),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
       child: Row(children: [
         Icon(Icons.calendar_today_outlined, size: 14, color: AppColors.primary),
@@ -351,7 +355,7 @@ class _DateBtn extends StatelessWidget {
           Text('${date.day}/${date.month}/${date.year}',
               style: AppTextStyles.bodySm.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: const Color(0xFF0F172A))),
+                  color: Theme.of(context).colorScheme.onSurface)),
         ])),
       ]),
     ),

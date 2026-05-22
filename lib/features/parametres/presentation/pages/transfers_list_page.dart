@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/product_image_card.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
@@ -149,7 +150,7 @@ class _TransfersListPageState extends ConsumerState<TransfersListPage> {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (_) => _TransferDetailsSheet(
@@ -214,7 +215,7 @@ class _FilterBar extends StatelessWidget {
                 horizontal: 10, vertical: 8),
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: AppColors.divider)),
+                borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
           ),
         ),
       ),
@@ -260,9 +261,9 @@ class _TransferCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppColors.divider),
+          border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -402,7 +403,7 @@ class _TransferDetailsSheet extends StatelessWidget {
           children: [
             Center(child: Container(width: 36, height: 4,
                 decoration: BoxDecoration(
-                    color: AppColors.divider,
+                    color: Theme.of(context).semantic.borderSubtle,
                     borderRadius: BorderRadius.circular(2)))),
             const SizedBox(height: 12),
             Row(children: [
@@ -444,7 +445,7 @@ class _TransferDetailsSheet extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: const Color(0xFFF9FAFB),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.divider),
+                  border: Border.all(color: Theme.of(context).semantic.borderSubtle),
                 ),
                 child: Text(transfer.notes!,
                     style: AppTextStyles.bodySmSecondary.copyWith(
@@ -460,7 +461,7 @@ class _TransferDetailsSheet extends StatelessWidget {
                 shrinkWrap: true,
                 itemCount: transfer.lines.length,
                 separatorBuilder: (_, __) =>
-                    const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                    Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
                 itemBuilder: (_, i) {
                   final l = transfer.lines[i];
                   return Padding(

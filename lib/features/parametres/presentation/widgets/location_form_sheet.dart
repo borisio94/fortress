@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -461,10 +462,10 @@ class _Field extends StatelessWidget {
           horizontal: 12, vertical: 11),
       border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+          borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
       enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+          borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
       focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
@@ -523,7 +524,7 @@ class _TypeOption extends StatelessWidget {
         color: selected ? color.withValues(alpha:0.10) : const Color(0xFFF9FAFB),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: selected ? color : const Color(0xFFE5E7EB),
+          color: selected ? color : Theme.of(context).semantic.borderSubtle,
           width: selected ? 1.5 : 1,
         ),
       ),
@@ -600,7 +601,7 @@ class _ModeBtn extends StatelessWidget {
           border: Border.all(
               color: selected
                   ? AppColors.primary
-                  : const Color(0xFFE5E7EB),
+                  : Theme.of(context).semantic.borderSubtle,
               width: selected ? 1.4 : 1),
         ),
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -669,7 +670,7 @@ class _DeliveryTemplatePicker extends ConsumerWidget {
           decoration: BoxDecoration(
             color: const Color(0xFFF9FAFB),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFFE5E7EB)),
+            border: Border.all(color: Theme.of(context).semantic.borderSubtle),
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<String?>(

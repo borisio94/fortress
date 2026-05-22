@@ -1252,7 +1252,7 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
                                   color: _deliveryDate != null
                                       ? theme.colorScheme.primary
                                           .withValues(alpha: 0.5)
-                                      : const Color(0xFFE5E7EB)),
+                                      : theme.semantic.borderSubtle),
                             ),
                             child: Row(children: [
                               Icon(Icons.event_rounded,

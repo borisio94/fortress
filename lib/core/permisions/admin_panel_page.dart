@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../theme/app_theme.dart';
 import '../theme/app_text_styles.dart';
 import '../../shared/widgets/adaptive_form_frame.dart';
 import '../../shared/widgets/form_sheet.dart';
@@ -153,7 +154,7 @@ class _UsersTab extends ConsumerWidget {
     return Column(children: [
       // ── Barre recherche + filtres ───────────────────────────
       Container(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
         child: Column(children: [
           // Recherche
@@ -171,12 +172,12 @@ class _UsersTab extends ConsumerWidget {
                 isDense: true, contentPadding: EdgeInsets.zero,
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(
-                        color: Color(0xFFE5E7EB))),
+                    borderSide: BorderSide(
+                        color: Theme.of(context).semantic.borderSubtle)),
                 enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(
-                        color: Color(0xFFE5E7EB))),
+                    borderSide: BorderSide(
+                        color: Theme.of(context).semantic.borderSubtle)),
                 focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide: BorderSide(
@@ -268,12 +269,12 @@ class _UserCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: user.isBlocked
               ? const Color(0xFFFECACA)
-              : const Color(0xFFE5E7EB),
+              : Theme.of(context).semantic.borderSubtle,
           width: user.isBlocked ? 1.5 : 1,
         ),
       ),
@@ -308,7 +309,7 @@ class _UserCard extends StatelessWidget {
                   Row(children: [
                     Flexible(child: Text(user.name,
                         style: AppTextStyles.bodyBold
-                            .copyWith(color: const Color(0xFF0F172A)))),
+                            .copyWith(color: Theme.of(context).colorScheme.onSurface))),
                     const SizedBox(width: 6),
                     if (user.isSuperAdmin)
                       _Badge('Super Admin', AppColors.primary),
@@ -328,7 +329,7 @@ class _UserCard extends StatelessWidget {
             PopupMenuButton<String>(
               onSelected: (action) =>
                   _handleAction(context, action),
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
               itemBuilder: (_) => [
@@ -355,9 +356,9 @@ class _UserCard extends StatelessWidget {
         if (user.hasPlan || user.subStatus != null)
           Container(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
                 border: Border(
-                    top: BorderSide(color: Color(0xFFF0F0F0)))),
+                    top: BorderSide(color: Theme.of(context).semantic.borderSubtle))),
             child: Row(children: [
               // Plan badge
               Container(
@@ -371,7 +372,7 @@ class _UserCard extends StatelessWidget {
                   border: Border.all(
                     color: user.subActive
                         ? AppColors.primary.withValues(alpha:0.3)
-                        : const Color(0xFFE5E7EB),
+                        : Theme.of(context).semantic.borderSubtle,
                   ),
                 ),
                 child: Text(
@@ -451,7 +452,7 @@ class _UserCard extends StatelessWidget {
                   icon: Icons.block_rounded,
                   iconColor: const Color(0xFFEF4444),
                 ),
-                const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                Divider(height: 1, color: Theme.of(dc).semantic.borderSubtle),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
                   child: Column(
@@ -475,12 +476,12 @@ class _UserCard extends StatelessWidget {
                           contentPadding: const EdgeInsets.all(10),
                           border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
-                              borderSide: const BorderSide(
-                                  color: Color(0xFFE5E7EB))),
+                              borderSide: BorderSide(
+                                  color: Theme.of(dc).semantic.borderSubtle)),
                           enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
-                              borderSide: const BorderSide(
-                                  color: Color(0xFFE5E7EB))),
+                              borderSide: BorderSide(
+                                  color: Theme.of(dc).semantic.borderSubtle)),
                         ),
                       ),
                     ],
@@ -560,7 +561,7 @@ class _UserCard extends StatelessWidget {
     showDialog(
       context: context,
       builder: (dc) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(dc).colorScheme.surface,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16)),
         title: Text('Activer le compte',
@@ -615,7 +616,7 @@ class _UserCard extends StatelessWidget {
     final fmt = DateFormat('dd/MM/yyyy HH:mm');
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(
               top: Radius.circular(20))),
@@ -861,11 +862,11 @@ class _SubscriptionSheetState extends State<_SubscriptionSheet> {
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide:
-            const BorderSide(color: Color(0xFFE5E7EB))),
+            BorderSide(color: Theme.of(context).semantic.borderSubtle)),
         enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide:
-            const BorderSide(color: Color(0xFFE5E7EB))),
+            BorderSide(color: Theme.of(context).semantic.borderSubtle)),
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide(color: AppColors.primary)),
@@ -964,11 +965,11 @@ class _FilterChip extends StatelessWidget {
             horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
           color: sel
-              ? AppColors.primarySurface : Colors.white,
+              ? AppColors.primarySurface : Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
               color: sel
-                  ? AppColors.primary : const Color(0xFFE5E7EB)),
+                  ? AppColors.primary : Theme.of(context).semantic.borderSubtle),
         ),
         child: Text(label, style: AppTextStyles.caption.copyWith(
             fontWeight: sel
@@ -1026,9 +1027,9 @@ class _StatCard extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE5E7EB))),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
     child: Row(children: [
       Container(
         width: 38, height: 38,
@@ -1062,7 +1063,7 @@ class _DetailLine extends StatelessWidget {
               .copyWith(color: const Color(0xFF6B7280)))),
       Expanded(child: Text(value,
           style: AppTextStyles.captionBold
-              .copyWith(color: const Color(0xFF0F172A)))),
+              .copyWith(color: Theme.of(context).colorScheme.onSurface))),
     ]),
   );
 }
@@ -1080,11 +1081,11 @@ class _PlanBtn extends StatelessWidget {
         duration: const Duration(milliseconds: 120),
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: sel ? AppColors.primary : Colors.white,
+          color: sel ? AppColors.primary : Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
               color: sel ? AppColors.primary
-                  : const Color(0xFFE5E7EB)),
+                  : Theme.of(context).semantic.borderSubtle),
         ),
         child: Text(label, textAlign: TextAlign.center,
             style: AppTextStyles.bodySmBold.copyWith(
@@ -1109,11 +1110,11 @@ class _CycleBtn extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 7),
         decoration: BoxDecoration(
           color: sel
-              ? AppColors.primarySurface : Colors.white,
+              ? AppColors.primarySurface : Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
               color: sel ? AppColors.primary
-                  : const Color(0xFFE5E7EB)),
+                  : Theme.of(context).semantic.borderSubtle),
         ),
         child: Text(label, textAlign: TextAlign.center,
             style: AppTextStyles.captionBold.copyWith(

@@ -164,7 +164,7 @@ class _ActionRow extends ConsumerWidget {
                   title: 'Confirmation propriétaire',
                   icon: Icons.lock_outline_rounded,
                 ),
-                const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                Divider(height: 1, color: theme.semantic.borderSubtle),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
                   child: Column(

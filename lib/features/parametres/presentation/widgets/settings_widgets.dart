@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/app_switch.dart';
 
 class SettingsSectionCard extends StatelessWidget {
@@ -15,9 +16,9 @@ class SettingsSectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         ),
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         child: Column(
@@ -87,11 +88,11 @@ class SettingsField extends StatelessWidget {
                     : const Color(0xFFF3F4F6),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                  borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                  borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
@@ -99,7 +100,7 @@ class SettingsField extends StatelessWidget {
                 ),
                 disabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                  borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle),
                 ),
               ),
             ),
@@ -136,10 +137,10 @@ class SettingsSwitchTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(label,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF111827))),
+                        color: Theme.of(context).colorScheme.onSurface)),
                 if (hint != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),

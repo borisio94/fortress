@@ -155,7 +155,7 @@ class _SuperAdminDeletedHubPageState
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(48),
           child: Container(
-            color: Colors.white,
+            color: Theme.of(context).colorScheme.surface,
             child: TabBar(
               controller: _tabCtrl,
               labelColor:    AppColors.primary,

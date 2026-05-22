@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -77,12 +78,12 @@ class _CurrencyPageState extends ConsumerState<CurrencyPage> {
           return Container(
             margin: const EdgeInsets.only(bottom: 8),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: selected
                     ? AppColors.primary
-                    : const Color(0xFFE5E7EB),
+                    : Theme.of(context).semantic.borderSubtle,
                 width: selected ? 1.5 : 1,
               ),
             ),
@@ -112,7 +113,7 @@ class _CurrencyPageState extends ConsumerState<CurrencyPage> {
                       fontWeight: FontWeight.w700,
                       color: selected
                           ? AppColors.primary
-                          : const Color(0xFF111827))),
+                          : Theme.of(context).colorScheme.onSurface)),
               subtitle: Text(c.name(isFr),
                   style: const TextStyle(
                       fontSize: 12, color: Color(0xFF6B7280))),
