@@ -1805,7 +1805,8 @@ end \$\$;""",
       if (ownerId == null) return null;
       final rows = await _db.from('subscriptions')
           .select('id, plan_id, sub_status, started_at, expires_at, '
-                  'amount_paid, billing_cycle, plans(name, label)')
+                  'amount_paid, billing_cycle, '
+                  'plans!subscriptions_plan_id_fkey(name, label)')
           .eq('user_id', ownerId)
           .inFilter('sub_status', ['active', 'trial'])
           .order('expires_at', ascending: false)
@@ -1991,7 +1992,8 @@ end \$\$;""",
           .from('profiles').select('id, name, email'));
       final subs = List<Map<String, dynamic>>.from(await _db
           .from('subscriptions')
-          .select('user_id, sub_status, plans(label)'));
+          .select('user_id, sub_status, '
+                  'plans!subscriptions_plan_id_fkey(label)'));
       final pays = List<Map<String, dynamic>>.from(await _db
           .from('payment_records').select('shop_id, amount'));
       final orders = List<Map<String, dynamic>>.from(await _db
