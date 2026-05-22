@@ -704,6 +704,8 @@ class _DashboardSection extends ConsumerWidget {
                           () => context.push(RouteNames.superAdminStats)),
                   _QuickAction('Incidents', Icons.warning_amber_rounded, AppColors.error,
                           () => context.push(RouteNames.superAdminIncidents)),
+                  _QuickAction('Export', Icons.download_rounded, AppColors.primary,
+                          () => context.push(RouteNames.superAdminExport)),
                   // Accès rapide unique au hub « Éléments supprimés »
                   // (commandes + produits sous tabs, hotfix_084 + 085).
                   // Le badge sur l'icône affiche le total — le hub

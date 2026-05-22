@@ -80,4 +80,6 @@ class RouteNames {
   static const superAdminBroadcast = '/super-admin/broadcast';
   static const superAdminStats     = '/super-admin/stats';
   static const superAdminIncidents = '/super-admin/incidents';
+  /// Super-admin PR-4 : exports plateforme (CSV).
+  static const superAdminExport    = '/super-admin/export';
 }

@@ -30,6 +30,7 @@ class OrdersExportSource {
       ExportScopeShop(:final shopId)        => _collectShop(shopId),
       ExportScopePartner(:final locationId) => _collectPartner(locationId),
       ExportScopeGlobal()                    => _collectGlobal(),
+      ExportScopePlatform()                  => const <List<Object?>>[],
     };
   }
 

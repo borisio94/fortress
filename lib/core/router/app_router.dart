@@ -16,6 +16,7 @@ import '../../features/super_admin/presentation/pages/plans_page.dart';
 import '../../features/super_admin/presentation/pages/broadcast_page.dart';
 import '../../features/super_admin/presentation/pages/platform_stats_page.dart';
 import '../../features/super_admin/presentation/pages/platform_incidents_page.dart';
+import '../../features/super_admin/presentation/pages/platform_export_page.dart';
 import '../../features/super_admin/presentation/pages/super_admin_deleted_hub_page.dart';
 import '../../features/onboarding/presentation/pages/onboarding_slides_page.dart';
 import '../../features/onboarding/presentation/pages/auth_choice_page.dart';
@@ -518,6 +519,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           builder: (c, s) => const PlatformStatsPage()),
       GoRoute(path: RouteNames.superAdminIncidents,
           builder: (c, s) => const PlatformIncidentsPage()),
+      GoRoute(path: RouteNames.superAdminExport,
+          builder: (c, s) => const PlatformExportPage()),
       // Hub « Éléments supprimés » (super-admin) — tabs Commandes/Produits.
       // Les 3 paths pointent vers le même hub, seul l'onglet initial diffère.
       // Le guard d'accès est porté par la page elle-même (currentPlanProvider)

@@ -30,6 +30,7 @@ class ClientsExportSource {
       ExportScopeShop(:final shopId) => _collectShop(shopId),
       ExportScopePartner()           => const [], // n/a — selector le bloque
       ExportScopeGlobal()            => _collectGlobal(),
+      ExportScopePlatform()          => const <List<Object?>>[],
     };
   }
 

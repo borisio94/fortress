@@ -1976,6 +1976,104 @@ end \$\$;""",
     return out;
   }
 
+  /// SA-8 — récap export plateforme : une ligne par boutique avec
+  /// nom, propriétaire, plan, CA encaissé (somme payment_records),
+  /// nb de ventes (orders non supprimées) et date de création.
+  /// Retourne (header, rows) prêt pour ExportService.
+  static Future<(List<String>, List<List<Object?>>)>
+      getPlatformShopsExport() async {
+    final header = ['Boutique', 'Propriétaire', 'Plan', 'Statut',
+        'CA encaissé', 'Nb ventes', 'Créée le'];
+    try {
+      final shops = List<Map<String, dynamic>>.from(await _db.from('shops')
+          .select('id, name, owner_id, status, created_at'));
+      final profiles = List<Map<String, dynamic>>.from(await _db
+          .from('profiles').select('id, name, email'));
+      final subs = List<Map<String, dynamic>>.from(await _db
+          .from('subscriptions')
+          .select('user_id, sub_status, plans(label)'));
+      final pays = List<Map<String, dynamic>>.from(await _db
+          .from('payment_records').select('shop_id, amount'));
+      final orders = List<Map<String, dynamic>>.from(await _db
+          .from('orders').select('shop_id, deleted_at')
+          .filter('deleted_at', 'is', null));
+
+      final profById = {for (final p in profiles) p['id']: p};
+      final planByUser = {
+        for (final s in subs)
+          if (s['sub_status'] == 'active' || s['sub_status'] == 'trial')
+            s['user_id']: (s['plans'] as Map?)?['label'],
+      };
+      final caByShop = <String, double>{};
+      for (final p in pays) {
+        final sid = p['shop_id']?.toString();
+        if (sid == null) continue;
+        caByShop[sid] = (caByShop[sid] ?? 0) + ((p['amount'] as num?)?.toDouble() ?? 0);
+      }
+      final salesByShop = <String, int>{};
+      for (final o in orders) {
+        final sid = o['shop_id']?.toString();
+        if (sid != null) salesByShop[sid] = (salesByShop[sid] ?? 0) + 1;
+      }
+
+      final rows = <List<Object?>>[];
+      for (final s in shops) {
+        final owner = profById[s['owner_id']];
+        final created = DateTime.tryParse(s['created_at']?.toString() ?? '');
+        rows.add([
+          s['name'] ?? '—',
+          owner?['name'] ?? owner?['email'] ?? '—',
+          planByUser[s['owner_id']] ?? '—',
+          s['status'] == 'suspended' ? 'Suspendue' : 'Active',
+          (caByShop[s['id']] ?? 0).toStringAsFixed(0),
+          salesByShop[s['id']] ?? 0,
+          created != null
+              ? '${created.day.toString().padLeft(2, '0')}/'
+                '${created.month.toString().padLeft(2, '0')}/${created.year}'
+              : '—',
+        ]);
+      }
+      return (header, rows);
+    } catch (e) {
+      debugPrint('[DB] getPlatformShopsExport: $e');
+      return (header, <List<Object?>>[]);
+    }
+  }
+
+  /// SA-8 — export de TOUS les payment_records (toutes boutiques).
+  static Future<(List<String>, List<List<Object?>>)>
+      getPlatformPaymentsExport() async {
+    final header = ['Date', 'Boutique', 'Montant', 'Devise', 'Mode',
+        'Référence', 'Note'];
+    try {
+      final pays = List<Map<String, dynamic>>.from(await _db
+          .from('payment_records')
+          .select('amount, currency, paid_at, method, reference, note, '
+                  'shops(name)')
+          .order('paid_at', ascending: false));
+      final rows = <List<Object?>>[];
+      for (final p in pays) {
+        final d = DateTime.tryParse(p['paid_at']?.toString() ?? '');
+        rows.add([
+          d != null
+              ? '${d.day.toString().padLeft(2, '0')}/'
+                '${d.month.toString().padLeft(2, '0')}/${d.year}'
+              : '—',
+          (p['shops'] as Map?)?['name'] ?? '—',
+          (p['amount'] as num?)?.toStringAsFixed(0) ?? '0',
+          p['currency'] ?? 'XAF',
+          p['method'] ?? '—',
+          p['reference'] ?? '',
+          p['note'] ?? '',
+        ]);
+      }
+      return (header, rows);
+    } catch (e) {
+      debugPrint('[DB] getPlatformPaymentsExport: $e');
+      return (header, <List<Object?>>[]);
+    }
+  }
+
   /// Liste des plans (id, name, label) pour les sélecteurs admin.
   static Future<List<Map<String, dynamic>>> getPlansLite() async {
     try {

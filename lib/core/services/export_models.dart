@@ -44,6 +44,15 @@ class ExportScopePartner extends ExportScope {
   List<Object?> get props => [shopId, locationId];
 }
 
+/// Périmètre PLATEFORME (SA-8, super-admin uniquement) : toutes les
+/// boutiques de l'instance, sans restriction membership. La collecte
+/// passe par des requêtes Supabase protégées par la RLS super-admin.
+class ExportScopePlatform extends ExportScope {
+  const ExportScopePlatform();
+  @override
+  List<Object?> get props => const [];
+}
+
 /// Format de sortie sélectionné dans le selector.
 enum ExportFormat { csv, pdf }
 
@@ -68,20 +77,29 @@ extension ExportFormatX on ExportFormat {
 
 /// Type d'export — sert à choisir le data source et à construire le
 /// nom de fichier (`fortress_<type>_<scope>_<YYYYMMDD>`).
-enum ExportType { products, orders, clients, logs }
+enum ExportType {
+  products, orders, clients, logs,
+  // SA-8 — exports plateforme (super-admin) : récapitulatif boutiques et
+  // journal des paiements, toutes boutiques confondues.
+  platformShops, platformPayments,
+}
 
 extension ExportTypeX on ExportType {
   String get key => switch (this) {
-        ExportType.products => 'produits',
-        ExportType.orders   => 'commandes',
-        ExportType.clients  => 'clients',
-        ExportType.logs     => 'logs',
+        ExportType.products         => 'produits',
+        ExportType.orders           => 'commandes',
+        ExportType.clients          => 'clients',
+        ExportType.logs             => 'logs',
+        ExportType.platformShops    => 'plateforme-boutiques',
+        ExportType.platformPayments => 'plateforme-paiements',
       };
   String get labelFr => switch (this) {
-        ExportType.products => 'Produits',
-        ExportType.orders   => 'Commandes',
-        ExportType.clients  => 'Clients',
-        ExportType.logs     => 'Journaux',
+        ExportType.products         => 'Produits',
+        ExportType.orders           => 'Commandes',
+        ExportType.clients          => 'Clients',
+        ExportType.logs             => 'Journaux',
+        ExportType.platformShops    => 'Boutiques (plateforme)',
+        ExportType.platformPayments => 'Paiements (plateforme)',
       };
 }
 
@@ -123,6 +141,7 @@ class ExportConfig extends Equatable {
       ExportScopeGlobal()        => 'global',
       ExportScopeShop(:final shopId) => 'shop_$shopId',
       ExportScopePartner(:final locationId) => 'partner_$locationId',
+      ExportScopePlatform()      => 'plateforme',
     };
     return 'fortress_${type.key}_${scopeKey}_$ymd';
   }

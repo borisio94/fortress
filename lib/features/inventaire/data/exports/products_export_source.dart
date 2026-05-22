@@ -52,6 +52,7 @@ class ProductsExportSource {
       ExportScopePartner(:final shopId, :final locationId) =>
           _collectPartner(shopId, locationId),
       ExportScopeGlobal()                    => _collectGlobal(),
+      ExportScopePlatform()                  => const <List<Object?>>[],
     };
   }
 

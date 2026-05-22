@@ -115,6 +115,7 @@ class LogsExportSource {
               .map((s) => s.id)
               .toList();
         }(),
+      ExportScopePlatform() => const <String>[],
     };
   }
 
