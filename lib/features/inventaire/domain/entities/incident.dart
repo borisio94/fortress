@@ -30,6 +30,33 @@ extension IncidentTypeX on IncidentType {
   };
 }
 
+// ─── Sévérité incident ───────────────────────────────────────────────────────
+
+enum IncidentSeverity { normal, critical }
+
+extension IncidentSeverityX on IncidentSeverity {
+  String get label => switch (this) {
+    IncidentSeverity.normal   => 'Normal',
+    IncidentSeverity.critical => 'Critique',
+  };
+  String get key => name; // 'normal' | 'critical'
+
+  static IncidentSeverity fromString(String? s) =>
+      s == 'critical' ? IncidentSeverity.critical : IncidentSeverity.normal;
+
+  /// Sévérité par défaut dérivée du type d'incident. Sont CRITIQUES les
+  /// incidents qui retirent définitivement du stock vendable / représentent
+  /// une perte ou un litige : rebut (`scrapped`, inclut les anomalies
+  /// d'audit) et retour fournisseur. Les autres (vente remisée, réparation —
+  /// récupérables) restent normaux.
+  static IncidentSeverity deriveFor(IncidentType type) => switch (type) {
+    IncidentType.scrapped       => IncidentSeverity.critical,
+    IncidentType.returnSupplier => IncidentSeverity.critical,
+    IncidentType.discounted     => IncidentSeverity.normal,
+    IncidentType.inRepair       => IncidentSeverity.normal,
+  };
+}
+
 // ─── Statut incident ─────────────────────────────────────────────────────────
 
 enum IncidentStatus { pending, inProgress, resolved, cancelled }
@@ -63,6 +90,7 @@ class Incident extends Equatable {
   final String  productName;
   final IncidentType   type;
   final IncidentStatus status;
+  final IncidentSeverity severity;
   final int     quantity;
   final double  repairCost;
   final double  salePrice;   // prix réduit si type=discounted
@@ -80,6 +108,7 @@ class Incident extends Equatable {
     required this.productName,
     required this.type,
     this.status     = IncidentStatus.pending,
+    this.severity   = IncidentSeverity.normal,
     this.quantity   = 1,
     this.repairCost = 0,
     this.salePrice  = 0,
@@ -98,6 +127,7 @@ class Incident extends Equatable {
     'product_id': productId, 'variant_id': variantId,
     'product_name': productName,
     'type': type.key, 'status': status.key,
+    'severity': severity.key,
     'quantity': quantity, 'repair_cost': repairCost,
     'sale_price': salePrice,
     'notes': notes, 'reception_id': receptionId,
@@ -114,6 +144,7 @@ class Incident extends Equatable {
     productName:  m['product_name'] as String? ?? '',
     type:         IncidentTypeX.fromString(m['type'] as String?),
     status:       IncidentStatusX.fromString(m['status'] as String?),
+    severity:     IncidentSeverityX.fromString(m['severity'] as String?),
     quantity:     m['quantity'] as int? ?? 1,
     repairCost:   (m['repair_cost'] as num?)?.toDouble() ?? 0,
     salePrice:    (m['sale_price'] as num?)?.toDouble() ?? 0,

@@ -152,7 +152,8 @@ class StockService {
     final incident = Incident(
       id: 'inc_${now.microsecondsSinceEpoch}',
       shopId: shopId, productId: productId, variantId: variantId,
-      productName: productName, type: incType, quantity: quantity,
+      productName: productName, type: incType,
+      severity: IncidentSeverityX.deriveFor(incType), quantity: quantity,
       notes: 'Incident $status — $cause${notes != null ? ' — $notes' : ''}',
       createdBy: user?.name, createdAt: now,
     );
@@ -501,6 +502,7 @@ class StockService {
       id: 'inc_${now.microsecondsSinceEpoch}',
       shopId: shopId, productId: productId, variantId: variantId,
       productName: productName, type: IncidentType.inRepair,
+      severity: IncidentSeverityX.deriveFor(IncidentType.inRepair),
       quantity: quantity, notes: 'Retour client défectueux',
       createdBy: user?.name, createdAt: now,
     );
@@ -1729,6 +1731,7 @@ class StockService {
       variantId:   r.variantId,
       productName: '${r.productName} — ${r.variantName}',
       type:        IncidentType.scrapped, // type existant le + proche d'« anomalie »
+      severity:    IncidentSeverity.critical, // anomalie d'audit = toujours critique
       quantity:    reportedQty,
       notes:       'Audit stock — ${r.diagnostic}. '
                    'État : physique ${r.physical}, '
