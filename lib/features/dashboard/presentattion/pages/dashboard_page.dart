@@ -114,7 +114,7 @@ class _DashBodyState extends ConsumerState<_DashBody> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => _PeriodPicker(
@@ -483,7 +483,7 @@ class _DashboardHeader extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: theme.semantic.borderSubtle),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 6, offset: const Offset(0, 2))],
       ),
@@ -817,7 +817,7 @@ class _FinancialSummaryCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: theme.semantic.borderSubtle),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 4, offset: const Offset(0,2))],
       ),
@@ -1558,18 +1558,21 @@ class _DashCard extends StatelessWidget {
   final Widget child;
   const _DashCard({required this.child});
   @override
-  Widget build(BuildContext context) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: AppColors.divider),
-      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
-          blurRadius: 5, offset: const Offset(0,2))],
-    ),
-    child: child,
-  );
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: theme.semantic.borderSubtle),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
+            blurRadius: 5, offset: const Offset(0,2))],
+      ),
+      child: child,
+    );
+  }
 }
 
 class _CardHeader extends StatelessWidget {

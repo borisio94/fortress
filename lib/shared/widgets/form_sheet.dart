@@ -19,7 +19,8 @@ Future<T?> showFormSheet<T>({
     isScrollControlled: isScrollControlled,
     isDismissible: false,
     enableDrag: false,
-    backgroundColor: backgroundColor ?? Colors.white,
+    backgroundColor:
+        backgroundColor ?? Theme.of(context).colorScheme.surface,
     shape: shape ??
         const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),

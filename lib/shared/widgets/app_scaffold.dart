@@ -7,6 +7,7 @@ import '../../core/permisions/permission_guard.dart';
 import '../../core/services/notification_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/i18n/app_localizations.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../features/caisse/presentation/bloc/caisse_bloc.dart';
@@ -120,7 +121,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
 
   Widget _buildDesktop(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Row(children: [
         ClipRect(
           child: AnimatedContainer(
@@ -134,10 +135,10 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
             ),
           ),
         ),
-        Container(width: 1, color: const Color(0xFFF0F0F0)),
+        Container(width: 1, color: Theme.of(context).semantic.borderSubtle),
         Expanded(
           child: Scaffold(
-            backgroundColor: AppColors.background,
+            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
             appBar: _buildAppBar(context, isDesktop: true) as PreferredSizeWidget,
             body: OfflineBlockGuard(
               child: Column(
@@ -159,7 +160,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
 
   Widget _buildMobile(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       drawer: widget.isRootPage ? AppDrawer(shopId: widget.shopId) : null,
       appBar: _buildAppBar(context, isDesktop: false) as PreferredSizeWidget,
       body: OfflineBlockGuard(
@@ -179,8 +180,9 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
   }
 
   Widget _buildAppBar(BuildContext context, {required bool isDesktop}) {
+    final theme = Theme.of(context);
     return AppBar(
-      backgroundColor: Colors.white,
+      backgroundColor: theme.colorScheme.surface,
       elevation: 0,
       scrolledUnderElevation: 0,
       leading: _buildLeading(context, isDesktop: isDesktop),
@@ -199,7 +201,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
       ],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),
-        child: Container(height: 1, color: const Color(0xFFF0F0F0)),
+        child: Container(height: 1, color: theme.semantic.borderSubtle),
       ),
     );
   }
@@ -208,7 +210,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
     if (!widget.isRootPage) {
       return IconButton(
         icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
-        color: AppColors.textPrimary,
+        color: Theme.of(context).colorScheme.onSurface,
         onPressed: () {
           if (context.canPop()) context.pop();
           else context.go('/shop/${widget.shopId}/dashboard');

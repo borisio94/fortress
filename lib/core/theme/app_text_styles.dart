@@ -40,6 +40,15 @@ class AppTextStyles {
 
   // ════════════════════════════════════════════════════════════════════
   //  ÉCHELLE CANONIQUE — à utiliser partout
+  //
+  //  ⚠ COULEUR (mode sombre) : les échelons de texte PRINCIPAL (body,
+  //  label, subtitle, title, display, input…) n'ont VOLONTAIREMENT PAS
+  //  de `color`. Ils héritent donc de `textTheme.bodyMedium` du thème
+  //  courant (sombre en clair, clair en sombre) — c'est ce qui rend le
+  //  texte lisible en mode sombre sans toucher chaque `Text()`.
+  //  → Ne PAS réintroduire `color: AppColors.textPrimary` ici.
+  //  Les variantes `*Secondary` / `*Hint` gardent une couleur grise
+  //  (hiérarchie visuelle) qui reste lisible dans les deux modes.
   // ════════════════════════════════════════════════════════════════════
 
   // ── 1. micro (10) ────────────────────────────────────────────────────
@@ -63,28 +72,28 @@ class AppTextStyles {
 
   // ── 3. bodySm (12) ───────────────────────────────────────────────────
   static const bodySm = TextStyle(
-      fontSize: 12, height: 1.45, color: AppColors.textPrimary);
+      fontSize: 12, height: 1.45);
   static const bodySmSecondary = TextStyle(
       fontSize: 12, height: 1.45, color: AppColors.textSecondary);
   static const bodySmBold = TextStyle(
       fontSize: 12, height: 1.45,
-      fontWeight: FontWeight.w700, color: AppColors.textPrimary);
+      fontWeight: FontWeight.w700);
 
   // ── 4. body (13) — CORPS PAR DÉFAUT ──────────────────────────────────
   static const body = TextStyle(
-      fontSize: 13, height: 1.5, color: AppColors.textPrimary);
+      fontSize: 13, height: 1.5);
   static const bodySecondary = TextStyle(
       fontSize: 13, height: 1.5, color: AppColors.textSecondary);
   static const bodyBold = TextStyle(
       fontSize: 13, height: 1.5,
-      fontWeight: FontWeight.w700, color: AppColors.textPrimary);
+      fontWeight: FontWeight.w700);
 
   // ── 5. label (14) — saisie / boutons / listes ────────────────────────
   static const label = TextStyle(
       fontSize: 14, height: 1.4,
-      fontWeight: FontWeight.w600, color: AppColors.textPrimary);
+      fontWeight: FontWeight.w600);
   static const labelRegular = TextStyle(
-      fontSize: 14, height: 1.4, color: AppColors.textPrimary);
+      fontSize: 14, height: 1.4);
   static const labelSecondary = TextStyle(
       fontSize: 14, height: 1.4, color: AppColors.textSecondary);
 
@@ -92,7 +101,7 @@ class AppTextStyles {
   /// sans gras. UNIQUE référence pour la taille de saisie de toute l'app
   /// → plus aucun champ « trop grand / trop petit ».
   static const input = TextStyle(
-      fontSize: 14, height: 1.3, color: AppColors.textPrimary);
+      fontSize: 14, height: 1.3);
 
   /// Placeholder / hint d'un champ — même taille que [input], couleur hint.
   static const inputHint = TextStyle(
@@ -101,20 +110,20 @@ class AppTextStyles {
   // ── 6. subtitle (16) — sous-titres / titres de card / dialogue ───────
   static const subtitle = TextStyle(
       fontSize: 16, height: 1.35,
-      fontWeight: FontWeight.w600, color: AppColors.textPrimary);
+      fontWeight: FontWeight.w600);
   static const subtitleBold = TextStyle(
       fontSize: 16, height: 1.35,
-      fontWeight: FontWeight.w700, color: AppColors.textPrimary);
+      fontWeight: FontWeight.w700);
 
   // ── 7. title (18) — titres de page / section ─────────────────────────
   static const title = TextStyle(
       fontSize: 18, height: 1.3,
-      fontWeight: FontWeight.w700, color: AppColors.textPrimary);
+      fontWeight: FontWeight.w700);
 
   // ── + display (24) — gros chiffres KPI uniquement ────────────────────
   static const display = TextStyle(
       fontSize: 24, height: 1.2,
-      fontWeight: FontWeight.w800, color: AppColors.textPrimary);
+      fontWeight: FontWeight.w800);
 
   // ════════════════════════════════════════════════════════════════════
   //  ALIAS HÉRITÉS — @Deprecated, conservés pour compat (ne pas réutiliser)

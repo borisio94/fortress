@@ -550,7 +550,20 @@ class AppTheme {
     ),
   );
 
-  // ── Thème sombre (minimal) ───────────────────────────────────────────────
+  // ── Thème sombre ─────────────────────────────────────────────────────────
+  // Palette Slate (Tailwind) cohérente avec `AppSemanticColors.darkForBrand`
+  // (elevatedSurface 0xFF1E293B, borderSubtle 0xFF334155). Ces constantes
+  // sont les pendants sombres des `AppColors.*` fixes utilisées par le
+  // light theme — on les définit ici plutôt que dans AppColors pour ne pas
+  // exposer de tokens « dark » statiques qui seraient lus hors thème.
+  static const Color _dScaffold = Color(0xFF0F172A); // slate 900
+  static const Color _dSurface  = Color(0xFF1E293B); // slate 800
+  static const Color _dBorder   = Color(0xFF334155); // slate 700
+  static const Color _dInputFill = Color(0xFF334155);
+  static const Color _dTextPrimary   = Color(0xFFF1F5F9); // slate 100
+  static const Color _dTextSecondary = Color(0xFF94A3B8); // slate 400
+  static const Color _dTextHint      = Color(0xFF64748B); // slate 500
+
   static ThemeData dark({ThemePalette? palette}) {
     final p = palette ?? kDefaultPalette;
     return ThemeData(
@@ -562,8 +575,212 @@ class AppTheme {
       colorScheme: ColorScheme.fromSeed(
         seedColor: p.primary,
         brightness: Brightness.dark,
-        surface:   const Color(0xFF1E293B),
-        onSurface: Colors.white,
+        // primaryLight reste lisible sur fond sombre (le primary brut
+        // peut être trop foncé pour certaines palettes : Midnight, Indigo).
+        primary:   p.primaryLight,
+        surface:   _dSurface,
+        onSurface: _dTextPrimary,
+        // Force les conteneurs M3 sur la surface slate plutôt que les
+        // teintes violettes auto-générées (miroir du light theme).
+        surfaceContainerHighest: _dSurface,
+        surfaceContainerHigh:    _dSurface,
+        surfaceContainer:        _dSurface,
+        surfaceContainerLow:     _dSurface,
+        surfaceContainerLowest:  _dScaffold,
+      ),
+      scaffoldBackgroundColor: _dScaffold,
+
+      appBarTheme: const AppBarTheme(
+        elevation: 0,
+        centerTitle: true,
+        backgroundColor: _dSurface,
+        foregroundColor: _dTextPrimary,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+      ),
+
+      cardTheme: CardThemeData(
+        elevation: 0,
+        color: _dSurface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: _dBorder, width: 1),
+        ),
+        margin: const EdgeInsets.symmetric(vertical: 6),
+      ),
+
+      dialogTheme: DialogThemeData(
+        backgroundColor: _dSurface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 8,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        titleTextStyle: const TextStyle(
+          fontSize: 16, fontWeight: FontWeight.w700, color: _dTextPrimary,
+        ),
+        contentTextStyle: const TextStyle(
+          fontSize: 13, color: _dTextSecondary, height: 1.5,
+        ),
+      ),
+
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: _dSurface,
+        surfaceTintColor: Colors.transparent,
+        modalBackgroundColor: _dSurface,
+        modalElevation: 16,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+      ),
+
+      popupMenuTheme: PopupMenuThemeData(
+        color: _dSurface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 6,
+        shadowColor: Colors.black.withValues(alpha: 0.4),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        textStyle: const TextStyle(
+          fontSize: 13, color: _dTextPrimary, fontWeight: FontWeight.w500,
+        ),
+      ),
+
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: const Color(0xFF334155),
+        contentTextStyle: const TextStyle(
+          color: _dTextPrimary, fontSize: 13, fontWeight: FontWeight.w500,
+        ),
+        actionTextColor: p.primaryLight,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        elevation: 4,
+      ),
+
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: const Color(0xFF475569),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        textStyle: const TextStyle(color: _dTextPrimary, fontSize: 11),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      ),
+
+      dividerTheme: const DividerThemeData(
+        color: _dBorder, thickness: 1, space: 24,
+      ),
+
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: _dInputFill,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: _dBorder)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: _dBorder)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: p.primaryLight, width: 1.5)),
+        errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.error)),
+        focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.error, width: 1.5)),
+        hintStyle: const TextStyle(color: _dTextHint, fontSize: 14),
+        labelStyle: const TextStyle(color: _dTextSecondary),
+        prefixIconColor: _dTextSecondary,
+        suffixIconColor: _dTextSecondary,
+      ),
+
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: p.primaryLight,
+          foregroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          minimumSize: const Size(double.infinity, 52),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600,
+              letterSpacing: 0.3),
+        ),
+      ),
+
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: _dTextPrimary,
+          minimumSize: const Size(double.infinity, 52),
+          side: const BorderSide(color: _dBorder),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+        ),
+      ),
+
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: p.primaryLight,
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+        ),
+      ),
+
+      listTileTheme: const ListTileThemeData(
+        titleTextStyle: TextStyle(
+          fontSize: 14, fontWeight: FontWeight.w600, height: 1.4,
+          color: _dTextPrimary,
+        ),
+        subtitleTextStyle: TextStyle(
+          fontSize: 12, height: 1.45, color: _dTextSecondary,
+        ),
+        iconColor: _dTextSecondary,
+        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      ),
+
+      drawerTheme: const DrawerThemeData(
+        backgroundColor: _dSurface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+      ),
+
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: _dSurface,
+        indicatorColor: p.primaryLight.withValues(alpha: 0.18),
+        surfaceTintColor: Colors.transparent,
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+                color: p.primaryLight);
+          }
+          return const TextStyle(fontSize: 11, color: _dTextSecondary);
+        }),
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return IconThemeData(color: p.primaryLight, size: 22);
+          }
+          return const IconThemeData(color: _dTextSecondary, size: 22);
+        }),
+      ),
+
+      textTheme: const TextTheme(
+        headlineLarge:  TextStyle(fontSize: 24, fontWeight: FontWeight.w800,
+            color: _dTextPrimary, height: 1.2),
+        headlineMedium: TextStyle(fontSize: 24, fontWeight: FontWeight.w800,
+            color: _dTextPrimary, height: 1.2),
+        headlineSmall:  TextStyle(fontSize: 18, fontWeight: FontWeight.w700,
+            color: _dTextPrimary, height: 1.3),
+        titleLarge:     TextStyle(fontSize: 18, fontWeight: FontWeight.w700,
+            color: _dTextPrimary, height: 1.3),
+        titleMedium:    TextStyle(fontSize: 16, fontWeight: FontWeight.w600,
+            color: _dTextPrimary, height: 1.35),
+        titleSmall:     TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
+            color: _dTextPrimary, height: 1.4),
+        bodyLarge:      TextStyle(fontSize: 14, color: _dTextPrimary,
+            height: 1.3),
+        bodyMedium:     TextStyle(fontSize: 13, color: _dTextPrimary,
+            height: 1.5),
+        bodySmall:      TextStyle(fontSize: 12, color: _dTextSecondary,
+            height: 1.45),
+        labelLarge:     TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
+            color: _dTextPrimary, height: 1.4),
+        labelMedium:    TextStyle(fontSize: 11, fontWeight: FontWeight.w500,
+            color: _dTextSecondary, height: 1.35),
+        labelSmall:     TextStyle(fontSize: 10, color: _dTextHint,
+            height: 1.3),
       ),
     );
   }
