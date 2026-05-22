@@ -162,12 +162,12 @@ class _DeleteSaleDialogState extends State<DeleteSaleDialog> {
                   counterStyle: AppTextStyles.micro,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(
+                    borderSide: BorderSide(
                         color: AppColors.inputBorder),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(
+                    borderSide: BorderSide(
                         color: AppColors.inputBorder),
                   ),
                   focusedBorder: OutlineInputBorder(

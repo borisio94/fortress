@@ -706,7 +706,7 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
             ? Center(
             child: Column(
                 mainAxisSize: MainAxisSize.min, children: [
-              const Icon(Icons.person_off_outlined,
+              Icon(Icons.person_off_outlined,
                   size: 36, color: AppColors.divider),
               const SizedBox(height: 8),
               Text(
@@ -720,7 +720,7 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
           controller:  sc,
           padding: const EdgeInsets.symmetric(vertical: 4),
           itemCount:   _filtered.length,
-          separatorBuilder: (_, __) => const Divider(
+          separatorBuilder: (_, __) => Divider(
               height: 1, color: AppColors.inputFill,
               indent: 56),
           itemBuilder: (_, i) {
@@ -1612,7 +1612,7 @@ class _EmptyCart extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Center(
     child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const Icon(Icons.shopping_cart_outlined,
+      Icon(Icons.shopping_cart_outlined,
           size: 40, color: AppColors.divider),
       const SizedBox(height: 10),
       Text(l.caisseEmpty,

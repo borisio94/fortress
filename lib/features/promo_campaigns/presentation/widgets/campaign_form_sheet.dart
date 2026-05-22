@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_field.dart';
@@ -384,15 +385,15 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
                   prefixIcon: const Icon(Icons.search_rounded, size: 18),
                   isDense: true,
                   filled: true,
-                  fillColor: const Color(0xFFF9FAFB),
+                  fillColor: Theme.of(context).colorScheme.surface,
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide:
-                          const BorderSide(color: Color(0xFFE5E7EB))),
+                      borderSide: BorderSide(
+                          color: Theme.of(context).semantic.borderSubtle)),
                   enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide:
-                          const BorderSide(color: Color(0xFFE5E7EB))),
+                      borderSide: BorderSide(
+                          color: Theme.of(context).semantic.borderSubtle)),
                 ),
               ),
               const SizedBox(height: 8),
@@ -429,7 +430,7 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
             ],
           ),
         ),
-        const Divider(height: 1, color: Color(0xFFF0F0F0)),
+        Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
         Padding(
           padding: const EdgeInsets.all(14),
           child: SizedBox(
@@ -484,12 +485,12 @@ class _TypeRadio extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected
               ? AppColors.primary.withValues(alpha: 0.08)
-              : const Color(0xFFF9FAFB),
+              : Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
               color: selected
                   ? AppColors.primary
-                  : const Color(0xFFE5E7EB),
+                  : Theme.of(context).semantic.borderSubtle,
               width: selected ? 1.5 : 1),
         ),
         child: Column(children: [
@@ -500,8 +501,9 @@ class _TypeRadio extends StatelessWidget {
           Text(label,
               style: AppTextStyles.bodySm.copyWith(
                   fontWeight: FontWeight.w700,
-                  color:
-                      selected ? AppColors.primary : AppColors.textPrimary)),
+                  color: selected
+                      ? AppColors.primary
+                      : Theme.of(context).colorScheme.onSurface)),
         ]),
       ),
     );
@@ -598,9 +600,9 @@ class _DateRow extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
-          color: const Color(0xFFF9FAFB),
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         ),
         child: Row(children: [
           Icon(icon, size: 16, color: AppColors.textSecondary),
@@ -615,7 +617,8 @@ class _DateRow extends StatelessWidget {
                     '${v.minute.toString().padLeft(2, '0')}',
               style: AppTextStyles.body.copyWith(
                   color: v == null
-                      ? AppColors.textHint : AppColors.textPrimary),
+                      ? AppColors.textHint
+                      : Theme.of(context).colorScheme.onSurface),
             ),
           ),
           if (v != null && onClear != null)

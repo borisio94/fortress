@@ -584,7 +584,7 @@ class _TransferDeliverySheetState
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFF9FAFB),
+              color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
                   color: Theme.of(context).semantic.borderSubtle),

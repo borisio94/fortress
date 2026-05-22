@@ -1445,7 +1445,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 8),
-                  const Divider(height: 1, color: AppColors.inputFill),
+                  Divider(height: 1, color: AppColors.inputFill),
                   const SizedBox(height: 8),
 
                   // Articles
@@ -1492,14 +1492,14 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   ],
 
                   const SizedBox(height: 8),
-                  const Divider(height: 1, color: AppColors.inputFill),
+                  Divider(height: 1, color: AppColors.inputFill),
                   const SizedBox(height: 8),
 
                   // ── Détails complets (paiement, livraison, expédition,
                   //    décomposition financière). Visible dans l'expand.
                   _OrderDetailsBlock(order: widget.order),
                   const SizedBox(height: 8),
-                  const Divider(height: 1, color: AppColors.inputFill),
+                  Divider(height: 1, color: AppColors.inputFill),
                   const SizedBox(height: 8),
 
                   // Relance WhatsApp : visible pour les commandes non finalisées
@@ -2990,7 +2990,7 @@ class _OrderDetailsBlock extends StatelessWidget {
 
         // ─── Décomposition financière ─────────────────────────────
         const SizedBox(height: 8),
-        const Divider(height: 1, color: AppColors.inputFill),
+        Divider(height: 1, color: AppColors.inputFill),
         const SizedBox(height: 6),
         _MoneyLine(label: 'Sous-total', value: _money(order.subtotal)),
         if (order.discountAmount > 0)

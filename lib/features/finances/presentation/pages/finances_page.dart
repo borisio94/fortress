@@ -521,7 +521,7 @@ class _SalesBarChart extends StatelessWidget {
                     show: true,
                     drawVerticalLine: false,
                     horizontalInterval: chartMax / 4,
-                    getDrawingHorizontalLine: (_) => const FlLine(
+                    getDrawingHorizontalLine: (_) => FlLine(
                       color: AppColors.inputFill,
                       strokeWidth: 1,
                     ),

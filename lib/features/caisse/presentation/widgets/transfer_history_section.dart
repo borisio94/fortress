@@ -41,7 +41,7 @@ class TransferHistorySection extends ConsumerWidget {
           margin: const EdgeInsets.only(top: 8),
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: const Color(0xFFF9FAFB),
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: Theme.of(context).semantic.borderSubtle),
           ),

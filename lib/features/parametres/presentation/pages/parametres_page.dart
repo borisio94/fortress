@@ -473,7 +473,7 @@ class _Section extends StatelessWidget {
             for (int i = 0; i < tiles.length; i++) ...[
               tiles[i],
               if (i < tiles.length - 1)
-                const Divider(height: 1, indent: 56,
+                Divider(height: 1, indent: 56,
                     color: AppColors.inputFill),
             ],
           ]),
@@ -673,7 +673,7 @@ class _DangerGateState extends State<_DangerGate> {
                   Text('Saisissez votre code PIN pour déverrouiller',
                       style: AppTextStyles.captionHint),
                 ])),
-                const Icon(Icons.chevron_right_rounded,
+                Icon(Icons.chevron_right_rounded,
                     size: 16, color: AppColors.divider),
               ]),
             ),
@@ -866,7 +866,7 @@ class _DangerSection extends ConsumerWidget {
               Text(subtitle, style: AppTextStyles.captionHint),
             ])),
             if (trailingChevron)
-              const Icon(Icons.chevron_right_rounded,
+              Icon(Icons.chevron_right_rounded,
                   size: 16, color: AppColors.divider),
           ]),
         ),
@@ -1378,7 +1378,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
                 Expanded(child: OutlinedButton(
                   onPressed: _loading ? null : () => _goTo(_page - 1),
                   style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.divider),
+                      side: BorderSide(color: AppColors.divider),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10))),
@@ -1453,10 +1453,10 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
             contentPadding: const EdgeInsets.all(12),
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: AppColors.divider)),
+                borderSide: BorderSide(color: AppColors.divider)),
             enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: AppColors.divider)),
+                borderSide: BorderSide(color: AppColors.divider)),
             focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide(
@@ -1547,10 +1547,10 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
           ),
           border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.divider)),
+              borderSide: BorderSide(color: AppColors.divider)),
           enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.divider)),
+              borderSide: BorderSide(color: AppColors.divider)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: BorderSide(color: AppColors.error, width: 1.5)),

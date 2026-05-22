@@ -844,7 +844,7 @@ class _FinancialSummaryCard extends StatelessWidget {
         _row(l.dashProductCost, '−${_fmt(productCost)} ${CurrencyFormatter.currentSymbol}',
             AppColors.textSecondary),
         const SizedBox(height: 8),
-        const Divider(height: 1, color: AppColors.divider),
+        Divider(height: 1, color: AppColors.divider),
         const SizedBox(height: 8),
         _row(l.dashNetProfit,
             '${isPositive ? '+' : ''}${_fmt(net)} ${CurrencyFormatter.currentSymbol}',
@@ -966,7 +966,7 @@ class _SalesBarChart extends StatelessWidget {
                       show: true,
                       drawVerticalLine: false,
                       horizontalInterval: chartMax / 4,
-                      getDrawingHorizontalLine: (_) => const FlLine(
+                      getDrawingHorizontalLine: (_) => FlLine(
                         color: AppColors.inputFill,
                         strokeWidth: 1,
                       ),

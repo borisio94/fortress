@@ -509,7 +509,7 @@ class _SADrawerContent extends ConsumerWidget {
           OutlinedButton(
             onPressed: () => Navigator.of(ctx).pop(),
             style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: AppColors.inputBorder),
+                side: BorderSide(color: AppColors.inputBorder),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10)),
                 padding: const EdgeInsets.symmetric(
@@ -1572,9 +1572,9 @@ class _FilterBar extends StatelessWidget {
             filled: true, fillColor: AppColors.inputFill,
             isDense: true, contentPadding: EdgeInsets.zero,
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: AppColors.inputBorder)),
+                borderSide: BorderSide(color: AppColors.inputBorder)),
             enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: AppColors.inputBorder)),
+                borderSide: BorderSide(color: AppColors.inputBorder)),
             focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
                 borderSide: BorderSide(color: AppColors.primary)),
           ),
@@ -2393,7 +2393,7 @@ class _SettingsCard extends StatelessWidget {
       for (int i = 0; i < items.length; i++) ...[
         items[i],
         if (i < items.length - 1)
-          const Divider(height: 1, indent: 56, color: AppColors.inputFill),
+          Divider(height: 1, indent: 56, color: AppColors.inputFill),
       ],
     ]),
   );
@@ -2503,9 +2503,9 @@ class _Field extends StatelessWidget {
       filled: true, fillColor: AppColors.inputFill, isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppColors.inputBorder)),
+          borderSide: BorderSide(color: AppColors.inputBorder)),
       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppColors.inputBorder)),
+          borderSide: BorderSide(color: AppColors.inputBorder)),
       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(color: AppColors.primary)),
     ),
@@ -2671,7 +2671,7 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
         OutlinedButton(
           onPressed: _loading ? null : () => Navigator.of(context).pop(),
           style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: AppColors.inputBorder),
+              side: BorderSide(color: AppColors.inputBorder),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10))),
           child: const Text('Annuler',
@@ -2920,7 +2920,7 @@ class _SaDangerReauthDialogState extends State<_SaDangerReauthDialog> {
         OutlinedButton(
           onPressed: _loading ? null : () => Navigator.of(context).pop(),
           style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: AppColors.inputBorder),
+              side: BorderSide(color: AppColors.inputBorder),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10))),
           child: const Text('Annuler',
@@ -3059,7 +3059,7 @@ void _showLogoutConfirm(BuildContext context) {
         OutlinedButton(
           onPressed: () => Navigator.of(ctx).pop(),
           style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: AppColors.inputBorder),
+              side: BorderSide(color: AppColors.inputBorder),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10)),

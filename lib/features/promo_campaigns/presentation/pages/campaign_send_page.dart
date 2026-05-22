@@ -8,6 +8,7 @@ import '../../../../core/services/whatsapp/whatsapp_template_renderer.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/phone_formatter.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -192,7 +193,7 @@ class _CampaignSendPageState extends ConsumerState<CampaignSendPage> {
                 loadingPreview: _loadingPreview,
               ),
               Container(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 child: Row(children: [
@@ -205,15 +206,15 @@ class _CampaignSendPageState extends ConsumerState<CampaignSendPage> {
                             const Icon(Icons.search_rounded, size: 18),
                         isDense: true,
                         filled: true,
-                        fillColor: const Color(0xFFF9FAFB),
+                        fillColor: Theme.of(context).colorScheme.surface,
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(
-                                color: Color(0xFFE5E7EB))),
+                            borderSide: BorderSide(
+                                color: Theme.of(context).semantic.borderSubtle)),
                         enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(
-                                color: Color(0xFFE5E7EB))),
+                            borderSide: BorderSide(
+                                color: Theme.of(context).semantic.borderSubtle)),
                       ),
                     ),
                   ),
@@ -228,7 +229,7 @@ class _CampaignSendPageState extends ConsumerState<CampaignSendPage> {
                 ]),
               ),
               Container(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 padding: const EdgeInsets.symmetric(
                     horizontal: 16, vertical: 6),
                 child: Row(children: [
@@ -331,9 +332,9 @@ class _Header extends StatelessWidget {
             padding:
                 const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: AppColors.divider),
+              border: Border.all(color: Theme.of(context).semantic.borderSubtle),
             ),
             child: Row(children: [
               Icon(Icons.link_rounded,
@@ -396,7 +397,7 @@ class _ClientTile extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         color: sent
                             ? AppColors.textHint
-                            : AppColors.textPrimary)),
+                            : Theme.of(context).colorScheme.onSurface)),
                 Text(client.phone ?? '',
                     style: AppTextStyles.caption),
               ],

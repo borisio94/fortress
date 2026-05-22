@@ -2083,7 +2083,7 @@ class _PendingInvitationsState extends State<_PendingInvitations> {
                   ]),
                 ),
                 if (i < _invitations.length - 1)
-                  const Divider(height: 1, indent: 56,
+                  Divider(height: 1, indent: 56,
                       color: AppColors.inputFill),
               ]);
             }).toList(),

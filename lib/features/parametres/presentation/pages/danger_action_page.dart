@@ -310,10 +310,10 @@ class _DangerActionPageState extends State<DangerActionPage> {
               horizontal: 12, vertical: 12),
           border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.divider)),
+              borderSide: BorderSide(color: AppColors.divider)),
           enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: AppColors.divider)),
+              borderSide: BorderSide(color: AppColors.divider)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: const BorderSide(color: AppColors.error, width: 1.5)),
@@ -343,10 +343,10 @@ class _DangerActionPageState extends State<DangerActionPage> {
             ),
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: AppColors.divider)),
+                borderSide: BorderSide(color: AppColors.divider)),
             enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: AppColors.divider)),
+                borderSide: BorderSide(color: AppColors.divider)),
             focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: const BorderSide(color: AppColors.error, width: 1.5)),
@@ -446,7 +446,7 @@ class _Footer extends StatelessWidget {
           Expanded(child: OutlinedButton(
             onPressed: loading ? null : onBack,
             style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: AppColors.divider),
+                side: BorderSide(color: AppColors.divider),
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10))),

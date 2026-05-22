@@ -1246,7 +1246,7 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 12, vertical: 12),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF9FAFB),
+                              color: theme.colorScheme.surface,
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(
                                   color: _deliveryDate != null

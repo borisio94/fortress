@@ -2148,7 +2148,7 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                    color: const Color(0xFFF9FAFB),
+                    color: Theme.of(context).colorScheme.surface,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
                 child: Column(children: [

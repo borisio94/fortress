@@ -270,7 +270,7 @@ class AppTheme {
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: AppColors.divider, width: 1),
+        side: BorderSide(color: AppColors.divider, width: 1),
       ),
       margin: const EdgeInsets.symmetric(vertical: 6),
     ),
@@ -427,7 +427,7 @@ class AppTheme {
           return AppColors.textSecondary;
         }),
         side: WidgetStateProperty.all(
-          const BorderSide(color: AppColors.inputBorder, width: 1),
+          BorderSide(color: AppColors.inputBorder, width: 1),
         ),
         shape: WidgetStateProperty.all(
           RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -456,11 +456,11 @@ class AppTheme {
       }),
       checkColor: WidgetStateProperty.all(Colors.white),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-      side: const BorderSide(color: AppColors.inputBorder, width: 1.5),
+      side: BorderSide(color: AppColors.inputBorder, width: 1.5),
     ),
 
     // ── Divider ────────────────────────────────────────────────────────
-    dividerTheme: const DividerThemeData(
+    dividerTheme: DividerThemeData(
       color: AppColors.divider, thickness: 1, space: 24,
     ),
 
@@ -470,9 +470,9 @@ class AppTheme {
       fillColor: AppColors.inputFill,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.inputBorder)),
+          borderSide: BorderSide(color: AppColors.inputBorder)),
       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.inputBorder)),
+          borderSide: BorderSide(color: AppColors.inputBorder)),
       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: p.primary, width: 1.5)),
       errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
@@ -503,7 +503,7 @@ class AppTheme {
       style: OutlinedButton.styleFrom(
         foregroundColor: AppColors.textPrimary,
         minimumSize: const Size(double.infinity, 52),
-        side: const BorderSide(color: AppColors.inputBorder),
+        side: BorderSide(color: AppColors.inputBorder),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
       ),

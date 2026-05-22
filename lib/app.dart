@@ -80,6 +80,15 @@ class _PosAppState extends ConsumerState<PosApp> {
     // tous les widgets qui lisent AppColors.primary verront la bonne couleur
     // au prochain build.
     AppColors.applyPalette(palette);
+    // Brightness effectif (themeMode résolu) → tokens de surface
+    // brightness-aware (AppColors.surface/background/inputFill/divider…).
+    // Sans ça, les widgets qui lisent ces tokens restent clairs en sombre.
+    final effectiveBrightness = switch (themeMode) {
+      ThemeMode.light  => Brightness.light,
+      ThemeMode.dark   => Brightness.dark,
+      ThemeMode.system => MediaQuery.platformBrightnessOf(context),
+    };
+    AppColors.applyBrightness(effectiveBrightness);
     final notifier = ref.watch(authRouterNotifierProvider);
     final authBloc = ref.watch(authBlocProvider);
     final router   = ref.watch(appRouterProvider);

@@ -22,26 +22,74 @@ class AppColors {
   static Color get primaryDark    => _primaryDark;
   static Color get primarySurface => _primarySurface;
 
+  /// Palette claire (light) brute — sert de base à `_primarySurface`
+  /// et à la dérivation sombre.
+  static ThemePalette _palette = kDefaultPalette;
+
   /// Met à jour les couleurs primaires runtime. Appelé au démarrage et à
   /// chaque changement de palette dans les paramètres.
   static void applyPalette(ThemePalette p) {
+    _palette        = p;
     _primary        = p.primary;
     _primaryLight   = p.primaryLight;
     _primaryDark    = p.primaryDark;
-    _primarySurface = p.primarySurface;
+    _refreshPrimarySurface();
   }
 
-  // ── Couleurs fixes (ne dépendent pas du thème) ─────────────────────────────
+  // ── Brightness runtime (mode clair / sombre) ───────────────────────────────
+  // Les tokens de SURFACE (surface/background/inputFill/inputBorder/divider)
+  // et `primarySurface` ne sont plus des constantes : ils suivent le mode
+  // EFFECTIVEMENT affiché. `app.dart` appelle [applyBrightness] avant de
+  // construire l'UI, avec le brightness résolu (themeMode + plateforme).
+  // Les widgets qui lisent `AppColors.surface` obtiennent ainsi la bonne
+  // couleur en sombre sans devoir passer par `Theme.of(context)`.
+  static bool _isDark = false;
+
+  static void applyBrightness(Brightness b) {
+    final dark = b == Brightness.dark;
+    if (dark == _isDark) return;
+    _isDark = dark;
+    _refreshPrimarySurface();
+  }
+
+  static bool get isDark => _isDark;
+
+  /// `primarySurface` = teinte douce du primary. En clair on prend la
+  /// valeur de la palette ; en sombre on mélange le primary à ~16 % sur
+  /// la surface slate (sinon le selected-state du drawer reste blanc vif).
+  static void _refreshPrimarySurface() {
+    _primarySurface = _isDark
+        ? Color.alphaBlend(
+            _palette.primary.withValues(alpha: 0.22), const Color(0xFF1E293B))
+        : _palette.primarySurface;
+  }
+
+  // ── Couleurs fixes (indépendantes du thème) ────────────────────────────────
   static const secondary = Color(0xFF10B981);
   static const error     = Color(0xFFEF4444);
   static const warning   = Color(0xFFF59E0B);
   static const info      = Color(0xFF3B82F6);
 
-  static const surface      = Color(0xFFFFFFFF);
-  static const background   = Color(0xFFF8F7FC);
-  static const inputFill    = Color(0xFFF3F4F6);
-  static const inputBorder  = Color(0xFFE5E7EB);
+  // ── Surfaces brightness-aware (getters, plus des const) ────────────────────
+  static const _surfaceLight     = Color(0xFFFFFFFF);
+  static const _surfaceDark      = Color(0xFF1E293B);
+  static const _backgroundLight  = Color(0xFFF8F7FC);
+  static const _backgroundDark   = Color(0xFF0F172A);
+  static const _inputFillLight   = Color(0xFFF3F4F6);
+  static const _inputFillDark    = Color(0xFF334155);
+  static const _borderLight      = Color(0xFFE5E7EB);
+  static const _borderDark       = Color(0xFF334155);
 
+  static Color get surface     => _isDark ? _surfaceDark    : _surfaceLight;
+  static Color get background  => _isDark ? _backgroundDark : _backgroundLight;
+  static Color get inputFill   => _isDark ? _inputFillDark  : _inputFillLight;
+  static Color get inputBorder => _isDark ? _borderDark     : _borderLight;
+  static Color get divider     => _isDark ? _borderDark     : _borderLight;
+
+  // ── Textes ─────────────────────────────────────────────────────────────────
+  // Restent const : utilisés dans des `const TextStyle` (AppTextStyles).
+  // En sombre, les Text principaux héritent du textTheme (cf. PR-1) ;
+  // ces tokens ne servent que pour des couleurs explicites résiduelles.
   static const textPrimary   = Color(0xFF111827);
   static const textSecondary = Color(0xFF6B7280);
   // WCAG AA : #6B7280 atteint 5.5:1 sur fond blanc (vs 3:1 pour #9CA3AF).
@@ -50,8 +98,6 @@ class AppColors {
   static const google   = Color(0xFFEA4335);
   static const facebook = Color(0xFF1877F2);
   static const apple    = Color(0xFF000000);
-
-  static const divider = Color(0xFFE5E7EB);
 
   /// Palette stable utilisée pour dériver une couleur identifiable par
   /// hash du nom de variante quand le champ `variant.color` n'est pas
