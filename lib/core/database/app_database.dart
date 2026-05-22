@@ -1184,6 +1184,18 @@ class AppDatabase {
         case 'delete': await _db.from(table).delete()
             .eq(op['col'] as String, op['val']);
         case 'insert': await _db.from(table).insert(data);
+        // UPDATE ciblé par filtres d'égalité (op['match']). Un seul ordre
+        // serveur met à jour toutes les lignes correspondantes — utilisé
+        // pour propager en cascade les coordonnées d'un client sur le
+        // snapshot figé (client_name/client_phone) de TOUTES ses commandes.
+        case 'update':
+          final match = (op['match'] as Map?)?.cast<String, dynamic>()
+              ?? const <String, dynamic>{};
+          var q = _db.from(table).update(data);
+          for (final e in match.entries) {
+            q = q.eq(e.key, e.value);
+          }
+          await q;
         // RPC offline-queued (hotfix_084 : delete_sale / restore_sale).
         // Le `name` est porté par `op['name']`, les params par `op['data']`.
         // La signature unique `{name, data}` permet à n'importe quelle RPC
@@ -4736,11 +4748,61 @@ end \$\$;""",
       _validateClientLocalUniqueness(c);
       if (_i._isOnline) await _validateClientRemoteUniqueness(c);
     }
+    // Capture l'ancien snapshot AVANT l'écriture, pour détecter un
+    // changement de nom/téléphone à répercuter sur les commandes.
+    final prevRaw = HiveBoxes.clientsBox.get(c.id);
+    String? prevName, prevPhone;
+    if (prevRaw != null) {
+      final pm = Map<String, dynamic>.from(prevRaw);
+      prevName  = pm['name']  as String?;
+      prevPhone = pm['phone'] as String?;
+    }
     // 1. Hive IMMÉDIATEMENT — offline-first
     HiveBoxes.clientsBox.put(c.id, _clientToMap(c));
     // 2. Supabase en arrière-plan — jamais bloquant
     _bgWrite({'table': 'clients', 'op': 'upsert', 'data': _clientToSupabase(c)});
     _notify('clients', c.storeId);
+    // 3. Cascade : si le nom ou le téléphone a changé sur un client
+    //    existant, propager sur le snapshot figé de toutes ses commandes.
+    if (prevRaw != null && (prevName != c.name || prevPhone != c.phone)) {
+      _cascadeClientCoordsToOrders(c);
+    }
+  }
+
+  /// Propage un changement de nom/téléphone client sur le snapshot figé
+  /// (`client_name` / `client_phone`) de TOUTES les commandes du client.
+  ///
+  /// Les commandes copient ces deux champs au moment de la vente (cf.
+  /// [Sale.clientName] / [Sale.clientPhone]) ; sans cette cascade, corriger
+  /// une faute de frappe ou un numéro changé ne se voyait pas dans
+  /// l'historique, les factures regénérées, les exports ni les messages de
+  /// livraison. On NE touche PAS aux champs de livraison (delivery_city /
+  /// delivery_address) : ils sont propres à chaque commande, pas au profil.
+  ///
+  /// - Hive : mise à jour immédiate (UI + offline) des commandes en cache.
+  /// - Supabase : un seul UPDATE filtré par client_id couvre TOUTES les
+  ///   commandes (même celles hors cache local) ; le realtime aligne ensuite
+  ///   les autres appareils. Passe par [_bgWrite] → rejoué au retour réseau.
+  static void _cascadeClientCoordsToOrders(Client c) {
+    var touched = false;
+    for (final key in HiveBoxes.ordersBox.keys) {
+      final raw = HiveBoxes.ordersBox.get(key);
+      if (raw == null) continue;
+      final m = Map<String, dynamic>.from(raw);
+      if (m['client_id'] != c.id) continue;
+      if (m['client_name'] == c.name && m['client_phone'] == c.phone) continue;
+      m['client_name']  = c.name;
+      m['client_phone'] = c.phone;
+      HiveBoxes.ordersBox.put(key, m);
+      touched = true;
+    }
+    _bgWrite({
+      'table': 'orders',
+      'op':    'update',
+      'data':  {'client_name': c.name, 'client_phone': c.phone},
+      'match': {'client_id': c.id, 'shop_id': c.storeId},
+    });
+    if (touched) _notify('orders', c.storeId);
   }
 
   /// Vérifie en local (Hive) qu'aucun autre client de la même boutique
