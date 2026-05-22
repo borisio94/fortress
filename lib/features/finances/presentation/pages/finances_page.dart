@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/permisions/subscription_provider.dart';
@@ -348,9 +349,9 @@ class _FinancialRecap extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 4, offset: const Offset(0, 2))],
       ),
@@ -394,7 +395,7 @@ class _FinancialRecap extends StatelessWidget {
               AppColors.error),
         ],
         const SizedBox(height: 8),
-        const Divider(height: 1, color: AppColors.divider),
+        Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
         const SizedBox(height: 8),
         Row(children: [
           Expanded(child: Text(l.financesBilanNet,
@@ -428,9 +429,9 @@ class _EmptyCard extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(24),
     decoration: BoxDecoration(
-      color: Colors.white,
+      color: Theme.of(context).colorScheme.surface,
       borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: AppColors.divider),
+      border: Border.all(color: Theme.of(context).semantic.borderSubtle),
     ),
     child: Column(children: [
       Icon(Icons.bar_chart_rounded,
@@ -484,9 +485,9 @@ class _SalesBarChart extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 5, offset: const Offset(0, 2))],
       ),

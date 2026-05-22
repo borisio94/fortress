@@ -5,6 +5,7 @@ import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/services/export_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
 import '../../../subscription/domain/models/plan_type.dart';
@@ -51,9 +52,9 @@ class LossesJournalWidget extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
             blurRadius: 4, offset: const Offset(0, 2))],
       ),
@@ -98,7 +99,7 @@ class LossesJournalWidget extends ConsumerWidget {
         ),
         if (entries.isNotEmpty) ...[
           const SizedBox(height: 10),
-          const Divider(height: 1, color: Color(0xFFF0F0F0)),
+          Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
           const SizedBox(height: 6),
           ...entries.take(8).map((e) => Padding(
             padding: const EdgeInsets.symmetric(vertical: 6),

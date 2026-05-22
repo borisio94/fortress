@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/activity_log_service.dart';
@@ -539,10 +540,13 @@ class _PeriodBar extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 7),
             decoration: BoxDecoration(
-              color: active ? AppColors.primary : Colors.white,
+              color: active
+                  ? AppColors.primary
+                  : Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: active
-                  ? AppColors.primary : const Color(0xFFE5E7EB)),
+                  ? AppColors.primary
+                  : Theme.of(context).semantic.borderSubtle),
             ),
             child: Text(p.label,
                 textAlign: TextAlign.center,
@@ -627,9 +631,11 @@ class _ExpenseTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(color: Colors.white,
+        decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFE5E7EB))),
+            border: Border.all(
+                color: Theme.of(context).semantic.borderSubtle)),
         child: Row(children: [
           Container(width: 36, height: 36,
               decoration: BoxDecoration(
@@ -922,7 +928,8 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
-                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                  border: Border.all(
+                      color: Theme.of(context).semantic.borderSubtle),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(children: [
