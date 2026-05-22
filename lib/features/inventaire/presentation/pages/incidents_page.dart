@@ -167,6 +167,7 @@ class _IncidentsPageState extends State<IncidentsPage>
     for (final k in arrivalKeys) HiveBoxes.stockArrivalsBox.delete(k);
 
     HiveBoxes.incidentsBox.delete(incident.id);
+    AppDatabase.bgDelete('incidents', val: incident.id);
 
     AppDatabase.notifyProductChange(widget.shopId);
     _load();
@@ -545,6 +546,7 @@ class _ResolveSheetState extends State<_ResolveSheet> {
       createdAt: inc.createdAt,
     );
     HiveBoxes.incidentsBox.put(resolved.id, resolved.toMap());
+    AppDatabase.bgUpsert('incidents', resolved.toMap());
 
     // Actions via StockService
     switch (_resolution) {

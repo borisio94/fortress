@@ -158,6 +158,9 @@ class StockService {
       createdBy: user?.name, createdAt: now,
     );
     HiveBoxes.incidentsBox.put(incident.id, incident.toMap());
+    // Push vers Supabase (best-effort + fallback file offline) pour que la
+    // console super-admin (SA-7) voie les incidents créés côté boutique.
+    AppDatabase.bgUpsert('incidents', incident.toMap());
 
     _log(shopId: shopId, productId: productId, variantId: variantId,
       type: 'block_existing', quantity: quantity, status: status,
@@ -507,6 +510,9 @@ class StockService {
       createdBy: user?.name, createdAt: now,
     );
     HiveBoxes.incidentsBox.put(incident.id, incident.toMap());
+    // Push vers Supabase (best-effort + fallback file offline) pour que la
+    // console super-admin (SA-7) voie les incidents créés côté boutique.
+    AppDatabase.bgUpsert('incidents', incident.toMap());
 
     _log(shopId: shopId, productId: productId, variantId: variantId,
       type: 'return_defective', quantity: quantity, status: 'defective',
@@ -1669,6 +1675,7 @@ class StockService {
                                  'Résolu automatiquement : invariant '
                                  'interne cohérent, log re-baseliné.';
               await HiveBoxes.incidentsBox.put(id, m);
+              AppDatabase.bgUpsert('incidents', Map<String, dynamic>.from(m));
             }
           }
         } else if (!r.isOk && createIncidents) {
@@ -1744,6 +1751,9 @@ class StockService {
       createdAt:   DateTime.now(),
     );
     HiveBoxes.incidentsBox.put(incident.id, incident.toMap());
+    // Push vers Supabase (best-effort + fallback file offline) pour que la
+    // console super-admin (SA-7) voie les incidents créés côté boutique.
+    AppDatabase.bgUpsert('incidents', incident.toMap());
 
     await ActivityLogService.log(
       action:      'stock_audit_drift',
@@ -1846,6 +1856,7 @@ class StockService {
                          'Résolu automatiquement par correction audit '
                          '(stockAvailable : $beforeAvail → $newAvail)';
       await HiveBoxes.incidentsBox.put(id, m);
+      AppDatabase.bgUpsert('incidents', Map<String, dynamic>.from(m));
     }
 
     await ActivityLogService.log(
