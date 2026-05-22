@@ -1784,6 +1784,97 @@ end \$\$;""",
     return res.toString();
   }
 
+  /// SA-3 — prolonge l'essai/abonnement de l'owner de [shopId] de [days]
+  /// jours. Retourne la nouvelle date d'expiration.
+  static Future<DateTime?> extendTrial(String shopId, int days) async {
+    final res = await _db.rpc('extend_trial', params: {
+      'p_shop_id': shopId,
+      'p_days':    days,
+    });
+    return res == null ? null : DateTime.tryParse(res.toString());
+  }
+
+  /// Subscription courante (active/trial) du propriétaire de [shopId].
+  /// Lecture directe Supabase (RLS super-admin / owner). `null` si aucune.
+  static Future<Map<String, dynamic>?> getShopSubscription(
+      String shopId) async {
+    try {
+      final shop = await _db.from('shops')
+          .select('owner_id').eq('id', shopId).single();
+      final ownerId = shop['owner_id'];
+      if (ownerId == null) return null;
+      final rows = await _db.from('subscriptions')
+          .select('id, plan_id, sub_status, started_at, expires_at, '
+                  'amount_paid, billing_cycle, plans(name, label)')
+          .eq('user_id', ownerId)
+          .inFilter('sub_status', ['active', 'trial'])
+          .order('expires_at', ascending: false)
+          .limit(1);
+      final list = List<Map<String, dynamic>>.from(rows);
+      return list.isEmpty ? null : list.first;
+    } catch (e) {
+      debugPrint('[DB] getShopSubscription: $e');
+      return null;
+    }
+  }
+
+  /// SA-4 — historique des paiements d'une boutique (récent → ancien).
+  static Future<List<Map<String, dynamic>>> getShopPayments(
+      String shopId) async {
+    try {
+      final rows = await _db.from('payment_records')
+          .select('id, amount, currency, paid_at, method, reference, note, '
+                  'plan_id, plans(label)')
+          .eq('shop_id', shopId)
+          .order('paid_at', ascending: false);
+      return List<Map<String, dynamic>>.from(rows);
+    } catch (e) {
+      debugPrint('[DB] getShopPayments: $e');
+      return const [];
+    }
+  }
+
+  /// SA-4 — enregistre un paiement. [activatePlan] bascule la subscription
+  /// de l'owner sur [planId] (active, +[months] mois). Retourne l'id.
+  static Future<String> recordPayment({
+    required String shopId,
+    String?         planId,
+    required num    amount,
+    String          currency = 'XAF',
+    String?         method,
+    String?         reference,
+    String?         note,
+    bool            activatePlan = false,
+    int             months = 1,
+  }) async {
+    final res = await _db.rpc('record_payment', params: {
+      'p_shop_id':       shopId,
+      'p_plan_id':       planId,
+      'p_amount':        amount,
+      'p_currency':      currency,
+      'p_method':        method,
+      'p_reference':     reference,
+      'p_note':          note,
+      'p_activate_plan': activatePlan,
+      'p_months':        months,
+    });
+    return res.toString();
+  }
+
+  /// Liste des plans (id, name, label) pour les sélecteurs admin.
+  static Future<List<Map<String, dynamic>>> getPlansLite() async {
+    try {
+      final rows = await _db.from('plans')
+          .select('id, name, label, price_monthly')
+          .eq('is_active', true)
+          .order('sort_order');
+      return List<Map<String, dynamic>>.from(rows);
+    } catch (e) {
+      debugPrint('[DB] getPlansLite: $e');
+      return const [];
+    }
+  }
+
   /// Re-pull une boutique depuis Supabase → Hive (après une RPC qui modifie
   /// la ligne côté serveur). Best-effort : si offline, l'écho realtime
   /// finira par rafraîchir.

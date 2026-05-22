@@ -12,6 +12,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../shared/widgets/app_switch.dart';
 import '../../../../shared/widgets/app_snack.dart';
+import '../widgets/shop_payments_sheet.dart';
 import '../../../../shared/widgets/plan_card.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../subscription/domain/models/plan_type.dart';
@@ -858,6 +859,94 @@ class _ShopsSectionState extends ConsumerState<_ShopsSection> {
     );
   }
 
+  /// SA-3 — prolonge l'essai/abonnement de l'owner. Affiche la date
+  /// d'expiration actuelle et la nouvelle date estimée avant validation.
+  Future<void> _extendTrial(Map<String, dynamic> shop) async {
+    final id  = shop['id'] as String;
+    final sub = await AppDatabase.getShopSubscription(id);
+    if (!mounted) return;
+    if (sub == null) {
+      AppSnack.error(context,
+          'Aucun abonnement actif/essai pour cette boutique');
+      return;
+    }
+    final current = DateTime.tryParse(sub['expires_at']?.toString() ?? '');
+    final days = await _promptExtendDays(current);
+    if (days == null) return;
+    try {
+      final newExp = await AppDatabase.extendTrial(id, days);
+      if (mounted) {
+        AppSnack.success(context, newExp != null
+            ? 'Essai prolongé jusqu\'au ${DateFormat('dd/MM/yyyy').format(newExp.toLocal())}'
+            : 'Essai prolongé');
+      }
+      ref.invalidate(_saShopsProvider);
+      ref.invalidate(_saStatsProvider);
+    } catch (e) {
+      if (mounted) AppSnack.error(context, 'Échec : $e');
+    }
+  }
+
+  Future<int?> _promptExtendDays(DateTime? current) async {
+    int days = 7;
+    final fmt = DateFormat('dd/MM/yyyy');
+    final theme = Theme.of(context);
+    return showDialog<int>(
+      context: context,
+      builder: (c) => StatefulBuilder(builder: (c, setLocal) {
+        final base = (current != null && current.isAfter(DateTime.now()))
+            ? current : DateTime.now();
+        final newDate = base.add(Duration(days: days));
+        return AlertDialog(
+          backgroundColor: theme.colorScheme.surface,
+          title: const Text('Prolonger l\'essai'),
+          content: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(current != null
+                ? 'Expiration actuelle : ${fmt.format(current.toLocal())}'
+                : 'Pas de date d\'expiration définie',
+                style: AppTextStyles.bodySmSecondary),
+            const SizedBox(height: 4),
+            Text('Nouvelle expiration : ${fmt.format(newDate.toLocal())}',
+                style: AppTextStyles.bodyBold.copyWith(color: AppColors.secondary)),
+            const SizedBox(height: 14),
+            Wrap(spacing: 8, children: [
+              for (final d in [7, 15, 30, 90])
+                ChoiceChip(
+                  label: Text('$d j'),
+                  selected: days == d,
+                  onSelected: (_) => setLocal(() => days = d),
+                ),
+            ]),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(c).pop(),
+                child: const Text('Annuler')),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+              onPressed: () => Navigator.of(c).pop(days),
+              child: const Text('Prolonger'),
+            ),
+          ],
+        );
+      }),
+    );
+  }
+
+  /// SA-4 — ouvre le bottom-sheet historique + enregistrement paiement.
+  void _showPayments(Map<String, dynamic> shop) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => ShopPaymentsSheet(
+          shopId: shop['id'] as String,
+          shopName: shop['name'] as String? ?? ''),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(_saShopsProvider);
@@ -896,6 +985,8 @@ class _ShopsSectionState extends ConsumerState<_ShopsSection> {
                   ref.invalidate(_saStatsProvider);
                 },
                 onToggleSuspend: () => _toggleSuspend(list[i]),
+                onExtendTrial: () => _extendTrial(list[i]),
+                onPayments: () => _showPayments(list[i]),
                 onDelete: () => showDialog(context: context, builder: (_) => _ConfirmDialog(
                   title: 'Supprimer la boutique',
                   body: 'Supprimer « ${list[i]['name']} » ? Irréversible.',
@@ -1879,9 +1970,11 @@ class _UserCard extends StatelessWidget {
 
 class _ShopRow extends StatelessWidget {
   final Map<String,dynamic> shop;
-  final VoidCallback? onToggle, onDelete, onToggleSuspend;
+  final VoidCallback? onToggle, onDelete, onToggleSuspend,
+      onExtendTrial, onPayments;
   const _ShopRow({required this.shop, required this.onToggle,
-      required this.onDelete, this.onToggleSuspend});
+      required this.onDelete, this.onToggleSuspend,
+      this.onExtendTrial, this.onPayments});
 
   @override
   Widget build(BuildContext context) {
@@ -1941,6 +2034,8 @@ class _ShopRow extends StatelessWidget {
               if (v == 't') onToggle?.call();
               if (v == 'd') onDelete?.call();
               if (v == 's') onToggleSuspend?.call();
+              if (v == 'x') onExtendTrial?.call();
+              if (v == 'p') onPayments?.call();
             },
             color: Theme.of(context).colorScheme.surface,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1953,6 +2048,22 @@ class _ShopRow extends StatelessWidget {
                     style: AppTextStyles.bodySm.copyWith(
                         color: isActive ? AppColors.warning : AppColors.secondary)),
               ])),
+              if (onExtendTrial != null)
+                PopupMenuItem(value: 'x', child: Row(children: [
+                  const Icon(Icons.more_time_rounded, size: 15,
+                      color: AppColors.info),
+                  const SizedBox(width: 8),
+                  Text('Prolonger l\'essai', style: AppTextStyles.bodySm
+                      .copyWith(color: AppColors.info)),
+                ])),
+              if (onPayments != null)
+                PopupMenuItem(value: 'p', child: Row(children: [
+                  const Icon(Icons.receipt_long_rounded, size: 15,
+                      color: AppColors.secondary),
+                  const SizedBox(width: 8),
+                  Text('Paiements', style: AppTextStyles.bodySm
+                      .copyWith(color: AppColors.secondary)),
+                ])),
               if (onToggleSuspend != null)
                 PopupMenuItem(value: 's', child: Row(children: [
                   Icon(suspended ? Icons.lock_open_rounded : Icons.block_rounded,
