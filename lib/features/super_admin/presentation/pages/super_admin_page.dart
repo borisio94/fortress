@@ -697,6 +697,13 @@ class _DashboardSection extends ConsumerWidget {
                           () => onNavigate(_SASection.payments)),
                   _QuickAction('Plans', Icons.card_membership_rounded, const Color(0xFF7C3AED),
                           () => onNavigate(_SASection.plans)),
+                  // PR-3 — pages dédiées (routées).
+                  _QuickAction('Messagerie', Icons.campaign_rounded, AppColors.info,
+                          () => context.push(RouteNames.superAdminBroadcast)),
+                  _QuickAction('Statistiques', Icons.insights_rounded, AppColors.secondary,
+                          () => context.push(RouteNames.superAdminStats)),
+                  _QuickAction('Incidents', Icons.warning_amber_rounded, AppColors.error,
+                          () => context.push(RouteNames.superAdminIncidents)),
                   // Accès rapide unique au hub « Éléments supprimés »
                   // (commandes + produits sous tabs, hotfix_084 + 085).
                   // Le badge sur l'icône affiche le total — le hub

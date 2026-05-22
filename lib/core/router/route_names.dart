@@ -76,4 +76,8 @@ class RouteNames {
   /// pas casser d'éventuels bookmarks ou liens externes.
   static const superAdminDeletedOrdersLegacy   = '/super-admin/orders/deleted';
   static const superAdminDeletedProductsLegacy = '/super-admin/products/deleted';
+  /// Super-admin PR-3 : messagerie broadcast · stats plateforme · incidents.
+  static const superAdminBroadcast = '/super-admin/broadcast';
+  static const superAdminStats     = '/super-admin/stats';
+  static const superAdminIncidents = '/super-admin/incidents';
 }

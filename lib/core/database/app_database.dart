@@ -1861,6 +1861,121 @@ end \$\$;""",
     return res.toString();
   }
 
+  /// SA-5 — envoie un broadcast (super-admin). Retourne l'id créé.
+  static Future<String> sendBroadcast({
+    required String title,
+    required String body,
+    required String type,         // info | warning | maintenance
+    required String targetType,   // all | plan | shop
+    String?         targetValue,
+  }) async {
+    final res = await _db.rpc('send_broadcast', params: {
+      'p_title':        title,
+      'p_body':         body,
+      'p_type':         type,
+      'p_target_type':  targetType,
+      'p_target_value': targetValue,
+    });
+    return res.toString();
+  }
+
+  /// SA-5 — historique des broadcasts (récent → ancien).
+  static Future<List<Map<String, dynamic>>> getBroadcasts() async {
+    try {
+      final rows = await _db.from('broadcasts')
+          .select('id, title, body, type, target_type, target_value, sent_at')
+          .order('sent_at', ascending: false)
+          .limit(100);
+      return List<Map<String, dynamic>>.from(rows);
+    } catch (e) {
+      debugPrint('[DB] getBroadcasts: $e');
+      return const [];
+    }
+  }
+
+  /// SA-7 — incidents de TOUTES les boutiques (console super-admin).
+  /// Lecture autorisée par la policy `incidents_superadmin_read`. Joint
+  /// le nom de la boutique. Filtrage (type/boutique/date) côté UI.
+  static Future<List<Map<String, dynamic>>> getAllIncidents() async {
+    try {
+      final rows = await _db.from('incidents')
+          .select('id, shop_id, product_name, type, status, severity, '
+                  'quantity, created_at, shops(name)')
+          .neq('status', 'resolved')
+          .order('created_at', ascending: false)
+          .limit(500);
+      return List<Map<String, dynamic>>.from(rows);
+    } catch (e) {
+      debugPrint('[DB] getAllIncidents: $e');
+      return const [];
+    }
+  }
+
+  /// SA-6 — statistiques plateforme (super-admin). Agrégations directes
+  /// Supabase. Retourne une map prête pour l'UI :
+  ///   revenue, shopsActive, shopsSuspended, shopsTrial,
+  ///   salesToday, salesWeek, salesMonth, topShops (5 × {name, total}).
+  static Future<Map<String, dynamic>> getPlatformStats() async {
+    final out = <String, dynamic>{
+      'revenue': 0.0, 'shopsActive': 0, 'shopsSuspended': 0,
+      'shopsTrial': 0, 'salesToday': 0, 'salesWeek': 0,
+      'salesMonth': 0, 'topShops': <Map<String, dynamic>>[],
+    };
+    try {
+      final shops = List<Map<String, dynamic>>.from(
+          await _db.from('shops').select('id, name, status, is_active'));
+      final subs = List<Map<String, dynamic>>.from(await _db
+          .from('subscriptions')
+          .select('amount_paid, sub_status'));
+      // Ventes : on récupère orders (id, shop_id, created_at, items) pour
+      // le comptage par période + CA par boutique.
+      final orders = List<Map<String, dynamic>>.from(await _db
+          .from('orders')
+          .select('shop_id, created_at, status, deleted_at')
+          .filter('deleted_at', 'is', null));
+
+      out['revenue'] = subs.fold<double>(
+          0, (a, s) => a + ((s['amount_paid'] as num?)?.toDouble() ?? 0));
+      out['shopsActive'] = shops
+          .where((s) => s['status'] != 'suspended' && s['is_active'] == true)
+          .length;
+      out['shopsSuspended'] =
+          shops.where((s) => s['status'] == 'suspended').length;
+      out['shopsTrial'] =
+          subs.where((s) => s['sub_status'] == 'trial').length;
+
+      final now = DateTime.now();
+      final todayStart = DateTime(now.year, now.month, now.day);
+      final weekStart  = todayStart.subtract(Duration(days: now.weekday - 1));
+      final monthStart = DateTime(now.year, now.month, 1);
+      int today = 0, week = 0, month = 0;
+      final byShop = <String, int>{};
+      for (final o in orders) {
+        final d = DateTime.tryParse(o['created_at']?.toString() ?? '');
+        if (d == null) continue;
+        if (d.isAfter(monthStart)) month++;
+        if (d.isAfter(weekStart))  week++;
+        if (d.isAfter(todayStart)) today++;
+        final sid = o['shop_id']?.toString();
+        if (sid != null) byShop[sid] = (byShop[sid] ?? 0) + 1;
+      }
+      out['salesToday'] = today;
+      out['salesWeek']  = week;
+      out['salesMonth'] = month;
+
+      final nameById = {for (final s in shops) s['id']: s['name']};
+      final top = byShop.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      out['topShops'] = [
+        for (final e in top.take(5))
+          {'name': nameById[e.key] ?? '—', 'count': e.value},
+      ];
+    } catch (e) {
+      debugPrint('[DB] getPlatformStats: $e');
+    }
+    return out;
+  }
+
   /// Liste des plans (id, name, label) pour les sélecteurs admin.
   static Future<List<Map<String, dynamic>>> getPlansLite() async {
     try {
