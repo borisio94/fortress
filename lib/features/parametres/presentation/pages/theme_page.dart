@@ -39,8 +39,11 @@ class ThemePage extends ConsumerWidget {
             children: [
               _Header(palette: current, label: current.label(isFr)),
               const SizedBox(height: 18),
-              _ModeSelector(primary: current.primary, isFr: isFr),
-              const SizedBox(height: 18),
+              // Sélecteur clair / sombre / système masqué tant que le mode
+              // sombre n'est pas finalisé (le rendu est forcé clair dans
+              // app.dart). Réactiver en décommentant la ligne ci-dessous.
+              // _ModeSelector(primary: current.primary, isFr: isFr),
+              // const SizedBox(height: 18),
               Row(children: [
                 Container(
                   width: 28, height: 28,
@@ -623,7 +626,9 @@ class _PaletteMockup extends StatelessWidget {
 }
 
 // ─── Sélecteur de mode (Clair / Sombre / Système) ───────────────────────────
-
+// Conservé pour réactivation quand le mode sombre sera finalisé (cf.
+// theme_page build + app.dart). Masqué de l'UI pour l'instant.
+// ignore: unused_element
 class _ModeSelector extends ConsumerWidget {
   final Color primary;
   final bool isFr;

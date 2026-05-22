@@ -75,20 +75,29 @@ class _PosAppState extends ConsumerState<PosApp> {
   Widget build(BuildContext context) {
     final locale   = ref.watch(localeProvider);
     final palette  = ref.watch(themePaletteProvider);
+    // Observé pour déclencher un rebuild si l'utilisateur change le mode,
+    // mais ignoré au rendu tant que le mode sombre est désactivé (cf.
+    // `themeMode: ThemeMode.light` plus bas).
+    // ignore: unused_local_variable
     final themeMode = ref.watch(themeModeProvider);
     // Applique les couleurs primaires globales AVANT de construire l'UI —
     // tous les widgets qui lisent AppColors.primary verront la bonne couleur
     // au prochain build.
     AppColors.applyPalette(palette);
-    // Brightness effectif (themeMode résolu) → tokens de surface
-    // brightness-aware (AppColors.surface/background/inputFill/divider…).
-    // Sans ça, les widgets qui lisent ces tokens restent clairs en sombre.
-    final effectiveBrightness = switch (themeMode) {
-      ThemeMode.light  => Brightness.light,
-      ThemeMode.dark   => Brightness.dark,
-      ThemeMode.system => MediaQuery.platformBrightnessOf(context),
-    };
-    AppColors.applyBrightness(effectiveBrightness);
+    // ── Mode sombre TEMPORAIREMENT DÉSACTIVÉ ──────────────────────────
+    // L'implémentation dark existe (AppTheme.dark + tokens brightness-aware)
+    // mais n'est pas finalisée → on force le rendu clair quel que soit le
+    // choix de l'utilisateur (light / dark / système-sombre). Le choix
+    // reste mémorisé (themeModeProvider intact) pour la réactivation.
+    // POUR RÉACTIVER : restaurer le calcul `effectiveBrightness` ci-dessous
+    // (switch sur themeMode) et remettre `themeMode: themeMode` dans
+    // MaterialApp.router.
+    //   final effectiveBrightness = switch (themeMode) {
+    //     ThemeMode.light  => Brightness.light,
+    //     ThemeMode.dark   => Brightness.dark,
+    //     ThemeMode.system => MediaQuery.platformBrightnessOf(context),
+    //   };
+    AppColors.applyBrightness(Brightness.light);
     final notifier = ref.watch(authRouterNotifierProvider);
     final authBloc = ref.watch(authBlocProvider);
     final router   = ref.watch(appRouterProvider);
@@ -143,7 +152,9 @@ class _PosAppState extends ConsumerState<PosApp> {
           debugShowCheckedModeBanner: false,
           theme: AppTheme.light(palette: palette),
           darkTheme: AppTheme.dark(palette: palette),
-          themeMode: themeMode,
+          // Forcé clair tant que le mode sombre n'est pas finalisé.
+          // Réactiver : remettre `themeMode: themeMode`.
+          themeMode: ThemeMode.light,
           routerConfig: router,
           locale: locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
