@@ -29,6 +29,7 @@ import '../../../onboarding/presentation/widgets/email_confirm_banner.dart';
 import '../../../onboarding/presentation/widgets/activation_checklist_card.dart';
 import '../../../onboarding/presentation/widgets/j1_resume_banner.dart';
 import '../../../onboarding/presentation/widgets/trial_end_banner.dart';
+import '../../../../shared/widgets/broadcast_banner.dart';
 
 
 // ─── Page principale ──────────────────────────────────────────────────────────
@@ -270,6 +271,7 @@ class _DashBodyState extends ConsumerState<_DashBody> {
         //     quand tout coché).
         const EmailConfirmBanner(margin: EdgeInsets.only(bottom: 12)),
         const TrialEndBanner(),
+        BroadcastBanner(shopId: widget.shopId),
         J1ResumeBanner(shopId: widget.shopId),
         ActivationChecklistCard(shopId: widget.shopId),
         const SizedBox(height: 12),
