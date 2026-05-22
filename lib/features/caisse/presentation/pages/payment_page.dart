@@ -25,6 +25,7 @@ import '../../../../core/utils/phone_formatter.dart';
 import 'package:printing/printing.dart';
 import '../../domain/entities/sale.dart';
 import '../../domain/usecases/order_receipt_usecase.dart';
+import '../../../../core/services/invoice_service.dart';
 import '../bloc/caisse_bloc.dart';
 import '../widgets/post_sale_sheet.dart';
 import '../widgets/order_creation_sheet.dart';
@@ -311,10 +312,14 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
     }
     setState(() => _sendingInvoice = true);
     try {
-      // 1. Génération PDF (réutilisation du DocumentService existant
-      //    via OrderReceiptUseCase qui produit un Uint8List).
+      // 1. Génération PDF — même moteur que l'aperçu in-app (facture
+      //    brandée : logo + couleurs de la boutique) pour que le lien
+      //    partagé soit identique à ce que voit l'opérateur. Repli sur
+      //    l'ancien template Fortress si la boutique n'est pas en cache.
       final shop = LocalStorageService.getShop(sale.shopId);
-      final bytes = await OrderReceiptUseCase.generatePdf(sale, shop: shop);
+      final bytes = shop != null
+          ? await InvoiceService.generatePdf(sale: sale, shop: shop)
+          : await OrderReceiptUseCase.generatePdf(sale, shop: shop);
 
       // 2. Upload + signed URL 30 jours.
       final orderId = sale.id ?? 'order_${sale.createdAt.millisecondsSinceEpoch}';

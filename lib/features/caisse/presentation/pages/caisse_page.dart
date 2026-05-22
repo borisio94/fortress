@@ -1953,7 +1953,12 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     final order = widget.order;
     final shop  = LocalStorageService.getShop(order.shopId);
     try {
-      final bytes = await OrderReceiptUseCase.generatePdf(order, shop: shop);
+      // Même moteur que l'aperçu in-app (facture brandée logo+couleurs)
+      // pour que le lien partagé soit identique. Repli sur l'ancien
+      // template Fortress si la boutique n'est pas en cache.
+      final bytes = shop != null
+          ? await InvoiceService.generatePdf(sale: order, shop: shop)
+          : await OrderReceiptUseCase.generatePdf(order, shop: shop);
       final orderId = order.id
           ?? 'order_${order.createdAt.millisecondsSinceEpoch}';
       final longUrl = await InvoiceStorageService.uploadInvoice(
@@ -2081,7 +2086,12 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     setState(() => _sendingInvoice = true);
     () async {
       try {
-        final bytes = await OrderReceiptUseCase.generatePdf(order, shop: shop);
+        // Même moteur que l'aperçu in-app (facture brandée logo+couleurs)
+        // pour que le lien partagé soit identique. Repli sur l'ancien
+        // template Fortress si la boutique n'est pas en cache.
+        final bytes = shop != null
+            ? await InvoiceService.generatePdf(sale: order, shop: shop)
+            : await OrderReceiptUseCase.generatePdf(order, shop: shop);
         final orderId = order.id
             ?? 'order_${order.createdAt.millisecondsSinceEpoch}';
         final longUrl = await InvoiceStorageService.uploadInvoice(
