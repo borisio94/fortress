@@ -107,26 +107,37 @@ class _CataloguePageState extends State<CataloguePage> {
     final hasExplicitIds = ids != null && ids.isNotEmpty;
     // Quand le partage WhatsApp inclut une liste d'`ids` précise, l'owner
     // a explicitement consenti à exposer ces produits — on bypass alors
-    // le filtre `is_visible_web` (qui sert à masquer le reste du catalogue
-    // de la boutique au visiteur générique). On garde `is_active=true`
-    // pour ne pas exposer un produit archivé / supprimé.
-    var query = db
-        .from('products')
-        .select(
-            'id,name,sku,price_sell_pos,stock_qty,image_url,'
-            'category_id,brand,is_visible_web,is_active,variants')
-        .eq('store_id', widget.shopId)
-        .eq('is_active', true);
-    if (!hasExplicitIds) {
-      query = query.eq('is_visible_web', true);
-    }
+    // le filtre `is_visible_web`. Hotfix_094 : la requête passe par un
+    // RPC SECURITY DEFINER (`get_delivery_products`) qui contourne RLS
+    // pour le cas ids-explicites. Avant ce hotfix on dépendait de
+    // `is_visible_web=true` côté DB, qui exigeait une étape de
+    // publication implicite (race conditions, ancien lien en cache,
+    // ...). Avec le RPC, le lien fonctionne dès qu'il est généré.
+    List<Map<String, dynamic>> products;
     if (hasExplicitIds) {
-      query = query.inFilter('id', ids);
+      final rows = await db.rpc('get_delivery_products', params: {
+        'p_shop_id':     widget.shopId,
+        'p_product_ids': ids,
+      });
+      products = (rows as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } else {
+      // Vitrine publique générique (pas d'ids → on respecte la RLS
+      // `products_anon_read_visible_web` pour ne pas exposer tout
+      // le catalogue par défaut).
+      final rows = await db
+          .from('products')
+          .select('id,name,sku,price_sell_pos,stock_qty,image_url,'
+              'category_id,brand,is_visible_web,is_active,variants')
+          .eq('store_id', widget.shopId)
+          .eq('is_active', true)
+          .eq('is_visible_web', true)
+          .order('name');
+      products = (rows as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
     }
-    final rows = await query.order('name');
-    final products = (rows as List)
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
 
     // Flatten produit + variantes en items (1 card par variante). Try/catch
     // par produit pour ne pas tout crasher si un seul produit a un format
