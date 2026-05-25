@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/database/app_database.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/app_switch.dart';
+import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../domain/entities/delivery_template.dart';
 import '../providers/delivery_template_provider.dart';
 
@@ -29,10 +33,16 @@ import '../providers/delivery_template_provider.dart';
 class DeliveryTemplateFormSheet extends ConsumerStatefulWidget {
   final String            shopId;
   final DeliveryTemplate? existing;
+  /// Pré-sélection du scope à la création (hotfix_093). Null = shop-wide.
+  /// Sinon id d'un partenaire (StockLocation.id) — le template sera lié
+  /// à ce partenaire uniquement. Ignoré en édition (le scope du template
+  /// existant est lu sur `existing.partnerId`).
+  final String?           initialPartnerId;
   const DeliveryTemplateFormSheet({
     super.key,
     required this.shopId,
     this.existing,
+    this.initialPartnerId,
   });
 
   @override
@@ -50,6 +60,8 @@ class _DeliveryTemplateFormSheetState
   bool   _isDefault = false;
   bool   _saving    = false;
   String? _nameError, _bodyError;
+  /// Scope du template : null = shop-wide, sinon id partenaire.
+  String? _partnerId;
 
   @override
   void initState() {
@@ -58,6 +70,7 @@ class _DeliveryTemplateFormSheetState
     _nameCtrl  = TextEditingController(text: e?.name ?? '');
     _bodyCtrl  = TextEditingController(text: e?.body ?? '');
     _isDefault = e?.isDefault ?? false;
+    _partnerId = e?.partnerId ?? widget.initialPartnerId;
   }
 
   /// Insère `{{name}}` à la position courante du curseur (ou remplace la
@@ -107,19 +120,30 @@ class _DeliveryTemplateFormSheetState
           ref.read(deliveryTemplatesProvider(widget.shopId).notifier);
       if (widget.existing == null) {
         await notifier.createTemplate(
-            name: name, body: body, isDefault: _isDefault);
+            name: name, body: body, isDefault: _isDefault,
+            partnerId: _partnerId);
       } else {
+        // Edition : on persiste aussi le scope (permet de RE-PORTER un
+        // template d'un partenaire à un autre ou vers shop-wide).
         await notifier.updateTemplate(widget.existing!.copyWith(
-            name: name, body: body, isDefault: _isDefault));
+            name: name, body: body, isDefault: _isDefault,
+            partnerId: _partnerId,
+            clearPartnerId: _partnerId == null));
       }
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {
         setState(() => _saving = false);
-        // Détection du conflit de nom (UNIQUE constraint).
+        // Détection du conflit de nom (UNIQUE constraint). Le nom de
+        // l'index a changé avec hotfix_093 : ancien
+        // `delivery_templates_name_per_shop` → nouveau scope-aware
+        // `delivery_templates_name_per_scope_uniq`. On garde les deux
+        // patterns pour rester rétro-compatible avec un Postgres pas
+        // encore migré.
         final msg = e.toString();
         AppSnack.error(context,
-            msg.contains('delivery_templates_name_per_shop')
+            msg.contains('delivery_templates_name_per_shop') ||
+            msg.contains('delivery_templates_name_per_scope_uniq')
                 ? l.deliveryTplNameDuplicate
                 : msg);
       }
@@ -149,6 +173,17 @@ class _DeliveryTemplateFormSheetState
                     hint: l.deliveryTplFormNameHint,
                     prefixIcon: Icons.label_outline_rounded,
                     validator: (_) => _nameError,
+                  ),
+                  const SizedBox(height: 14),
+                  // ── Scope picker (hotfix_093) ──────────────────────────
+                  const AppFieldLabel('Portée'),
+                  const SizedBox(height: 4),
+                  _ScopePicker(
+                    shopId:     widget.shopId,
+                    selectedId: _partnerId,
+                    onChanged:  _saving
+                        ? null
+                        : (v) => setState(() => _partnerId = v),
                   ),
                   const SizedBox(height: 14),
                   AppFieldLabel(l.deliveryTplFormBody, required: true),
@@ -260,6 +295,10 @@ class _VariablesHint extends StatelessWidget {
     'ville_expedition',
     'produits', 'date', 'heure',
     'prix_produit', 'frais_livraison', 'total', 'notes',
+    // Variables partenaire (hotfix_093) — résolues depuis la StockLocation
+    // ciblée par le transfert. Vides + ligne supprimée si pas de partenaire
+    // (employé ou numéro libre).
+    'partner_name', 'partner_phone', 'partner_city', 'partner_notes',
   ];
 
   @override
@@ -315,6 +354,81 @@ class _VariablesHint extends StatelessWidget {
           ],
         ),
       ]),
+    );
+  }
+}
+
+/// Picker de portée pour un template (hotfix_093) : shop-wide (défaut)
+/// ou rattaché à un partenaire spécifique (StockLocation type=partner).
+/// La liste des partenaires est lue depuis Hive (offline-friendly) via
+/// `AppDatabase.getStockLocationsForOwner`. Les partenaires inactifs
+/// sont masqués.
+class _ScopePicker extends StatelessWidget {
+  final String         shopId;
+  final String?        selectedId;
+  final ValueChanged<String?>? onChanged;
+  const _ScopePicker({
+    required this.shopId,
+    required this.selectedId,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Les partenaires sont owner-scoped (pas shop-scoped) — cf.
+    // memory project_multishop_roadmap : partenaires = locations de
+    // type 'partner' dans l'owner, partagés entre toutes ses boutiques.
+    final ownerId = Supabase.instance.client.auth.currentUser?.id;
+    final partners = ownerId == null
+        ? const <StockLocation>[]
+        : AppDatabase.getStockLocationsForOwner(ownerId)
+            .where((l) => l.type == StockLocationType.partner && l.isActive)
+            .toList();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String?>(
+          isExpanded: true,
+          value: selectedId == null
+              ? null
+              : (partners.any((p) => p.id == selectedId) ? selectedId : null),
+          icon: const Icon(Icons.keyboard_arrow_down_rounded,
+              size: 18, color: Color(0xFF9CA3AF)),
+          items: <DropdownMenuItem<String?>>[
+            const DropdownMenuItem<String?>(
+              value: null,
+              child: Row(children: [
+                Icon(Icons.store_outlined, size: 13, color: Color(0xFF6B7280)),
+                SizedBox(width: 6),
+                Text('Shop — tous partenaires',
+                    style: AppTextStyles.bodySm),
+              ]),
+            ),
+            for (final p in partners)
+              DropdownMenuItem<String?>(
+                value: p.id,
+                child: Row(children: [
+                  // local_shipping plutôt que handshake — cf.
+                  // project_icon_tree_shaking (handshake dans plan
+                  // Unicode supplémentaire, à éviter).
+                  Icon(Icons.local_shipping_outlined, size: 13,
+                      color: AppColors.primary),
+                  const SizedBox(width: 6),
+                  Flexible(child: Text(p.name,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySm)),
+                ]),
+              ),
+          ],
+          onChanged: onChanged,
+        ),
+      ),
     );
   }
 }

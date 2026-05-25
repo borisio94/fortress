@@ -74,19 +74,31 @@ class DeliveryTemplateRepository {
     return list;
   }
 
+  /// Liste filtrée par scope. [partnerId] null = shop-wide uniquement ;
+  /// [partnerId] non null = templates rattachés à ce partenaire uniquement.
+  /// Pour récupérer le set complet (shop + partenaire), appeler
+  /// `listFromCache(shopId)` puis filtrer côté caller.
+  List<DeliveryTemplate> listForPartner(String shopId, String? partnerId) =>
+      listFromCache(shopId)
+          .where((t) => t.partnerId == partnerId)
+          .toList();
+
   /// Crée un nouveau template. Si [isDefault] est true, reset les autres
-  /// défauts du shop avant l'insert (l'index unique partiel SQL est strict).
+  /// défauts du même scope (`partnerId`) avant l'insert — l'index unique
+  /// partiel SQL est scoped sur `COALESCE(partner_id, sentinelle)`.
   Future<DeliveryTemplate> create({
     required String shopId,
+    String?         partnerId,
     required String name,
     required String body,
     bool isDefault = false,
   }) async {
     if (isDefault) {
-      await _resetDefaults(shopId);
+      await _resetDefaults(shopId, partnerId: partnerId);
     }
     final row = await _db.from(_table).insert({
       'shop_id':    shopId,
+      'partner_id': partnerId,
       'name':       name,
       'body':       body,
       'is_default': isDefault,
@@ -97,13 +109,17 @@ class DeliveryTemplateRepository {
     return tpl;
   }
 
-  /// Met à jour un template existant. Si [isDefault] passe à true, reset les
-  /// autres défauts du shop d'abord.
+  /// Met à jour un template existant. Si [isDefault] passe à true, reset
+  /// les autres défauts du même scope d'abord. `partnerId` est persisté
+  /// (permet aussi de RE-PORTER un template du shop vers un partenaire ou
+  /// inversement en éditant le scope).
   Future<DeliveryTemplate> update(DeliveryTemplate tpl) async {
     if (tpl.isDefault) {
-      await _resetDefaults(tpl.shopId, exceptId: tpl.id);
+      await _resetDefaults(tpl.shopId,
+          partnerId: tpl.partnerId, exceptId: tpl.id);
     }
     final row = await _db.from(_table).update({
+      'partner_id': tpl.partnerId,
       'name':       tpl.name,
       'body':       tpl.body,
       'is_default': tpl.isDefault,
@@ -120,23 +136,33 @@ class DeliveryTemplateRepository {
     await HiveBoxes.deliveryTemplatesBox.delete(templateId);
   }
 
-  /// Reset is_default=false sur tous les templates du shop (sauf
-  /// éventuellement [exceptId]).
-  Future<void> _resetDefaults(String shopId, {String? exceptId}) async {
+  /// Reset is_default=false sur tous les templates du même scope
+  /// (shop_id + partner_id), sauf éventuellement [exceptId].
+  Future<void> _resetDefaults(String shopId,
+      {String? partnerId, String? exceptId}) async {
     var query = _db.from(_table)
         .update({'is_default': false})
         .eq('shop_id', shopId)
         .eq('is_default', true);
+    // Filtre scope partenaire : null = "défaut shop-wide", sinon "défaut
+    // du partenaire X". On NE PEUT PAS utiliser .eq() sur null avec
+    // supabase-flutter — il faut .filter('partner_id', 'is', null).
+    if (partnerId == null) {
+      query = query.filter('partner_id', 'is', null);
+    } else {
+      query = query.eq('partner_id', partnerId);
+    }
     if (exceptId != null && exceptId.isNotEmpty) {
       query = query.neq('id', exceptId);
     }
     await query;
-    // Met à jour Hive en miroir.
+    // Met à jour Hive en miroir — même filtre par scope.
     final box = HiveBoxes.deliveryTemplatesBox;
     for (final k in box.keys.toList()) {
       final raw = box.get(k);
       if (raw is! Map) continue;
       if (raw['shop_id'] != shopId) continue;
+      if (raw['partner_id'] != partnerId) continue;
       if (raw['id'] == exceptId)    continue;
       if (raw['is_default'] == true) {
         await box.put(k, {...raw, 'is_default': false});
@@ -144,23 +170,42 @@ class DeliveryTemplateRepository {
     }
   }
 
-  /// Récupère le template par défaut d'un shop, ou null si aucun.
-  DeliveryTemplate? getDefault(String shopId) {
-    final all = listFromCache(shopId);
-    for (final t in all) {
+  /// Récupère le template par défaut d'un scope donné. Si [partnerId] est
+  /// fourni, cherche le défaut spécifique à ce partenaire ; à défaut
+  /// retombe sur le défaut shop-wide. Retourne null si aucun template
+  /// du tout (ne devrait pas arriver vu le seed shops_seed_delivery_template).
+  DeliveryTemplate? getDefault(String shopId, {String? partnerId}) {
+    if (partnerId != null) {
+      // 1. Défaut explicite du partenaire.
+      for (final t in listForPartner(shopId, partnerId)) {
+        if (t.isDefault) return t;
+      }
+      // 2. Tout template du partenaire (cas dégradé : pas marqué défaut).
+      final partnerTpls = listForPartner(shopId, partnerId);
+      if (partnerTpls.isNotEmpty) return partnerTpls.first;
+    }
+    // 3. Défaut shop-wide.
+    for (final t in listForPartner(shopId, null)) {
       if (t.isDefault) return t;
     }
+    // 4. Premier shop-wide (dégradé).
+    final shopTpls = listForPartner(shopId, null);
+    if (shopTpls.isNotEmpty) return shopTpls.first;
+    // 5. Vraiment rien : retourne le premier de la liste globale, sinon null.
+    final all = listFromCache(shopId);
     return all.isEmpty ? null : all.first;
   }
 
   /// Résolution du template à utiliser pour un destinataire donné.
-  /// Ordre :
-  ///   1. [overrideTemplateId] si fourni et trouvé.
-  ///   2. Template par défaut du shop.
-  ///   3. Premier template du shop (cas dégradé).
-  ///   4. null (aucun template — ne devrait pas arriver vu le seed).
+  /// Ordre de priorité :
+  ///   1. [overrideTemplateId] si fourni et trouvé (choix explicite côté UI).
+  ///   2. Défaut du partenaire si [partnerId] fourni.
+  ///   3. Défaut shop-wide.
+  ///   4. Premier template du shop (cas dégradé).
+  ///   5. null (aucun template — ne devrait pas arriver vu le seed).
   DeliveryTemplate? resolveForRecipient({
     required String  shopId,
+    String?         partnerId,
     String?         overrideTemplateId,
   }) {
     if (overrideTemplateId != null && overrideTemplateId.isNotEmpty) {
@@ -171,6 +216,6 @@ class DeliveryTemplateRepository {
         }
       } catch (_) {/* fallthrough */}
     }
-    return getDefault(shopId);
+    return getDefault(shopId, partnerId: partnerId);
   }
 }

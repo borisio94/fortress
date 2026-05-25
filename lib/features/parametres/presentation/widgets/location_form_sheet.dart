@@ -10,6 +10,7 @@ import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../features/inventaire/domain/entities/stock_location.dart';
 import '../providers/delivery_template_provider.dart';
+import '../../domain/entities/delivery_template.dart';
 
 /// Sheet bottom pour créer ou modifier un emplacement de stock
 /// (warehouse ou partner). Les locations type='shop' ne passent pas par ici.
@@ -345,13 +346,18 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
                 const SizedBox(height: 12),
 
                 // Dropdown template livraison — uniquement pour les
-                // partenaires d'un shop donné (cf. hotfix_049).
+                // partenaires d'un shop donné (cf. hotfix_049 + hotfix_093).
+                // Le picker groupe : templates spécifiques à ce partenaire
+                // en haut, templates shop-wide en dessous. `null` = laisse
+                // la résolution automatique choisir (défaut partenaire >
+                // défaut shop).
                 if (_type == StockLocationType.partner
                     && widget.shopId != null) ...[
                   const _Label('Template de livraison'),
                   const SizedBox(height: 4),
                   _DeliveryTemplatePicker(
                     shopId: widget.shopId!,
+                    partnerId: widget.existing?.id,
                     selectedId: _deliveryTemplateId,
                     onChanged: (v) =>
                         setState(() => _deliveryTemplateId = v),
@@ -630,10 +636,16 @@ class _ModeBtn extends StatelessWidget {
 /// La valeur `null` correspond à "Template par défaut du shop".
 class _DeliveryTemplatePicker extends ConsumerWidget {
   final String          shopId;
+  /// Id du partenaire courant (StockLocation.id). Null en création :
+  /// dans ce cas, seuls les templates shop-wide sont proposés (un
+  /// template partenaire ne peut être créé qu'après que le partenaire
+  /// existe — chicken-and-egg sinon avec le FK partner_id).
+  final String?         partnerId;
   final String?         selectedId;
   final ValueChanged<String?> onChanged;
   const _DeliveryTemplatePicker({
     required this.shopId,
+    required this.partnerId,
     required this.selectedId,
     required this.onChanged,
   });
@@ -650,20 +662,49 @@ class _DeliveryTemplatePicker extends ConsumerWidget {
       error: (e, _) => Text(e.toString(),
           style: AppTextStyles.caption.copyWith(color: AppColors.error)),
       data: (list) {
-        // L'item null = "Template par défaut du shop".
+        // Templates spécifiques à ce partenaire (haut) et shop-wide (bas).
+        // La règle de résolution côté send (DeliveryTemplateRepository.
+        // resolveForRecipient) privilégie déjà le défaut partenaire si
+        // selectedId est null — ce picker permet juste de FORCER un
+        // template précis quand on veut.
+        final partnerTpls = partnerId == null
+            ? const <DeliveryTemplate>[]
+            : list.where((t) => t.partnerId == partnerId).toList();
+        final shopTpls = list.where((t) => t.partnerId == null).toList();
+
         final items = <DropdownMenuItem<String?>>[
           const DropdownMenuItem<String?>(
             value: null,
-            child: Text('Template par défaut du shop',
+            child: Text('Auto (défaut partenaire ou shop)',
                 style: AppTextStyles.bodySm),
           ),
-          for (final t in list)
-            DropdownMenuItem<String?>(
-              value: t.id,
-              child: Text(
-                  '${t.name}${t.isDefault ? " (défaut)" : ""}',
-                  style: AppTextStyles.bodySm),
-            ),
+          if (partnerTpls.isNotEmpty)
+            ...partnerTpls.map((t) => DropdownMenuItem<String?>(
+                  value: t.id,
+                  child: Row(children: [
+                    // local_shipping plutôt que handshake — cf.
+                    // project_icon_tree_shaking.
+                    Icon(Icons.local_shipping_outlined, size: 13,
+                        color: AppColors.primary),
+                    const SizedBox(width: 6),
+                    Flexible(child: Text(
+                        '${t.name}${t.isDefault ? " ★" : ""}',
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySm)),
+                  ]),
+                )),
+          ...shopTpls.map((t) => DropdownMenuItem<String?>(
+                value: t.id,
+                child: Row(children: [
+                  const Icon(Icons.store_outlined, size: 13,
+                      color: Color(0xFF9CA3AF)),
+                  const SizedBox(width: 6),
+                  Flexible(child: Text(
+                      '${t.name}${t.isDefault ? " ★" : ""}',
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySm)),
+                ]),
+              )),
         ];
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 10),

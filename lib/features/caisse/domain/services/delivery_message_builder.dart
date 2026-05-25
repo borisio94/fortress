@@ -1,3 +1,4 @@
+import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../../parametres/domain/entities/delivery_template.dart';
 import '../entities/sale.dart';
 import '../entities/sale_item.dart';
@@ -11,6 +12,10 @@ import '../entities/sale_item.dart';
 ///   {{frais_livraison}} {{total}} {{notes}}
 ///   {{ville_expedition}} (cf. hotfix_049 — ville du destinataire,
 ///                         partenaire ou employé)
+///   {{partner_name}} {{partner_phone}} {{partner_city}} {{partner_notes}}
+///   (cf. hotfix_093 — résolus depuis la StockLocation cible quand le
+///    transfert vise un partenaire ; sinon chaînes vides → la ligne
+///    correspondante est éliminée par la règle drop-ligne).
 ///
 /// RÈGLES DE FORMATAGE PRIX (auto, pas user-configurable) :
 ///   • 1 produit qty=1  → "5 000 XAF (qté 1)"
@@ -50,11 +55,15 @@ class DeliveryMessageBuilder {
     double?                   paidAmount,
     String?                   senderCity,
     String?                   clientDistrict,
+    /// Partenaire destinataire — résout les variables `{{partner_*}}`.
+    /// Null pour un employé ou un numéro libre : ces variables seront
+    /// vides et leurs lignes filtrées par la règle drop-ligne.
+    StockLocation?            partner,
     String? Function(SaleItem item)? resolveProductName,
   }) {
     final values = _resolveVariables(
         sale, shopName, paidAmount, senderCity,
-        clientDistrict, resolveProductName);
+        clientDistrict, partner, resolveProductName);
     return _renderWithDropEmpty(template.body, values);
   }
 
@@ -62,7 +71,7 @@ class DeliveryMessageBuilder {
 
   static Map<String, String> _resolveVariables(
       Sale sale, String shopName, double? paidAmount, String? senderCity,
-      String? clientDistrict,
+      String? clientDistrict, StockLocation? partner,
       String? Function(SaleItem)? resolveProductName) {
     final lieu = _formatLieuLivraison(sale, clientDistrict);
     final productsBlock = _formatProducts(sale.items, resolveProductName);
@@ -74,6 +83,19 @@ class DeliveryMessageBuilder {
         0, (s, i) => s + (i.unitPrice * i.quantity));
     final grandTotal    = productsTotal + feesAmount;
     final totalText     = _formatTotalWithAcompte(grandTotal, paidAmount);
+
+    // Ville du partenaire : combine district + city si les deux sont
+    // présents, sinon prend ce qui est dispo. Sert de fallback explicite
+    // à ville_expedition quand le user ne saisit rien.
+    String partnerCity() {
+      if (partner == null) return '';
+      final d = (partner.district ?? '').trim();
+      final c = (partner.city     ?? '').trim();
+      if (d.isNotEmpty && c.isNotEmpty) return '$d, $c';
+      if (d.isNotEmpty) return d;
+      if (c.isNotEmpty) return c;
+      return (partner.address ?? '').trim();
+    }
 
     final scheduled = sale.scheduledAt;
     return {
@@ -89,6 +111,11 @@ class DeliveryMessageBuilder {
       'total'          : totalText,
       'notes'          : (sale.notes ?? '').trim(),
       'ville_expedition': (senderCity ?? '').trim(),
+      // ── Variables partenaire (hotfix_093) — vides si pas de partenaire.
+      'partner_name'   : partner?.name.trim() ?? '',
+      'partner_phone'  : (partner?.phone ?? '').trim(),
+      'partner_city'   : partnerCity(),
+      'partner_notes'  : (partner?.notes ?? '').trim(),
     };
   }
 

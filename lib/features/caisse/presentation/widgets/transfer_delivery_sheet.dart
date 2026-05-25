@@ -133,12 +133,31 @@ class _TransferDeliverySheetState
     return null;
   }
 
+  /// Si le destinataire actuel est un partenaire, retrouve la
+  /// `StockLocation` complète via Hive. Sert à 2 endroits :
+  ///   • passer `partnerId` à `resolveForRecipient` (priorité au défaut
+  ///     du partenaire dans la chaîne de résolution — hotfix_093)
+  ///   • passer l'objet partenaire au builder pour résoudre les variables
+  ///     `{{partner_*}}` au rendu.
+  StockLocation? _resolvePartnerLocation() {
+    if (_target?.kind != 'partner') return null;
+    final ownerId = Supabase.instance.client.auth.currentUser?.id;
+    if (ownerId == null) return null;
+    final partners = AppDatabase.getStockLocationsForOwner(ownerId);
+    for (final p in partners) {
+      if (p.id == _target!.ref) return p;
+    }
+    return null;
+  }
+
   // ── Step 0 → Step 1 : compose le message depuis le template ───────────
   void _goToPreview() {
     if (_target == null) return;
-    final repo = ref.read(deliveryTemplateRepositoryProvider);
-    final tpl  = repo.resolveForRecipient(
+    final repo    = ref.read(deliveryTemplateRepositoryProvider);
+    final partner = _resolvePartnerLocation();
+    final tpl     = repo.resolveForRecipient(
         shopId: widget.shopId,
+        partnerId: partner?.id,
         overrideTemplateId: _target!.templateId);
     if (tpl == null) {
       setState(() => _error = context.l10n.deliveryNoTemplate);
@@ -152,6 +171,7 @@ class _TransferDeliverySheetState
             ? null
             : _senderCityCtrl.text.trim(),
         clientDistrict: _resolveClientDistrict(),
+        partner: partner,
         resolveProductName: _buildProductNameResolver());
     _messageCtrl.text = msg;
     setState(() {
@@ -164,9 +184,11 @@ class _TransferDeliverySheetState
   /// Ré-applique le template (annule l'édition manuelle).
   void _resetMessage() {
     if (_target == null) return;
-    final repo = ref.read(deliveryTemplateRepositoryProvider);
-    final tpl  = repo.resolveForRecipient(
+    final repo    = ref.read(deliveryTemplateRepositoryProvider);
+    final partner = _resolvePartnerLocation();
+    final tpl     = repo.resolveForRecipient(
         shopId: widget.shopId,
+        partnerId: partner?.id,
         overrideTemplateId: _target!.templateId);
     if (tpl == null) return;
     _messageCtrl.text = DeliveryMessageBuilder.build(
@@ -177,6 +199,7 @@ class _TransferDeliverySheetState
             ? null
             : _senderCityCtrl.text.trim(),
         clientDistrict: _resolveClientDistrict(),
+        partner: partner,
         resolveProductName: _buildProductNameResolver());
     setState(() => _editing = false);
   }
@@ -194,9 +217,11 @@ class _TransferDeliverySheetState
     setState(() { _sending = true; _error = null; });
     try {
       final db  = Supabase.instance.client;
+      final partner = _resolvePartnerLocation();
       final tpl = ref.read(deliveryTemplateRepositoryProvider)
           .resolveForRecipient(
               shopId: widget.shopId,
+              partnerId: partner?.id,
               overrideTemplateId: _target!.templateId);
       await db.rpc('transfer_order_to_delivery', params: {
         'p_order_id':         widget.order.id,

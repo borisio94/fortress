@@ -49,10 +49,12 @@ class DeliveryTemplatesNotifier
     required String name,
     required String body,
     bool isDefault = false,
+    String? partnerId,
   }) async {
     final shopId = arg;
     final tpl = await _repo.create(
-        shopId: shopId, name: name, body: body, isDefault: isDefault);
+        shopId: shopId, partnerId: partnerId, name: name, body: body,
+        isDefault: isDefault);
     // Refresh complet : si isDefault=true, d'autres rows ont changé aussi.
     state = AsyncValue.data(_repo.listFromCache(shopId));
     return tpl;
