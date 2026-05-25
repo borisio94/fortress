@@ -9,6 +9,8 @@ import 'package:url_launcher/link.dart';
 
 import '../../../../core/database/app_database.dart';
 import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/services/short_link_service.dart';
+import '../../../../core/services/url_shortener_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -150,8 +152,51 @@ class _TransferDeliverySheetState
     return null;
   }
 
+  /// Cache local du lien court résolu pour la commande courante. Évite
+  /// d'appeler le RPC à chaque rebuild / reset de message. Invalidé si
+  /// l'utilisateur change de destinataire (changement de `_target` ne
+  /// change pas l'URL : les items et le shopId sont les mêmes).
+  String? _cachedProductsLink;
+  /// Vrai pendant la génération async du lien court ; sert à désactiver
+  /// le bouton « Continuer » pour éviter un double tap.
+  bool _generatingLink = false;
+
+  /// Génère (et cache) l'URL courte vers la mini-vitrine catalogue de la
+  /// commande. Pipeline :
+  ///   1. Build long URL via `DeliveryMessageBuilder.buildCatalogueLongUrl`.
+  ///   2. Tente le raccourcisseur maison (Supabase short_links).
+  ///   3. Repli tinyurl/is.gd si la DB est KO.
+  ///   4. Dernier recours : URL longue (l'envoi n'est jamais bloqué).
+  /// Le résultat est mis en cache — ré-appel = aucun coût réseau.
+  Future<String> _ensureProductsLink() async {
+    if (_cachedProductsLink != null) return _cachedProductsLink!;
+    // Web base : on utilise la même origine que la page courante quand on
+    // est sur web (kIsWeb) — utile si l'app est servie depuis un domaine
+    // custom. Sinon, fallback hardcodé sur prod.
+    final webBase = kIsWeb
+        ? Uri.base.origin
+        : 'https://fortress-pos.web.app';
+    final long = DeliveryMessageBuilder.buildCatalogueLongUrl(
+      webBase: webBase,
+      shopId:  widget.shopId,
+      sale:    widget.order,
+    );
+    try {
+      final maison = await ShortLinkService.createShortLink(
+        longUrl:   long,
+        linkType:  'delivery',
+        expiresIn: const Duration(days: 30),
+      );
+      final shortened = maison ?? await UrlShortenerService.shorten(long);
+      _cachedProductsLink = shortened;
+    } catch (_) {
+      _cachedProductsLink = long;
+    }
+    return _cachedProductsLink!;
+  }
+
   // ── Step 0 → Step 1 : compose le message depuis le template ───────────
-  void _goToPreview() {
+  Future<void> _goToPreview() async {
     if (_target == null) return;
     final repo    = ref.read(deliveryTemplateRepositoryProvider);
     final partner = _resolvePartnerLocation();
@@ -163,6 +208,9 @@ class _TransferDeliverySheetState
       setState(() => _error = context.l10n.deliveryNoTemplate);
       return;
     }
+    setState(() => _generatingLink = true);
+    final link = await _ensureProductsLink();
+    if (!mounted) return;
     final msg = DeliveryMessageBuilder.build(
         template: tpl,
         sale: widget.order,
@@ -172,17 +220,19 @@ class _TransferDeliverySheetState
             : _senderCityCtrl.text.trim(),
         clientDistrict: _resolveClientDistrict(),
         partner: partner,
+        productsLink: link,
         resolveProductName: _buildProductNameResolver());
     _messageCtrl.text = msg;
     setState(() {
-      _step    = 1;
-      _editing = false;
-      _error   = null;
+      _step          = 1;
+      _editing       = false;
+      _error         = null;
+      _generatingLink = false;
     });
   }
 
   /// Ré-applique le template (annule l'édition manuelle).
-  void _resetMessage() {
+  Future<void> _resetMessage() async {
     if (_target == null) return;
     final repo    = ref.read(deliveryTemplateRepositoryProvider);
     final partner = _resolvePartnerLocation();
@@ -191,6 +241,8 @@ class _TransferDeliverySheetState
         partnerId: partner?.id,
         overrideTemplateId: _target!.templateId);
     if (tpl == null) return;
+    final link = await _ensureProductsLink();
+    if (!mounted) return;
     _messageCtrl.text = DeliveryMessageBuilder.build(
         template: tpl,
         sale: widget.order,
@@ -200,6 +252,7 @@ class _TransferDeliverySheetState
             : _senderCityCtrl.text.trim(),
         clientDistrict: _resolveClientDistrict(),
         partner: partner,
+        productsLink: link,
         resolveProductName: _buildProductNameResolver());
     setState(() => _editing = false);
   }
@@ -520,12 +573,17 @@ class _TransferDeliverySheetState
   Widget _buildTargetFooter() {
     final l = context.l10n;
     final canNext = _target != null
-        && (_target!.phoneE164.isNotEmpty || _target!.groupUrl.isNotEmpty);
+        && (_target!.phoneE164.isNotEmpty || _target!.groupUrl.isNotEmpty)
+        && !_generatingLink;
     return SizedBox(
       width: double.infinity, height: 44,
       child: ElevatedButton.icon(
-        onPressed: canNext ? _goToPreview : null,
-        icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+        onPressed: canNext ? () => _goToPreview() : null,
+        icon: _generatingLink
+            ? const SizedBox(width: 14, height: 14,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white))
+            : const Icon(Icons.arrow_forward_rounded, size: 16),
         label: Text(l.deliveryPreviewTitle,
             style: AppTextStyles.bodyBold
                 .copyWith(color: Colors.white)),
@@ -571,7 +629,7 @@ class _TransferDeliverySheetState
           ),
           if (_editing)
             TextButton.icon(
-              onPressed: _sending ? null : _resetMessage,
+              onPressed: _sending ? null : () => _resetMessage(),
               icon: const Icon(Icons.refresh_rounded, size: 14),
               label: Text(l.deliveryPreviewResetBtn,
                   style: AppTextStyles.captionHint

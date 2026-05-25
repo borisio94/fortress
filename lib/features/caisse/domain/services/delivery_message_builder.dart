@@ -8,7 +8,7 @@ import '../entities/sale_item.dart';
 ///
 /// VARIABLES SUPPORTÉES (cf. spec) :
 ///   {{caisse}} {{client_name}} {{client_phone}} {{lieu_livraison}}
-///   {{produits}} {{date}} {{heure}} {{prix_produit}}
+///   {{date}} {{heure}} {{prix_produit}}
 ///   {{frais_livraison}} {{total}} {{notes}}
 ///   {{ville_expedition}} (cf. hotfix_049 — ville du destinataire,
 ///                         partenaire ou employé)
@@ -16,6 +16,19 @@ import '../entities/sale_item.dart';
 ///   (cf. hotfix_093 — résolus depuis la StockLocation cible quand le
 ///    transfert vise un partenaire ; sinon chaînes vides → la ligne
 ///    correspondante est éliminée par la règle drop-ligne).
+///
+/// VARIABLES « PRODUITS » :
+///   {{produits}}      → lien court vers la mini-vitrine produits de la
+///                       commande (images + quantités) quand on est en
+///                       contexte d'envoi (le caller passe `productsLink`).
+///                       Sans contexte (copier depuis la page Modèles),
+///                       retombe sur la liste texte multi-ligne.
+///   {{produits_link}} → identique à {{produits}} en contexte envoi.
+///                       Reste vide hors-contexte (et la ligne
+///                       correspondante est dropée par la règle drop-ligne).
+///   {{produits_text}} → toujours la liste texte multi-ligne
+///                       (« • Nom — calcul ») pour les utilisateurs qui
+///                       veulent l'ancien format quel que soit le contexte.
 ///
 /// RÈGLES DE FORMATAGE PRIX (auto, pas user-configurable) :
 ///   • 1 produit qty=1  → "5 000 XAF (qté 1)"
@@ -59,12 +72,55 @@ class DeliveryMessageBuilder {
     /// Null pour un employé ou un numéro libre : ces variables seront
     /// vides et leurs lignes filtrées par la règle drop-ligne.
     StockLocation?            partner,
+    /// URL (idéalement courte, cf. ShortLinkService) vers la mini-vitrine
+    /// produits de la commande. Si fournie, `{{produits}}` et
+    /// `{{produits_link}}` s'y résolvent. Si null, `{{produits}}` retombe
+    /// sur la liste texte (cas du copier-coller depuis la page Modèles
+    /// où aucun order context n'est dispo).
+    String?                   productsLink,
     String? Function(SaleItem item)? resolveProductName,
   }) {
     final values = _resolveVariables(
         sale, shopName, paidAmount, senderCity,
-        clientDistrict, partner, resolveProductName);
+        clientDistrict, partner, productsLink, resolveProductName);
     return _renderWithDropEmpty(template.body, values);
+  }
+
+  /// Construit l'URL longue vers la mini-vitrine catalogue d'une commande,
+  /// prête à être passée à `ShortLinkService.createShortLink` puis utilisée
+  /// comme `productsLink` dans [build]. Format :
+  ///   `<base>/#/catalogue/<shopId>?ids=<id1,id2>&stock=<id1:qty,id2:qty>
+  ///    &loc=<deliveryLocationId>`
+  /// `base` est l'URL canonique de l'app (web), passée par le caller —
+  /// permet de tester en local sans hardcoder le domaine prod.
+  static String buildCatalogueLongUrl({
+    required String webBase,
+    required String shopId,
+    required Sale   sale,
+  }) {
+    final ids = sale.items
+        .map((i) => i.productId)
+        .where((id) => id.isNotEmpty)
+        .toSet() // dédup (cas d'un même produit ajouté 2 fois — on cumule la qty plus bas)
+        .toList();
+    // Cumul des quantités par productId (au cas où un produit apparaît
+    // plusieurs lignes — additionne plutôt que d'écraser).
+    final qtyById = <String, int>{};
+    for (final it in sale.items) {
+      if (it.productId.isEmpty) continue;
+      qtyById.update(it.productId, (q) => q + it.quantity,
+          ifAbsent: () => it.quantity);
+    }
+    final qp = <String>[];
+    if (ids.isNotEmpty) qp.add('ids=${ids.join(",")}');
+    if (qtyById.isNotEmpty) {
+      qp.add('stock=${qtyById.entries.map((e) =>
+          "${e.key}:${e.value}").join(",")}');
+    }
+    final loc = (sale.deliveryLocationId ?? '').trim();
+    if (loc.isNotEmpty) qp.add('loc=$loc');
+    final base = '$webBase/#/catalogue/$shopId';
+    return qp.isEmpty ? base : '$base?${qp.join("&")}';
   }
 
   // ── Résolution variables ───────────────────────────────────────────────
@@ -72,9 +128,14 @@ class DeliveryMessageBuilder {
   static Map<String, String> _resolveVariables(
       Sale sale, String shopName, double? paidAmount, String? senderCity,
       String? clientDistrict, StockLocation? partner,
+      String? productsLink,
       String? Function(SaleItem)? resolveProductName) {
     final lieu = _formatLieuLivraison(sale, clientDistrict);
-    final productsBlock = _formatProducts(sale.items, resolveProductName);
+    final productsText = _formatProducts(sale.items, resolveProductName);
+    // {{produits}} : lien si fourni, sinon texte (compat copier-coller).
+    final produitsValue = (productsLink != null && productsLink.isNotEmpty)
+        ? productsLink
+        : productsText;
     final feesAmount    = _deliveryFeeAmount(sale.fees);
     final feesText      = feesAmount <= 0
         ? 'inclus dans le prix'
@@ -103,7 +164,9 @@ class DeliveryMessageBuilder {
       'client_name'    : (sale.clientName  ?? '').trim(),
       'client_phone'   : (sale.clientPhone ?? '').trim(),
       'lieu_livraison' : lieu,
-      'produits'       : productsBlock,
+      'produits'       : produitsValue,
+      'produits_link'  : productsLink ?? '',
+      'produits_text'  : productsText,
       'date'           : scheduled != null ? _formatDate(scheduled) : '',
       'heure'          : scheduled != null ? _formatTime(scheduled) : '',
       'prix_produit'   : _formatAmount(productsTotal),

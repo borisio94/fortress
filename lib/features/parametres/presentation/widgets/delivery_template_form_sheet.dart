@@ -293,7 +293,11 @@ class _VariablesHint extends StatelessWidget {
   static const _vars = [
     'caisse', 'client_name', 'client_phone', 'lieu_livraison',
     'ville_expedition',
-    'produits', 'date', 'heure',
+    // {{produits}} : lien court vers la mini-vitrine catalogue de la
+    // commande (images + quantités) en contexte envoi, sinon retombe sur
+    // la liste texte. {{produits_text}} = toujours la liste texte (compat).
+    'produits', 'produits_text',
+    'date', 'heure',
     'prix_produit', 'frais_livraison', 'total', 'notes',
     // Variables partenaire (hotfix_093) — résolues depuis la StockLocation
     // ciblée par le transfert. Vides + ligne supprimée si pas de partenaire
