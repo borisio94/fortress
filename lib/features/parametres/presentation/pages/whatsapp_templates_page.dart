@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -118,6 +119,7 @@ class _WhatsappTemplatesPageState
               template: filtered[i],
               canEdit:  canEdit,
               onTap:    () => _openForm(context, ref, filtered[i]),
+              onCopy:   () => _copyWhatsapp(context, filtered[i]),
               onSetDefault: () => _setDefault(context, ref, filtered[i]),
               onDelete: () => _confirmDelete(context, ref, filtered[i]),
             ),
@@ -220,9 +222,11 @@ class _WhatsappTemplatesPageState
                   padding: const EdgeInsets.only(bottom: 10),
                   child: _DeliveryCard(
                     template: t,
+                    partner:  null, // shop-wide → pas de partner context
                     canEdit:  canEdit,
                     onTap:    () =>
                         _openDeliveryForm(context, existing: t),
+                    onCopy:   () => _copyDelivery(context, t, null),
                     onSetDefault: () =>
                         _setDeliveryDefault(context, t),
                     onDelete: () =>
@@ -254,9 +258,11 @@ class _WhatsappTemplatesPageState
                     padding: const EdgeInsets.only(bottom: 10),
                     child: _DeliveryCard(
                       template: t,
+                      partner:  p, // résout {{partner_*}} pour le copier-coller
                       canEdit:  canEdit,
                       onTap:    () =>
                           _openDeliveryForm(context, existing: t),
+                      onCopy:   () => _copyDelivery(context, t, p),
                       onSetDefault: () =>
                           _setDeliveryDefault(context, t),
                       onDelete: () =>
@@ -284,6 +290,47 @@ class _WhatsappTemplatesPageState
     );
     if (saved == true && context.mounted) {
       AppSnack.success(context, 'Modèle de livraison enregistré');
+    }
+  }
+
+  /// Copie le corps du template dans le presse-papier. Si [partner] est
+  /// fourni (template partner-scoped), les variables `{{partner_*}}` sont
+  /// résolues depuis ce partenaire — les autres variables ({{client_name}},
+  /// {{produits}}, …) restent en placeholder car on n'a pas d'order context
+  /// dans cette page (l'utilisateur les remplacera dans WhatsApp).
+  Future<void> _copyDelivery(
+      BuildContext context, DeliveryTemplate t, StockLocation? partner) async {
+    var body = t.body;
+    if (partner != null) {
+      String partnerCity() {
+        final d = (partner.district ?? '').trim();
+        final c = (partner.city     ?? '').trim();
+        if (d.isNotEmpty && c.isNotEmpty) return '$d, $c';
+        if (d.isNotEmpty) return d;
+        if (c.isNotEmpty) return c;
+        return (partner.address ?? '').trim();
+      }
+      body = body
+          .replaceAll('{{partner_name}}',  partner.name.trim())
+          .replaceAll('{{partner_phone}}', (partner.phone ?? '').trim())
+          .replaceAll('{{partner_city}}',  partnerCity())
+          .replaceAll('{{partner_notes}}', (partner.notes ?? '').trim());
+    }
+    await Clipboard.setData(ClipboardData(text: body));
+    if (context.mounted) {
+      AppSnack.success(context,
+          partner != null
+              ? 'Modèle copié (variables ${partner.name} résolues)'
+              : 'Modèle copié dans le presse-papier');
+    }
+  }
+
+  /// Copie le corps brut d'un template WhatsApp client.
+  Future<void> _copyWhatsapp(
+      BuildContext context, WhatsappTemplate t) async {
+    await Clipboard.setData(ClipboardData(text: t.body));
+    if (context.mounted) {
+      AppSnack.success(context, 'Template copié dans le presse-papier');
     }
   }
 
@@ -449,14 +496,20 @@ class _TypeFilterBar extends StatelessWidget {
 // ─── Card d'un modèle de livraison (style identique à _TemplateCard) ─────
 class _DeliveryCard extends StatelessWidget {
   final DeliveryTemplate template;
+  /// Partenaire de cette section (null si shop-wide) — sert au libellé
+  /// du tooltip Copier (« Copier (résout les variables de <partenaire>) »).
+  final StockLocation?   partner;
   final bool             canEdit;
   final VoidCallback     onTap;
+  final VoidCallback     onCopy;
   final VoidCallback     onSetDefault;
   final VoidCallback     onDelete;
   const _DeliveryCard({
     required this.template,
+    required this.partner,
     required this.canEdit,
     required this.onTap,
+    required this.onCopy,
     required this.onSetDefault,
     required this.onDelete,
   });
@@ -512,6 +565,21 @@ class _DeliveryCard extends StatelessWidget {
                             fontWeight: FontWeight.w800,
                             color: AppColors.primary)),
                   ),
+                // Bouton Copier : visible pour tous (canEdit pas requis —
+                // copier ne modifie rien). Tooltip explicite quand un
+                // partenaire est résolu.
+                IconButton(
+                  onPressed: onCopy,
+                  icon: const Icon(Icons.content_copy_rounded, size: 16),
+                  tooltip: partner != null
+                      ? 'Copier (variables ${partner!.name} résolues)'
+                      : 'Copier le message',
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.all(6),
+                  constraints: const BoxConstraints(
+                      minWidth: 32, minHeight: 32),
+                  color: AppColors.primary,
+                ),
                 if (canEdit)
                   PopupMenuButton<String>(
                     icon: Icon(Icons.more_vert_rounded,
@@ -590,12 +658,14 @@ class _TemplateCard extends StatelessWidget {
   final WhatsappTemplate template;
   final bool             canEdit;
   final VoidCallback     onTap;
+  final VoidCallback     onCopy;
   final VoidCallback     onSetDefault;
   final VoidCallback     onDelete;
   const _TemplateCard({
     required this.template,
     required this.canEdit,
     required this.onTap,
+    required this.onCopy,
     required this.onSetDefault,
     required this.onDelete,
   });
@@ -651,6 +721,17 @@ class _TemplateCard extends StatelessWidget {
                             fontWeight: FontWeight.w800,
                             color: AppColors.primary)),
                   ),
+                // Bouton Copier visible pour tous (ne modifie pas la data).
+                IconButton(
+                  onPressed: onCopy,
+                  icon: const Icon(Icons.content_copy_rounded, size: 16),
+                  tooltip: 'Copier le message',
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.all(6),
+                  constraints: const BoxConstraints(
+                      minWidth: 32, minHeight: 32),
+                  color: AppColors.primary,
+                ),
                 if (canEdit)
                   PopupMenuButton<String>(
                     icon: Icon(Icons.more_vert_rounded,
