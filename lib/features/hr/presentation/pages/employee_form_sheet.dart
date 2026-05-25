@@ -107,19 +107,14 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
       }
     }
 
-    // ── Calcul du rôle effectif ──────────────────────────────────────
-    // - En édition : le rôle vient du segmented `_role` (admin/user).
-    // - À la création : le rôle est dérivé du préréglage choisi. Si
-    //   l'utilisateur a sélectionné le preset "Admin" (= toutes les
-    //   permissions non owner-only), on enregistre role='admin' pour que
-    //   la limite des 3 administrateurs s'applique. Sinon role='user'.
-    bool setEq(Set<EmployeePermission> a, Set<EmployeePermission> b) =>
-        a.length == b.length && a.every(b.contains);
-    final MemberRole effectiveRole = _isEdit
-        ? _role
-        : (setEq(_selected, EmployeePermissionPresets.admin)
-            ? MemberRole.admin
-            : MemberRole.user);
+    // ── Rôle effectif ────────────────────────────────────────────────
+    // `_role` est maintenu cohérent par `_applyPreset` (preset Admin
+    // → role=admin, autres presets → role=user). À la création comme
+    // en édition on prend directement `_role` — plus aucune dérivation
+    // implicite par equality sur les permissions, donc plus de risque
+    // qu'une légère modification individuelle d'une case rétrograde
+    // silencieusement un admin.
+    final MemberRole effectiveRole = _role;
 
     // ── Garde "max 3 admins (propriétaire inclus)" — création + édition.
     // Miroir client du trigger SQL trg_enforce_max_admins (hotfix_024).
@@ -207,9 +202,24 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
     ));
   }
 
+  /// Applique un preset de permissions ET aligne automatiquement le rôle :
+  /// le preset « Admin » force `role = admin`, tous les autres presets
+  /// (Employé, Caissier, Stock, Comptable, Tout décocher) ramènent à
+  /// `role = user`. Empêche la dérive historique « role = admin mais
+  /// permissions = cashier » qui produisait un badge incohérent dans la
+  /// liste membres (cf. _employeeRoleLabel qui détectait le preset par
+  /// equality sur permissions, ignorant role).
   void _applyPreset(Set<EmployeePermission> preset) {
-    setState(() => _selected = {...preset});
+    setState(() {
+      _selected = {...preset};
+      _role = _setEq(preset, EmployeePermissionPresets.admin)
+          ? MemberRole.admin
+          : MemberRole.user;
+    });
   }
+
+  static bool _setEq(Set<EmployeePermission> a, Set<EmployeePermission> b) =>
+      a.length == b.length && a.every(b.contains);
 
   void _toggleGroup(EmployeePermissionGroup group, bool checkAll,
       {required bool includeOwnerOnly}) {

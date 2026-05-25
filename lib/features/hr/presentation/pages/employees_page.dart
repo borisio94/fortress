@@ -100,11 +100,10 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // ─── Topbar : titre + bouton "Nouveau membre" ──────────────────
+        // ─── Topbar : titre + bouton « + » à l'extrême droite ────────
         _MembersTopbar(
-          title:        l.hrMembersTitle,
-          buttonLabel:  l.hrNewMember,
-          onCreate:     _openCreateSheet,
+          title:    l.hrMembersTitle,
+          onCreate: _openCreateSheet,
         ),
 
         // ─── Banner d'approbation owner (gardé) ────────────────────────
@@ -430,9 +429,13 @@ class _ErrorView extends StatelessWidget {
 /// Calcule le libellé de rôle à afficher dans la carte employé : détecte
 /// quel preset de permissions correspond à ses permissions effectives, et
 /// retombe sur "Personnalisé" si aucun preset n'est exact. Le owner est
-/// traité à part (toujours "Propriétaire").
+/// traité à part (toujours "Propriétaire"). Le rôle `admin` prime sur
+/// toute détection de preset — sinon un membre avec `role=admin` mais
+/// permissions cashier (données historiques incohérentes) s'afficherait
+/// "Caissier" alors qu'il est rangé sous la section « Admins ».
 String _employeeRoleLabel(AppLocalizations l, Employee e) {
   if (e.isOwner) return l.hrBadgeOwner;
+  if (e.role == MemberRole.admin) return l.hrPresetAdmin;
 
   // Permissions effectives = (défauts du rôle) ∪ grants \ denies.
   // Même calcul que dans le form (employee_form_sheet.dart::initState).
@@ -445,7 +448,6 @@ String _employeeRoleLabel(AppLocalizations l, Employee e) {
       p.length == effective.length && p.every(effective.contains);
 
   // Ordre du plus spécifique au plus générique.
-  if (eq(EmployeePermissionPresets.admin))        return l.hrPresetAdmin;
   if (eq(EmployeePermissionPresets.accountant))   return l.hrPresetAccountant;
   if (eq(EmployeePermissionPresets.stockManager)) return l.hrPresetStock;
   if (eq(EmployeePermissionPresets.cashier))      return l.hrPresetCashier;
@@ -477,24 +479,16 @@ String _initialsOf(String s) {
 // ═════════════════════════════════════════════════════════════════════════════
 class _MembersTopbar extends StatelessWidget {
   final String       title;
-  final String       buttonLabel;
   final VoidCallback onCreate;
-  const _MembersTopbar({
-    required this.title,
-    required this.buttonLabel,
-    required this.onCreate,
-  });
+  const _MembersTopbar({required this.title, required this.onCreate});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs    = theme.colorScheme;
-    // Sur mobile, le bouton « + » est rendu par la topbar shell
-    // (cf. ShopShell._topbarActionsFor pour /parametres/users) — on
-    // évite le doublon en masquant le bouton inline. Sur desktop, le
-    // bouton inline reste visible (la topbar shell desktop ne montre
-    // pas de + dédié pour cette page).
     final isMobile = MediaQuery.of(context).size.width < 600;
+    // Titre + bouton « + » carré arrondi 28×28 à l'extrême droite,
+    // fond primary opaque (100%).
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
       child: Row(children: [
@@ -507,26 +501,21 @@ class _MembersTopbar extends StatelessWidget {
                 color: cs.onSurface,
               )),
         ),
-        if (!isMobile)
-          ElevatedButton.icon(
-            onPressed: onCreate,
-            icon: Icon(Icons.add_rounded, size: 16, color: cs.onPrimary),
-            label: Text(buttonLabel,
-                style: AppTextStyles.body.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: cs.onPrimary)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: cs.primary,
-              foregroundColor: cs.onPrimary,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 15),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+        Material(
+          color: cs.primary,
+          borderRadius: BorderRadius.circular(12),
+          elevation: 0,
+          child: InkWell(
+            onTap: onCreate,
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              width: 42,
+              height: 42,
+              child: Icon(Icons.person_add_rounded,
+                  size: 22, color: cs.onPrimary),
             ),
           ),
+        ),
       ]),
     );
   }
