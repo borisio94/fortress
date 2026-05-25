@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/database/app_database.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/draggable_fab.dart';
+import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../domain/entities/whatsapp_template.dart';
 import '../providers/whatsapp_template_provider.dart';
 import '../widgets/whatsapp_template_form_sheet.dart';
@@ -67,7 +71,7 @@ class _WhatsappTemplatesPageState
           ? DraggableFabContainer(
               storageKey: 'whatsapp-templates',
               onTap: () => _delivery
-                  ? _openDeliveryForm(context, null)
+                  ? _openDeliveryForm(context, existing: null)
                   : _openForm(context, ref, null),
               tooltip: _delivery
                   ? 'Nouveau modèle de livraison'
@@ -123,7 +127,10 @@ class _WhatsappTemplatesPageState
     );
   }
 
-  // ── Liste modèles de LIVRAISON (système delivery_templates, intact) ────
+  // ── Liste modèles de LIVRAISON groupée par portée (hotfix_093) ────────
+  // Section "Shop — tous partenaires" puis 1 section par partenaire actif,
+  // chacune avec son propre bouton « + ajouter » qui pré-sélectionne le
+  // scope. Les partenaires sans template affichent un hint cliquable.
   Widget _buildDeliveryList(BuildContext context, bool canEdit) {
     final asyncList = ref.watch(deliveryTemplatesProvider(widget.shopId));
     return asyncList.when(
@@ -138,7 +145,28 @@ class _WhatsappTemplatesPageState
         ),
       ),
       data: (templates) {
-        if (templates.isEmpty) {
+        // Bucket par portée.
+        final shopTpls = templates
+            .where((t) => t.partnerId == null).toList();
+        final byPartner = <String, List<DeliveryTemplate>>{};
+        for (final t in templates) {
+          if (t.partnerId == null) continue;
+          byPartner.putIfAbsent(t.partnerId!, () => []).add(t);
+        }
+        // Partenaires actifs du propriétaire (toutes boutiques confondues
+        // — cf. project_multishop_roadmap : owner-scoped).
+        final ownerId = Supabase.instance.client.auth.currentUser?.id;
+        final allPartners = ownerId == null
+            ? const <StockLocation>[]
+            : AppDatabase.getStockLocationsForOwner(ownerId)
+                .where((l) =>
+                    l.type == StockLocationType.partner && l.isActive)
+                .toList()
+              ..sort((a, b) => a.name.toLowerCase()
+                  .compareTo(b.name.toLowerCase()));
+
+        // État vide global : aucun template ET aucun partenaire → CTA simple.
+        if (templates.isEmpty && allPartners.isEmpty) {
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -151,7 +179,8 @@ class _WhatsappTemplatesPageState
                 if (canEdit) ...[
                   const SizedBox(height: 12),
                   TextButton.icon(
-                    onPressed: () => _openDeliveryForm(context, null),
+                    onPressed: () =>
+                        _openDeliveryForm(context, existing: null),
                     icon: const Icon(Icons.add_rounded, size: 16),
                     label: const Text('Créer un modèle de livraison'),
                   ),
@@ -160,36 +189,97 @@ class _WhatsappTemplatesPageState
             ),
           );
         }
+
         return RefreshIndicator(
           onRefresh: () => ref
               .read(deliveryTemplatesProvider(widget.shopId).notifier)
               .refresh(),
-          child: ListView.separated(
+          child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-            itemCount: templates.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (_, i) => _DeliveryCard(
-              template: templates[i],
-              canEdit:  canEdit,
-              onTap:    () => _openDeliveryForm(context, templates[i]),
-              onSetDefault: () =>
-                  _setDeliveryDefault(context, templates[i]),
-              onDelete: () =>
-                  _confirmDeleteDelivery(context, templates[i]),
-            ),
+            children: [
+              _DeliverySectionHeader(
+                icon:     Icons.store_outlined,
+                label:    'Shop — tous partenaires',
+                subtitle: 'Modèle utilisé par défaut',
+                count:    shopTpls.length,
+                onAdd:    canEdit
+                    ? () => _openDeliveryForm(context,
+                        existing: null, partnerId: null)
+                    : null,
+              ),
+              const SizedBox(height: 8),
+              if (shopTpls.isEmpty)
+                _DeliveryEmptyHint(
+                  text: 'Aucun modèle shop-wide.',
+                  canCreate: canEdit,
+                  onCreate: () => _openDeliveryForm(context,
+                      existing: null, partnerId: null),
+                )
+              else
+                for (final t in shopTpls) Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _DeliveryCard(
+                    template: t,
+                    canEdit:  canEdit,
+                    onTap:    () =>
+                        _openDeliveryForm(context, existing: t),
+                    onSetDefault: () =>
+                        _setDeliveryDefault(context, t),
+                    onDelete: () =>
+                        _confirmDeleteDelivery(context, t),
+                  ),
+                ),
+              const SizedBox(height: 18),
+              for (final p in allPartners) ...[
+                _DeliverySectionHeader(
+                  icon:     Icons.local_shipping_outlined,
+                  label:    p.name,
+                  subtitle: 'Modèles dédiés à ce partenaire',
+                  count:    byPartner[p.id]?.length ?? 0,
+                  onAdd:    canEdit
+                      ? () => _openDeliveryForm(context,
+                          existing: null, partnerId: p.id)
+                      : null,
+                ),
+                const SizedBox(height: 8),
+                if ((byPartner[p.id] ?? const []).isEmpty)
+                  _DeliveryEmptyHint(
+                    text: 'Aucun modèle — ${p.name} utilisera le défaut shop.',
+                    canCreate: canEdit,
+                    onCreate: () => _openDeliveryForm(context,
+                        existing: null, partnerId: p.id),
+                  )
+                else
+                  for (final t in byPartner[p.id]!) Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _DeliveryCard(
+                      template: t,
+                      canEdit:  canEdit,
+                      onTap:    () =>
+                          _openDeliveryForm(context, existing: t),
+                      onSetDefault: () =>
+                          _setDeliveryDefault(context, t),
+                      onDelete: () =>
+                          _confirmDeleteDelivery(context, t),
+                    ),
+                  ),
+                const SizedBox(height: 18),
+              ],
+            ],
           ),
         );
       },
     );
   }
 
-  Future<void> _openDeliveryForm(
-      BuildContext context, DeliveryTemplate? existing) async {
+  Future<void> _openDeliveryForm(BuildContext context,
+      {DeliveryTemplate? existing, String? partnerId}) async {
     final saved = await showAdaptiveFormSheet<bool>(
       context: context,
       builder: (_) => DeliveryTemplateFormSheet(
-        shopId:   widget.shopId,
-        existing: existing,
+        shopId:           widget.shopId,
+        existing:         existing,
+        initialPartnerId: partnerId,
       ),
     );
     if (saved == true && context.mounted) {
@@ -632,6 +722,106 @@ class _EmptyState extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// En-tête de section pour la vue Livraison groupée par portée (hotfix_093).
+class _DeliverySectionHeader extends StatelessWidget {
+  final IconData      icon;
+  final String        label;
+  final String        subtitle;
+  final int           count;
+  final VoidCallback? onAdd;
+  const _DeliverySectionHeader({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.count,
+    required this.onAdd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+      Container(width: 28, height: 28,
+          decoration: BoxDecoration(
+              color: AppColors.primarySurface,
+              borderRadius: BorderRadius.circular(7)),
+          child: Icon(icon, size: 15, color: AppColors.primary)),
+      const SizedBox(width: 10),
+      Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Flexible(child: Text(label,
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface))),
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(8)),
+            child: Text('$count', style: AppTextStyles.microBold
+                .copyWith(color: AppColors.primary)),
+          ),
+        ]),
+        Text(subtitle, style: AppTextStyles.microSecondary),
+      ])),
+      if (onAdd != null)
+        IconButton(
+          onPressed: onAdd,
+          icon: const Icon(Icons.add_rounded, size: 18),
+          tooltip: 'Ajouter un modèle à cette portée',
+          style: IconButton.styleFrom(
+            backgroundColor: AppColors.primary.withValues(alpha: 0.08),
+            foregroundColor: AppColors.primary,
+            padding: const EdgeInsets.all(6),
+            minimumSize: const Size(32, 32),
+          ),
+        ),
+    ]);
+  }
+}
+
+/// Carte placeholder pour une portée sans modèle (hotfix_093).
+class _DeliveryEmptyHint extends StatelessWidget {
+  final String        text;
+  final bool          canCreate;
+  final VoidCallback  onCreate;
+  const _DeliveryEmptyHint({
+    required this.text,
+    required this.canCreate,
+    required this.onCreate,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Theme.of(context).semantic.borderSubtle),
+      ),
+      child: Row(children: [
+        Expanded(child: Text(text,
+            style: TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondary))),
+        if (canCreate)
+          TextButton.icon(
+            onPressed: onCreate,
+            icon: const Icon(Icons.add_rounded, size: 14),
+            label: const Text('Ajouter'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              minimumSize: const Size(0, 32),
+            ),
+          ),
+      ]),
     );
   }
 }
