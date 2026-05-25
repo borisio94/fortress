@@ -22,9 +22,7 @@ import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
 import '../../../../shared/widgets/order_source_badge.dart';
 import '../../../../shared/widgets/view_filter_chip_bar.dart';
-import '../widgets/transfer_delivery_sheet.dart';
-import '../widgets/transfer_history_section.dart';
-import '../../data/repositories/delivery_transfer_repository.dart';
+import '../widgets/copy_delivery_message_sheet.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -1539,22 +1537,24 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     const SizedBox(height: 8),
                   ],
 
-                  // ── Transfert au livreur (cf. hotfix_049) ──────────
-                  // Affiché pour toute commande "scheduled" si le user a
-                  // la permission. Ouvre un sheet 2 étapes (destinataire
-                  // + aperçu éditable) qui appelle la RPC atomique
-                  // `transfer_order_to_delivery`.
+                  // ── Copier message livraison ────────────────────────
+                  // Remplace l'ancien transfert in-app (qui ouvrait wa.me)
+                  // — l'utilisateur envoie en réalité dans un groupe
+                  // WhatsApp, donc on génère le message + copie clipboard.
+                  // L'envoi proprement dit est manuel (paste dans le groupe).
                   if (widget.order.status == SaleStatus.scheduled
                       && _permsForOrder().canTransferDelivery) ...[
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                        onPressed: () => _openTransferDeliverySheet(context),
-                        icon: const Icon(Icons.local_shipping_rounded,
+                        onPressed: () => _openCopyDeliveryMessage(context),
+                        icon: const Icon(Icons.content_copy_rounded,
                             size: 14),
-                        label: Text(context.l10n.deliveryTransferBtn,
-                            style: AppTextStyles.captionBold
-                                .copyWith(color: const Color(0xFF25D366))),
+                        label: const Text('Copier message livraison',
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF25D366))),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: const Color(0xFF25D366),
                           side: const BorderSide(
@@ -1749,10 +1749,9 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         onTap: () => _confirmDelete(context),
                       ),
                   ]),
-                  // Historique des transferts au livreur (cf. hotfix_049).
-                  // S'affiche en lecture seule + bouton "Renvoyer" par row.
-                  if (widget.order.id != null)
-                    TransferHistorySection(orderId: widget.order.id!),
+                  // Historique des transferts retiré : l'envoi se fait
+                  // désormais manuellement via copier-coller dans WhatsApp,
+                  // plus aucune trace ne transite par l'app.
                 ],
               ),
             ),
@@ -2148,28 +2147,21 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   AppPermissions _permsForOrder() =>
       ref.read(permissionsProvider(widget.order.shopId));
 
-  /// Ouvre le sheet de transfert au livreur (cf. hotfix_049).
-  Future<void> _openTransferDeliverySheet(BuildContext context) async {
+  /// Ouvre le sheet « Copier message livraison ». Génère le message
+  /// final (template résolu + variables partenaire + lien court produits)
+  /// et le met dans le presse-papier. Le user colle ensuite manuellement
+  /// dans son groupe WhatsApp — wa.me ne supportant pas les groupes,
+  /// l'envoi automatique in-app n'est pas possible.
+  Future<void> _openCopyDeliveryMessage(BuildContext context) async {
     final shop = LocalStorageService.getShop(widget.order.shopId);
-    final ok = await showAdaptiveFormSheet<bool>(
+    await showAdaptiveFormSheet<bool>(
       context: context,
-      builder: (_) => TransferDeliverySheet(
+      builder: (_) => CopyDeliveryMessageSheet(
         order:    widget.order,
         shopId:   widget.order.shopId,
         shopName: shop?.name ?? '',
       ),
     );
-    if (ok == true && context.mounted) {
-      // Rafraîchit l'écran : la commande est passée à processing via la RPC.
-      // Le realtime listener mettra Hive à jour, mais on déclenche aussi un
-      // refresh local pour retour visuel immédiat.
-      AppDatabase.notifyOrderChange(widget.order.shopId);
-      // Invalide la liste de transferts pour que la nouvelle row s'affiche
-      // immédiatement dans l'historique sous la fiche.
-      if (widget.order.id != null) {
-        ref.invalidate(orderDeliveryTransfersProvider(widget.order.id!));
-      }
-    }
   }
 
   /// Libellé du statut, avec sous-statut "Reprogrammée" pour les commandes
