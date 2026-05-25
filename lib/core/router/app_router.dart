@@ -24,6 +24,7 @@ import '../../features/onboarding/presentation/pages/register_simplified_page.da
 import '../../features/onboarding/presentation/pages/shop_onboarding_wizard.dart';
 import '../../features/onboarding/presentation/pages/product_quick_add_page.dart';
 import '../../features/onboarding/presentation/providers/onboarding_seen_provider.dart';
+import '../../features/onboarding/data/onboarding_prefs.dart';
 import '../../features/catalogue/presentation/pages/catalogue_page.dart';
 import '../../features/marketing/presentation/pages/landing_page.dart';
 import '../../features/promo_campaigns/presentation/pages/campaign_send_page.dart';
@@ -162,21 +163,25 @@ class AuthRouterNotifier extends ChangeNotifier {
     final wasAuth = _isAuthenticated;
     _isAuthenticated = state is AuthAuthenticated;
     if (!wasAuth && _isAuthenticated) {
-      // Validation serveur de la session : si le compte a été supprimé
-      // côté serveur (delete_employee → _purge_auth_user), la session
-      // est invalidée + Hive purgé → l'utilisateur revient sur login
-      // sans pouvoir réutiliser le cache offline.
-      SessionValidator.validate().then((valid) {
-        if (!valid) notifyListeners();
-      });
+      // Toute authentification réussie marque les slides d'onboarding
+      // comme « vues » — y compris pour un user qui a contourné les
+      // slides (inscription directe /auth/register, lien d'invitation,
+      // import de session existante). Sinon, au logout, le redirect le
+      // renverrait sur l'onboarding au lieu de /login.
+      unawaited(OnboardingPrefs.markSlidesSeen());
+      _ref?.read(onboardingSeenCacheProvider.notifier).state = true;
       // Vient de se connecter → charger plan + memberships EN PARALLÈLE
-      // puis re-déclencher le redirect une fois les deux prêts.
-      // Le flag `_syncing` empêche le redirect d'envoyer un employé sur
-      // la page paywall pendant cette fenêtre transitoire.
+      // avec la validation serveur de la session (compte zombie : profile
+      // ou membership supprimés côté serveur sans purge auth). Si invalide,
+      // SessionValidator déclenche signOut + clear Hive → l'AuthBloc émet
+      // AuthUnauthenticated et le router redirige vers /login sans flash
+      // dashboard. Le flag `_syncing` bloque toute redirection vers le
+      // dashboard tant que ces 3 étapes ne sont pas terminées.
       final ref = _ref;
       if (ref != null) {
         _syncing = true;
         Future.wait([
+          SessionValidator.validate(),
           ref.read(subscriptionProvider.notifier).load(),
           _syncMemberships(ref),
         ]).whenComplete(() {
@@ -724,14 +729,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               builder: (c, s) => TransfersListPage(
                   shopId: s.pathParameters['shopId']!)),
           // Route legacy — préservée pour les liens externes / deeplinks.
-          // Redirige systématiquement vers /parametres/shop?tab=members&with_overview=1
-          // pour que TOUTES les transitions internes restent sur le même
-          // path : GoRouter conserve alors la pageKey, la page n'est jamais
-          // démontée entre tabs, et le clignotement disparaît.
+          // Redirige vers /parametres/shop?tab=members (SANS with_overview=1).
+          // ShopSettingsPage rend EmployeesPage quand showOverviewTab=false
+          // (= pas de with_overview en query). Mettre with_overview=1 ferait
+          // afficher la vue Boutique → l'utilisateur ne voit pas Membres et
+          // le bouton « + » de la topbar (gated sur tab=members) ne s'ouvre
+          // sur rien d'utile.
           GoRoute(path: '/shop/:shopId/parametres/users',
               redirect: (ctx, s) =>
                   '/shop/${s.pathParameters['shopId']!}/parametres/shop'
-                  '?tab=members&with_overview=1'),
+                  '?tab=members'),
           GoRoute(path: '/shop/:shopId/parametres/security-history',
               builder: (c, s) => SecurityHistoryPage(
                   shopId: s.pathParameters['shopId']!)),
