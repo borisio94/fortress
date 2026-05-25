@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -93,8 +93,39 @@ class _CopyDeliveryMessageSheetState
     return null;
   }
 
+  /// Force `is_visible_web=true` côté Supabase pour les produits de la
+  /// commande AVANT de générer le lien — sinon la RLS publique
+  /// (`products_anon_read_visible_web`) bloque la lecture anonyme du
+  /// catalogue par le livreur qui clique le lien depuis WhatsApp.
+  /// On bypasse l'offline-queue pour avoir une écriture synchrone : le
+  /// partenaire peut cliquer dès que le user a collé dans WhatsApp,
+  /// pas la peine d'attendre un flush.
+  Future<void> _publishOrderProducts() async {
+    final ids = widget.order.items
+        .map((i) => i.productId)
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    if (ids.isEmpty) return;
+    try {
+      await Supabase.instance.client.from('products')
+          .update({'is_visible_web': true})
+          .inFilter('id', ids)
+          .eq('store_id', widget.shopId);
+    } catch (e) {
+      // Non bloquant : si le push échoue (offline / RLS), on tente quand
+      // même de générer le lien. Le partenaire verra le message
+      // « produits plus disponibles publiquement » et le user pourra
+      // marquer les produits visibles manuellement ensuite.
+      debugPrint('[CopyDelivery] publish products failed: $e');
+    }
+  }
+
   Future<String> _ensureLink() async {
     if (_cachedLink != null) return _cachedLink!;
+    // 1. Publier les produits AVANT la génération du lien.
+    await _publishOrderProducts();
+    // 2. Construire l'URL longue.
     final webBase = kIsWeb
         ? Uri.base.origin
         : 'https://fortress-pos.web.app';
