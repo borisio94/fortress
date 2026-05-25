@@ -27,8 +27,11 @@
 
 -- 1) Colonne partner_id (nullable, ON DELETE CASCADE : si on supprime un
 -- partenaire on ne garde pas ses templates orphelins).
+-- TYPE : text (et pas uuid) pour matcher `stock_locations.id` qui est
+-- text dans cette base — sinon le FK Postgres refuse de se créer
+-- («incompatible types: uuid and text»).
 ALTER TABLE delivery_templates
-  ADD COLUMN IF NOT EXISTS partner_id uuid;
+  ADD COLUMN IF NOT EXISTS partner_id text;
 
 DO $$
 BEGIN
@@ -49,12 +52,14 @@ END$$;
 -- traiter NULL comme une valeur sentinelle stable — sinon plusieurs
 -- défauts shop-wide pourraient coexister (Postgres considère
 -- NULL ≠ NULL dans les contraintes uniques).
+-- Sentinelle : chaîne vide '' (partner_id text). Aucun stock_locations.id
+-- n'est '' en pratique → pas de collision.
 DROP INDEX IF EXISTS delivery_templates_default_uniq;
 
 CREATE UNIQUE INDEX IF NOT EXISTS delivery_templates_default_per_scope_uniq
   ON delivery_templates (
     shop_id,
-    COALESCE(partner_id, '00000000-0000-0000-0000-000000000000'::uuid)
+    COALESCE(partner_id, '')
   )
   WHERE is_default = true;
 
@@ -67,7 +72,7 @@ ALTER TABLE delivery_templates
 CREATE UNIQUE INDEX IF NOT EXISTS delivery_templates_name_per_scope_uniq
   ON delivery_templates (
     shop_id,
-    COALESCE(partner_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    COALESCE(partner_id, ''),
     name
   );
 
