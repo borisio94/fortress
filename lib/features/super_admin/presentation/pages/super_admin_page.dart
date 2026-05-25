@@ -16,7 +16,6 @@ import '../widgets/shop_payments_sheet.dart';
 import '../../../../shared/widgets/plan_card.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../subscription/domain/models/plan_type.dart';
-import '../../../../core/widgets/fortress_logo.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/secure_storage.dart';
 import '../../../../core/database/app_database.dart';
@@ -394,8 +393,8 @@ class _SADrawerContent extends ConsumerWidget {
               color: Theme.of(context).colorScheme.surface,
               border: Border(bottom: BorderSide(color: Theme.of(context).semantic.borderSubtle))),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const FortressLogo.light(size: 22),
-            const SizedBox(height: 12),
+            // Logo Fortress isolé retiré — la carte « Super Admin » fait
+            // déjà office de marquage visuel en haut du drawer.
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
@@ -979,34 +978,65 @@ class _ShopsSectionState extends ConsumerState<_ShopsSection> {
             _           => list,
           };
           if (list.isEmpty) return const _EmptyState('Aucune boutique trouvée');
-          return RefreshIndicator(
-            onRefresh: () async => ref.invalidate(_saShopsProvider),
-            child: ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: list.length,
-              itemBuilder: (_, i) => _ShopRow(
-                shop: list[i],
+
+          // ── Regroupement par propriétaire ───────────────────────────
+          // Toutes les boutiques d'un même owner_id sont rendues sous un
+          // en-tête « Propriétaire · N boutique(s) ». Les boutiques sans
+          // owner_id (anomalie données) sont regroupées sous « Inconnu ».
+          // Tri : alphabétique sur le nom du propriétaire ; à l'intérieur
+          // d'un groupe on conserve l'ordre du provider (created_at DESC).
+          final groups = <String, List<Map<String, dynamic>>>{};
+          for (final s in list) {
+            final oid = (s['owner_id'] as String?) ?? '__none__';
+            groups.putIfAbsent(oid, () => []).add(s);
+          }
+          String groupKeyName(String k) {
+            final o = groups[k]!.first['owner_profile'] as Map?;
+            return ((o?['name'] ?? o?['email'] ?? '~') as String).toLowerCase();
+          }
+          final sortedKeys = groups.keys.toList()
+            ..sort((a, b) => groupKeyName(a).compareTo(groupKeyName(b)));
+
+          final items = <Widget>[];
+          for (var gi = 0; gi < sortedKeys.length; gi++) {
+            final k     = sortedKeys[gi];
+            final shops = groups[k]!;
+            final owner = shops.first['owner_profile'] as Map?;
+            if (gi > 0) items.add(const SizedBox(height: 14));
+            items.add(_OwnerGroupHeader(owner: owner, count: shops.length));
+            items.add(const SizedBox(height: 6));
+            for (final s in shops) {
+              items.add(_ShopRow(
+                shop: s,
                 onToggle: () async {
-                  final val = !(list[i]['is_active'] as bool? ?? true);
+                  final val = !(s['is_active'] as bool? ?? true);
                   await Supabase.instance.client.from('shops')
-                      .update({'is_active': val}).eq('id', list[i]['id']);
+                      .update({'is_active': val}).eq('id', s['id']);
                   ref.invalidate(_saShopsProvider);
                   ref.invalidate(_saStatsProvider);
                 },
-                onToggleSuspend: () => _toggleSuspend(list[i]),
-                onExtendTrial: () => _extendTrial(list[i]),
-                onPayments: () => _showPayments(list[i]),
+                onToggleSuspend: () => _toggleSuspend(s),
+                onExtendTrial: () => _extendTrial(s),
+                onPayments: () => _showPayments(s),
                 onDelete: () => showDialog(context: context, builder: (_) => _ConfirmDialog(
                   title: 'Supprimer la boutique',
-                  body: 'Supprimer « ${list[i]['name']} » ? Irréversible.',
+                  body: 'Supprimer « ${s['name']} » ? Irréversible.',
                   confirmLabel: 'Supprimer', confirmColor: AppColors.error,
                   onConfirm: () async {
-                    await Supabase.instance.client.from('shops').delete().eq('id', list[i]['id']);
+                    await Supabase.instance.client.from('shops').delete().eq('id', s['id']);
                     ref.invalidate(_saShopsProvider);
                     ref.invalidate(_saStatsProvider);
                   },
                 )),
-              ),
+              ));
+            }
+          }
+
+          return RefreshIndicator(
+            onRefresh: () async => ref.invalidate(_saShopsProvider),
+            child: ListView(
+              padding: const EdgeInsets.all(12),
+              children: items,
             ),
           );
         },
@@ -2100,6 +2130,55 @@ class _ShopRow extends StatelessWidget {
                 style: AppTextStyles.microBold.copyWith(
                     color: isActive ? AppColors.secondary : AppColors.error)),
           ),
+      ]),
+    );
+  }
+}
+
+/// En-tête de groupe rendue au-dessus des boutiques d'un même propriétaire
+/// dans la liste super-admin. Affiche l'initiale + nom + email + compteur.
+class _OwnerGroupHeader extends StatelessWidget {
+  final Map? owner;
+  final int count;
+  const _OwnerGroupHeader({required this.owner, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final name  = (owner?['name']  as String?)?.trim();
+    final email = (owner?['email'] as String?)?.trim();
+    final label = (name != null && name.isNotEmpty)
+        ? name
+        : (email != null && email.isNotEmpty ? email : 'Propriétaire inconnu');
+    final initial = label.isNotEmpty ? label[0].toUpperCase() : '?';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+          color: AppColors.primarySurface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.18))),
+      child: Row(children: [
+        Container(width: 28, height: 28,
+            decoration: BoxDecoration(
+                color: AppColors.primary, shape: BoxShape.circle),
+            child: Center(child: Text(initial,
+                style: AppTextStyles.captionBold.copyWith(color: Colors.white)))),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min, children: [
+          Text(label, style: AppTextStyles.bodySmBold,
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+          if (name != null && name.isNotEmpty && email != null && email.isNotEmpty)
+            Text(email, style: AppTextStyles.microSecondary,
+                maxLines: 1, overflow: TextOverflow.ellipsis),
+        ])),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+          decoration: BoxDecoration(
+              color: AppColors.primary,
+              borderRadius: BorderRadius.circular(20)),
+          child: Text('$count', style: AppTextStyles.microBold
+              .copyWith(color: Colors.white)),
+        ),
       ]),
     );
   }
