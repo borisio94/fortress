@@ -75,7 +75,7 @@ class _CampaignSendPageState extends ConsumerState<CampaignSendPage> {
         final origin = Uri.base.origin.startsWith('http')
             ? Uri.base.origin
             : 'https://fortress-pos.web.app';
-        final longUrl = '$origin/#/promo/${c.shopId}/${c.id}';
+        final longUrl = '$origin/promo/${c.shopId}/${c.id}';
         final shortUrl = await ShortLinkService.createShortLink(
               longUrl:   longUrl,
               linkType:  c.type.key,

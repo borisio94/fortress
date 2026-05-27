@@ -12,6 +12,10 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
+  # `usePathUrlStrategy()` côté web (main.dart) — élimine le `#` dans
+  # les URLs pour préserver les query params lors d'une 302 d'un short_link.
+  flutter_web_plugins:
+    sdk: flutter
 
   # ── State management ────────────────────────────────────────────
   flutter_riverpod: ^2.5.1

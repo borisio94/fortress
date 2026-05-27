@@ -645,9 +645,10 @@ class _InventairePageState extends ConsumerState<InventairePage>
   /// l'URL, puis ouvre WhatsApp avec un message pré-rempli (sans destinataire
   /// — l'utilisateur choisit le contact ou le groupe à qui envoyer).
   /// Partage le **lien web** de la vitrine publique de la boutique :
-  /// `https://<host>/#/catalogue/<shopId>`. Plus besoin de générer / uploader
+  /// `https://<host>/catalogue/<shopId>`. Plus besoin de générer / uploader
   /// un PDF — la page publique est dynamique (toujours à jour) et ouvre
   /// directement le catalogue dans le navigateur du client.
+  /// Path routing (sans `#`) depuis main.usePathUrlStrategy().
   ///
   /// Volontairement **synchrone jusqu'à `openExternal`** : sur web, un
   /// `await` préalable rompt le user gesture et le navigateur bloque
@@ -734,8 +735,8 @@ class _InventairePageState extends ConsumerState<InventairePage>
         .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
         .join('&');
     final longUrl = qpString.isEmpty
-        ? '$origin/#/catalogue/${widget.shopId}'
-        : '$origin/#/catalogue/${widget.shopId}?$qpString';
+        ? '$origin/catalogue/${widget.shopId}'
+        : '$origin/catalogue/${widget.shopId}?$qpString';
     // Raccourcir AVANT le picker destinataire : l'await est consommé
     // avant la prochaine interaction utilisateur (clic recipient), qui
     // fournit alors un user gesture frais pour `openExternal` côté web

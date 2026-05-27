@@ -181,7 +181,10 @@ class _ShareCatalogDialogState extends State<ShareCatalogDialog> {
         debugPrint('[Share] markProductsVisibleWeb error: $e');
       });
     }
-    final base = 'https://fortress-pos.web.app/#/catalogue/${widget.shopId}';
+    // Path routing (sans `#`) depuis main.usePathUrlStrategy() — élimine
+    // le fragment qui posait problème dans les in-app browsers WhatsApp
+    // lors d'une 302 (Edge `r` → long URL).
+    final base = 'https://fortress-pos.web.app/catalogue/${widget.shopId}';
     // Build query params : `ids` (sous-ensemble produits) + `stock`
     // (snapshot filtré par location). Le snapshot n'est encodé que
     // pour les produits effectivement partagés (sélectionnés). Si

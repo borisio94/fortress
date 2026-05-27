@@ -11,6 +11,26 @@
   -->
   <base href="$FLUTTER_BASE_HREF">
 
+  <!--
+    Compat migration hash→path routing (2026-05-27).
+    Les anciens liens partagés (catalogue, promo, etc.) suivent le format
+    `https://<host>/#/catalogue/...` (hash routing). Depuis le passage à
+    PathUrlStrategy, le fragment n'est plus interprété par GoRouter, donc
+    ces liens atterriraient sur la landing page. Ce shim détecte un hash
+    qui débute par `#/` et réécrit la barre d'adresse vers le path
+    équivalent AVANT le boot Flutter. Préserve les anciens short_links
+    déjà chez les clients/partenaires.
+  -->
+  <script>
+    (function() {
+      if (window.location.hash && window.location.hash.indexOf('#/') === 0) {
+        var rewritten = window.location.origin
+          + window.location.hash.substring(1);  // strip leading '#'
+        window.location.replace(rewritten);
+      }
+    })();
+  </script>
+
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Fortress POS — caisse multi-boutique pour commerçants.">

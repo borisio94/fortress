@@ -89,10 +89,12 @@ class DeliveryMessageBuilder {
   /// Construit l'URL longue vers la mini-vitrine catalogue d'une commande,
   /// prête à être passée à `ShortLinkService.createShortLink` puis utilisée
   /// comme `productsLink` dans [build]. Format :
-  ///   `<base>/#/catalogue/<shopId>?ids=<id1,id2>&stock=<id1:qty,id2:qty>
+  ///   `<base>/catalogue/<shopId>?ids=<id1,id2>&stock=<id1:qty,id2:qty>
   ///    &loc=<deliveryLocationId>`
   /// `base` est l'URL canonique de l'app (web), passée par le caller —
-  /// permet de tester en local sans hardcoder le domaine prod.
+  /// permet de tester en local sans hardcoder le domaine prod. Path
+  /// routing (sans `#`) depuis main.usePathUrlStrategy — les in-app
+  /// browsers WhatsApp préservent ainsi les query params lors d'une 302.
   static String buildCatalogueLongUrl({
     required String webBase,
     required String shopId,
@@ -119,7 +121,7 @@ class DeliveryMessageBuilder {
     }
     final loc = (sale.deliveryLocationId ?? '').trim();
     if (loc.isNotEmpty) qp.add('loc=$loc');
-    final base = '$webBase/#/catalogue/$shopId';
+    final base = '$webBase/catalogue/$shopId';
     return qp.isEmpty ? base : '$base?${qp.join("&")}';
   }
 

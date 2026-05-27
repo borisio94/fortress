@@ -124,7 +124,7 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> {
     final origin = Uri.base.origin.startsWith('http')
         ? Uri.base.origin
         : 'https://fortress-pos.web.app';
-    final url = '$origin/#/promo/${c.shopId}/${c.id}';
+    final url = '$origin/promo/${c.shopId}/${c.id}';
     showDialog<void>(
       context: context,
       // ctx du builder pour fermer correctement le dialog. Utiliser le

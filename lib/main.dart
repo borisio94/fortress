@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'app.dart';
 import 'core/storage/hive_boxes.dart';
 import 'core/storage/secure_storage.dart';
@@ -36,6 +37,17 @@ void main() async {
 
   // 1. Binding minimal — requis avant tout `runApp`.
   SentryWidgetsFlutterBinding.ensureInitialized();
+
+  // 1bis. Web : passe en path routing (sans #). Élimine le fragment qui
+  //       posait problème quand un lien court (Edge `r` → 302) était
+  //       suivi par certains in-app browsers WhatsApp (iOS notamment),
+  //       qui strippaient le hash et faisaient atterrir le livreur sur
+  //       la landing page au lieu du catalogue. Le rewrite Firebase
+  //       Hosting (`** → /index.html`) est déjà en place côté
+  //       firebase.json, donc toute route deeplink fonctionne sans
+  //       changement serveur. À appeler AVANT runApp pour ne pas voir
+  //       un flash de hash dans la barre d'adresse.
+  if (kIsWeb) usePathUrlStrategy();
 
   // 2. Splash Flutter animé — uniquement mobile/desktop.
   // Sur web, le splash HTML inline est déjà visible (cf. web/index.html).

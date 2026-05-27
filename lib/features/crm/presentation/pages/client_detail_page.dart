@@ -51,7 +51,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
     final origin = Uri.base.origin.startsWith('http')
         ? Uri.base.origin
         : 'https://fortress-pos.web.app';
-    final longUrl = '$origin/#/catalogue/${widget.shopId}';
+    final longUrl = '$origin/catalogue/${widget.shopId}';
     try {
       final short = await ShortLinkService.createShortLink(
         longUrl:   longUrl,
@@ -220,7 +220,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
     // Lien court pré-généré (initState) si dispo, sinon fallback URL longue
     // (jamais bloquant — wa.me doit s'ouvrir dans le tick du clic sur web).
     final link = _catalogueShortUrl
-        ?? '$origin/#/catalogue/${widget.shopId}';
+        ?? '$origin/catalogue/${widget.shopId}';
     final shop = LocalStorageService.getShop(widget.shopId);
     final shopName = shop?.name ?? 'Fortress';
     final clientName = client.name;
