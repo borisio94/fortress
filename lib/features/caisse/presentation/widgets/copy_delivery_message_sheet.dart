@@ -103,8 +103,15 @@ class _CopyDeliveryMessageSheetState
     final webBase = kIsWeb
         ? Uri.base.origin
         : 'https://fortress-pos.web.app';
+    // Passe le catalogue local (Hive) au builder pour qu'il résolve
+    // les variantIds (SaleItem.productId peut être un `var_…` quand
+    // l'item est une variante) vers leur produit parent. Sans ça, le
+    // RPC get_delivery_products cherche un product dont l'id matche
+    // le variantId → 0 row → page vide.
+    final products = LocalStorageService.getProductsForShop(widget.shopId);
     final long = DeliveryMessageBuilder.buildCatalogueLongUrl(
-        webBase: webBase, shopId: widget.shopId, sale: widget.order);
+        webBase: webBase, shopId: widget.shopId, sale: widget.order,
+        products: products);
     try {
       final maison = await ShortLinkService.createShortLink(
         longUrl:   long,

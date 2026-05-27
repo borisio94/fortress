@@ -36,6 +36,12 @@
 --    Dart récupère un List<Map<String, dynamic>> côté supabase-flutter.
 DROP FUNCTION IF EXISTS public.get_delivery_products(text, text[]);
 
+-- Le WHERE accepte AUSSI les IDs de variante (filet de sécurité Couche 2,
+-- ticket 2026-05-27). Le `SaleItem.productId` peut stocker en réalité un
+-- `var_<timestamp>_<index>` quand l'item est une variante — sans cette
+-- branche le RPC ne matchait rien et la page restait vide. La Couche 1
+-- côté Dart résout déjà variantId → parentId dans l'URL, mais cette
+-- garde-fou couvre les vieilles commandes / autres call sites.
 CREATE FUNCTION public.get_delivery_products(
   p_shop_id     text,
   p_product_ids text[]
@@ -58,10 +64,19 @@ AS $$
     'is_active',      is_active,
     'variants',       variants
   )), '[]'::jsonb)
-  FROM public.products
+  FROM public.products p
   WHERE store_id = p_shop_id::text
-    AND id::text = ANY(p_product_ids)
-    AND is_active = true;
+    AND is_active = true
+    AND (
+      -- Match direct sur products.id (cas normal).
+      id::text = ANY(p_product_ids)
+      -- OU : un des IDs demandés se trouve dans p.variants[].id (variante).
+      OR EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(p.variants) v
+        WHERE v->>'id' = ANY(p_product_ids)
+      )
+    );
 $$;
 
 -- Grant explicite (anon + authenticated). Le SECURITY DEFINER déjà

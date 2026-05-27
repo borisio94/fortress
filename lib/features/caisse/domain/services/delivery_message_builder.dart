@@ -1,3 +1,4 @@
+import '../../../inventaire/domain/entities/product.dart';
 import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../../parametres/domain/entities/delivery_template.dart';
 import '../entities/sale.dart';
@@ -89,36 +90,75 @@ class DeliveryMessageBuilder {
   /// Construit l'URL longue vers la mini-vitrine catalogue d'une commande,
   /// prête à être passée à `ShortLinkService.createShortLink` puis utilisée
   /// comme `productsLink` dans [build]. Format :
-  ///   `<base>/catalogue/<shopId>?ids=<id1,id2>&stock=<id1:qty,id2:qty>
+  ///   `<base>/catalogue/<shopId>?ids=<id1,id2>&stock=<id1:qty,id2|var:qty>
   ///    &loc=<deliveryLocationId>`
   /// `base` est l'URL canonique de l'app (web), passée par le caller —
   /// permet de tester en local sans hardcoder le domaine prod. Path
   /// routing (sans `#`) depuis main.usePathUrlStrategy — les in-app
   /// browsers WhatsApp préservent ainsi les query params lors d'une 302.
+  ///
+  /// [products] : catalogue local complet du shop (depuis Hive). Sert à
+  /// résoudre les `SaleItem.productId` qui sont en réalité des IDs de
+  /// VARIANTE (format `var_…`) vers leur produit parent. Le catalogue
+  /// page expose les variantes en cards séparées sous le produit parent ;
+  /// donc on passe le PARENT dans `ids=` et on encode la variante dans
+  /// `stock=` au format `parentId|variantId:qty` (déjà supporté côté
+  /// page, cf. app_router catalogue route). Si [products] est null ou
+  /// vide, fallback sur l'ancien comportement (productId tel quel) pour
+  /// rester rétro-compatible.
   static String buildCatalogueLongUrl({
-    required String webBase,
-    required String shopId,
-    required Sale   sale,
+    required String        webBase,
+    required String        shopId,
+    required Sale          sale,
+    List<Product>?         products,
   }) {
-    final ids = sale.items
-        .map((i) => i.productId)
-        .where((id) => id.isNotEmpty)
-        .toSet() // dédup (cas d'un même produit ajouté 2 fois — on cumule la qty plus bas)
-        .toList();
-    // Cumul des quantités par productId (au cas où un produit apparaît
-    // plusieurs lignes — additionne plutôt que d'écraser).
-    final qtyById = <String, int>{};
+    // Index pour résolution rapide : productId → product et variantId → parent.
+    final byProductId = <String, Product>{};
+    final variantToParent = <String, String>{}; // variantId → parent.id
+    if (products != null) {
+      for (final p in products) {
+        final pid = p.id;
+        if (pid != null && pid.isNotEmpty) byProductId[pid] = p;
+        for (final v in p.variants) {
+          final vid = v.id;
+          if (vid != null && vid.isNotEmpty && pid != null) {
+            variantToParent[vid] = pid;
+          }
+        }
+      }
+    }
+
+    // Résolution de chaque SaleItem.productId :
+    //   - id matche un produit → c'est un productId, on garde
+    //   - id matche un variantId connu → on remplace par parentId,
+    //     et on note la variante pour le stock
+    //   - sinon (vieux records, products non chargés…) → on garde tel quel
+    final parentIds = <String>{};
+    final stockTokens = <String>[];
     for (final it in sale.items) {
-      if (it.productId.isEmpty) continue;
-      qtyById.update(it.productId, (q) => q + it.quantity,
-          ifAbsent: () => it.quantity);
+      final raw = it.productId;
+      if (raw.isEmpty) continue;
+      String parentId;
+      String? variantId;
+      if (byProductId.containsKey(raw)) {
+        parentId = raw;
+      } else if (variantToParent.containsKey(raw)) {
+        parentId  = variantToParent[raw]!;
+        variantId = raw;
+      } else {
+        // Fallback rétro-compat — on passe tel quel.
+        parentId = raw;
+      }
+      parentIds.add(parentId);
+      // Format catalogue : `productId|variantId:qty` pour une variante,
+      // `productId:qty` sinon. Voir app_router catalogue route.
+      final key = variantId == null ? parentId : '$parentId|$variantId';
+      stockTokens.add('$key:${it.quantity}');
     }
+
     final qp = <String>[];
-    if (ids.isNotEmpty) qp.add('ids=${ids.join(",")}');
-    if (qtyById.isNotEmpty) {
-      qp.add('stock=${qtyById.entries.map((e) =>
-          "${e.key}:${e.value}").join(",")}');
-    }
+    if (parentIds.isNotEmpty) qp.add('ids=${parentIds.join(",")}');
+    if (stockTokens.isNotEmpty) qp.add('stock=${stockTokens.join(",")}');
     final loc = (sale.deliveryLocationId ?? '').trim();
     if (loc.isNotEmpty) qp.add('loc=$loc');
     final base = '$webBase/catalogue/$shopId';
