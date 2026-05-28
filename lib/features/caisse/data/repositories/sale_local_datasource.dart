@@ -789,8 +789,24 @@ class SaleLocalDatasource {
       for (final i in rawItems) {
         try {
           final map = Map<String, dynamic>.from(i as Map);
+          // Les commandes WEB (place_public_order) stockent
+          // {product_id: parentId, variant_id: variantId} séparés. Les
+          // commandes POS multi-variant stockent product_id = variantId
+          // (cf. product_grid_widget). Pour rester cohérent côté domain
+          // (SaleItem.productId = id matchable via variantToParent dans
+          // DeliveryMessageBuilder), on prend variant_id en priorité s'il
+          // est renseigné. Sinon fallback sur product_id. Sans ce
+          // mapping, le lien delivery d'une commande web multi-variant
+          // omettait l'index variante dans `stock=` → la page catalogue
+          // filtrait toutes les variantes et affichait « Les produits
+          // partagés ne sont plus disponibles ».
+          final rawVariantId =
+              (map['variant_id'] as String?)?.trim() ?? '';
+          final productIdValue = rawVariantId.isNotEmpty
+              ? rawVariantId
+              : ((map['product_id'] ?? '') as String);
           items.add(SaleItem(
-            productId:   (map['product_id'] ?? '') as String,
+            productId:   productIdValue,
             productName: (map['product_name'] ?? map['name'] ?? '') as String,
             unitPrice:   ((map['unit_price'] ?? map['price'] ?? 0) as num)
                 .toDouble(),

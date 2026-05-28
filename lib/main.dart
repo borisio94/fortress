@@ -10,6 +10,7 @@ import 'core/services/supabase_service.dart';
 import 'core/database/app_database.dart';
 import 'core/database/supabase_migrations.dart';
 import 'core/services/delivery_reminder_service.dart';
+import 'core/services/new_web_order_service.dart';
 import 'core/services/scheduled_order_alert_service.dart';
 import 'shared/widgets/alerts/alarm_sound_player.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -174,6 +175,13 @@ Future<void> _initBackgroundServices() async {
     // Non bloquant : retry interne 2s si AppDatabase pas prêt.
     ScheduledOrderAlertService.instance.start().catchError((Object e) {
       debugPrint('ScheduledOrderAlertService init error: $e');
+    }),
+    // Service notifications « nouvelle commande web » — alimente la
+    // bannière persistante (NewWebOrderBanner) pour que l'owner ne rate
+    // pas une commande passée via le lien catalogue. Distinct du moteur
+    // précédent (escalade temporelle vs canal d'arrivée).
+    NewWebOrderService.instance.start().catchError((Object e) {
+      debugPrint('NewWebOrderService init error: $e');
     }),
   ]);
 }

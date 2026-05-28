@@ -15,7 +15,6 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/theme_palette.dart';
-import '../../core/widgets/fortress_logo.dart';
 import '../../features/auth/presentation/bloc/auth_bloc.dart';
 import '../../features/auth/presentation/bloc/auth_event.dart';
 import '../../features/caisse/presentation/bloc/caisse_bloc.dart';
@@ -28,7 +27,10 @@ import 'offline_banner_widget.dart';
 import 'sync_status_banner.dart';
 import 'order_source_badge.dart';
 import 'pin_lock_banner.dart';
+import 'shop_logo_avatar.dart';
+import '../../core/storage/local_storage_service.dart';
 import 'stock_nav_chips.dart';
+import 'alerts/new_web_order_banner.dart';
 import 'alerts/scheduled_alerts_banner_host.dart';
 import '../providers/scheduled_alerts_provider.dart';
 import '../navigation/page_titles.dart';
@@ -357,6 +359,11 @@ class _MobileShell extends StatelessWidget {
         // qu'une alerte WARNING+ est active. Auto-hide quand la liste se
         // vide (ack via modal ou statut commande change).
         const ScheduledAlertsBannerHost(),
+        // Bannière commandes web non acquittées — alertes "nouvelle
+        // commande arrivée via lien catalogue". Persiste jusqu'au clic
+        // sur "Vu". Distincte de ScheduledAlertsBannerHost qui escalade
+        // selon la proximité de l'heure de livraison.
+        const NewWebOrderBanner(),
         // StockNavChips supprimés round 13 — doublon avec le menu drawer
         // (Inventaire → Produits / Emplacements / Incidents). La nav passe
         // désormais uniquement par le drawer pour éviter la redondance.
@@ -434,34 +441,47 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
       backgroundColor: theme.colorScheme.surface,
       child: SafeArea(
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          // ── Header : avatar boutique 36px + nom ────────────────────
+          // ── Header : logo boutique (fallback Fortress) + nom + actions
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 14, 12),
-            child: Row(children: [
-              _DrawerShopAvatar(name: shop?.name, palette: palette),
-              const SizedBox(width: 12),
-              Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(shop?.name ?? l.hubBrand,
-                      maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.label.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: theme.colorScheme.onSurface)),
-                  Text(l.hubBrand,
-                      maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.micro.copyWith(
-                          letterSpacing: 0.6,
-                          color: theme.colorScheme.onSurface.withValues(alpha:0.5))),
-                ],
-              )),
-              IconButton(
-                icon: const Icon(Icons.close_rounded, size: 22),
-                tooltip: l.cancel,
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-            ]),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(children: [
+                  ShopLogoAvatar(logoUrl: shop?.logoUrl, size: 40),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(shop?.name ?? l.hubBrand,
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.label.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: theme.colorScheme.onSurface)),
+                      Text(l.hubBrand,
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.micro.copyWith(
+                              letterSpacing: 0.6,
+                              color: theme.colorScheme.onSurface
+                                  .withValues(alpha: 0.5))),
+                    ],
+                  )),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 22),
+                    tooltip: l.cancel,
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ]),
+                const SizedBox(height: 10),
+                _DrawerShopActions(
+                  onSwitch: () {
+                    Navigator.of(context).pop();
+                    context.go(RouteNames.shopSelector);
+                  },
+                ),
+              ],
+            ),
           ),
           Divider(height: 1,
               color: theme.colorScheme.onSurface.withValues(alpha:0.08)),
@@ -540,29 +560,81 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
   }
 }
 
-/// Avatar boutique 36px (spec mobile drawer round 9 prompt 5) — initiale
-/// du nom dans un cercle teinté primary.
-class _DrawerShopAvatar extends StatelessWidget {
-  final String?       name;
-  final ThemePalette  palette;
-  const _DrawerShopAvatar({required this.name, required this.palette});
+/// Actions du header drawer : uniquement « Changer de boutique » désormais.
+/// La création d'une nouvelle boutique a été déplacée vers
+/// Inventaire → Emplacements → section Boutiques (carte dédiée), pour
+/// regrouper toutes les actions liées à l'organisation des emplacements
+/// au même endroit.
+class _DrawerShopActions extends StatelessWidget {
+  final VoidCallback onSwitch;
+  const _DrawerShopActions({required this.onSwitch});
 
   @override
   Widget build(BuildContext context) {
-    final letter = (name == null || name!.trim().isEmpty)
-        ? '?'
-        : name!.trim().characters.first.toUpperCase();
-    return Container(
-      width: 36, height: 36,
-      decoration: BoxDecoration(
-        color: palette.primary,
-        shape: BoxShape.circle,
+    final uid = LocalStorageService.getCurrentUser()?.id ?? '';
+    final shopsCount = uid.isEmpty
+        ? 0
+        : LocalStorageService.getShopsForUser(uid).length;
+    final hasMultiple = shopsCount > 1;
+    // Avec une seule boutique, aucune action — le bouton "Changer" n'a
+    // pas de sens (rien vers quoi switch).
+    if (!hasMultiple) return const SizedBox.shrink();
+    return _DrawerActionBtn(
+      icon: Icons.swap_horiz_rounded,
+      label: 'Changer de boutique',
+      onTap: onSwitch,
+    );
+  }
+}
+
+class _DrawerActionBtn extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  /// `true` = bouton plein violet (CTA principal). `false` = outline.
+  final bool filled;
+  const _DrawerActionBtn({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.filled = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = filled
+        ? AppColors.primary
+        : Theme.of(context).colorScheme.surface;
+    final fg = filled
+        ? Colors.white
+        : AppColors.primary;
+    final borderColor = filled
+        ? Colors.transparent
+        : AppColors.primary.withValues(alpha: 0.40);
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: borderColor),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 14, color: fg),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.captionBold.copyWith(color: fg)),
+            ),
+          ]),
+        ),
       ),
-      alignment: Alignment.center,
-      child: Text(letter,
-          style: AppTextStyles.subtitle.copyWith(
-              fontWeight: FontWeight.w800,
-              color: Theme.of(context).colorScheme.onPrimary)),
     );
   }
 }
@@ -854,6 +926,11 @@ class _DesktopShell extends StatelessWidget {
           const SubscriptionBanner(),
           // Banner alertes commandes programmées (sprint 2B) — cf. mobile.
           const ScheduledAlertsBannerHost(),
+        // Bannière commandes web non acquittées — alertes "nouvelle
+        // commande arrivée via lien catalogue". Persiste jusqu'au clic
+        // sur "Vu". Distincte de ScheduledAlertsBannerHost qui escalade
+        // selon la proximité de l'heure de livraison.
+        const NewWebOrderBanner(),
           // StockNavChips supprimés round 13 — doublon avec la sidebar
           // (Inventaire → Produits / Emplacements / Incidents). La nav
           // passe uniquement par la sidebar pour éviter la redondance.
@@ -928,23 +1005,39 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
                 width: 0.5)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        // ── Header : logo Fortress 28px + nom boutique tronqué ─────
-        // Le logo Fortress remplace l'avatar boutique pour cohérence
-        // de marque — le nom boutique reste à droite pour identifier
-        // le contexte courant. Avatar conservé sur drawer mobile (plus
-        // d'espace).
+        // ── Header : avatar boutique (logo, fallback Fortress) + nom
+        //            + sous-titre Fortress + actions Nouvelle/Changer
         Padding(
-          padding: const EdgeInsets.fromLTRB(14, 16, 14, 12),
-          child: Row(children: [
-            const FortressLogo.dark(size: 28),
-            const SizedBox(width: 10),
-            Expanded(child: Text(
-              shop?.name ?? l.hubBrand,
-              maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.bodyBold.copyWith(
-                  color: theme.colorScheme.onSurface),
-            )),
-          ]),
+          padding: const EdgeInsets.fromLTRB(12, 16, 12, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(children: [
+                ShopLogoAvatar(logoUrl: shop?.logoUrl, size: 36),
+                const SizedBox(width: 10),
+                Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(shop?.name ?? l.hubBrand,
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodyBold.copyWith(
+                            color: theme.colorScheme.onSurface)),
+                    Text(l.hubBrand,
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.micro.copyWith(
+                            letterSpacing: 0.6,
+                            color: theme.colorScheme.onSurface
+                                .withValues(alpha: 0.5))),
+                  ],
+                )),
+              ]),
+              const SizedBox(height: 10),
+              _DrawerShopActions(
+                onSwitch: () => context.go(RouteNames.shopSelector),
+              ),
+            ],
+          ),
         ),
         Divider(height: 1,
             color: theme.colorScheme.onSurface.withValues(alpha:0.08)),
