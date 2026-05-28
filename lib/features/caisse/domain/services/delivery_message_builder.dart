@@ -206,9 +206,24 @@ class DeliveryMessageBuilder {
     final feesText      = feesAmount <= 0
         ? 'inclus dans le prix'
         : _formatAmount(feesAmount);
-    final productsTotal = sale.items.fold<double>(
-        0, (s, i) => s + (i.unitPrice * i.quantity));
-    final grandTotal    = productsTotal + feesAmount;
+    // {{prix_produit}} et {{total}} doivent EXACTEMENT matcher la facture
+    // (cf. ticket 2026-05-28). On utilise donc `sale.subtotal` et
+    // `sale.total` qui prennent en compte :
+    //   • `customPrice` saisi par le marchand (prix modifié pour la vente)
+    //   • `discount` par ligne
+    //   • `discountAmount` global
+    //   • `taxAmount`
+    // Avant fix : `sum(i.unitPrice * i.quantity)` ignorait customPrice et
+    // discount → le message livreur affichait le prix CATALOGUE alors que
+    // la facture affichait le prix négocié. Discrepancy ≠ 0.
+    //
+    // `grandTotal` ajoute `feesAmount` (frais de livraison) au total
+    // facture pour que le livreur sache combien encaisser au total.
+    // Si le marchand veut afficher le total facture pur (sans fees), il
+    // peut composer son template avec uniquement `{{prix_produit}}` +
+    // `{{frais_livraison}}` séparés.
+    final productsTotal = sale.subtotal;
+    final grandTotal    = sale.total + feesAmount;
     final totalText     = _formatTotalWithAcompte(grandTotal, paidAmount);
 
     // Ville du partenaire : combine district + city si les deux sont
@@ -308,10 +323,17 @@ class DeliveryMessageBuilder {
   /// Calcul d'une ligne :
   ///   • qty=1 → "5 000 XAF (qté 1)"
   ///   • qty>1 → "5 000 × 3 = 15 000 XAF"
+  ///
+  /// Le prix unitaire affiché = `i.effectivePrice` (customPrice si défini,
+  /// sinon unitPrice) — aligné avec la facture. Le total ligne =
+  /// `i.subtotal` qui inclut aussi le discount par ligne s'il y en a un.
+  /// Sans ce dernier alignement, le marchand qui applique un rabais
+  /// pourrait voir une ligne « 5 000 × 3 = 15 000 » dans le message
+  /// livreur alors que la facture montre 14 250 (5% de remise).
   static String _formatItemLine(SaleItem i) {
-    final unit  = i.customPrice ?? i.unitPrice;
+    final unit  = i.effectivePrice;
     final qty   = i.quantity;
-    final total = unit * qty;
+    final total = i.subtotal;
     if (qty <= 1) {
       return '${_formatAmount(unit)} (qté 1)';
     }
