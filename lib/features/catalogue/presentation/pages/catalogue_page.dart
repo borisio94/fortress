@@ -1077,6 +1077,11 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
         'sku':         it.sku,
         'quantity':    1,
         'unit_price':  it.price,
+        // Image figée pour que la page tracking (et le marchand côté
+        // dashboard) puissent afficher l'image du produit dans le
+        // récap commande — sinon `m['image_url']` est null et tombe sur
+        // le placeholder gris.
+        'image_url':   it.imageUrl,
       }).toList();
       final city     = _cityCtrl.text.trim();
       final district = _districtCtrl.text.trim();

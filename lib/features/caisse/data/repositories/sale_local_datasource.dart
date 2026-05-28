@@ -156,6 +156,7 @@ class SaleLocalDatasource {
         'custom_price': i.customPrice,
         'quantity':     i.quantity,
         'discount':     i.discount,
+        'image_url':    i.imageUrl,
         'variant_name': i.variantName,
       }).toList(),
     };
@@ -311,6 +312,7 @@ class SaleLocalDatasource {
         'custom_price': i.customPrice,
         'quantity':     i.quantity,
         'discount':     i.discount,
+        'image_url':    i.imageUrl,
         'variant_name': i.variantName,
       }).toList(),
     };
@@ -711,6 +713,7 @@ class SaleLocalDatasource {
     'custom_price': i.customPrice,
     'quantity':     i.quantity,
     'discount':     i.discount,
+    'image_url':    i.imageUrl,
     'variant_name': i.variantName,
   };
 
