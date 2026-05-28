@@ -145,18 +145,21 @@ class _CataloguePageState extends State<CataloguePage> {
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
     } else {
-      // Vitrine publique générique (pas d'ids → on respecte la RLS
-      // `products_anon_read_visible_web` pour ne pas exposer tout
-      // le catalogue par défaut).
-      final rows = await db
-          .from('products')
-          .select('id,name,sku,price_sell_pos,stock_qty,image_url,'
-              'category_id,brand,is_visible_web,is_active,variants')
-          .eq('store_id', widget.shopId)
-          .eq('is_active', true)
-          .eq('is_visible_web', true)
-          .order('name');
-      products = (rows as List)
+      // Vitrine publique générique (pas d'ids) — partage catalogue
+      // complet ou par catégorie depuis l'inventaire. Passe par le RPC
+      // SECURITY DEFINER `get_public_catalogue_products` (hotfix_097)
+      // plutôt qu'un SELECT direct. Raison : la policy `products_select`
+      // (TO authenticated) exige `_is_shop_member`, ce qui cassait le
+      // partage de lien sur mobile quand le marchand avait une session
+      // Supabase persistée sur un compte non-membre du shop testé.
+      // Le RPC retourne uniquement les produits actifs + visibles web
+      // d'un shop actif quel que soit le rôle de l'appelant.
+      final rpcResult = await db.rpc('get_public_catalogue_products',
+          params: {
+            'p_shop_id':  widget.shopId,
+            'p_category': widget.initialCategory,
+          });
+      products = (rpcResult as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
     }
