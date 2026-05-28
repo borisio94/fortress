@@ -94,13 +94,22 @@ class _CataloguePageState extends State<CataloguePage> {
 
   Future<_CatalogueData> _load() async {
     final db = Supabase.instance.client;
-    final shopRow = await db
-        .from('shops').select('id,name,phone,whatsapp_phone')
-        .eq('id', widget.shopId).maybeSingle();
+    // Passe par un RPC SECURITY DEFINER (hotfix_095) plutôt qu'un SELECT
+    // direct sur `shops` : la policy `shops_select_owner_or_member`
+    // (TO authenticated) bloque les utilisateurs authentifiés non-membres
+    // du shop, ce qui cassait le partage de lien sur mobile quand le
+    // marchand l'ouvrait dans un browser où sa session Supabase était
+    // persistée. Le RPC retourne les colonnes publiques d'un shop actif
+    // quel que soit le rôle de l'appelant.
+    final rpcResult = await db.rpc(
+        'get_public_shop_info', params: {'p_shop_id': widget.shopId});
+    final shopRow = rpcResult is Map
+        ? Map<String, dynamic>.from(rpcResult)
+        : null;
     if (shopRow == null) {
       throw Exception(
           'Boutique introuvable ou non publique.\n\n'
-          'Vérifiez que la migration `hotfix_045_catalogue_public.sql` '
+          'Vérifiez que la migration `hotfix_095_public_shop_info.sql` '
           'a été appliquée côté Supabase et que la boutique est active.');
     }
     final ids = widget.productIds;
