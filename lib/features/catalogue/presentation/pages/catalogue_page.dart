@@ -194,11 +194,27 @@ class _CataloguePageState extends State<CataloguePage> {
           // `_buildStockSnapshot` côté inventaire/dashboard pour que
           // le matching survive aux divergences d'ID variants entre
           // Hive local et JSONB Supabase.
+          //
+          // Filtre variantes affichées (cf. bug 2026-05-28) : quand
+          // `override` est fourni ET qu'aucune clé pour cette variante
+          // n'est présente, on n'affiche PAS la variante. Permet au
+          // partage commande (delivery) d'exposer SEULEMENT les variantes
+          // réellement commandées, pas toutes les variantes du parent.
+          // Le partage catalogue (inventaire) publie un snapshot pour
+          // CHAQUE variante du shop, donc toutes restent affichées.
+          // Fallback rétro-compat : si la clé `pid|<variantId>` est dans
+          // override (ancien format), on accepte aussi.
+          final hasOverride = override != null;
           for (int idx = 0; idx < realVariants.length; idx++) {
             final v = Map<String, dynamic>.from(realVariants[idx] as Map);
             final variantName = (v['name'] as String).trim();
             final vid = v['id']?.toString() ?? variantName;
-            final snapStock = override?['$pid|$idx'];
+            final snapByIdx = override?['$pid|$idx'];
+            final snapByVid = override?['$pid|$vid'];
+            if (hasOverride && snapByIdx == null && snapByVid == null) {
+              continue; // variante non commandée → masquée
+            }
+            final snapStock = snapByIdx ?? snapByVid;
             items.add(_CatalogueItem(
               productId:       pid,
               variantId:       vid,

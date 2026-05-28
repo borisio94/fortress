@@ -133,26 +133,45 @@ class DeliveryMessageBuilder {
     //   - id matche un variantId connu → on remplace par parentId,
     //     et on note la variante pour le stock
     //   - sinon (vieux records, products non chargés…) → on garde tel quel
+    //
+    // Format clé snapshot pour les variantes : `parentId|<idx>` où idx =
+    // position dans `realVariants` (variantes filtrées avec name non vide).
+    // Aligné avec `_buildStockSnapshot` (inventaire) ET `catalogue_page._load`
+    // pour que :
+    //   1. le snapshot de stock soit correctement matché côté catalogue,
+    //   2. la CataloguePage puisse filtrer les variantes affichées (n'expose
+    //      QUE les variantes commandées, pas toutes les variantes du parent
+    //      — sinon le client voit 4 variantes alors qu'il n'a commandé qu'une
+    //      seule couleur, cf. bug rapporté 2026-05-28).
     final parentIds = <String>{};
     final stockTokens = <String>[];
     for (final it in sale.items) {
       final raw = it.productId;
       if (raw.isEmpty) continue;
       String parentId;
-      String? variantId;
+      String? variantToken; // idx dans realVariants OU variantId (fallback)
       if (byProductId.containsKey(raw)) {
         parentId = raw;
       } else if (variantToParent.containsKey(raw)) {
-        parentId  = variantToParent[raw]!;
-        variantId = raw;
+        parentId = variantToParent[raw]!;
+        final parent = byProductId[parentId];
+        if (parent != null) {
+          final realVariants =
+              parent.variants.where((v) => v.name.trim().isNotEmpty).toList();
+          final idx = realVariants.indexWhere((v) => v.id == raw);
+          variantToken = idx >= 0 ? '$idx' : raw; // fallback : variantId brut
+        } else {
+          variantToken = raw;
+        }
       } else {
         // Fallback rétro-compat — on passe tel quel.
         parentId = raw;
       }
       parentIds.add(parentId);
-      // Format catalogue : `productId|variantId:qty` pour une variante,
+      // Format catalogue : `productId|<idx>:qty` pour une variante,
       // `productId:qty` sinon. Voir app_router catalogue route.
-      final key = variantId == null ? parentId : '$parentId|$variantId';
+      final key =
+          variantToken == null ? parentId : '$parentId|$variantToken';
       stockTokens.add('$key:${it.quantity}');
     }
 
