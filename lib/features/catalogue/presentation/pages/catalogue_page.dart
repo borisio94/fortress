@@ -519,6 +519,7 @@ class _CataloguePageState extends State<CataloguePage> {
                                     return _DeliveryCard(
                                       imageUrl: item.imageUrl,
                                       quantity: item.stock,
+                                      sku:      item.sku,
                                     );
                                   }
                                   final selected =
@@ -1596,11 +1597,17 @@ class _BatchOrderBar extends StatelessWidget {
 class _DeliveryCard extends StatelessWidget {
   final String? imageUrl;
   final int     quantity;
-  const _DeliveryCard({required this.imageUrl, required this.quantity});
+  final String? sku;
+  const _DeliveryCard({
+    required this.imageUrl,
+    required this.quantity,
+    required this.sku,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final skuValue = (sku ?? '').trim();
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: Container(
@@ -1645,6 +1652,37 @@ class _DeliveryCard extends StatelessWidget {
                 ),
               ),
             ),
+            // Badge SKU en bas — sert au livreur à identifier précisément
+            // la référence à prendre dans le stock (utile quand plusieurs
+            // produits/variantes se ressemblent visuellement). Masqué si
+            // pas de SKU enregistré pour le produit.
+            if (skuValue.isNotEmpty)
+              Positioned(
+                left:   8,
+                right:  8,
+                bottom: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    skuValue,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color:      Colors.white,
+                      fontSize:   11,
+                      fontWeight: FontWeight.w700,
+                      fontFamily: 'monospace',
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
