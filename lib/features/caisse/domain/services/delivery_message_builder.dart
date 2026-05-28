@@ -180,8 +180,13 @@ class DeliveryMessageBuilder {
     if (stockTokens.isNotEmpty) qp.add('stock=${stockTokens.join(",")}');
     final loc = (sale.deliveryLocationId ?? '').trim();
     if (loc.isNotEmpty) qp.add('loc=$loc');
+    // Mode delivery : la CataloguePage simplifie l'affichage (uniquement
+    // image + quantité à livrer ; pas de nom/prix/stock/commande). Le
+    // livreur n'a besoin que d'une fiche visuelle pour reconnaître les
+    // produits à livrer.
+    qp.add('mode=delivery');
     final base = '$webBase/catalogue/$shopId';
-    return qp.isEmpty ? base : '$base?${qp.join("&")}';
+    return '$base?${qp.join("&")}';
   }
 
   // ── Résolution variables ───────────────────────────────────────────────

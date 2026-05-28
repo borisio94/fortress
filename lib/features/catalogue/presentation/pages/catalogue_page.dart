@@ -45,6 +45,18 @@ class CataloguePage extends StatefulWidget {
   /// périmètre global / boutique → comportement historique inchangé.
   final String? locationId;
 
+  /// Mode livraison (param `mode=delivery` du lien généré par
+  /// `DeliveryMessageBuilder`). Quand activé, la page se simplifie pour
+  /// un livreur qui n'a besoin que de voir l'image et la quantité à
+  /// livrer par item :
+  ///   - cards minimalistes (image + badge quantité, sans nom/prix/stock)
+  ///   - pas de toolbar de sélection / commande
+  ///   - pas de hint « cliquez pour sélectionner »
+  ///   - pas de bandeau « Commander la sélection »
+  /// `stockOverride[key]` est alors interprété comme la quantité à
+  /// livrer (et plus comme un snapshot de stock disponible).
+  final bool deliveryMode;
+
   const CataloguePage({
     super.key,
     required this.shopId,
@@ -52,6 +64,7 @@ class CataloguePage extends StatefulWidget {
     this.productIds,
     this.stockOverride,
     this.locationId,
+    this.deliveryMode = false,
   });
 
   @override
@@ -455,19 +468,24 @@ class _CataloguePageState extends State<CataloguePage> {
                       slivers: [
                         SliverToBoxAdapter(
                             child: _Header(shopName: data.shop.name)),
-                        const SliverToBoxAdapter(child: _OrderHint()),
-                        SliverToBoxAdapter(
-                          child: _Toolbar(
-                            activeCategory:  _category,
-                            onOpenFilters:   () => _openFiltersSheet(data),
-                            selectMode:      _selectMode,
-                            selectedCount:   _selected.length,
-                            onToggleSelect:  () => setState(() {
-                              _selectMode = !_selectMode;
-                              if (!_selectMode) _selected.clear();
-                            }),
+                        // Mode delivery : pas de hint « cliquez pour
+                        // sélectionner » ni de toolbar de sélection — le
+                        // livreur ne passe pas de commande.
+                        if (!widget.deliveryMode) ...[
+                          const SliverToBoxAdapter(child: _OrderHint()),
+                          SliverToBoxAdapter(
+                            child: _Toolbar(
+                              activeCategory:  _category,
+                              onOpenFilters:   () => _openFiltersSheet(data),
+                              selectMode:      _selectMode,
+                              selectedCount:   _selected.length,
+                              onToggleSelect:  () => setState(() {
+                                _selectMode = !_selectMode;
+                                if (!_selectMode) _selected.clear();
+                              }),
+                            ),
                           ),
-                        ),
+                        ],
                         const SliverToBoxAdapter(child: SizedBox(height: 8)),
                         if (filtered.isEmpty)
                           SliverFillRemaining(
@@ -492,6 +510,14 @@ class _CataloguePageState extends State<CataloguePage> {
                               delegate: SliverChildBuilderDelegate(
                                 (_, i) {
                                   final item = filtered[i];
+                                  if (widget.deliveryMode) {
+                                    // Card minimaliste pour le livreur :
+                                    // image + badge quantité à livrer.
+                                    return _DeliveryCard(
+                                      imageUrl: item.imageUrl,
+                                      quantity: item.stock,
+                                    );
+                                  }
                                   final selected =
                                       _selected.contains(item.key);
                                   // Le tap déclenche `_toggleSelect` peu
@@ -524,7 +550,10 @@ class _CataloguePageState extends State<CataloguePage> {
                 ),
                 // Bandeau "Commander" fixé en bas — TOUJOURS visible si
                 // sélection ≥ 1, peu importe la taille de la fenêtre.
-                if (_selectMode && _selected.isNotEmpty)
+                // En mode delivery, le bandeau est désactivé (le livreur
+                // n'achète pas, il visualise).
+                if (!widget.deliveryMode &&
+                    _selectMode && _selected.isNotEmpty)
                   _BatchOrderBar(
                     count:           _selected.length,
                     availableCount:  _selectedAvailable(data).length,
@@ -1547,4 +1576,85 @@ class _BatchOrderBar extends StatelessWidget {
       ),
     );
   }
+}
+
+// ─── Delivery card (mode livreur) ──────────────────────────────────────────
+//
+// Card minimaliste utilisée quand `mode=delivery` est dans l'URL. Le
+// livreur n'a besoin que d'identifier visuellement le produit et la
+// quantité à livrer ; ni nom, ni prix, ni stock, ni interactions.
+// AspectRatio 3:4 imposé pour rester aligné avec la grille
+// (`childAspectRatio: 0.75` côté SliverGrid).
+class _DeliveryCard extends StatelessWidget {
+  final String? imageUrl;
+  final int     quantity;
+  const _DeliveryCard({required this.imageUrl, required this.quantity});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest
+              .withValues(alpha: 0.4),
+          border: Border.all(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5)),
+        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (imageUrl != null && imageUrl!.isNotEmpty)
+              Image.network(imageUrl!,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const _DeliveryPlaceholder())
+            else
+              const _DeliveryPlaceholder(),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.15),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  '×$quantity',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DeliveryPlaceholder extends StatelessWidget {
+  const _DeliveryPlaceholder();
+  @override
+  Widget build(BuildContext context) => Container(
+        color: Theme.of(context)
+            .colorScheme
+            .surfaceContainerHighest
+            .withValues(alpha: 0.5),
+        child: Icon(Icons.image_outlined,
+            size: 40,
+            color: Theme.of(context).colorScheme.onSurfaceVariant
+                .withValues(alpha: 0.4)),
+      );
 }

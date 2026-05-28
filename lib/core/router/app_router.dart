@@ -49,8 +49,6 @@ import '../../features/inventaire/presentation/pages/purchase_orders_page.dart';
 import '../../features/inventaire/presentation/pages/stock_movements_page.dart';
 import '../../features/inventaire/presentation/pages/client_returns_page.dart';
 import '../../features/crm/presentation/pages/clients_page.dart' show ClientsPage;
-import '../../features/hr/presentation/pages/employee_form_sheet.dart';
-import '../../shared/widgets/form_sheet.dart';
 import '../../features/crm/presentation/pages/client_detail_page.dart';
 import '../../features/crm/presentation/pages/send_notification_page.dart';
 import '../../features/finances/presentation/pages/finances_page.dart';
@@ -94,7 +92,6 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../storage/hive_boxes.dart';
 import '../../shared/widgets/adaptive_scaffold.dart';
-import '../i18n/app_localizations.dart';
 
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 import 'route_names.dart';
@@ -480,12 +477,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               if (m.isNotEmpty) stockOverride = m;
             }
             final loc = qp['loc']?.trim();
+            final deliveryMode = qp['mode']?.trim() == 'delivery';
             return CataloguePage(
               shopId: s.pathParameters['shopId']!,
               initialCategory: qp['cat'],
               productIds: (ids != null && ids.isNotEmpty) ? ids : null,
               stockOverride: stockOverride,
               locationId: (loc != null && loc.isNotEmpty) ? loc : null,
+              deliveryMode: deliveryMode,
             );
           }),
       // Suivi de commande publique — lien envoyé par WhatsApp dans la
@@ -847,32 +846,11 @@ class ShopShell extends ConsumerWidget {
     );
   }
 
-  /// Bouton « + » conditionnel dans la topbar shell — basé sur la route
-  /// active. Inventaire (`/inventaire` exact) → push form produit ;
-  /// Clients (`/crm` exact) → ouvre ClientFormSheet en bottom sheet ;
-  /// Membres (`/parametres/shop?tab=members`) → ouvre EmployeeFormSheet.
-  /// Sur les sub-pages (édition produit, détail client…), pas de CTA.
+  /// Bouton « + » conditionnel dans la topbar shell. Désormais renvoie
+  /// toujours null : Inventaire / CRM / Membres ont leur propre FAB
+  /// inline en bas à droite de leur page (évite le doublon UI).
   static List<Widget>? _topbarActionsFor(
       BuildContext context, String loc, String shopId, String? tabQuery) {
-    // Inventaire et CRM : leur "+" topbar a été retiré au profit d'un
-    // bouton inline sur la ligne des filtres / recherche (cf. lots UX).
-    // Membres = path /parametres/shop avec query tab=members.
-    final usersRoot      = loc == '/shop/$shopId/parametres/shop'
-        && tabQuery == 'members';
-    if (!usersRoot) return null;
-    // usersRoot — Membres : ouvre EmployeeFormSheet. EmployeesPage écoute
-    // employeesProvider via Riverpod, refresh auto sur invalidation.
-    return [
-      IconButton(
-        icon: const Icon(Icons.add_rounded, size: 26),
-        tooltip: context.l10n.hrNewMember,
-        onPressed: () {
-          showFormSheet<bool>(
-            context: context,
-            builder: (_) => EmployeeFormSheet(shopId: shopId),
-          );
-        },
-      ),
-    ];
+    return null;
   }
 }
