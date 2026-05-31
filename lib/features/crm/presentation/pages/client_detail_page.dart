@@ -8,16 +8,11 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/whatsapp_service.dart';
-import '../../../../core/services/short_link_service.dart';
-import '../../../../core/services/whatsapp/whatsapp_template_renderer.dart';
-import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/phone_formatter.dart';
 import '../../../../core/i18n/app_localizations.dart';
-import '../../../../core/services/external_launcher.dart';
-import '../../../parametres/domain/entities/whatsapp_template.dart';
-import '../../../parametres/presentation/providers/whatsapp_template_provider.dart';
 import '../../domain/entities/client.dart';
+import '../../../inventaire/presentation/widgets/share_catalog_dialog.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import 'clients_page.dart';
@@ -32,78 +27,12 @@ class ClientDetailPage extends StatefulWidget {
 
 class _ClientDetailPageState extends State<ClientDetailPage> {
   Client? _client;
-  /// Lien court du catalogue pré-généré à l'ouverture de la fiche. L'URL
-  /// catalogue est fixe (dépend du shop, pas du client) → on la raccourcit
-  /// une seule fois ici pour que `_sendCatalogue` puisse l'utiliser
-  /// SYNCHRONIQUEMENT au clic (wa.me sur web exige un user-gesture sans
-  /// await préalable). Fallback URL longue si pas encore prêt.
-  String? _catalogueShortUrl;
 
   @override
   void initState() {
     super.initState();
     _load();
-    _prepareCatalogueShortLink();
     AppDatabase.addListener(_onDbChanged);
-  }
-
-  Future<void> _prepareCatalogueShortLink() async {
-    final origin = Uri.base.origin.startsWith('http')
-        ? Uri.base.origin
-        : 'https://fortress-pos.web.app';
-    // Un lien catalogue GÉNÉRIQUE (`/catalogue/{shopId}` sans `ids`) passe
-    // côté page par la RPC `get_public_catalogue_products` qui exige
-    // `is_visible_web = true`. Or les produits naissent à false et ce flux
-    // ne publie rien → le destinataire voyait « aucun produit ».
-    //
-    // On embarque donc explicitement les `ids` de tous les produits actifs
-    // EN STOCK (+ un snapshot de stock figé), exactement comme le partage
-    // « sélection » de l'inventaire. La page catalogue route alors vers la
-    // RPC `get_delivery_products` (hotfix_094) qui BYPASSE `is_visible_web`
-    // — plus aucune dépendance à une étape de publication, et le snapshot
-    // garantit que le filtre `stock <= 0` ne masque pas tout même si le
-    // `stock_qty` côté Supabase est en retard. Snapshot figé à l'ouverture
-    // de la fiche (limite assumée, identique au partage inventaire).
-    final products = AppDatabase.getProductsForShop(widget.shopId)
-        .where((p) => p.id != null && p.isActive && p.totalStock > 0)
-        .toList();
-    final ids = products.map((p) => p.id!).toList();
-
-    // Snapshot stock — clés alignées sur `CataloguePage._load` :
-    //   • produit sans (ou ≤1) vraie variante → clé = `productId`
-    //   • sinon → une clé `productId|<idx>` par variante (idx = position
-    //     dans les variantes au nom non vide).
-    final snapshot = <String, int>{};
-    for (final p in products) {
-      final realVariants =
-          p.variants.where((v) => v.name.trim().isNotEmpty).toList();
-      if (realVariants.length <= 1) {
-        snapshot[p.id!] = p.totalStock;
-      } else {
-        for (var i = 0; i < realVariants.length; i++) {
-          snapshot['${p.id!}|$i'] = realVariants[i].stockAvailable;
-        }
-      }
-    }
-
-    final qp = <String>[];
-    if (ids.isNotEmpty) qp.add('ids=${ids.join(",")}');
-    if (snapshot.isNotEmpty) {
-      qp.add('stock=${snapshot.entries.map((e) => '${e.key}:${e.value}').join(",")}');
-    }
-    final base = '$origin/catalogue/${widget.shopId}';
-    final longUrl = qp.isEmpty ? base : '$base?${qp.join("&")}';
-
-    try {
-      final short = await ShortLinkService.createShortLink(
-        longUrl:   longUrl,
-        linkType:  'catalogue',
-        expiresIn: const Duration(days: 365),
-      );
-      if (mounted && short != null) {
-        setState(() => _catalogueShortUrl = short);
-      }
-    } catch (_) {/* fallback URL longue */}
   }
 
   @override
@@ -223,7 +152,16 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
               _ActionTile(icon: Icons.collections_bookmark_outlined,
                   color: AppColors.secondary,
                   label: context.l10n.catalogueSendBtn,
-                  onTap: () => _sendCatalogue(context, client)),
+                  // Réutilise EXACTEMENT le composant de partage de
+                  // l'inventaire (qui fonctionne) : sélection produits →
+                  // destinataires → envoi WhatsApp. Le dialog embarque les
+                  // `ids` (→ RPC get_delivery_products qui bypasse
+                  // is_visible_web) et publie les produits partagés, donc le
+                  // lien est toujours peuplé. Le client courant apparaît dans
+                  // la liste des destinataires à l'étape 2.
+                  onTap: () => ShareCatalogDialog.show(context,
+                      products: AppDatabase.getProductsForShop(widget.shopId),
+                      shopId: widget.shopId)),
               const _Div(),
               _ActionTile(icon: Icons.edit_outlined,
                   color: const Color(0xFF6B7280),
@@ -242,55 +180,6 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
   /// `wa.me/<phone>?text=…`). Le numéro client est normalisé via
   /// `PhoneFormatter.toWame` pour gérer les formats `+237 6XX…` /
   /// `06XX…` / `6XX…` indifféremment.
-  /// Envoie le lien public du catalogue par WhatsApp.
-  /// **Synchrone** jusqu'à `launchUrl` — sur web, un await préalable
-  /// rompt le user gesture et le navigateur bloque la fenêtre wa.me.
-  void _sendCatalogue(BuildContext context, Client client) {
-    final phone = (client.phone ?? '').trim();
-    if (phone.isEmpty) {
-      AppSnack.warning(context, 'Numéro WhatsApp manquant.');
-      return;
-    }
-    final p = PhoneFormatter.toWame(phone).replaceAll(RegExp(r'[^\d]'), '');
-    if (p.isEmpty) {
-      AppSnack.error(context, 'Numéro WhatsApp invalide.');
-      return;
-    }
-    final origin = Uri.base.origin.startsWith('http')
-        ? Uri.base.origin
-        : 'https://fortress-pos.web.app';
-    // Lien court pré-généré (initState) si dispo, sinon fallback URL longue
-    // (jamais bloquant — wa.me doit s'ouvrir dans le tick du clic sur web).
-    final link = _catalogueShortUrl
-        ?? '$origin/catalogue/${widget.shopId}';
-    final shop = LocalStorageService.getShop(widget.shopId);
-    final shopName = shop?.name ?? 'Fortress';
-    final clientName = client.name;
-
-    final container = ProviderScope.containerOf(context, listen: false);
-    final tplRepo = container.read(whatsappTemplateRepositoryProvider);
-    final tpl =
-        tplRepo.getDefault(widget.shopId, WhatsappTemplateType.catalogue);
-
-    final msg = tpl == null
-        ? 'Bonjour $clientName 👋\n\n'
-            'Découvrez notre catalogue.\n\n🛍️ $link\n\n'
-            'À très bientôt !\n\n$shopName'
-        : WhatsappTemplateRenderer.render(tpl, {
-            'client_name': clientName,
-            'shop_name':   shopName,
-            'link':        link,
-          });
-
-    final waUrl = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
-    openExternal(waUrl).then((ok) {
-      if (!ok && context.mounted) {
-        AppSnack.error(context,
-            'Impossible d\'ouvrir WhatsApp. Autorisez les pop-ups dans le navigateur.');
-      }
-    });
-  }
-
   Future<void> _composeWhatsappMessage(
       BuildContext context, Client client) async {
     final phone = (client.phone ?? '').trim();
