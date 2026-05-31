@@ -126,7 +126,22 @@
       "Bash(Measure-Object)",
       "Bash(Select-Object Count)",
       "PowerShell(flutter *)",
-      "Bash(sort -t_ -k2 -n)"
+      "Bash(sort -t_ -k2 -n)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "Bash(git diff *)",
+      "Bash(echo \"EXIT_GREP=$?\")",
+      "Read(//c/flutter/bin/cache/artifacts/material_fonts/**)",
+      "Read(//c/flutter/packages/flutter/lib/src/material/**)",
+      "Bash(perl -i -pe 's/const Divider\\\\\\(height: 1, color: AppColors\\\\.inputFill\\\\\\)/Divider\\(height: 1, color: AppColors.inputFill\\)/g' lib/features/caisse/presentation/pages/caisse_page.dart)",
+      "Bash(perl -0pi -e 's/const BorderSide\\\\\\(\\\\s*\\\\n\\\\s*color: AppColors\\\\.inputBorder\\\\\\)/BorderSide\\(\\\\n                        color: AppColors.inputBorder\\)/g' lib/features/caisse/presentation/widgets/delete_sale_dialog.dart)",
+      "Bash(perl -i -pe 's/borderSide: const BorderSide\\\\\\(color: AppColors\\\\.inputBorder\\\\\\)/borderSide: BorderSide\\(color: AppColors.inputBorder\\)/g' lib/features/inventaire/presentation/widgets/delete_product_dialog.dart)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(Get-ChildItem -Path supabase -Recurse -Filter \"*.sql\")",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)",
+      "Bash(awk 'NR<=1291' \"C:/Users/DELL PRO/Desktop/flutter_projets/pratique_app/fortress/lib/features/hr/presentation/pages/employees_page.dart\")",
+      "PowerShell(npx --yes supabase@latest --version 2>&1 | Select-Object -First 10)",
+      "PowerShell(npx --yes supabase@latest functions deploy reset-platform --project-ref hyxvussnlnvbkalqzovb 2>&1 | Select-Object -First 40)"
     ]
   }
 }

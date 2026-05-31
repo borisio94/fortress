@@ -1,3 +1,5 @@
+import '../../../../core/storage/schema_migrator.dart';
+
 /// Mouvement comptable lié à un partenaire de livraison.
 ///
 /// Modélise les flux financiers croisés entre la boutique et un dépôt
@@ -110,7 +112,15 @@ class PartnerLedgerEntry {
   /// multi-appareils / offline-first sans résurrection par re-push.
   final DateTime? deletedAt;
 
+  // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
+  static const int currentSchemaVersion = 1;
+  static final SchemaMigrator _migrator = SchemaMigrator(
+    currentVersion: currentSchemaVersion,
+    steps: const {},
+  );
+
   Map<String, dynamic> toMap() => {
+        'schema_version': currentSchemaVersion,
         'id': id,
         'shop_id': shopId,
         'partner_location_id': partnerLocationId,
@@ -124,7 +134,8 @@ class PartnerLedgerEntry {
         'deleted_at': deletedAt?.toUtc().toIso8601String(),
       };
 
-  factory PartnerLedgerEntry.fromMap(Map<String, dynamic> m) {
+  factory PartnerLedgerEntry.fromMap(Map<String, dynamic> rawM) {
+    final m = _migrator.migrate(rawM);
     return PartnerLedgerEntry(
       id: m['id'] as String,
       shopId: m['shop_id'] as String,

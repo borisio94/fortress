@@ -181,6 +181,8 @@ class AuthRouterNotifier extends ChangeNotifier {
           SessionValidator.validate(),
           ref.read(subscriptionProvider.notifier).load(),
           _syncMemberships(ref),
+          // Flag serveur des slides d'intro (1 fois par compte, cross-device).
+          loadOnboardingSlidesSeen(ref),
         ]).whenComplete(() {
           _syncing = false;
           notifyListeners();
@@ -200,6 +202,9 @@ class AuthRouterNotifier extends ChangeNotifier {
     } else if (wasAuth && !_isAuthenticated) {
       _ref?.read(subscriptionProvider.notifier).reset();
       _ref?.read(shopRolesMapProvider.notifier).state = {};
+      // Réinitialise le flag slides → rechargé à la prochaine connexion
+      // (un autre compte sur le même appareil doit être réévalué).
+      _ref?.read(onboardingSlidesSeenProvider.notifier).state = null;
       // Vider la boutique active et notifier le dashboard
       try {
         _ref?.read(currentShopProvider.notifier).clearShop();
@@ -332,14 +337,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         // /onboarding/* et /auth/* sont publics par construction.
         if (isOnboardingRoute) return null;
         if (isAuthRoute)       return null;
-        // 1ʳᵉ ouverture (flag absent) → slides marketing avant le login.
-        // Lecture du cache synchrone alimenté au boot par `app.dart`
-        // (cf. primeOnboardingSeenCache). Si `null` (cache pas encore
-        // prêt), on n'introduit AUCUN redirect prématuré pour éviter un
-        // flash visuel sur le 1er frame.
-        final seen = ref.read(onboardingSeenCacheProvider);
-        if (seen == null) return null;
-        if (!seen)        return RouteNames.onboardingSlides;
+        // Les slides d'intro ne sont PLUS un tunnel pré-login : elles
+        // s'affichent uniquement après la 1ʳᵉ connexion d'un compte (flag
+        // serveur, cf. branche connectée + hotfix_099). Un visiteur anonyme
+        // sur une route protégée va donc directement au login.
         return RouteNames.login;
       }
 
@@ -348,6 +349,26 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       // Plan pas encore chargé → ne pas rediriger (évite le flash)
       if (plan == null) return null;
+
+      // ── Slides d'intro : UNE FOIS par compte, à la 1ʳᵉ connexion ────
+      // Flag serveur profiles.onboarding_slides_seen (hotfix_099), chargé au
+      // login dans AuthRouterNotifier. Le super admin n'a pas de tunnel
+      // onboarding. On N'INTERROMPT PAS le tunnel d'inscription /onboarding/*
+      // (register simplifié + wizard boutique) : les slides s'afficheront
+      // quand l'utilisateur arrive sur une vraie route applicative.
+      // `null` = en chargement → attendre (pas de flash). `false` = compte
+      // neuf → slides. `true` = déjà vu.
+      if (!plan.isSuperAdmin) {
+        final slidesSeen = ref.read(onboardingSlidesSeenProvider);
+        if (loc == RouteNames.onboardingSlides) {
+          // Sur la page slides : si déjà vues (refresh / retour), entrer dans
+          // l'app ; sinon (false/null) laisser la page s'afficher.
+          if (slidesSeen == true) return postAuthDestination();
+        } else if (!isOnboardingRoute) {
+          if (slidesSeen == null)  return null;
+          if (slidesSeen == false) return RouteNames.onboardingSlides;
+        }
+      }
 
       // ── CAS 1 — Super Admin ────────────────────────────────────────
       if (plan.isSuperAdmin) {

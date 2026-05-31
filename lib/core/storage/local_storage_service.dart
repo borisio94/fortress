@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'hive_boxes.dart';
+import 'schema_migrator.dart';
 import '../../features/auth/domain/entities/user.dart';
 import '../../features/shop_selector/domain/entities/shop_summary.dart';
 import '../../features/inventaire/domain/entities/product.dart';
@@ -295,19 +296,31 @@ class LocalStorageService {
   // SÉRIALISEURS
   // ══════════════════════════════════════════════════════════════════
 
+  // Schema versioning (cf. lib/core/storage/schema_migrator.dart).
+  // Chaque entité a son propre migrator pour pouvoir évoluer indépendamment.
+  static final _userMigrator = SchemaMigrator(
+    currentVersion: 1, steps: const {});
+  static final _shopMigrator = SchemaMigrator(
+    currentVersion: 1, steps: const {});
+
   static Map<String, dynamic> _userToMap(User u) => {
+    'schema_version': _userMigrator.currentVersion,
     'id': u.id, 'email': u.email, 'name': u.name,
     'phone': u.phone, 'avatar_url': u.avatarUrl,
     'created_at': u.createdAt.toIso8601String(),
   };
 
-  static User _userFromMap(Map<String, dynamic> m) => User(
-    id: m['id'], email: m['email'], name: m['name'],
-    phone: m['phone'], avatarUrl: m['avatar_url'],
-    createdAt: DateTime.parse(m['created_at']),
-  );
+  static User _userFromMap(Map<String, dynamic> rawM) {
+    final m = _userMigrator.migrate(rawM);
+    return User(
+      id: m['id'], email: m['email'], name: m['name'],
+      phone: m['phone'], avatarUrl: m['avatar_url'],
+      createdAt: DateTime.parse(m['created_at']),
+    );
+  }
 
   static Map<String, dynamic> _shopToMap(ShopSummary s) => {
+    'schema_version': _shopMigrator.currentVersion,
     'id': s.id, 'name': s.name, 'logo_url': s.logoUrl,
     'currency': s.currency, 'country': s.country, 'sector': s.sector,
     'is_active': s.isActive, 'today_sales': s.todaySales,
@@ -321,7 +334,9 @@ class LocalStorageService {
     'suspended_reason': s.suspendedReason,
   };
 
-  static ShopSummary _shopFromMap(Map<String, dynamic> m) => ShopSummary(
+  static ShopSummary _shopFromMap(Map<String, dynamic> rawM) {
+    final m = _shopMigrator.migrate(rawM);
+    return ShopSummary(
     // Lectures DEFENSIVES : on accepte n'importe quel type dans la map
     // (legacy formats, payloads tronqués par anciens `_shopToMap`,
     // valeurs nulles inattendues). Tout cast strict (`as String`) sur un
@@ -350,9 +365,41 @@ class LocalStorageService {
     suspendedAt:     m['suspended_at'] is String
         ? DateTime.tryParse(m['suspended_at'] as String) : null,
     suspendedReason: m['suspended_reason']?.toString(),
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────
+  // Migration versionnée Product (cf. lib/core/storage/schema_migrator.dart).
+  //
+  // Convention : chaque fois qu'on modifie le format sérialisé de Product
+  // (renommer un champ, changer une valeur par défaut, etc.), on :
+  //   1. Bump `currentVersion`
+  //   2. Ajoute une step `N: (m) => transformed_m` dans `steps`
+  // Les anciens produits stockés en Hive/Supabase seront migrés à la
+  // lecture, transparent pour l'utilisateur final. Pour persister la
+  // migration côté serveur, le write-back via `saveProduct` ré-écrit le
+  // map migré (avec `schema_version: currentVersion`).
+  static final _productMigrator = SchemaMigrator(
+    currentVersion: 1,
+    steps: const {
+      // Exemple pour la prochaine évolution :
+      // 1: _migrateProductV1ToV2,
+    },
   );
 
+  // Exemple commenté d'une future migration :
+  // static Map<String, dynamic> _migrateProductV1ToV2(
+  //     Map<String, dynamic> m) {
+  //   // v1 → v2 : `price` devient `price_buy` (clarification).
+  //   if (m.containsKey('price') && !m.containsKey('price_buy')) {
+  //     m['price_buy'] = m['price'];
+  //     m.remove('price');
+  //   }
+  //   return m;
+  // }
+
   static Map<String, dynamic> _productToMap(Product p) => {
+    'schema_version': _productMigrator.currentVersion,
     'id': p.id, 'store_id': p.storeId, 'category_id': p.categoryId,
     'brand': p.brand, 'name': p.name, 'description': p.description,
     'barcode': p.barcode, 'sku': p.sku,
@@ -375,7 +422,11 @@ class LocalStorageService {
     'archived_snapshot': p.archivedSnapshot,
   };
 
-  static Product _productFromMap(Map<String, dynamic> m) {
+  static Product _productFromMap(Map<String, dynamic> rawM) {
+    // Migration automatique : applique les steps successifs pour
+    // remettre les anciennes données au format courant. No-op si
+    // `schema_version == currentVersion`.
+    final m = _productMigrator.migrate(rawM);
     final rawVariants = m['variants'] as List?;
     // Migration automatique : si aucune variante sauvegardée,
     // créer une variante de base depuis les champs du produit

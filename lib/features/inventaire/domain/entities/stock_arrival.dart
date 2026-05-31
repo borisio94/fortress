@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../../../../core/storage/schema_migrator.dart';
 
 // ─── Cause d'arrivée ─────────────────────────────────────────────────────────
 
@@ -76,7 +77,13 @@ class StockArrival extends Equatable {
     _            => status,
   };
 
+  // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
+  static const int currentSchemaVersion = 1;
+  static final SchemaMigrator _migrator = SchemaMigrator(
+    currentVersion: currentSchemaVersion, steps: const {});
+
   Map<String, dynamic> toMap() => {
+    'schema_version': currentSchemaVersion,
     'id': id, 'variant_id': variantId, 'product_id': productId,
     'shop_id': shopId, 'quantity': quantity, 'status': status,
     'cause': cause.key, 'related_order_id': relatedOrderId,
@@ -84,19 +91,22 @@ class StockArrival extends Equatable {
     'created_at': createdAt.toIso8601String(),
   };
 
-  factory StockArrival.fromMap(Map<String, dynamic> m) => StockArrival(
-    id:             m['id'] as String,
-    variantId:      m['variant_id'] as String?,
-    productId:      m['product_id'] as String?,
-    shopId:         m['shop_id'] as String,
-    quantity:       m['quantity'] as int? ?? 0,
-    status:         m['status'] as String? ?? 'available',
-    cause:          ArrivalCauseX.fromString(m['cause'] as String?),
-    relatedOrderId: m['related_order_id'] as String?,
-    note:           m['note'] as String?,
-    createdBy:      m['created_by'] as String?,
-    createdAt:      DateTime.tryParse(m['created_at']?.toString() ?? '') ?? DateTime.now(),
-  );
+  factory StockArrival.fromMap(Map<String, dynamic> rawM) {
+    final m = _migrator.migrate(rawM);
+    return StockArrival(
+      id:             m['id'] as String,
+      variantId:      m['variant_id'] as String?,
+      productId:      m['product_id'] as String?,
+      shopId:         m['shop_id'] as String,
+      quantity:       m['quantity'] as int? ?? 0,
+      status:         m['status'] as String? ?? 'available',
+      cause:          ArrivalCauseX.fromString(m['cause'] as String?),
+      relatedOrderId: m['related_order_id'] as String?,
+      note:           m['note'] as String?,
+      createdBy:      m['created_by'] as String?,
+      createdAt:      DateTime.tryParse(m['created_at']?.toString() ?? '') ?? DateTime.now(),
+    );
+  }
 
   @override List<Object?> get props => [id, variantId, quantity, status];
 }

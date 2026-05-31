@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../../../../core/storage/schema_migrator.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // WhatsappTemplate — modèle de message WhatsApp envoyé aux CLIENTS du shop
@@ -174,7 +175,13 @@ class WhatsappTemplate extends Equatable {
         updatedAt: updatedAt ?? this.updatedAt,
       );
 
+  // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
+  static const int currentSchemaVersion = 1;
+  static final SchemaMigrator _migrator = SchemaMigrator(
+    currentVersion: currentSchemaVersion, steps: const {});
+
   Map<String, dynamic> toMap() => {
+        'schema_version': currentSchemaVersion,
         'id':         id,
         'shop_id':    shopId,
         'type':       type.key,
@@ -185,7 +192,9 @@ class WhatsappTemplate extends Equatable {
         'updated_at': updatedAt.toIso8601String(),
       };
 
-  static WhatsappTemplate fromMap(Map m) => WhatsappTemplate(
+  static WhatsappTemplate fromMap(Map rawM) {
+    final m = _migrator.migrate(Map<String, dynamic>.from(rawM));
+    return WhatsappTemplate(
         id:        m['id']      as String,
         shopId:    m['shop_id'] as String,
         type:      WhatsappTemplateTypeX.fromKey(m['type']?.toString()),
@@ -197,6 +206,7 @@ class WhatsappTemplate extends Equatable {
         updatedAt: DateTime.tryParse(m['updated_at']?.toString() ?? '')
             ?? DateTime.now(),
       );
+  }
 
   @override
   List<Object?> get props => [id, shopId, type, name, body, isDefault];

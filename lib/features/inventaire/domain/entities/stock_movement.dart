@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../../../../core/storage/schema_migrator.dart';
 
 enum StockMovementType {
   entry,           // Réception / ajout
@@ -75,7 +76,15 @@ class StockMovement extends Equatable {
     required this.createdAt,
   });
 
+  // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
+  static const int currentSchemaVersion = 1;
+  static final SchemaMigrator _migrator = SchemaMigrator(
+    currentVersion: currentSchemaVersion,
+    steps: const {},
+  );
+
   Map<String, dynamic> toMap() => {
+    'schema_version': currentSchemaVersion,
     'id': id, 'shop_id': shopId,
     'product_id': productId, 'variant_id': variantId,
     'type': type.key, 'quantity': quantity,
@@ -84,7 +93,9 @@ class StockMovement extends Equatable {
     'created_at': createdAt.toIso8601String(),
   };
 
-  factory StockMovement.fromMap(Map<String, dynamic> m) => StockMovement(
+  factory StockMovement.fromMap(Map<String, dynamic> rawM) {
+    final m = _migrator.migrate(rawM);
+    return StockMovement(
     id:        m['id'] as String,
     shopId:    m['shop_id'] as String,
     productId: m['product_id'] as String?,
@@ -96,7 +107,8 @@ class StockMovement extends Equatable {
     notes:     m['notes'] as String?,
     createdBy: m['created_by'] as String?,
     createdAt: DateTime.tryParse(m['created_at']?.toString() ?? '') ?? DateTime.now(),
-  );
+    );
+  }
 
   @override List<Object?> get props => [id, shopId, type, quantity];
 }

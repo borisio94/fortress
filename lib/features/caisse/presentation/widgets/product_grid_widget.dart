@@ -1096,15 +1096,22 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
                 const SizedBox(width: 6),
                 sortBtn,
               ])
-            : Column(children: [
-                searchField,
-                const SizedBox(height: 8),
-                Row(children: [
-                  filtersBtn,
-                  const SizedBox(width: 8),
-                  sortBtn,
-                ]),
-              ]),
+            : Column(
+                // stretch : sans ça, le TextField (qui n'a pas de width
+                // explicite) se réduit à la largeur intrinsèque du hint
+                // dans une Column à alignement centre par défaut → le
+                // texte saisi wrap caractère par caractère.
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  searchField,
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    filtersBtn,
+                    const SizedBox(width: 8),
+                    sortBtn,
+                  ]),
+                ],
+              ),
       ),
 
       // ── Compteur produits/variantes + toggle grille/liste ──────

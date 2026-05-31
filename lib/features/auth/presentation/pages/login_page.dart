@@ -501,13 +501,20 @@ class _LoginFormState extends State<_LoginForm> {
           SizedBox(height: gap),
 
           // ── Mot de passe ──────────────────────────────────────────
+          // `autofillHints` retiré + `autocorrect`/`enableSuggestions`
+          // désactivés pour empêcher le browser web de proposer la
+          // sauvegarde du mot de passe. Sur mobile web, le popup
+          // "Enregistrer ce mot de passe ?" interférait avec le clavier
+          // (apparition/disparition à chaque touche frappée).
           TextFormField(
-            controller:        widget.passCtrl,
-            focusNode:         widget.passFocus,
-            obscureText:       _obscurePass,
-            textInputAction:   TextInputAction.done,
-            autofillHints:     const [AutofillHints.password],
-            onFieldSubmitted:  (_) => widget.onSubmit(),
+            controller:           widget.passCtrl,
+            focusNode:            widget.passFocus,
+            obscureText:          _obscurePass,
+            textInputAction:      TextInputAction.done,
+            autocorrect:          false,
+            enableSuggestions:    false,
+            autofillHints:        const <String>[],
+            onFieldSubmitted:     (_) => widget.onSubmit(),
             style:             AppTextStyles.bodySm,
             decoration: _decoration(
               context,

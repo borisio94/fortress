@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../../../../core/storage/schema_migrator.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // PromoCampaign — campagne marketing (promotion ou annonce nouveautés)
@@ -172,7 +173,13 @@ class PromoCampaign extends Equatable {
         updatedAt:       updatedAt       ?? this.updatedAt,
       );
 
+  // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
+  static const int currentSchemaVersion = 1;
+  static final SchemaMigrator _migrator = SchemaMigrator(
+    currentVersion: currentSchemaVersion, steps: const {});
+
   Map<String, dynamic> toMap() => {
+        'schema_version':   currentSchemaVersion,
         'id':               id,
         'shop_id':          shopId,
         'type':             type.key,
@@ -188,7 +195,9 @@ class PromoCampaign extends Equatable {
         'updated_at':       updatedAt.toIso8601String(),
       };
 
-  static PromoCampaign fromMap(Map m) => PromoCampaign(
+  static PromoCampaign fromMap(Map rawM) {
+    final m = _migrator.migrate(Map<String, dynamic>.from(rawM));
+    return PromoCampaign(
         id:              m['id']      as String,
         shopId:          m['shop_id'] as String,
         type:            PromoCampaignTypeX.fromKey(m['type']?.toString()),
@@ -215,6 +224,7 @@ class PromoCampaign extends Equatable {
                 m['updated_at']?.toString() ?? '')
             ?? DateTime.now(),
       );
+  }
 
   @override
   List<Object?> get props => [

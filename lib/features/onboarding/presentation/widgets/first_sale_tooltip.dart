@@ -159,6 +159,12 @@ class _FirstSaleTooltipBannerState extends State<FirstSaleTooltipBanner> {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 6),
                   visualDensity: VisualDensity.compact,
+                  // Surcharge le minimumSize global (Size(infinity, 52))
+                  // qui forcerait ce bouton à prendre toute la largeur,
+                  // écrasant l'Expanded(Column titre/body) du milieu et
+                  // faisant wrapper le texte caractère par caractère.
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8)),
                 ),

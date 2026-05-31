@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../../../../core/storage/schema_migrator.dart';
 
 // ─── Type d'incident ─────────────────────────────────────────────────────────
 
@@ -122,7 +123,15 @@ class Incident extends Equatable {
   bool get isPending  => status == IncidentStatus.pending;
   bool get isResolved => status == IncidentStatus.resolved;
 
+  // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
+  static const int currentSchemaVersion = 1;
+  static final SchemaMigrator _migrator = SchemaMigrator(
+    currentVersion: currentSchemaVersion,
+    steps: const {},
+  );
+
   Map<String, dynamic> toMap() => {
+    'schema_version': currentSchemaVersion,
     'id': id, 'shop_id': shopId,
     'product_id': productId, 'variant_id': variantId,
     'product_name': productName,
@@ -136,7 +145,9 @@ class Incident extends Equatable {
     'created_at': createdAt.toIso8601String(),
   };
 
-  factory Incident.fromMap(Map<String, dynamic> m) => Incident(
+  factory Incident.fromMap(Map<String, dynamic> rawM) {
+    final m = _migrator.migrate(rawM);
+    return Incident(
     id:           m['id'] as String,
     shopId:       m['shop_id'] as String,
     productId:    m['product_id'] as String?,
@@ -154,7 +165,8 @@ class Incident extends Equatable {
         ? DateTime.tryParse(m['resolved_at'] as String) : null,
     createdBy:    m['created_by'] as String?,
     createdAt:    DateTime.tryParse(m['created_at']?.toString() ?? '') ?? DateTime.now(),
-  );
+    );
+  }
 
   @override List<Object?> get props => [id, shopId, type, status, quantity];
 }

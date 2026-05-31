@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' show Supabase;
+import 'package:supabase_flutter/supabase_flutter.dart' show Supabase, AuthChangeEvent;
+import '../../../../core/database/app_database.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../core/services/pin_service.dart';
 import '../../../../core/services/session_service.dart';
@@ -17,6 +18,8 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final RegisterUseCase registerUseCase;
   final LogoutUseCase   logoutUseCase;
   final AuthRepository  authRepository;
+
+  StreamSubscription? _supaAuthSub;
 
   AuthBloc({
     required this.loginUseCase,
@@ -35,6 +38,32 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     // check, AuthBloc reste en AuthInitial → notifier.isAuthenticated
     // = false → redirect /login alors que la session est valide.
     add(AuthCheckRequested());
+
+    // Écoute les changements de session Supabase venant d'AILLEURS
+    // (ex : `SessionValidator.validate()` qui force un signOut quand un
+    // compte zombie tente de se reconnecter). Sans cet abonnement,
+    // AuthBloc reste en `AuthAuthenticated` après un signOut externe →
+    // le router ne redirige jamais vers /login.
+    _supaAuthSub =
+        Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      // Réagit uniquement aux signedOut externes : les login passent
+      // déjà par `_onLogin` (qui émet AuthAuthenticated correctement).
+      if (data.event == AuthChangeEvent.signedOut) {
+        // L'état Supabase est déjà nettoyé ; on émet seulement la
+        // transition côté Bloc + on déclenche la logique cleanup
+        // standard via l'event AuthLogoutRequested (qui sera idempotent
+        // car la session est déjà révoquée).
+        if (state is! AuthUnauthenticated) {
+          add(AuthLogoutRequested());
+        }
+      }
+    });
+  }
+
+  @override
+  Future<void> close() async {
+    await _supaAuthSub?.cancel();
+    return super.close();
   }
 
   Future<void> _onCheck(
@@ -45,6 +74,20 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     final hasValidSession = session != null && !session.isExpired
         && supaUser != null;
     if (hasValidSession && localUser != null) {
+      // Re-synchronise shops + memberships AVANT d'émettre l'état
+      // authentifié, pour que la file offline ne tente pas de pousser
+      // des ops vers des boutiques disparues côté serveur (cas typique :
+      // ancien compte recréé, boutique supprimée par super-admin entre
+      // deux sessions). Sans ce sync, la queue tourne en boucle 42501
+      // au reload navigateur (cf. logout/login qui le fait déjà via
+      // _onLogin → AppDatabase.syncOnLogin). Coût : ~500 ms–1 s au boot,
+      // acceptable comparé au cycle de retry RLS sans fin.
+      try {
+        await AppDatabase.syncOnLogin(supaUser.id);
+      } catch (e) {
+        // Erreur sync = on continue quand même, l'app reste utilisable
+        // en offline (Hive local sert de fallback).
+      }
       // Re-enregistre la session au boot (refresh navigateur, redémarrage
       // app). Le backend met à jour last_seen et confirme la limite.
       unawaited(SessionService.register());
@@ -138,16 +181,17 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
   Future<void> _onLogout(
       AuthLogoutRequested event, Emitter<AuthState> emit) async {
-    try {
-      // Révoque la session courante côté Supabase AVANT le logout local —
-      // sinon on perd le token nécessaire pour appeler le RPC.
-      await SessionService.revokeCurrent();
-      SessionService.stop();
-      await logoutUseCase();
-      emit(AuthUnauthenticated());
-    } catch (e) {
-      emit(AuthError(_extractMessage(e)));
-    }
+    // Révoque la session courante côté Supabase AVANT le logout local —
+    // sinon on perd le token nécessaire pour appeler le RPC. Chaque étape
+    // est encapsulée pour rester idempotente : si `SessionValidator` a
+    // déjà signé out le user (cas compte zombie), `revokeCurrent` /
+    // `logoutUseCase` peuvent échouer parce qu'il n'y a plus de token,
+    // mais on doit quand même finir en `AuthUnauthenticated` pour que
+    // le router redirige vers /login.
+    try { await SessionService.revokeCurrent(); } catch (_) {}
+    try { SessionService.stop();                } catch (_) {}
+    try { await logoutUseCase();                } catch (_) {}
+    emit(AuthUnauthenticated());
   }
 
   Future<void> _onForgotPassword(

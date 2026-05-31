@@ -4,11 +4,17 @@ import '../storage/local_storage_service.dart';
 import '../storage/secure_storage.dart';
 
 /// Vérifie que la session courante correspond à un compte qui existe
-/// vraiment côté serveur. Détecte les cas suivants :
+/// vraiment côté serveur ET qui a au moins un accès métier. Détecte :
 ///
 ///   1. JWT encore valide (5 min de TTL) mais auth.users a été supprimé
 ///      (ex: licenciement employé via delete_employee).
 ///   2. Profile supprimé côté serveur sans nettoyage côté client.
+///   3. **Compte zombie** : profile existe encore (delete_employee n'a pas
+///      purgé l'auth) MAIS aucune `shop_memberships` ni `shops.owner_id`
+///      pour cet utilisateur → il n'a aucun accès métier dans Fortress.
+///      Cas typique : owner supprime un employé, l'employé tente de se
+///      reconnecter avec ses anciens identifiants et tombe sur une UI
+///      vide. On le déconnecte automatiquement avec un message clair.
 ///
 /// Si la session est invalide :
 ///   - signOut Supabase
@@ -29,9 +35,10 @@ class SessionValidator {
     if (user == null) return true; // pas de session → rien à valider
 
     try {
+      // ── 1. Profile existe-t-il ? + super-admin ?
       final profile = await supa
           .from('profiles')
-          .select('id')
+          .select('id, is_super_admin')
           .eq('id', user.id)
           .maybeSingle();
 
@@ -41,7 +48,37 @@ class SessionValidator {
         await _forceLogoutAndPurge();
         return false;
       }
-      return true;
+
+      // Super-admin : accès toutes boutiques par défaut → pas besoin de
+      // vérifier shop_memberships / shops.owner_id.
+      final isSuperAdmin = profile['is_super_admin'] as bool? ?? false;
+      if (isSuperAdmin) return true;
+
+      // ── 2. Au moins un accès métier ? (membership OU ownership)
+      //   RLS profiles_select garantit qu'on ne voit que les profils des
+      //   membres de nos boutiques + le sien — donc on doit aussi compter
+      //   les boutiques où on est explicitement owner pour le cas du
+      //   "self-signup just-created" qui n'a pas encore de membership.
+      final memberships = await supa
+          .from('shop_memberships')
+          .select('shop_id')
+          .eq('user_id', user.id)
+          .limit(1);
+      if (memberships.isNotEmpty) return true;
+
+      final ownedShops = await supa
+          .from('shops')
+          .select('id')
+          .eq('owner_id', user.id)
+          .limit(1);
+      if (ownedShops.isNotEmpty) return true;
+
+      // Aucun accès → compte zombie (employé supprimé qui tente de se
+      // reconnecter, ou propriétaire dont la boutique a été supprimée).
+      debugPrint('[SessionValidator] ⊘ aucun membership / ownership '
+          'côté serveur → logout forcé (compte zombie)');
+      await _forceLogoutAndPurge();
+      return false;
     } on AuthException {
       // 401 / token invalide → user supprimé
       debugPrint('[SessionValidator] ⊘ token rejeté serveur → logout forcé');

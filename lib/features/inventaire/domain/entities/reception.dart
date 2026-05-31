@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../../../../core/storage/schema_migrator.dart';
 
 // ─── Statut réception ────────────────────────────────────────────────────────
 
@@ -124,7 +125,13 @@ class Reception extends Equatable {
   int get totalConform   => items.fold(0, (s, i) => s + i.conformQty);
   bool get hasIssues     => items.any((i) => i.hasIssues);
 
+  // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
+  static const int currentSchemaVersion = 1;
+  static final SchemaMigrator _migrator = SchemaMigrator(
+    currentVersion: currentSchemaVersion, steps: const {});
+
   Map<String, dynamic> toMap() => {
+    'schema_version': currentSchemaVersion,
     'id': id, 'shop_id': shopId,
     'purchase_order_id': purchaseOrderId,
     'supplier_id': supplierId,
@@ -134,7 +141,9 @@ class Reception extends Equatable {
     'created_at': createdAt.toIso8601String(),
   };
 
-  factory Reception.fromMap(Map<String, dynamic> m) => Reception(
+  factory Reception.fromMap(Map<String, dynamic> rawM) {
+    final m = _migrator.migrate(rawM);
+    return Reception(
     id:              m['id'] as String,
     shopId:          m['shop_id'] as String,
     purchaseOrderId: m['purchase_order_id'] as String?,
@@ -146,7 +155,8 @@ class Reception extends Equatable {
     notes:           m['notes'] as String?,
     createdBy:       m['created_by'] as String?,
     createdAt:       DateTime.tryParse(m['created_at']?.toString() ?? '') ?? DateTime.now(),
-  );
+    );
+  }
 
   @override List<Object?> get props => [id, shopId, status, items];
 }

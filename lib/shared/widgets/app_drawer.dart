@@ -19,6 +19,7 @@ import '../../core/storage/hive_boxes.dart';
 import '../providers/current_shop_provider.dart';
 import '../../core/widgets/fortress_logo.dart';
 import 'app_confirm_dialog.dart';
+import 'shop_logo_avatar.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Modèle de navigation
@@ -298,7 +299,9 @@ class _DrawerHeader extends StatelessWidget {
   Widget _build(BuildContext context, bool useCompact) {
     final topPad = MediaQuery.of(context).padding.top;
 
-    // Mode compact : logo + icône secteur seuls, centrés
+    // Mode compact : logo boutique (= avatar) centré, tooltip avec le
+    // nom. Les actions Nouvelle/Changer ne tiennent pas dans 64px → l'user
+    // doit déplier le rail (icône menu) pour y accéder.
     if (useCompact) {
       return Container(
         width: double.infinity,
@@ -312,31 +315,22 @@ class _DrawerHeader extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            const FortressLogo.dark(size: 32),
-            if (shop != null) ...[
-              const SizedBox(height: 10),
-              Tooltip(
-                message: shop!.name,
-                child: Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: AppColors.primarySurface,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(_icon(shop!.sector),
-                      color: AppColors.primary, size: 14),
-                ),
+            Tooltip(
+              message: shop?.name ?? 'Fortress',
+              child: ShopLogoAvatar(
+                logoUrl: shop?.logoUrl,
+                size: 36,
               ),
-            ],
+            ),
           ],
         ),
       );
     }
 
-    // Mode expanded : logo + carte boutique avec avatar, rôle et métadonnées
-    // Couleur + label dérivés de MemberRole (source de vérité). Le `isOwner`
-    // est redondant avec memberRole==owner mais on le garde pour le cas où
-    // l'utilisateur est owner par `shops.owner_id` sans ligne shop_memberships.
+    // Mode expanded : carte boutique = avatar logo + (nom boutique +
+    // "Fortress") + ligne d'actions (Nouvelle / Changer) + chips
+    // pays/devise/rôle. Le logo de l'app est intégré comme sous-titre
+    // dans la colonne — plus de FortressLogo standalone au-dessus.
     final isAdminRole = memberRole == MemberRole.admin;
     final roleColor = (isOwner || memberRole == MemberRole.owner)
         ? AppColors.primary
@@ -347,6 +341,15 @@ class _DrawerHeader extends StatelessWidget {
         ? context.l10n.roleOwner
         : (memberRole?.labelFr ?? '');
 
+    // Compte des boutiques dispo localement → conditionne le bouton
+    // « Changer boutique » : inutile à afficher si l'utilisateur n'en
+    // a qu'une (le shop-selector auto-redirige sur le dashboard).
+    final uid = LocalStorageService.getCurrentUser()?.id ?? '';
+    final shopsCount = uid.isEmpty
+        ? 0
+        : LocalStorageService.getShopsForUser(uid).length;
+    final hasMultipleShops = shopsCount > 1;
+
     return Container(
       width: double.infinity,
       padding: EdgeInsets.fromLTRB(12, topPad + 14, 12, 14),
@@ -356,122 +359,111 @@ class _DrawerHeader extends StatelessWidget {
             bottom: BorderSide(
                 color: Theme.of(context).semantic.borderSubtle, width: 1)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Padding(
-            padding: EdgeInsets.only(left: 4),
-            child: FortressLogo.dark(size: 32),
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              AppColors.primary.withValues(alpha: 0.06),
+              AppColors.primaryLight.withValues(alpha: 0.04),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
-          if (shop != null) ...[
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    AppColors.primary.withValues(alpha:0.06),
-                    AppColors.primaryLight.withValues(alpha:0.04),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: AppColors.primary.withValues(alpha: 0.12)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Ligne 1 : Avatar (logo boutique ou Fortress par défaut)
+            //   + colonne (nom boutique • "Fortress")
+            Row(children: [
+              ShopLogoAvatar(logoUrl: shop?.logoUrl, size: 40),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(shop?.name ?? '—',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodyBold.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: Theme.of(context).colorScheme.onSurface)),
+                    const SizedBox(height: 2),
+                    Text('Fortress',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.microSecondary.copyWith(
+                            fontWeight: FontWeight.w500,
+                            color: const Color(0xFF6B7280))),
                   ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
                 ),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                    color: AppColors.primary.withValues(alpha:0.12)),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children: [
-                    // Avatar boutique — fond primary pastel, icône secteur
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                            color: AppColors.primary.withValues(alpha:0.2)),
-                      ),
-                      child: Icon(_icon(shop!.sector),
-                          color: AppColors.primary, size: 20),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(shop!.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppTextStyles.bodyBold.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                  color: Theme.of(context).colorScheme.onSurface)),
-                          const SizedBox(height: 2),
-                          Text(_sectorLabel(shop!.sector),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppTextStyles.microSecondary.copyWith(
-                                  fontWeight: FontWeight.w500,
-                                  color: const Color(0xFF6B7280))),
-                        ],
-                      ),
-                    ),
-                  ]),
-                  const SizedBox(height: 10),
-                  // Wrap (au lieu de Row) — quand la largeur du rail est
-                  // courte (panel collapsed/medium), le badge rôle passe à
-                  // la ligne au lieu d'overflow.
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      _Chip(
-                        icon: Text(_flag(shop!.country),
-                            style: AppTextStyles.caption),
-                        label: shop!.currency,
-                      ),
-                      if (memberRole != null)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: roleColor,
-                            borderRadius: BorderRadius.circular(5),
-                          ),
-                          child: Text(roleLabel,
-                              style: AppTextStyles.micro.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.3)),
-                        ),
-                    ],
+            ]),
+
+            // ── Ligne 2 : Actions boutique ────────────────────────────
+            //   « Nouvelle » toujours visible ; « Changer » seulement
+            //   si plusieurs boutiques (sinon /shop-selector boucle).
+            const SizedBox(height: 12),
+            Row(children: [
+              Expanded(
+                child: _HeaderActionBtn(
+                  icon: Icons.add_business_rounded,
+                  label: 'Nouvelle',
+                  onTap: () => context.push(RouteNames.createShop),
+                ),
+              ),
+              if (hasMultipleShops) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _HeaderActionBtn(
+                    icon: Icons.swap_horiz_rounded,
+                    label: 'Changer',
+                    filled: false,
+                    onTap: () => context.go(RouteNames.shopSelector),
                   ),
+                ),
+              ],
+            ]),
+
+            // ── Ligne 3 : chips drapeau/devise + rôle ─────────────────
+            if (shop != null) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  _Chip(
+                    icon: Text(_flag(shop!.country),
+                        style: AppTextStyles.caption),
+                    label: shop!.currency,
+                  ),
+                  if (memberRole != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: roleColor,
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Text(roleLabel,
+                          style: AppTextStyles.micro.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.3)),
+                    ),
                 ],
               ),
-            ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
-
-  String _sectorLabel(String s) => switch (s) {
-        'restaurant'  => 'Restaurant',
-        'supermarche' => 'Supermarché',
-        'pharmacie'   => 'Pharmacie',
-        'boutique'    => 'Boutique',
-        _ => 'Commerce',
-      };
-
-  IconData _icon(String s) => switch (s) {
-    'restaurant'  => Icons.restaurant_rounded,
-    'supermarche' => Icons.local_grocery_store_rounded,
-    'pharmacie'   => Icons.local_pharmacy_rounded,
-    _ => Icons.storefront_rounded,
-  };
 
   String _flag(String iso) {
     const f = {'CM':'🇨🇲','SN':'🇸🇳','CI':'🇨🇮','NG':'🇳🇬','GH':'🇬🇭',
@@ -501,6 +493,63 @@ class _Chip extends StatelessWidget {
                   color: const Color(0xFF374151))),
         ]),
       );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bouton d'action du header (Nouvelle / Changer boutique)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _HeaderActionBtn extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  /// `true` = bouton plein violet (CTA principal — Nouvelle boutique).
+  /// `false` = bouton outline (action secondaire — Changer).
+  final bool filled;
+  const _HeaderActionBtn({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.filled = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = filled
+        ? AppColors.primary
+        : Theme.of(context).colorScheme.surface;
+    final fg = filled
+        ? Colors.white
+        : AppColors.primary;
+    final borderColor = filled
+        ? Colors.transparent
+        : AppColors.primary.withValues(alpha: 0.40);
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: borderColor),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 14, color: fg),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.captionBold.copyWith(color: fg)),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

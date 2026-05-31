@@ -80,3 +80,8 @@ COMMENT ON FUNCTION public.get_public_catalogue_products(text, text) IS
   'la page catalogue publique (partage catalogue complet ou par '
   'catégorie). Bypass RLS pour servir aussi les utilisateurs '
   'authentifiés non-membres du shop. Voir hotfix_097.';
+
+-- Force PostgREST à recharger son schema cache. Sans ça, le RPC peut
+-- rester invisible (PGRST202 « Could not find the function ») pendant
+-- quelques minutes après création.
+NOTIFY pgrst, 'reload schema';

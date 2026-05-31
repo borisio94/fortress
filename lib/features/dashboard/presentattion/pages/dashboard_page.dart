@@ -29,6 +29,7 @@ import '../../../onboarding/presentation/widgets/email_confirm_banner.dart';
 import '../../../onboarding/presentation/widgets/activation_checklist_card.dart';
 import '../../../onboarding/presentation/widgets/j1_resume_banner.dart';
 import '../../../onboarding/presentation/widgets/trial_end_banner.dart';
+import '../../../onboarding/presentation/widgets/trial_status_banner.dart';
 import '../../../../shared/widgets/broadcast_banner.dart';
 
 
@@ -265,11 +266,13 @@ class _DashBodyState extends ConsumerState<_DashBody> {
         // Toutes les widgets sont self-gated (SizedBox.shrink() s'ils ne
         // doivent pas s'afficher) → safe à inclure inconditionnellement.
         //   • EmailConfirmBanner : tant que email_confirmed_at est null.
-        //   • TrialEndBanner     : si plan=trial && daysLeft<=2.
+        //   • TrialStatusBanner  : si plan=trial && daysLeft>2 (info doux).
+        //   • TrialEndBanner     : si plan=trial && daysLeft<=2 (warning).
         //   • J1ResumeBanner     : 1×/jour si ventes hier.
         //   • ActivationChecklistCard : 4 étapes onboarding (disparaît
         //     quand tout coché).
         const EmailConfirmBanner(margin: EdgeInsets.only(bottom: 12)),
+        const TrialStatusBanner(),
         const TrialEndBanner(),
         BroadcastBanner(shopId: widget.shopId),
         J1ResumeBanner(shopId: widget.shopId),

@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../../../../core/storage/schema_migrator.dart';
 
 /// Stock d'une variante de produit dans une [StockLocation] précise.
 ///
@@ -56,7 +57,15 @@ class StockLevel extends Equatable {
     updatedAt:      updatedAt      ?? this.updatedAt,
   );
 
+  // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
+  static const int currentSchemaVersion = 1;
+  static final SchemaMigrator _migrator = SchemaMigrator(
+    currentVersion: currentSchemaVersion,
+    steps: const {},
+  );
+
   Map<String, dynamic> toMap() => {
+    'schema_version': currentSchemaVersion,
     'id': id,
     'variant_id': variantId,
     'location_id': locationId,
@@ -68,18 +77,21 @@ class StockLevel extends Equatable {
     'updated_at': updatedAt.toIso8601String(),
   };
 
-  factory StockLevel.fromMap(Map<String, dynamic> m) => StockLevel(
-    id:             m['id'] as String,
-    variantId:      m['variant_id'] as String? ?? '',
-    locationId:     m['location_id'] as String? ?? '',
-    shopId:         m['shop_id'] as String?,
-    stockAvailable: (m['stock_available'] as num?)?.toInt() ?? 0,
-    stockPhysical:  (m['stock_physical']  as num?)?.toInt() ?? 0,
-    stockBlocked:   (m['stock_blocked']   as num?)?.toInt() ?? 0,
-    stockOrdered:   (m['stock_ordered']   as num?)?.toInt() ?? 0,
-    updatedAt:      DateTime.tryParse(m['updated_at']?.toString() ?? '')
-                    ?? DateTime.now(),
-  );
+  factory StockLevel.fromMap(Map<String, dynamic> rawM) {
+    final m = _migrator.migrate(rawM);
+    return StockLevel(
+      id:             m['id'] as String,
+      variantId:      m['variant_id'] as String? ?? '',
+      locationId:     m['location_id'] as String? ?? '',
+      shopId:         m['shop_id'] as String?,
+      stockAvailable: (m['stock_available'] as num?)?.toInt() ?? 0,
+      stockPhysical:  (m['stock_physical']  as num?)?.toInt() ?? 0,
+      stockBlocked:   (m['stock_blocked']   as num?)?.toInt() ?? 0,
+      stockOrdered:   (m['stock_ordered']   as num?)?.toInt() ?? 0,
+      updatedAt:      DateTime.tryParse(m['updated_at']?.toString() ?? '')
+                      ?? DateTime.now(),
+    );
+  }
 
   @override
   List<Object?> get props => [id, variantId, locationId];

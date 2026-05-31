@@ -23,6 +23,7 @@ import 'shared/widgets/alerts/scheduled_alerts_overlay.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/stock_service.dart';
 import 'features/onboarding/presentation/providers/onboarding_seen_provider.dart';
+import 'core/providers/demo_mode_provider.dart';
 
 // ConsumerStatefulWidget — les blocs sont créés UNE SEULE FOIS dans initState
 // évite la recréation de BlocProvider à chaque rebuild → plus de Duplicate GlobalKey
@@ -182,11 +183,32 @@ class _PosAppState extends ConsumerState<PosApp> {
               minScaleFactor: 1.10,
               maxScaleFactor: 1.30,
             );
+            // Mode démo (enregistrements promo) : on amplifie le splash
+            // Material via un sur-thème local. Chaque InkWell / ListTile /
+            // bouton de l'app utilise alors un ripple violet bien visible,
+            // exactement à l'endroit où l'utilisateur a tapé. Aucun cercle
+            // sur les labels / espaces vides / pendant les scrolls : la
+            // mécanique du splash Material gère déjà ces cas par défaut.
+            final demo = ref.watch(demoModeProvider);
+            Widget content = ScheduledAlertsOverlay(
+              child: child ?? const SizedBox.shrink(),
+            );
+            if (demo) {
+              final base = Theme.of(context);
+              content = Theme(
+                data: base.copyWith(
+                  splashFactory: InkRipple.splashFactory,
+                  splashColor:
+                      AppColors.primary.withValues(alpha: 0.55),
+                  highlightColor:
+                      AppColors.primary.withValues(alpha: 0.30),
+                ),
+                child: content,
+              );
+            }
             return MediaQuery(
               data: mq.copyWith(textScaler: clamped),
-              child: ScheduledAlertsOverlay(
-                child: child ?? const SizedBox.shrink(),
-              ),
+              child: content,
             );
           },
         ),

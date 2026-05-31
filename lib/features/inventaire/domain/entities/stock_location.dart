@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../../../../core/storage/schema_migrator.dart';
 
 /// Type d'emplacement de stockage.
 /// - [shop]      : boutique / point de vente (créée automatiquement pour chaque Shop)
@@ -122,7 +123,15 @@ class StockLocation extends Equatable {
         : (whatsappGroupUrl ?? this.whatsappGroupUrl),
   );
 
+  // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
+  static const int currentSchemaVersion = 1;
+  static final SchemaMigrator _migrator = SchemaMigrator(
+    currentVersion: currentSchemaVersion,
+    steps: const {},
+  );
+
   Map<String, dynamic> toMap() => {
+    'schema_version': currentSchemaVersion,
     'id': id,
     'owner_id': ownerId,
     'type': type.key,
@@ -141,7 +150,9 @@ class StockLocation extends Equatable {
     'whatsapp_group_url':   whatsappGroupUrl,
   };
 
-  factory StockLocation.fromMap(Map<String, dynamic> m) => StockLocation(
+  factory StockLocation.fromMap(Map<String, dynamic> rawM) {
+    final m = _migrator.migrate(rawM);
+    return StockLocation(
     id:                m['id'] as String,
     ownerId:           m['owner_id'] as String? ?? '',
     type:              StockLocationTypeX.fromKey(m['type'] as String?),
@@ -159,7 +170,8 @@ class StockLocation extends Equatable {
                        ?? DateTime.now(),
     deliveryTemplateId: m['delivery_template_id'] as String?,
     whatsappGroupUrl:   m['whatsapp_group_url']   as String?,
-  );
+    );
+  }
 
   @override
   List<Object?> get props => [id, ownerId, type, name, shopId, isActive];

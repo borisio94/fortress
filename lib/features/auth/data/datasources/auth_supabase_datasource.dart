@@ -48,13 +48,21 @@ class AuthSupabaseDataSource {
       final userId = res.user!.id;
       final userEmail = email.trim().toLowerCase();
 
-      // Créer le profil dans Supabase via AppDatabase
-      await _client.from('profiles').upsert({
-        'id':    userId,
-        'name':  name.trim(),
-        'email': userEmail,
-        'phone': phone,
-      });
+      // Le trigger SQL handle_new_user crée déjà le profile lors de
+      // l'insert dans auth.users. L'upsert reste en filet de sécurité ;
+      // si la RLS le rejette (ex: « Confirm email » activé → session
+      // null), on log et on continue — login() recrée le profile au
+      // besoin (ligne 105-113), évitant tout compte zombie.
+      try {
+        await _client.from('profiles').upsert({
+          'id':    userId,
+          'name':  name.trim(),
+          'email': userEmail,
+          'phone': phone,
+        });
+      } catch (e) {
+        debugPrint('[Auth] profile upsert post-signUp non-bloquant: $e');
+      }
 
       final model = UserModel(
         id:        userId,

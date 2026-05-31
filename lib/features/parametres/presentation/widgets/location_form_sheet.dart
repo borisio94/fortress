@@ -11,6 +11,7 @@ import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../features/inventaire/domain/entities/stock_location.dart';
 import '../providers/delivery_template_provider.dart';
 import '../../domain/entities/delivery_template.dart';
+import 'delivery_template_form_sheet.dart';
 
 /// Sheet bottom pour créer ou modifier un emplacement de stock
 /// (warehouse ou partner). Les locations type='shop' ne passent pas par ici.
@@ -21,11 +22,17 @@ class LocationFormSheet extends StatefulWidget {
   /// "Template de livraison utilisé" listant les templates du shop
   /// (cf. hotfix_049).
   final String? shopId;
+  /// Quand `true`, masque le sélecteur de type (Magasin / Dépôt partenaire) :
+  /// le type est imposé par `defaultType`. Utilisé quand le formulaire est
+  /// ouvert depuis un bouton déjà dédié à un type (ex. « Nouveau dépôt
+  /// partenaire ») — proposer « Magasin » y serait trompeur.
+  final bool lockType;
   const LocationFormSheet({
     super.key,
     this.existing,
     this.defaultType = StockLocationType.warehouse,
     this.shopId,
+    this.lockType = false,
   });
 
   @override
@@ -50,11 +57,6 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
   /// `null` = utilise le défaut du shop (cf. hotfix_049). Sinon id d'un
   /// template attribué spécifiquement à ce partenaire.
   String? _deliveryTemplateId;
-  /// Mode de communication WhatsApp avec le partenaire (cf. hotfix_050) :
-  /// `false` = numéro 1-à-1 (champ phone), `true` = groupe (lien d'invitation).
-  bool _useGroup = false;
-  late TextEditingController _groupUrl;
-  String? _groupUrlError;
 
   bool get _isEdit => widget.existing != null;
 
@@ -72,8 +74,6 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
     _type    = e?.type ?? widget.defaultType;
     _active  = e?.isActive ?? true;
     _deliveryTemplateId = e?.deliveryTemplateId;
-    _groupUrl = TextEditingController(text: e?.whatsappGroupUrl ?? '');
-    _useGroup = (e?.whatsappGroupUrl ?? '').isNotEmpty;
   }
 
   @override
@@ -85,21 +85,7 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
     _phone.dispose();
     _contact.dispose();
     _notes.dispose();
-    _groupUrl.dispose();
     super.dispose();
-  }
-
-  /// Validation lien WhatsApp : `https://chat.whatsapp.com/<code>` avec
-  /// éventuellement un query string (`?mode=gi_t`, `?mode=ac_t`…) ajouté
-  /// par WhatsApp lui-même sur les liens d'invitation modernes. Vide
-  /// accepté (le champ est optionnel quand le toggle est sur "Numéro").
-  String? _validateGroupUrl(String v) {
-    final s = v.trim();
-    if (s.isEmpty) return null;
-    final ok = RegExp(
-            r'^https://chat\.whatsapp\.com/[A-Za-z0-9]+(\?[A-Za-z0-9_=&\-]*)?$')
-        .hasMatch(s);
-    return ok ? null : 'Lien invalide (attendu : https://chat.whatsapp.com/…)';
   }
 
   String? _validateName(String v) {
@@ -131,18 +117,9 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
       setState(() => _nameError = err);
       return;
     }
-    // Valide l'URL du groupe si le toggle est sur "Groupe".
-    if (_type == StockLocationType.partner && _useGroup) {
-      final ge = _validateGroupUrl(_groupUrl.text);
-      if (ge != null) {
-        setState(() => _groupUrlError = ge);
-        return;
-      }
-    }
     setState(() {
       _submitting = true;
       _nameError = null;
-      _groupUrlError = null;
     });
 
     final userId = LocalStorageService.getCurrentUser()?.id ?? '';
@@ -151,15 +128,11 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
       return;
     }
 
-    // En mode "groupe", on efface le phone (et inversement) pour garder
-    // un canal de contact unique et explicite.
+    // Le contact partenaire est désormais un simple numéro WhatsApp (champ
+    // phone). L'éventuel `whatsappGroupUrl` legacy d'un partenaire existant
+    // est préservé tel quel (non modifié par ce formulaire).
     final isPartner = _type == StockLocationType.partner;
-    final groupUrl  = isPartner && _useGroup
-        ? _groupUrl.text.trim()
-        : '';
-    final phone     = isPartner && _useGroup
-        ? ''
-        : _phone.text.trim();
+    final phone     = _phone.text.trim();
     // Pour les partenaires : ville/quartier séparés. Les warehouses
     // continuent à utiliser le champ `address` legacy.
     final cityVal     = isPartner ? _city.text.trim() : '';
@@ -184,8 +157,6 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
           notes:       _notes.text.trim().isEmpty ? null : _notes.text.trim(),
           isActive:    _active,
           deliveryTemplateId: _deliveryTemplateId,
-          whatsappGroupUrl: groupUrl.isEmpty ? null : groupUrl,
-          clearWhatsappGroupUrl: groupUrl.isEmpty,
         );
 
     try {
@@ -221,8 +192,9 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
 
-                // Type (verrouillé en édition pour éviter confusion)
-                if (!_isEdit) ...[
+                // Type (verrouillé en édition, ou quand imposé par l'appelant
+                // ex. création depuis le bouton « Nouveau dépôt partenaire »)
+                if (!_isEdit && !widget.lockType) ...[
                   const _Label('Type'),
                   const SizedBox(height: 6),
                   _TypePicker(
@@ -277,43 +249,16 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
                   const SizedBox(height: 12),
                 ],
 
-                // Pour les partenaires : toggle "Numéro / Groupe WhatsApp"
-                // (cf. hotfix_050). Les warehouses gardent juste le téléphone.
+                // Partenaire : contact WhatsApp (numéro). Les warehouses
+                // gardent le libellé « Téléphone ».
                 if (_type == StockLocationType.partner) ...[
-                  const _Label('Mode de communication'),
-                  const SizedBox(height: 6),
-                  _CommModeToggle(
-                    useGroup: _useGroup,
-                    onChanged: (v) => setState(() {
-                      _useGroup = v;
-                      if (_groupUrlError != null) _groupUrlError = null;
-                    }),
+                  const _Label('Contact WhatsApp'),
+                  const SizedBox(height: 4),
+                  AppField(
+                    controller: _phone,
+                    isPhone: true,
+                    style: AppFieldStyle.filled,
                   ),
-                  const SizedBox(height: 8),
-                  if (_useGroup) ...[
-                    const _Label('Lien d\'invitation au groupe'),
-                    const SizedBox(height: 4),
-                    _Field(
-                      controller: _groupUrl,
-                      hint: 'https://chat.whatsapp.com/…',
-                      icon: Icons.group_rounded,
-                      errorText: _groupUrlError,
-                      keyboardType: TextInputType.url,
-                      onChanged: (_) {
-                        if (_groupUrlError != null) {
-                          setState(() => _groupUrlError = null);
-                        }
-                      },
-                    ),
-                  ] else ...[
-                    const _Label('Téléphone'),
-                    const SizedBox(height: 4),
-                    AppField(
-                      controller: _phone,
-                      isPhone: true,
-                      style: AppFieldStyle.filled,
-                    ),
-                  ],
                   const SizedBox(height: 12),
                 ] else ...[
                   const _Label('Téléphone'),
@@ -439,7 +384,6 @@ class _Field extends StatelessWidget {
   final String hint;
   final IconData icon;
   final int maxLines;
-  final TextInputType? keyboardType;
   final String? errorText;
   final ValueChanged<String>? onChanged;
   const _Field({
@@ -447,7 +391,6 @@ class _Field extends StatelessWidget {
     required this.hint,
     required this.icon,
     this.maxLines = 1,
-    this.keyboardType,
     this.errorText,
     this.onChanged,
   });
@@ -456,7 +399,6 @@ class _Field extends StatelessWidget {
   Widget build(BuildContext context) => TextField(
     controller: controller,
     maxLines: maxLines,
-    keyboardType: keyboardType,
     onChanged: onChanged,
     style: AppTextStyles.body,
     decoration: InputDecoration(
@@ -550,90 +492,13 @@ class _TypeOption extends StatelessWidget {
   );
 }
 
-/// Toggle binaire "Numéro 1-à-1 / Groupe WhatsApp" pour la communication
-/// avec un partenaire (cf. hotfix_050).
-class _CommModeToggle extends StatelessWidget {
-  final bool             useGroup;
-  final ValueChanged<bool> onChanged;
-  const _CommModeToggle({
-    required this.useGroup,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(children: [
-      Expanded(child: _ModeBtn(
-        icon: Icons.phone_rounded,
-        label: 'Numéro',
-        selected: !useGroup,
-        onTap: () => onChanged(false),
-      )),
-      const SizedBox(width: 6),
-      Expanded(child: _ModeBtn(
-        icon: Icons.group_rounded,
-        label: 'Groupe WhatsApp',
-        selected: useGroup,
-        onTap: () => onChanged(true),
-      )),
-    ]);
-  }
-}
-
-class _ModeBtn extends StatelessWidget {
-  final IconData     icon;
-  final String       label;
-  final bool         selected;
-  final VoidCallback onTap;
-  const _ModeBtn({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.primary.withValues(alpha: 0.08)
-              : const Color(0xFFF9FAFB),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-              color: selected
-                  ? AppColors.primary
-                  : Theme.of(context).semantic.borderSubtle,
-              width: selected ? 1.4 : 1),
-        ),
-        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(icon, size: 14,
-              color: selected
-                  ? AppColors.primary
-                  : const Color(0xFF9CA3AF)),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(label,
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.bodySm.copyWith(
-                    fontWeight:
-                        selected ? FontWeight.w700 : FontWeight.w500,
-                    color: selected
-                        ? AppColors.primary
-                        : const Color(0xFF6B7280))),
-          ),
-        ]),
-      ),
-    );
-  }
-}
+/// Valeur sentinelle de l'item « Créer un nouveau template » du dropdown.
+/// Jamais persistée : interceptée par [_DeliveryTemplatePicker._handleChanged].
+const String _kCreateTplValue = '__create_new_delivery_template__';
 
 /// Dropdown de sélection de template de livraison pour un partenaire.
 /// La valeur `null` correspond à "Template par défaut du shop".
+/// Le dernier item permet de créer un template à la volée et de l'affecter.
 class _DeliveryTemplatePicker extends ConsumerWidget {
   final String          shopId;
   /// Id du partenaire courant (StockLocation.id). Null en création :
@@ -705,6 +570,20 @@ class _DeliveryTemplatePicker extends ConsumerWidget {
                       style: AppTextStyles.bodySm)),
                 ]),
               )),
+          // Action en bas de liste : créer un nouveau template et l'affecter
+          // immédiatement au partenaire en cours (cf. _handleChanged).
+          DropdownMenuItem<String?>(
+            value: _kCreateTplValue,
+            child: Row(children: [
+              Icon(Icons.add_circle_outline_rounded, size: 14,
+                  color: AppColors.primary),
+              const SizedBox(width: 6),
+              Text('Créer un nouveau template',
+                  style: AppTextStyles.bodySm.copyWith(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w600)),
+            ]),
+          ),
         ];
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -722,11 +601,42 @@ class _DeliveryTemplatePicker extends ConsumerWidget {
               icon: const Icon(Icons.keyboard_arrow_down_rounded,
                   size: 18, color: Color(0xFF9CA3AF)),
               items: items,
-              onChanged: onChanged,
+              onChanged: (v) => _handleChanged(context, ref, list, v),
             ),
           ),
         );
       },
     );
+  }
+
+  /// Intercepte la sélection du dropdown. Si l'utilisateur choisit « Créer un
+  /// nouveau template », ouvre le formulaire de template, puis sélectionne
+  /// automatiquement le template fraîchement créé (= l'affecte au partenaire
+  /// via `deliveryTemplateId`). Sinon, propage simplement la sélection.
+  ///
+  /// FK-safe : à la CRÉATION d'un partenaire (`partnerId == null`), le template
+  /// est créé shop-wide (le partenaire n'existe pas encore en base, donc on ne
+  /// peut pas le scoper avec un FK partner_id). En ÉDITION d'un partenaire
+  /// existant, il est pré-scopé à ce partenaire.
+  Future<void> _handleChanged(BuildContext context, WidgetRef ref,
+      List<DeliveryTemplate> current, String? v) async {
+    if (v != _kCreateTplValue) {
+      onChanged(v);
+      return;
+    }
+    final beforeIds = current.map((t) => t.id).toSet();
+    final saved = await showAdaptiveFormSheet<bool>(
+      context: context,
+      builder: (_) => DeliveryTemplateFormSheet(
+        shopId: shopId,
+        initialPartnerId: partnerId,
+      ),
+    );
+    if (saved != true) return;
+    final after = ref.read(deliveryTemplatesProvider(shopId)).valueOrNull
+        ?? const <DeliveryTemplate>[];
+    final created =
+        after.where((t) => !beforeIds.contains(t.id)).toList();
+    if (created.isNotEmpty) onChanged(created.first.id);
   }
 }

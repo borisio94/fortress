@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../../../../core/storage/schema_migrator.dart';
 
 // ─── Statut commande fournisseur ─────────────────────────────────────────────
 
@@ -112,7 +113,15 @@ class PurchaseOrder extends Equatable {
 
   double get computedTotal => items.fold(0.0, (s, i) => s + i.lineTotal);
 
+  // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
+  static const int currentSchemaVersion = 1;
+  static final SchemaMigrator _migrator = SchemaMigrator(
+    currentVersion: currentSchemaVersion,
+    steps: const {},
+  );
+
   Map<String, dynamic> toMap() => {
+    'schema_version': currentSchemaVersion,
     'id': id, 'shop_id': shopId, 'supplier_id': supplierId,
     'status': status.key, 'items': items.map((i) => i.toMap()).toList(),
     'notes': notes, 'expected_at': expectedAt?.toIso8601String(),
@@ -121,22 +130,25 @@ class PurchaseOrder extends Equatable {
     'updated_at': updatedAt.toIso8601String(),
   };
 
-  factory PurchaseOrder.fromMap(Map<String, dynamic> m) => PurchaseOrder(
-    id:          m['id'] as String,
-    shopId:      m['shop_id'] as String,
-    supplierId:  m['supplier_id'] as String?,
-    status:      POStatusX.fromString(m['status'] as String?),
-    items:       ((m['items'] as List?) ?? [])
-        .map((e) => POItem.fromMap(Map<String, dynamic>.from(e as Map)))
-        .toList(),
-    notes:       m['notes'] as String?,
-    expectedAt:  m['expected_at'] is String
-        ? DateTime.tryParse(m['expected_at'] as String) : null,
-    totalAmount: (m['total_amount'] as num?)?.toDouble() ?? 0,
-    createdBy:   m['created_by'] as String?,
-    createdAt:   DateTime.tryParse(m['created_at']?.toString() ?? '') ?? DateTime.now(),
-    updatedAt:   DateTime.tryParse(m['updated_at']?.toString() ?? '') ?? DateTime.now(),
-  );
+  factory PurchaseOrder.fromMap(Map<String, dynamic> rawM) {
+    final m = _migrator.migrate(rawM);
+    return PurchaseOrder(
+      id:          m['id'] as String,
+      shopId:      m['shop_id'] as String,
+      supplierId:  m['supplier_id'] as String?,
+      status:      POStatusX.fromString(m['status'] as String?),
+      items:       ((m['items'] as List?) ?? [])
+          .map((e) => POItem.fromMap(Map<String, dynamic>.from(e as Map)))
+          .toList(),
+      notes:       m['notes'] as String?,
+      expectedAt:  m['expected_at'] is String
+          ? DateTime.tryParse(m['expected_at'] as String) : null,
+      totalAmount: (m['total_amount'] as num?)?.toDouble() ?? 0,
+      createdBy:   m['created_by'] as String?,
+      createdAt:   DateTime.tryParse(m['created_at']?.toString() ?? '') ?? DateTime.now(),
+      updatedAt:   DateTime.tryParse(m['updated_at']?.toString() ?? '') ?? DateTime.now(),
+    );
+  }
 
   @override List<Object?> get props => [id, shopId, status, items];
 }

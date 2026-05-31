@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../data/onboarding_prefs.dart';
 
@@ -24,4 +25,46 @@ final onboardingSeenCacheProvider =
 Future<void> primeOnboardingSeenCache(WidgetRef ref) async {
   final seen = await OnboardingPrefs.hasSeenSlides();
   ref.read(onboardingSeenCacheProvider.notifier).state = seen;
+}
+
+/// Flag SERVEUR `profiles.onboarding_slides_seen` (cf. hotfix_099).
+///
+/// Contrairement à [onboardingSeenCacheProvider] qui est device-scoped, ce
+/// flag est lié au COMPTE : les slides d'intro ne s'affichent qu'UNE SEULE
+/// FOIS, à la première connexion, et plus jamais ensuite — même sur un autre
+/// appareil.
+///
+/// • `null`  : pas encore chargé (au boot / pendant la sync post-login). Le
+///   `redirect` GoRouter attend (ne route pas) tant que c'est null pour éviter
+///   un flash dashboard → slides.
+/// • `false` : compte neuf jamais onboardé → afficher les slides.
+/// • `true`  : déjà vu (ou compte existant backfillé) → ne rien afficher.
+///
+/// Chargé au login par `AuthRouterNotifier`, réinitialisé à `null` au logout.
+final onboardingSlidesSeenProvider = StateProvider<bool?>((ref) => null);
+
+/// Lit le flag serveur pour l'utilisateur courant et alimente
+/// [onboardingSlidesSeenProvider]. Appelé dans le `Future.wait` du login.
+///
+/// Fail-safe : en cas d'erreur (réseau, colonne absente, pas de session) on
+/// considère les slides comme VUES (`true`) — on ne bloque jamais l'entrée
+/// dans l'app et on ne spamme jamais les slides à tort.
+Future<void> loadOnboardingSlidesSeen(Ref ref) async {
+  final client = Supabase.instance.client;
+  final uid = client.auth.currentUser?.id;
+  final notifier = ref.read(onboardingSlidesSeenProvider.notifier);
+  if (uid == null) {
+    notifier.state = true;
+    return;
+  }
+  try {
+    final row = await client
+        .from('profiles')
+        .select('onboarding_slides_seen')
+        .eq('id', uid)
+        .maybeSingle();
+    notifier.state = (row?['onboarding_slides_seen'] as bool?) ?? true;
+  } catch (_) {
+    notifier.state = true;
+  }
 }

@@ -23,7 +23,10 @@ import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/storage/secure_storage.dart';
 import '../../../../core/storage/hive_boxes.dart';
+import '../../../../core/providers/demo_mode_provider.dart';
 import '../../../../shared/providers/current_shop_provider.dart';
+import '../../../../shared/widgets/shop_logo_avatar.dart';
+import '../../../shop_selector/domain/entities/shop_summary.dart';
 import '../../../auth/domain/entities/user.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../auth/presentation/bloc/auth_event.dart';
@@ -44,7 +47,7 @@ class ParametresPage extends ConsumerWidget {
         children: [
 
           // ── Header profil ─────────────────────────────────────────
-          _ProfileHeader(user: user, shop: shop?.name, perms: perms),
+          _ProfileHeader(user: user, shop: shop, perms: perms),
           const SizedBox(height: 20),
 
           // ── Boutique ──────────────────────────────────────────────
@@ -144,6 +147,10 @@ class ParametresPage extends ConsumerWidget {
                 color: AppColors.primary,
                 onTap: () => context.push('/shop/$shopId/parametres/theme'),
               ),
+              // Mode démo — affiche un cercle visible à chaque appui.
+              // Utile pour les enregistrements promo sur mobile (iOS n'a
+              // pas d'option système équivalente). Désactivé par défaut.
+              _DemoModeTile(),
               // Devise (monnaie & format) → réservé admin + owner.
               if (perms.isShopAdmin)
                 _Tile(
@@ -218,7 +225,7 @@ class ParametresPage extends ConsumerWidget {
 
 class _ProfileHeader extends StatelessWidget {
   final User? user;
-  final String? shop;
+  final ShopSummary? shop;
   final AppPermissions perms;
   const _ProfileHeader({this.user, this.shop, required this.perms});
 
@@ -237,11 +244,6 @@ class _ProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final initials = user?.name.isNotEmpty == true
-        ? user!.name.trim().split(' ')
-        .map((w) => w.isNotEmpty ? w[0].toUpperCase() : '')
-        .take(2).join()
-        : '?';
     final badge = _roleBadge();
 
     return Container(
@@ -255,16 +257,12 @@ class _ProfileHeader extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(children: [
-        // Avatar
-        Container(
-          width: 52, height: 52,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha:0.25),
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white.withValues(alpha:0.4), width: 2),
-          ),
-          child: Center(child: Text(initials,
-              style: AppTextStyles.title.copyWith(color: Colors.white))),
+        // Avatar = logo boutique sur fond violet du header. Fallback
+        // Fortress en blanc-sur-violet via la variante `dark`.
+        ShopLogoAvatar(
+          logoUrl: shop?.logoUrl,
+          size: 52,
+          variant: ShopLogoAvatarVariant.dark,
         ),
         const SizedBox(width: 14),
         Expanded(child: Column(
@@ -293,7 +291,7 @@ class _ProfileHeader extends StatelessWidget {
                         color: Colors.white.withValues(alpha:0.2),
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: Text(shop!,
+                      child: Text(shop!.name,
                           style: AppTextStyles.microBold.copyWith(
                               color: Colors.white),
                           maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -557,6 +555,62 @@ class _Tile extends StatelessWidget {
           ),
           Icon(Icons.chevron_right_rounded, size: 16,
               color: AppColors.textHint.withValues(alpha:0.6)),
+        ]),
+      ),
+    );
+  }
+}
+
+// ─── Mode démo (toggle inline) ────────────────────────────────────────────────
+
+/// Tuile interrupteur pour le mode démo (ripple visible à chaque appui).
+/// Style aligné sur `_Tile` mais avec un `AppSwitch` à droite ; le tap sur
+/// la ligne entière bascule l'état.
+class _DemoModeTile extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final enabled = ref.watch(demoModeProvider);
+    final color = AppColors.primary;
+    final titleColor = Theme.of(context).colorScheme.onSurface;
+    return InkWell(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        ref.read(demoModeProvider.notifier).toggle();
+      },
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        child: Row(children: [
+          Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(9)),
+            child: Icon(Icons.touch_app_rounded, size: 17, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Mode démo',
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.bodyBold.copyWith(color: titleColor)),
+                Text(
+                  enabled
+                      ? 'Vos appuis sont visibles à l\'écran'
+                      : 'Affiche un cercle à chaque appui (enregistrement vidéo)',
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.captionHint,
+                ),
+              ],
+            ),
+          ),
+          AppSwitch(
+            value: enabled,
+            onChanged: (v) => ref.read(demoModeProvider.notifier).setEnabled(v),
+          ),
         ]),
       ),
     );
@@ -1308,11 +1362,26 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
         },
       );
 
-      // 3. Appel RPC — supprime toutes les données puis le compte.
-      //    Le RPC RAISE en cas d'échec sur auth.users — l'exception remonte
-      //    dans le catch ci-dessous et l'utilisateur voit l'erreur réelle.
-      await Supabase.instance.client
+      // 3. Appel RPC — supprime toutes les données puis tente le compte auth.
+      //    Sur Supabase Cloud, postgres ne peut pas supprimer auth.users :
+      //    la RPC renvoie auth_deleted=false (sans annuler la purge des
+      //    données). On termine alors via l'edge function reset-platform mode
+      //    delete-user (service_role), tant que la session courante est encore
+      //    valide — sinon le compte pourrait encore se connecter.
+      final res = await Supabase.instance.client
           .rpc('delete_user_account', params: {'p_user_id': uid});
+      final authDeleted = (res is Map) ? (res['auth_deleted'] == true) : true;
+      if (!authDeleted) {
+        try {
+          await Supabase.instance.client.functions.invoke(
+            'reset-platform',
+            body: {'mode': 'delete-user', 'user_id': uid},
+          );
+        } catch (_) {
+          // Edge function non déployée : données purgées mais compte auth
+          // résiduel. On poursuit la déconnexion + purge locale ci-dessous.
+        }
+      }
 
       // 4. Vider tout le cache local du compte supprimé pour qu'aucune
       //    donnée stale ne survive si quelqu'un se reconnecte sur l'appareil.

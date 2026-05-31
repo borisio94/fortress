@@ -1136,11 +1136,14 @@ class AppLocalizations {
       ? "Format d'image non reconnu. Utilisez JPEG ou PNG."
       : 'Image format not recognized. Use JPEG or PNG.';
   String imageTooSmall(int w, int h) => _isFr
-      ? 'Image trop petite ($w×$h px). Minimum requis : 800×800 px.'
-      : 'Image too small ($w×$h px). Minimum: 800×800 px.';
+      ? 'Image trop petite ($w×$h px). Minimum requis : 200×200 px.'
+      : 'Image too small ($w×$h px). Minimum: 200×200 px.';
+  String imageNotSquare(int w, int h) => _isFr
+      ? 'Image non carrée ($w×$h px). Utilisez une image au ratio 1:1.'
+      : 'Image not square ($w×$h px). Please use a 1:1 ratio image.';
   String get imageUploadHint => _isFr
-      ? 'Conseil : image carrée PNG, 1024×1024 px minimum.'
-      : 'Tip: square PNG image, 1024×1024 px minimum.';
+      ? 'Conseil : image carrée PNG, 200×200 px minimum.'
+      : 'Tip: square PNG image, 200×200 px minimum.';
   String imageSaved(int w, int h) => _isFr
       ? 'Image enregistrée $w×$h PNG'
       : 'Image saved $w×$h PNG';

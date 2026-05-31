@@ -47,9 +47,10 @@ class ImageValidationResult {
 Future<ImageValidationResult> validateAndReadImage(
   XFile xFile,
   BuildContext context, {
-  int minWidth = 800,
-  int minHeight = 800,
-  int maxOutputSize = 1600,
+  int minWidth = 200,
+  int minHeight = 200,
+  int maxOutputSize = 2048,
+  bool requireSquare = true,
 }) async {
   final rawBytes = await xFile.readAsBytes();
   final decoded = img.decodeImage(rawBytes);
@@ -80,13 +81,28 @@ Future<ImageValidationResult> validateAndReadImage(
         width: srcW, height: srcH, errorMessage: l);
   }
 
+  // Vérification ratio 1:1 strict. La grille produit + les cards mode
+  // dépendent d'un ratio carré : une image rectangulaire serait soit
+  // déformée, soit recadrée arbitrairement → on rejette à la source
+  // pour forcer le user à fournir une image déjà carrée.
+  if (requireSquare && srcW != srcH) {
+    if (!context.mounted) {
+      return ImageValidationResult._(
+          width: srcW, height: srcH, errorMessage: 'not square');
+    }
+    final l = context.l10n.imageNotSquare(srcW, srcH);
+    _showError(context, l, durationSeconds: 5);
+    return ImageValidationResult._(
+        width: srcW, height: srcH, errorMessage: l);
+  }
+
   var resized = decoded;
   if (srcW > maxOutputSize || srcH > maxOutputSize) {
     resized = srcW >= srcH
         ? img.copyResize(decoded,
-            width: maxOutputSize, interpolation: img.Interpolation.cubic)
+            width: maxOutputSize, interpolation: img.Interpolation.average)
         : img.copyResize(decoded,
-            height: maxOutputSize, interpolation: img.Interpolation.cubic);
+            height: maxOutputSize, interpolation: img.Interpolation.average);
   }
 
   // level 6 = bon compromis taille/CPU. level 9 gagne ~3-5% pour 2-3× le

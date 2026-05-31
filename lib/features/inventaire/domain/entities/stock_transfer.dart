@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../../../../core/storage/schema_migrator.dart';
 
 /// État d'un transfert entre deux [StockLocation].
 /// - [draft]     : créé, pas encore envoyé. Modifiable, supprimable.
@@ -128,7 +129,13 @@ class StockTransfer extends Equatable {
   int get totalQuantity =>
       lines.fold(0, (s, l) => s + l.quantity);
 
+  // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
+  static const int currentSchemaVersion = 1;
+  static final SchemaMigrator _migrator = SchemaMigrator(
+    currentVersion: currentSchemaVersion, steps: const {});
+
   Map<String, dynamic> toMap() => {
+    'schema_version': currentSchemaVersion,
     'id': id,
     'owner_id': ownerId,
     'from_location_id': fromLocationId,
@@ -144,7 +151,8 @@ class StockTransfer extends Equatable {
     'idempotency_key': idempotencyKey,
   };
 
-  factory StockTransfer.fromMap(Map<String, dynamic> m) {
+  factory StockTransfer.fromMap(Map<String, dynamic> rawM) {
+    final m = _migrator.migrate(rawM);
     final rawLines = m['lines'] as List? ?? const [];
     return StockTransfer(
       id:             m['id'] as String,

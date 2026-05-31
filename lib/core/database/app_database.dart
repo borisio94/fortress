@@ -8,6 +8,7 @@ import '../config/supabase_config.dart';
 import '../services/notification_service.dart';
 import '../storage/hive_boxes.dart';
 import '../storage/local_storage_service.dart';
+import '../storage/schema_migrator.dart';
 import '../../features/auth/domain/entities/user.dart';
 import '../../features/shop_selector/domain/entities/shop_summary.dart';
 import '../../features/inventaire/domain/entities/product.dart';
@@ -1170,6 +1171,35 @@ class AppDatabase {
       final table = op['table'] as String;
       final type  = op['op']    as String;
       final data  = Map<String, dynamic>.from(op['data'] as Map);
+
+      // ── Strip schema_version avant push Supabase ───────────────────
+      // Ce champ est ajouté par les toMap() pour le pattern de migration
+      // (cf. lib/core/storage/schema_migrator.dart). Il est utile EN
+      // LOCAL (Hive) pour décider d'appliquer les migrations à la lecture,
+      // mais les tables Supabase n'ont pas cette colonne → un push avec
+      // `schema_version` provoque une erreur PostgREST "column not found"
+      // et la file de retry abandonne après 10 tentatives. On le retire
+      // ici pour rester compatible sans devoir ajouter la colonne à
+      // chaque table SQL.
+      data.remove('schema_version');
+
+      // ── Garde-fou ops orphelines ────────────────────────────────────
+      // Si l'op référence un shop_id qui n'existe plus dans le Hive
+      // local (boutique supprimée côté super-admin, ou orpheline d'un
+      // ancien compte recréé), inutile de la pousser : Supabase
+      // rejettera systématiquement avec un 42501 (RLS) ou 23503 (FK).
+      // On la drop silencieusement pour éviter la boucle de retry qui
+      // sature la file et bloque la bannière sync sur "1 erreur"
+      // permanente. Couvre shop_id (la plupart des tables) et store_id
+      // (clients, products).
+      final orphanShopId = (data['shop_id'] ?? data['store_id'])?.toString();
+      if (orphanShopId != null && orphanShopId.isNotEmpty
+          && LocalStorageService.getShop(orphanShopId) == null) {
+        debugPrint('[DB] ⏭️  Op droppée — shop inexistant localement '
+            '(table=$table op=$type shop=$orphanShopId)');
+        return true;
+      }
+
       // onConflict : nom(s) de la contrainte unique à utiliser pour résoudre
       // les doublons quand la clé primaire n'est pas la bonne cible (ex:
       // categories où la PK est id mais l'unicité métier est (shop_id, name)).
@@ -2754,9 +2784,15 @@ end \$\$;""",
   /// Permet l'idempotence entre devices qui migrent en parallèle.
   static String _shopLocationId(String shopId) => 'loc_shop_$shopId';
 
-  /// Crée (ou récupère) la location type='shop' pour une boutique.
-  /// N'écrit PAS vers Supabase seule — c'est `migrateShopStocksToLocationsV1`
-  /// ou `saveStockLocation` qui le font.
+  /// Crée (ou récupère) la location type='shop' pour une boutique, ET
+  /// la (re-)pousse vers Supabase à CHAQUE appel (upsert idempotent).
+  ///
+  /// Le re-push systématique répare automatiquement le cas où un push
+  /// précédent a échoué (RLS, FK, schema_version legacy, abandon après
+  /// 10 retries, etc.) : la StockLocation existait alors en Hive mais
+  /// PAS sur Supabase, bloquant tous les `stock_transfers` /
+  /// `stock_levels` qui la référencent (erreurs FK 23503 + RLS 42501).
+  /// Désormais chaque appel auto-répare ce drift silencieusement.
   static StockLocation _ensureShopLocation({
     required String shopId,
     required String ownerId,
@@ -2764,24 +2800,21 @@ end \$\$;""",
   }) {
     final locId = _shopLocationId(shopId);
     final existing = HiveBoxes.stockLocationsBox.get(locId);
+    StockLocation loc;
     if (existing != null) {
-      return StockLocation.fromMap(Map<String, dynamic>.from(existing));
+      loc = StockLocation.fromMap(Map<String, dynamic>.from(existing));
+    } else {
+      loc = StockLocation(
+        id: locId,
+        ownerId: ownerId,
+        type: StockLocationType.shop,
+        name: shopName,
+        shopId: shopId,
+        createdAt: DateTime.now(),
+      );
+      HiveBoxes.stockLocationsBox.put(locId, loc.toMap());
     }
-    final loc = StockLocation(
-      id: locId,
-      ownerId: ownerId,
-      type: StockLocationType.shop,
-      name: shopName,
-      shopId: shopId,
-      createdAt: DateTime.now(),
-    );
-    HiveBoxes.stockLocationsBox.put(locId, loc.toMap());
-    // Pousser aussi vers Supabase. Sans ça, tous les `stock_levels` qui
-    // référencent cette location échouent en 42501 (la sub-query RLS de
-    // stock_levels ne trouve pas la location côté serveur). Le fait que
-    // _bgWrite soit fire-and-forget convient ici : si on est offline, l'op
-    // est mise en queue et flushera dès le retour réseau, débloquant
-    // ensuite tous les stock_levels en attente.
+    // Push idempotent à chaque appel — voir doc ci-dessus.
     _bgWrite({'table': 'stock_locations', 'op': 'upsert',
         'data': loc.toMap()});
     _notify('stock_locations', shopId);
@@ -3037,24 +3070,39 @@ end \$\$;""",
   /// tables existantes (products, variants, shops). Sans danger.
   static Future<void> migrateShopStocksToLocationsV1(String shopId) async {
     final flagKey = '$_kMigrationV1FlagPrefix$shopId';
-    if (HiveBoxes.settingsBox.get(flagKey) == true) return;
 
     final shop = LocalStorageService.getShop(shopId);
     if (shop == null) return;
     final ownerId = shop.ownerId ?? _userId ?? '';
     if (ownerId.isEmpty) return;
 
-    // 1. Garantir la location type='shop' côté Hive
+    // 1. Garantir la location type='shop' côté Hive (idempotent — vérifie
+    //    l'existant dans Hive avant de créer).
+    //    _ensureShopLocation pousse aussi via _bgWrite (queue+strip) à
+    //    chaque appel, donc même si le flag de migration est posé, la
+    //    location se re-pousse vers Supabase. Auto-répare le drift Hive↔
+    //    Supabase causé par un push raté antérieur (schema_version legacy,
+    //    RLS transitoire, etc.) sans avoir à reset le flag manuellement.
     final location = _ensureShopLocation(
       shopId:   shopId,
       ownerId:  ownerId,
       shopName: shop.name,
     );
 
+    // Flag déjà posé → les étapes 2-5 (push levels, etc.) ont déjà tourné
+    // avec succès dans une session précédente. On a déjà re-poussé la
+    // location ci-dessus pour auto-réparer, on peut sortir.
+    if (HiveBoxes.settingsBox.get(flagKey) == true) return;
+
     // 2. Pousser la location Supabase en AWAITANT (requis avant les levels)
+    // Strip `schema_version` : le pattern de versioning est purement local
+    // (Hive). Les tables Supabase n'ont pas cette colonne — sans ce strip,
+    // l'upsert direct échoue en PostgrestException et le flag n'est jamais
+    // posé → migration boucle en échec silencieux.
+    final locMap = location.toMap()..remove('schema_version');
     if (_i._isOnline) {
       try {
-        await _db.from('stock_locations').upsert(location.toMap())
+        await _db.from('stock_locations').upsert(locMap)
             .timeout(const Duration(seconds: 10));
       } catch (e) {
         debugPrint('[DB] Migration v1 shop=$shopId : location upsert KO ($e), '
@@ -3065,7 +3113,7 @@ end \$\$;""",
       // Offline : pousser via la queue FIFO, mais ne pas poser le flag
       // (la migration se finalisera au retour online).
       _bgWrite({'table': 'stock_locations', 'op': 'upsert',
-        'data': location.toMap()});
+        'data': locMap});
     }
 
     // 3. Collecter tous les levels (depuis la variante = source de vérité
@@ -3976,7 +4024,12 @@ end \$\$;""",
   }
 
   // ── Sérialisation Expense ──────────────────────────────────────────
+  // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
+  static final _expenseMigrator = SchemaMigrator(
+    currentVersion: 1, steps: const {});
+
   static Map<String, dynamic> _expenseToMap(Expense e) => {
+    'schema_version': _expenseMigrator.currentVersion,
     'id':             e.id,
     'shop_id':        e.shopId,
     'amount':         e.amount,
@@ -3994,24 +4047,27 @@ end \$\$;""",
   static Map<String, dynamic> _expenseToSupabase(Expense e) =>
       _expenseToMap(e); // mêmes colonnes
 
-  static Expense _expenseFromMap(Map<String, dynamic> m) => Expense(
-    id:       m['id'] as String,
-    shopId:   m['shop_id'] as String,
-    amount:   (m['amount'] as num).toDouble(),
-    category: ExpenseCategoryX.fromString(m['category'] as String?),
-    label:    (m['label'] as String?) ?? '',
-    paidAt:   DateTime.parse(m['paid_at'] as String).toLocal(),
-    paymentMethod: PaymentMethod.values.firstWhere(
-        (p) => p.name == m['payment_method'],
-        orElse: () => PaymentMethod.cash),
-    receiptUrl: m['receipt_url'] as String?,
-    notes:      m['notes'] as String?,
-    createdBy:  m['created_by']?.toString(),
-    createdAt:  m['created_at'] != null
-        ? DateTime.parse(m['created_at'] as String).toLocal()
-        : DateTime.now(),
-    locationId: m['location_id'] as String?,
-  );
+  static Expense _expenseFromMap(Map<String, dynamic> rawM) {
+    final m = _expenseMigrator.migrate(rawM);
+    return Expense(
+      id:       m['id'] as String,
+      shopId:   m['shop_id'] as String,
+      amount:   (m['amount'] as num).toDouble(),
+      category: ExpenseCategoryX.fromString(m['category'] as String?),
+      label:    (m['label'] as String?) ?? '',
+      paidAt:   DateTime.parse(m['paid_at'] as String).toLocal(),
+      paymentMethod: PaymentMethod.values.firstWhere(
+          (p) => p.name == m['payment_method'],
+          orElse: () => PaymentMethod.cash),
+      receiptUrl: m['receipt_url'] as String?,
+      notes:      m['notes'] as String?,
+      createdBy:  m['created_by']?.toString(),
+      createdAt:  m['created_at'] != null
+          ? DateTime.parse(m['created_at'] as String).toLocal()
+          : DateTime.now(),
+      locationId: m['location_id'] as String?,
+    );
+  }
 
   /// Convertit une ligne Supabase en map Hive (mêmes colonnes, conversion UUID).
   static Map<String, dynamic> _mapFromSupabase(Map<dynamic, dynamic> row) => {
@@ -5517,9 +5573,13 @@ end \$\$;""",
 
 
   // ── Sérialisation Client ──────────────────────────────────────────
+  // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
+  static final _clientMigrator = SchemaMigrator(
+    currentVersion: 1, steps: const {});
 
   // Hive persiste city/district séparément + address legacy pour compat.
   static Map<String, dynamic> _clientToMap(Client c) => {
+    'schema_version': _clientMigrator.currentVersion,
     'id':           c.id,
     'store_id':     c.storeId,
     'name':         c.name,
@@ -5536,23 +5596,26 @@ end \$\$;""",
     'is_archived':  c.isArchived,
   };
 
-  static Client _clientFromMap(Map<String, dynamic> m) => Client(
-    id:           m['id'] as String,
-    storeId:      m['store_id'] as String,
-    name:         m['name'] as String,
-    phone:        m['phone'] as String?,
-    email:        m['email'] as String?,
-    city:         m['city'] as String?,
-    district:     m['district'] as String?,
-    address:      m['address'] as String?,
-    notes:        m['notes'] as String?,
-    createdAt:    DateTime.parse(m['created_at'] as String),
-    lastVisitAt:  m['last_visit_at'] != null
-        ? DateTime.parse(m['last_visit_at'] as String) : null,
-    totalOrders:  (m['total_orders'] as num?)?.toInt() ?? 0,
-    totalSpent:   (m['total_spent']  as num?)?.toDouble() ?? 0,
-    isArchived:   m['is_archived'] as bool? ?? false,
-  );
+  static Client _clientFromMap(Map<String, dynamic> rawM) {
+    final m = _clientMigrator.migrate(rawM);
+    return Client(
+      id:           m['id'] as String,
+      storeId:      m['store_id'] as String,
+      name:         m['name'] as String,
+      phone:        m['phone'] as String?,
+      email:        m['email'] as String?,
+      city:         m['city'] as String?,
+      district:     m['district'] as String?,
+      address:      m['address'] as String?,
+      notes:        m['notes'] as String?,
+      createdAt:    DateTime.parse(m['created_at'] as String),
+      lastVisitAt:  m['last_visit_at'] != null
+          ? DateTime.parse(m['last_visit_at'] as String) : null,
+      totalOrders:  (m['total_orders'] as num?)?.toInt() ?? 0,
+      totalSpent:   (m['total_spent']  as num?)?.toDouble() ?? 0,
+      isArchived:   m['is_archived'] as bool? ?? false,
+    );
+  }
 
   // Supabase : écrit address = "quartier, ville" pour rester compatible avec
   // la colonne existante. La colonne `tag` est toujours écrite à NULL — le

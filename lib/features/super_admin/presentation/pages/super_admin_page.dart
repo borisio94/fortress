@@ -1959,9 +1959,32 @@ class _UserCard extends StatelessWidget {
           'produits et abonnements. Cette action est irréversible.',
       confirmLabel: 'Supprimer définitivement',
       onConfirmed: () async {
-        await Supabase.instance.client
+        // 1. RPC SQL : purge toutes les données + tente auth.users.
+        //    La RPC journalise déjà 'user_deleted' côté SQL — pas de doublon ici.
+        final res = await Supabase.instance.client
             .rpc('delete_user_account', params: {'p_user_id': uid});
-        // La RPC journalise déjà 'user_deleted' côté SQL — pas de doublon ici.
+
+        // 2. Sur Supabase Cloud, postgres ne peut pas supprimer auth.users :
+        //    la RPC renvoie auth_deleted=false. On termine via l'edge function
+        //    reset-platform (service_role) — sinon le compte peut encore se
+        //    connecter. Même schéma que la réinitialisation globale.
+        final authDeleted = (res is Map) ? (res['auth_deleted'] == true) : true;
+        if (!authDeleted) {
+          try {
+            await Supabase.instance.client.functions.invoke(
+              'reset-platform',
+              body: {'mode': 'delete-user', 'user_id': uid},
+            );
+          } catch (_) {
+            // Edge function absente/non déployée : la donnée est purgée mais le
+            // compte auth survit. On le signale plutôt que d'échouer en silence.
+            if (ctx.mounted) {
+              AppSnack.warning(ctx,
+                  'Données supprimées, mais le compte Auth n\'a pas pu être '
+                  'effacé (déployez l\'edge function reset-platform).');
+            }
+          }
+        }
         onRefresh();
       },
     ));

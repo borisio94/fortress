@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/database/app_database.dart';
+import '../../../../core/router/route_names.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -56,13 +57,18 @@ class _StockLocationsPageState extends ConsumerState<StockLocationsPage> {
     context.push('/shop/${widget.shopId}/parametres/locations/${loc.id}');
   }
 
-  Future<void> _openForm({StockLocation? existing, StockLocationType? defaultType}) async {
+  Future<void> _openForm({
+    StockLocation? existing,
+    StockLocationType? defaultType,
+    bool lockType = false,
+  }) async {
     final result = await showAdaptiveFormSheet<bool>(
       context: context,
       builder: (_) => LocationFormSheet(
         existing: existing,
         defaultType: defaultType ?? StockLocationType.warehouse,
         shopId: widget.shopId,
+        lockType: lockType,
       ),
     );
     if (result == true) {
@@ -175,6 +181,14 @@ class _StockLocationsPageState extends ConsumerState<StockLocationsPage> {
                     onOpen: _openContents,
                     onEdit: null,
                     onDelete: null,
+                    // Création d'une nouvelle boutique : ouvre la page
+                    // dédiée /shop-selector/create. La boutique créée
+                    // apparaîtra ici automatiquement à la prochaine sync
+                    // (auto-création d'une StockLocation type=shop).
+                    onCreate: AppDatabase.isSubscriptionFrozen
+                        ? null
+                        : () => context.push(RouteNames.createShop),
+                    createLabel: 'Nouvelle boutique',
                   ),
                   const SizedBox(height: 16),
                   _Section(
@@ -207,7 +221,8 @@ class _StockLocationsPageState extends ConsumerState<StockLocationsPage> {
                     onDelete: AppDatabase.isSubscriptionFrozen
                         ? null : _confirmDelete,
                     onCreate: () => _openForm(
-                        defaultType: StockLocationType.partner),
+                        defaultType: StockLocationType.partner,
+                        lockType: true),
                     createLabel: 'Nouveau dépôt partenaire',
                   ),
                   const SizedBox(height: 32),

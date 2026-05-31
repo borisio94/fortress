@@ -1,24 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/router/route_names.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/widgets/fortress_logo.dart';
-import '../../data/onboarding_prefs.dart';
 import '../providers/onboarding_seen_provider.dart';
 
-/// Slides marketing 1ʳᵉ ouverture (point 2 de l'onboarding spec).
+/// Slides d'intro affichées UNE SEULE FOIS par compte, à la première
+/// connexion (cf. hotfix_099 + onboardingSlidesSeenProvider).
 ///
 /// 3 cartes swipables qui présentent les 3 valeurs clés de l'app. Le
 /// bouton « Commencer » est visible **dès la première slide** (le user
-/// n'a pas à swiper jusqu'au bout). Au tap, on marque `onboarding_seen`
-/// dans SharedPreferences et on bascule vers l'écran de choix
-/// inscription/connexion.
-///
-/// Une fois vues, ces slides ne se ré-affichent pas (gated par
-/// [OnboardingPrefs.hasSeenSlides] au démarrage de l'app).
+/// n'a pas à swiper jusqu'au bout). Au tap, on marque le flag serveur
+/// `profiles.onboarding_slides_seen = true` (donc plus jamais réaffiché,
+/// même sur un autre appareil) puis on entre dans l'app.
 class OnboardingSlidesPage extends ConsumerStatefulWidget {
   const OnboardingSlidesPage({super.key});
 
@@ -59,12 +57,26 @@ class _OnboardingSlidesPageState extends ConsumerState<OnboardingSlidesPage> {
   }
 
   Future<void> _finish() async {
-    await OnboardingPrefs.markSlidesSeen();
-    // Synchronise le cache mémoire pour que le `redirect` GoRouter ne
-    // renvoie pas l'utilisateur sur cette page au prochain refresh.
+    // Marque le flag local IMMÉDIATEMENT pour que le `redirect` GoRouter ne
+    // renvoie pas l'utilisateur sur cette page (optimiste : suffit pour la
+    // session courante même si l'écriture serveur échoue).
+    ref.read(onboardingSlidesSeenProvider.notifier).state = true;
+
+    // Persiste le flag côté serveur (cross-device) — best-effort.
+    final client = Supabase.instance.client;
+    final uid = client.auth.currentUser?.id;
+    if (uid != null) {
+      try {
+        await client
+            .from('profiles')
+            .update({'onboarding_slides_seen': true}).eq('id', uid);
+      } catch (_) {/* réseau KO : le flag local couvre cette session */}
+    }
+
     if (!mounted) return;
-    ref.read(onboardingSeenCacheProvider.notifier).state = true;
-    context.go(RouteNames.onboardingAuthChoice);
+    // Les slides étant désormais post-login, on entre directement dans l'app.
+    // shop-selector se charge de router vers le dashboard si une seule boutique.
+    context.go(RouteNames.shopSelector);
   }
 
   @override

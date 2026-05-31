@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../../../../core/storage/schema_migrator.dart';
 
 /// Niveau hiérarchique courant d'un ticket. Détermine qui le voit en
 /// priorité dans son inbox.
@@ -139,7 +140,13 @@ class ShopTicket extends Equatable {
         resolvedAt:   clearResolvedAt ? null : (resolvedAt ?? this.resolvedAt),
       );
 
+  // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
+  static const int currentSchemaVersion = 1;
+  static final SchemaMigrator _migrator = SchemaMigrator(
+    currentVersion: currentSchemaVersion, steps: const {});
+
   Map<String, dynamic> toMap() => {
+        'schema_version': currentSchemaVersion,
         'id':            id,
         'shop_id':       shopId,
         'opened_by':     openedBy,
@@ -153,7 +160,9 @@ class ShopTicket extends Equatable {
         'resolved_at':   resolvedAt?.toIso8601String(),
       };
 
-  factory ShopTicket.fromMap(Map<String, dynamic> m) => ShopTicket(
+  factory ShopTicket.fromMap(Map<String, dynamic> rawM) {
+    final m = _migrator.migrate(rawM);
+    return ShopTicket(
         id:           m['id'] as String,
         shopId:       m['shop_id'] as String,
         openedBy:     m['opened_by'] as String,
@@ -170,6 +179,7 @@ class ShopTicket extends Equatable {
                         ? DateTime.tryParse(m['resolved_at'].toString())
                         : null,
       );
+  }
 
   @override
   List<Object?> get props => [id, shopId, openedBy, currentLevel,

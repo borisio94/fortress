@@ -52,6 +52,22 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
         ? Uri.base.origin
         : 'https://fortress-pos.web.app';
     final longUrl = '$origin/catalogue/${widget.shopId}';
+    // Le lien CRM est GÉNÉRIQUE (pas d'`ids`) → la page catalogue passe par
+    // la RPC `get_public_catalogue_products` qui filtre `is_visible_web =
+    // true`. Or les produits naissent avec `is_visible_web = false` : sans
+    // publication préalable le destinataire voit « aucun produit ».
+    // Contrairement au partage Inventaire (qui publie les produits cochés),
+    // ce flux ne publie rien. On publie donc ici tous les produits actifs
+    // en stock — idempotent (markProductsVisibleWeb skip les déjà visibles),
+    // fire-and-forget pour ne pas bloquer la génération du lien court.
+    final toPublish = AppDatabase.getProductsForShop(widget.shopId)
+        .where((p) => p.isActive && p.totalStock > 0 && !p.isVisibleWeb)
+        .toList();
+    if (toPublish.isNotEmpty) {
+      AppDatabase.markProductsVisibleWeb(toPublish).catchError((e) {
+        debugPrint('[Catalogue CRM] markProductsVisibleWeb error: $e');
+      });
+    }
     try {
       final short = await ShortLinkService.createShortLink(
         longUrl:   longUrl,

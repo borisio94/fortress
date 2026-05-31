@@ -48,6 +48,15 @@ Both **Riverpod** and **flutter_bloc** are used together and this is intentional
 
 When adding a new synced entity: add a Hive box in `HiveBoxes`, add a `sync<Entity>` + realtime handler in `AppDatabase`, and have the repository write-through to Hive then enqueue or push to Supabase.
 
+### Schema versioning (forward-compatibility)
+`lib/core/storage/schema_migrator.dart` provides `SchemaMigrator` — a generic utility for evolving the serialized format of entities without forcing users to delete/recreate their data. **Convention to follow for every entity stored in Hive/Supabase as a `Map<String, dynamic>`** (Product, Order, Client, Sale, etc.) :
+- The `toMap()` / `_xxxToMap()` writes a `schema_version: N` field where N matches the entity's `currentVersion`.
+- The `fromMap()` / `_xxxFromMap()` first calls `_migrator.migrate(rawMap)` BEFORE parsing — this applies any pending migrations to legacy data on the fly.
+- When you change the format (rename a field, change a default, split a field…), bump `currentVersion` AND register a step `N: (m) => transformedM` in the entity's migrator. Old records in Hive/Supabase will be migrated transparently on the next read.
+- Migrations MUST be pure + idempotent. The migrator copies the input map — never mutate `raw` in place.
+- Reference implementation : `LocalStorageService._productMigrator` + `_productToMap` / `_productFromMap`. Mirror this pattern for any new entity.
+- Reminder : the same migration may re-apply on every read if the migrated map isn't written back (e.g. read-only from Supabase). That's safe (idempotent) but wastes CPU — push the migrated map via `bgUpsert` or write to Hive when convenient.
+
 ### Permissions & subscription
 `lib/core/permisions/` (note the typo in the folder name — it's the real path):
 - `AppPermissions` combines `UserPlan` (subscription tier) + `shopRole` (`admin` | `user` | null) into boolean capabilities (`canEditProduct`, `canAccessCaisse`, …). Gate UI and use-case calls through these, not ad-hoc role checks.

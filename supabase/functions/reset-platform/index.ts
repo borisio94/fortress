@@ -1,16 +1,21 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Edge Function : reset-platform
 //
-// Supprime tous les comptes auth.users SAUF les super admins en utilisant
-// la service_role_key (seule clé capable de faire du auth.admin.deleteUser).
+// Supprime des comptes auth.users en utilisant la service_role_key (seule clé
+// capable de faire du auth.admin.deleteUser).
 //
-// Le RPC SQL reset_all_data() ne peut pas toujours supprimer auth.users sur
-// Supabase Cloud (privilèges insufficient). Cette Edge Function sert de
-// fallback garanti.
+// Le RPC SQL (reset_all_data / delete_user_account) ne peut pas toujours
+// supprimer auth.users sur Supabase Cloud (privilèges insuffisants — le rôle
+// postgres n'a pas DELETE sur auth.users). Cette Edge Function sert de fallback
+// garanti.
 //
-// Contrat :
-//   Input  : { mode: "auth-cleanup" }
-//   Auth   : JWT de l'appelant (doit être super_admin dans profiles)
+// Contrat — deux modes :
+//   1. { mode: "auth-cleanup" }
+//        → supprime TOUS les auth.users SAUF les super admins.
+//        Auth   : super_admin dans profiles.
+//   2. { mode: "delete-user", user_id: "<uuid>" }
+//        → supprime UN seul auth.users.
+//        Auth   : super_admin OU l'utilisateur supprimant son propre compte.
 //   Output : { deleted_auth_users: number, errors: string[] }
 //
 // Déploiement :
@@ -54,17 +59,45 @@ serve(async (req) => {
     }
     const callerId = userData.user.id;
 
-    // 2. Vérifier que l'appelant est super admin
+    // Lire le mode demandé (défaut historique : auth-cleanup global)
+    let body: { mode?: string; user_id?: string } = {};
+    try { body = await req.json(); } catch (_) { /* corps vide → défaut */ }
+    const mode = body.mode ?? 'auth-cleanup';
+
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
       auth: { persistSession: false },
     });
-    const { data: profile, error: profileErr } = await admin
+
+    // Profil de l'appelant (pour les contrôles d'autorisation)
+    const { data: callerProfile } = await admin
       .from('profiles')
       .select('is_super_admin')
       .eq('id', callerId)
       .maybeSingle();
+    const callerIsSuperAdmin = callerProfile?.is_super_admin === true;
 
-    if (profileErr || !profile?.is_super_admin) {
+    // ── Mode 2 : suppression d'un seul utilisateur ──────────────────────────
+    if (mode === 'delete-user') {
+      const targetId = body.user_id;
+      if (!targetId) return json({ error: 'missing_user_id' }, 400);
+
+      // Autorisé si super admin OU suppression de son propre compte.
+      if (!callerIsSuperAdmin && callerId !== targetId) {
+        return json({ error: 'not_authorized' }, 403);
+      }
+
+      const { error: delErr } = await admin.auth.admin.deleteUser(targetId);
+      if (delErr) {
+        // "user not found" = déjà supprimé → succès idempotent.
+        const notFound = /not.?found/i.test(delErr.message);
+        if (notFound) return json({ deleted_auth_users: 0, errors: [] });
+        return json({ deleted_auth_users: 0, errors: [delErr.message] }, 500);
+      }
+      return json({ deleted_auth_users: 1, errors: [] });
+    }
+
+    // ── Mode 1 : nettoyage global (réservé super admin) ─────────────────────
+    if (!callerIsSuperAdmin) {
       return json({ error: 'not_super_admin' }, 403);
     }
 

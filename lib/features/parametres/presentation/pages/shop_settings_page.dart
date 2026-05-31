@@ -55,100 +55,32 @@ class ShopSettingsPage extends ConsumerStatefulWidget {
   ConsumerState<ShopSettingsPage> createState() => _ShopSettingsPageState();
 }
 
-class _ShopSettingsPageState extends ConsumerState<ShopSettingsPage>
-    with SingleTickerProviderStateMixin {
-  late TabController _tab;
+class _ShopSettingsPageState extends ConsumerState<ShopSettingsPage> {
 
-  // Onglet « Copier » retiré (plus utilisé). Reste « Membres » ; l'onglet
-  // « Boutique » (overview) n'est ajouté que si showOverviewTab.
-  static const _baseTabs = [
-    (icon: Icons.people_alt_rounded,       label: 'Membres'),
-  ];
-
-  static const _overviewTabDef =
-      (icon: Icons.storefront_rounded, label: 'Boutique');
-
-  List<({IconData icon, String label})> get _tabs => widget.showOverviewTab
-      ? const [_overviewTabDef, ..._baseTabs]
-      : _baseTabs;
-
-  /// Mapping enum → index de tab. L'offset dépend de la présence de
-  /// l'onglet Boutique (overview) en première position. `danger` est
-  /// historique (onglet retiré) — mappé sur Membres pour rétro-compat.
-  int _initialIndexFor(ShopSettingsTab t) {
-    // Onglets : [Boutique?, Membres]. Boutique en 0 si présent, Membres
-    // toujours dernier. `copy`/`danger` (legacy enum) → Membres.
-    if (widget.showOverviewTab) {
-      return switch (t) {
-        ShopSettingsTab.overview => 0,
-        _                        => 1, // members / copy / danger
-      };
-    }
-    return 0; // un seul onglet (Membres)
-  }
-
-  /// Index de l'onglet « Membres » selon le mode d'affichage.
-  int get _membersIndex => widget.showOverviewTab ? 1 : 0;
-
-  /// Index de l'onglet visible — driven par un listener du `_tab` plutôt
-  /// que par `TabBarView` (cf. `build`). Permet d'utiliser un IndexedStack
-  /// qui pré-monte tous les onglets et évite le flash du premier swap.
-  late int _shownIndex;
+  // Plus de TabBar : selon le mode d'entrée, on rend directement la vue
+  // adéquate (Boutique OU Membres). « Paramètres boutique » (drawer ou
+  // tile Paramètres) ouvre showOverviewTab=true → vue Boutique. L'entrée
+  // dédiée « Employés & permissions » ouvre showOverviewTab=false → vue
+  // Membres. L'onglet Membres dans la page boutique a été retiré pour
+  // éviter le doublon avec la page Employés.
 
   @override
   void initState() {
     super.initState();
-    _tab = TabController(
-      length: _tabs.length,
-      vsync: this,
-      initialIndex: _initialIndexFor(widget.initialTab),
-    );
-    _shownIndex = _tab.index;
-    // Sync URL ↔ tab : sans ce listener, switcher de tab via la TabBar
-    // interne ne change pas l'URL, donc le ShopShell ne sait pas qu'on
-    // est passé sur Membres et le bouton « + » de la topbar shell ne
-    // s'affiche pas. Avec ce sync, /parametres/shop ↔ /parametres/users
-    // suit le tap utilisateur.
-    _tab.addListener(_syncUrlWithTab);
-    _tab.addListener(_onTabIndexChanged);
+    // Sync URL au mount : ShopShell._topbarActionsFor lit `tab=members`
+    // pour activer le bouton « + » dans la topbar quand on est sur la
+    // vue Membres. Avec un seul onglet par mode désormais (Boutique OU
+    // Membres), la sync se fait une seule fois après le 1er frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncUrl());
   }
 
-  @override
-  void dispose() {
-    _tab.removeListener(_syncUrlWithTab);
-    _tab.removeListener(_onTabIndexChanged);
-    _tab.dispose();
-    super.dispose();
-  }
-
-  /// Met à jour `_shownIndex` quand `_tab.index` change réellement (pas
-  /// pendant l'animation, où l'index est déjà à la cible mais
-  /// indexIsChanging=true). setState seulement quand c'est nécessaire
-  /// pour éviter de spammer l'IndexedStack.
-  void _onTabIndexChanged() {
+  void _syncUrl() {
     if (!mounted) return;
-    if (_shownIndex != _tab.index) {
-      setState(() => _shownIndex = _tab.index);
-    }
-  }
-
-  void _syncUrlWithTab() {
-    // Évite de re-pousser pendant l'animation. On agit seulement quand
-    // l'index a vraiment changé (post-animation OU swipe terminé).
-    if (_tab.indexIsChanging) return;
-    if (!mounted) return;
-    // Tous les onglets restent sur le même path `/parametres/shop` —
-    // seul le query `tab=members|copy` (overview = pas de query) change.
-    // GoRouter conserve la même `pageKey` quand le path ne bouge pas,
-    // donc la page n'est jamais démontée → plus de flash visuel entre
-    // tabs. ShopShell._topbarActionsFor lit `tab=members` pour activer
-    // le bouton « + » dans la topbar quand on est sur l'onglet Membres.
-    final isMembers = _tab.index == _membersIndex;
     final basePath  = '/shop/${widget.shopId}/parametres/shop';
     final queryParts = <String>[
       if (widget.showOverviewTab) 'with_overview=1',
     ];
-    if (isMembers) {
+    if (!widget.showOverviewTab) {
       queryParts.add('tab=members');
     }
     final target = queryParts.isEmpty
@@ -163,76 +95,12 @@ class _ShopSettingsPageState extends ConsumerState<ShopSettingsPage>
   @override
   Widget build(BuildContext context) {
     final shop = ref.watch(currentShopProvider);
-    // IndexedStack monte les 3 (ou 2) onglets en même temps au mount
-    // initial — premier swap = page déjà construite → pas de flash.
-    // Tradeoff vs TabBarView : plus d'animation de swipe entre tabs,
-    // mais transition instantanée et stable.
-    final idx = _shownIndex.clamp(0, _tabs.length - 1);
-    return Column(children: [
-      // TabBar masqué quand un seul onglet (accès « Membres » direct
-      // depuis CRM → page Membres pure, sans onglet unique disgracieux).
-      if (_tabs.length > 1)
-        _TabBar(controller: _tab, tabs: _tabs),
-      Expanded(
-        child: IndexedStack(
-          index: idx,
-          children: [
-            if (widget.showOverviewTab)
-              _OverviewTab(shop: shop, shopId: widget.shopId),
-            EmployeesPage(
-              shopId:          widget.shopId,
-              embedInScaffold: false,
-            ),
-          ],
-        ),
-      ),
-    ]);
-  }
-
-  void _snack(String msg, {required bool success}) {
-    if (!mounted) return;
-    success ? AppSnack.success(context, msg) : AppSnack.error(context, msg);
-  }
-}
-
-// ─── Tab Bar ──────────────────────────────────────────────────────────────────
-
-class _TabBar extends StatelessWidget {
-  final TabController controller;
-  final List<({IconData icon, String label})> tabs;
-  const _TabBar({required this.controller, required this.tabs});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: Theme.of(context).colorScheme.surface,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TabBar(
-            controller: controller,
-            labelColor: AppColors.primary,
-            unselectedLabelColor: AppColors.textHint,
-            indicatorColor: AppColors.primary,
-            indicatorWeight: 2,
-            labelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-            unselectedLabelStyle: const TextStyle(fontSize: 11),
-            tabs: tabs.map((t) => Tab(
-              height: 48,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(t.icon, size: 16),
-                  const SizedBox(height: 3),
-                  Text(t.label),
-                ],
-              ),
-            )).toList(),
-          ),
-          Container(height: 1, color: Theme.of(context).semantic.borderSubtle),
-        ],
-      ),
-    );
+    return widget.showOverviewTab
+        ? _OverviewTab(shop: shop, shopId: widget.shopId)
+        : EmployeesPage(
+            shopId:          widget.shopId,
+            embedInScaffold: false,
+          );
   }
 }
 
