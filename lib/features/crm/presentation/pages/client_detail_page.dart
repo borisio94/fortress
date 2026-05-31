@@ -51,23 +51,49 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
     final origin = Uri.base.origin.startsWith('http')
         ? Uri.base.origin
         : 'https://fortress-pos.web.app';
-    final longUrl = '$origin/catalogue/${widget.shopId}';
-    // Le lien CRM est GÉNÉRIQUE (pas d'`ids`) → la page catalogue passe par
-    // la RPC `get_public_catalogue_products` qui filtre `is_visible_web =
-    // true`. Or les produits naissent avec `is_visible_web = false` : sans
-    // publication préalable le destinataire voit « aucun produit ».
-    // Contrairement au partage Inventaire (qui publie les produits cochés),
-    // ce flux ne publie rien. On publie donc ici tous les produits actifs
-    // en stock — idempotent (markProductsVisibleWeb skip les déjà visibles),
-    // fire-and-forget pour ne pas bloquer la génération du lien court.
-    final toPublish = AppDatabase.getProductsForShop(widget.shopId)
-        .where((p) => p.isActive && p.totalStock > 0 && !p.isVisibleWeb)
+    // Un lien catalogue GÉNÉRIQUE (`/catalogue/{shopId}` sans `ids`) passe
+    // côté page par la RPC `get_public_catalogue_products` qui exige
+    // `is_visible_web = true`. Or les produits naissent à false et ce flux
+    // ne publie rien → le destinataire voyait « aucun produit ».
+    //
+    // On embarque donc explicitement les `ids` de tous les produits actifs
+    // EN STOCK (+ un snapshot de stock figé), exactement comme le partage
+    // « sélection » de l'inventaire. La page catalogue route alors vers la
+    // RPC `get_delivery_products` (hotfix_094) qui BYPASSE `is_visible_web`
+    // — plus aucune dépendance à une étape de publication, et le snapshot
+    // garantit que le filtre `stock <= 0` ne masque pas tout même si le
+    // `stock_qty` côté Supabase est en retard. Snapshot figé à l'ouverture
+    // de la fiche (limite assumée, identique au partage inventaire).
+    final products = AppDatabase.getProductsForShop(widget.shopId)
+        .where((p) => p.id != null && p.isActive && p.totalStock > 0)
         .toList();
-    if (toPublish.isNotEmpty) {
-      AppDatabase.markProductsVisibleWeb(toPublish).catchError((e) {
-        debugPrint('[Catalogue CRM] markProductsVisibleWeb error: $e');
-      });
+    final ids = products.map((p) => p.id!).toList();
+
+    // Snapshot stock — clés alignées sur `CataloguePage._load` :
+    //   • produit sans (ou ≤1) vraie variante → clé = `productId`
+    //   • sinon → une clé `productId|<idx>` par variante (idx = position
+    //     dans les variantes au nom non vide).
+    final snapshot = <String, int>{};
+    for (final p in products) {
+      final realVariants =
+          p.variants.where((v) => v.name.trim().isNotEmpty).toList();
+      if (realVariants.length <= 1) {
+        snapshot[p.id!] = p.totalStock;
+      } else {
+        for (var i = 0; i < realVariants.length; i++) {
+          snapshot['${p.id!}|$i'] = realVariants[i].stockAvailable;
+        }
+      }
     }
+
+    final qp = <String>[];
+    if (ids.isNotEmpty) qp.add('ids=${ids.join(",")}');
+    if (snapshot.isNotEmpty) {
+      qp.add('stock=${snapshot.entries.map((e) => '${e.key}:${e.value}').join(",")}');
+    }
+    final base = '$origin/catalogue/${widget.shopId}';
+    final longUrl = qp.isEmpty ? base : '$base?${qp.join("&")}';
+
     try {
       final short = await ShortLinkService.createShortLink(
         longUrl:   longUrl,
