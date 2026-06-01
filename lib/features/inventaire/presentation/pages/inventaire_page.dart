@@ -2230,6 +2230,11 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
                     onChanged: widget.onProductChanged,
                     isPartnerView: isPartnerView,
                     partnerLocId:  partnerLocId,
+                    // Sans `locationIds`, `_VariantRow` retombe sur
+                    // `variant.stockAvailable` (= 0 en modèle stock_levels)
+                    // → stock variante affiché à 0 sur mobile alors que le
+                    // desktop (qui passe locIds) montre la bonne valeur.
+                    locationIds:   locIds,
                   ),
               ],
             ]),
