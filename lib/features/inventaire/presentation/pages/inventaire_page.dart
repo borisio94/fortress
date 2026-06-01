@@ -2137,7 +2137,7 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
 
             // ── Résumé variantes (état fermé) ───────────────────────────
             if (!_expanded && p.variants.isNotEmpty)
-              _VariantsSummary(product: p),
+              _VariantsSummary(product: p, locationIds: locIds),
 
         // Détails expandés
         if (_expanded) ...[
@@ -2335,12 +2335,26 @@ class _StarsRating extends StatelessWidget {
 
 class _VariantsSummary extends StatelessWidget {
   final Product product;
-  const _VariantsSummary({required this.product});
+  /// Emplacements de la vue active (cf. `_resolveLocationIds`). Le stock de
+  /// chaque variante est la Σ de son stock sur ces emplacements — identique
+  /// au tableau développé (`_VariantRow`) et au stock produit principal.
+  /// Null/legacy sans id → repli `variant.stockAvailable`.
+  final List<String>? locationIds;
+  const _VariantsSummary({required this.product, this.locationIds});
+
+  /// Stock affiché d'une variante = Σ stock_levels sur les emplacements de la
+  /// vue (Globale = boutique + partenaires). Sans ça, on lisait
+  /// `variant.stockAvailable` qui vaut 0 dans le modèle multi-emplacement →
+  /// pills à « · 0 » sur mobile alors que le desktop montrait le bon stock.
+  int _stockOf(ProductVariant v) => v.id == null
+      ? v.stockAvailable
+      : stock_loc.stockForVariantAtLocations(v, locationIds);
 
   /// Retourne une couleur sémantique selon le niveau de stock de la variante.
   Color _variantStatusColor(ProductVariant v) {
-    if (v.stockAvailable <= 0) return AppColors.error;
-    if (v.stockAvailable <= v.stockMinAlert) return AppColors.warning;
+    final s = _stockOf(v);
+    if (s <= 0) return AppColors.error;
+    if (s <= v.stockMinAlert) return AppColors.warning;
     return AppColors.secondary;
   }
 
@@ -2348,9 +2362,11 @@ class _VariantsSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = context.l10n;
     final variants = product.variants;
-    final hasLow = variants.any((v) =>
-        v.stockAvailable > 0 && v.stockAvailable <= v.stockMinAlert);
-    final hasOut = variants.any((v) => v.stockAvailable <= 0);
+    final hasLow = variants.any((v) {
+      final s = _stockOf(v);
+      return s > 0 && s <= v.stockMinAlert;
+    });
+    final hasOut = variants.any((v) => _stockOf(v) <= 0);
 
     return Container(
       width: double.infinity,
@@ -2367,6 +2383,7 @@ class _VariantsSummary extends StatelessWidget {
             for (int i = 0; i < variants.length; i++) ...[
               if (i > 0) const SizedBox(width: 6),
               _VariantPill(variant: variants[i],
+                  stock: _stockOf(variants[i]),
                   statusColor: _variantStatusColor(variants[i])),
             ],
           ]),
@@ -2398,8 +2415,12 @@ class _VariantsSummary extends StatelessWidget {
 
 class _VariantPill extends StatelessWidget {
   final ProductVariant variant;
+  /// Stock résolu sur la vue active (passé par `_VariantsSummary`), pas
+  /// `variant.stockAvailable` qui vaut 0 dans le modèle multi-emplacement.
+  final int stock;
   final Color statusColor;
-  const _VariantPill({required this.variant, required this.statusColor});
+  const _VariantPill({required this.variant, required this.stock,
+      required this.statusColor});
 
   @override
   Widget build(BuildContext context) {
@@ -2423,7 +2444,7 @@ class _VariantPill extends StatelessWidget {
                 fontWeight: FontWeight.w600,
                 color: Theme.of(context).colorScheme.onSurface)),
         const SizedBox(width: 5),
-        Text('· ${variant.stockAvailable}',
+        Text('· $stock',
             style: AppTextStyles.microBold.copyWith(color: statusColor)),
       ]),
     );
