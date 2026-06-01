@@ -288,6 +288,12 @@ class _TrackedOrder {
 class _OrderItem {
   final String name;
   final int quantity;
+  /// Prix unitaire RÉELLEMENT facturé au client : `custom_price` (prix
+  /// modifié dans le panier — ex. rabais accordé) s'il existe, sinon
+  /// `unit_price` (prix boutique), puis remise % par ligne appliquée.
+  /// Avant, on ne lisait que `unit_price` → le suivi affichait le prix
+  /// boutique (ex. 13000) au lieu du prix panier (ex. 12000). Aligné sur
+  /// `SaleItem.effectivePrice` / `SaleItem.subtotal`.
   final double unitPrice;
   final String? imageUrl;
 
@@ -298,12 +304,18 @@ class _OrderItem {
     required this.imageUrl,
   });
 
-  factory _OrderItem.fromMap(Map<String, dynamic> m) => _OrderItem(
-        name:      (m['product_name'] ?? m['name'] ?? '').toString(),
-        quantity:  (m['quantity'] as num?)?.toInt() ?? 1,
-        unitPrice: (m['unit_price'] as num?)?.toDouble() ?? 0,
-        imageUrl:  m['image_url']?.toString(),
-      );
+  factory _OrderItem.fromMap(Map<String, dynamic> m) {
+    final base        = (m['unit_price'] as num?)?.toDouble() ?? 0;
+    final custom      = (m['custom_price'] as num?)?.toDouble();
+    final discountPct = (m['discount'] as num?)?.toDouble() ?? 0;
+    final effective   = (custom ?? base) * (1 - discountPct / 100);
+    return _OrderItem(
+      name:      (m['product_name'] ?? m['name'] ?? '').toString(),
+      quantity:  (m['quantity'] as num?)?.toInt() ?? 1,
+      unitPrice: effective,
+      imageUrl:  m['image_url']?.toString(),
+    );
+  }
 }
 
 // ─── Header ────────────────────────────────────────────────────────────────
