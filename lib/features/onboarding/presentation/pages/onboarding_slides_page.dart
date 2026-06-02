@@ -84,6 +84,11 @@ class _OnboardingSlidesPageState extends ConsumerState<OnboardingSlidesPage> {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
+        // Desktop : borne la largeur et centre — sinon header, slides, dots
+        // et CTA s'étiraient sur tout l'écran (rendu « grossier »).
+        child: Center(
+        child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
         child: Column(
           children: [
             // ── Header : logo + bouton Passer ───────────────────────────
@@ -187,6 +192,8 @@ class _OnboardingSlidesPageState extends ConsumerState<OnboardingSlidesPage> {
             ),
           ],
         ),
+        ),
+        ),
       ),
     );
   }
@@ -209,41 +216,58 @@ class _Slide extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(28, 12, 28, 12),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          // Cercle d'illustration — réutilise les tokens primaires.
-          Container(
-            width: 140, height: 140,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end:   Alignment.bottomRight,
-                colors: [
-                  AppColors.primary.withValues(alpha: 0.15),
-                  AppColors.primary.withValues(alpha: 0.05),
-                ],
+    // Centrage vertical quand ça tient, scroll quand l'écran est trop court
+    // (sinon, avec `mainAxisAlignment.center`, le débordement rognait le
+    // HAUT du contenu → le cercle/icône disparaissait sur petit mobile).
+    // `maxWidth` borne la largeur sur desktop (sinon titre/texte s'étiraient
+    // sur toute la largeur — rendu « grossier »).
+    return LayoutBuilder(
+      builder: (_, c) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: c.maxHeight),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 440),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Cercle d'illustration — réutilise les tokens primaires.
+                    Container(
+                      width: 140, height: 140,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end:   Alignment.bottomRight,
+                          colors: [
+                            AppColors.primary.withValues(alpha: 0.15),
+                            AppColors.primary.withValues(alpha: 0.05),
+                          ],
+                        ),
+                      ),
+                      child: Icon(spec.icon, size: 64, color: AppColors.primary),
+                    ),
+                    const SizedBox(height: 36),
+                    Text(
+                      spec.title,
+                      textAlign: TextAlign.center,
+                      style: AppTextStyles.title.copyWith(height: 1.25),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      spec.body,
+                      textAlign: TextAlign.center,
+                      style: AppTextStyles.bodySecondary.copyWith(height: 1.5),
+                    ),
+                  ],
+                ),
               ),
             ),
-            child: Icon(spec.icon, size: 64, color: AppColors.primary),
           ),
-          const SizedBox(height: 36),
-          Text(
-            spec.title,
-            textAlign: TextAlign.center,
-            style: AppTextStyles.title.copyWith(height: 1.25),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            spec.body,
-            textAlign: TextAlign.center,
-            style: AppTextStyles.bodySecondary.copyWith(height: 1.5),
-          ),
-        ],
+        ),
       ),
     );
   }

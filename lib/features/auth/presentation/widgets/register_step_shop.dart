@@ -64,13 +64,15 @@ class _StepShop extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          // Adresse / Ville (optionnel)
-          const AppFieldLabel('Adresse / Ville'),
+          // Adresse / Ville (désormais obligatoire)
+          const AppFieldLabel('Adresse / Ville', required: true),
           AppField(
             controller:  state._shopAddressCtrl,
             hint:        'Ex : Bonanjo, Douala',
             prefixIcon:  Icons.location_on_outlined,
           ),
+          if (state._shopAddressError != null)
+            _ErrText(state._shopAddressError!),
         ],
       ),
     );

@@ -104,6 +104,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   final _shopAddressCtrl = TextEditingController();
   String  _sector        = 'retail';
   String? _shopNameError;
+  String? _shopAddressError;
 
   bool   _isOnline = true;
 
@@ -139,6 +140,12 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
           : v.length < 2
               ? 'Minimum 2 caractères'
               : v.length > 60 ? 'Maximum 60 caractères' : null;
+    }));
+    _shopAddressCtrl.addListener(() => setState(() {
+      final v = _shopAddressCtrl.text.trim();
+      _shopAddressError = v.isEmpty
+          ? null
+          : v.length < 2 ? 'Minimum 2 caractères' : null;
     }));
   }
 
@@ -176,7 +183,9 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   bool get _step2Valid =>
       _shopNameError == null &&
-      _shopNameCtrl.text.trim().length >= 2;
+      _shopNameCtrl.text.trim().length >= 2 &&
+      _shopAddressError == null &&
+      _shopAddressCtrl.text.trim().length >= 2;
 
   void _next() {
     if (_step == 0) {
@@ -189,12 +198,13 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
       });
       if (!_step1Valid) return;
     } else if (_step == 1) {
-      if (!_step2Valid) {
-        setState(() => _shopNameError =
-            _shopNameCtrl.text.trim().isEmpty
-                ? 'Nom de boutique requis' : _shopNameError);
-        return;
-      }
+      setState(() {
+        _shopNameError = _shopNameCtrl.text.trim().isEmpty
+            ? 'Nom de boutique requis' : _shopNameError;
+        _shopAddressError = _shopAddressCtrl.text.trim().isEmpty
+            ? 'Adresse / ville requise' : _shopAddressError;
+      });
+      if (!_step2Valid) return;
     }
     setState(() => _step = (_step + 1).clamp(0, 2));
     _pageCtrl.animateToPage(_step,
@@ -283,21 +293,28 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
         ],
         child: SafeArea(
           child: Stack(children: [
-            Column(children: [
-              _ProgressHeader(step: _step),
-              Expanded(
-                child: PageView(
-                  controller: _pageCtrl,
-                  physics: const NeverScrollableScrollPhysics(),
-                  children: [
-                    _StepAccount(state: this),
-                    _StepShop(state: this),
-                    _StepRecap(state: this),
-                  ],
-                ),
+            // Desktop : on borne la largeur du tunnel et on le centre — sans
+            // ça le contenu s'étirait sur toute la largeur de l'écran.
+            Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: Column(children: [
+                  _ProgressHeader(step: _step),
+                  Expanded(
+                    child: PageView(
+                      controller: _pageCtrl,
+                      physics: const NeverScrollableScrollPhysics(),
+                      children: [
+                        _StepAccount(state: this),
+                        _StepShop(state: this),
+                        _StepRecap(state: this),
+                      ],
+                    ),
+                  ),
+                  _BottomBar(state: this),
+                ]),
               ),
-              _BottomBar(state: this),
-            ]),
+            ),
             Positioned(
               top: 8, right: 16,
               child: LanguageSwitcher(
@@ -384,9 +401,11 @@ class _BottomBar extends StatelessWidget {
               style: AppTextStyles.bodySecondary
                   .copyWith(fontWeight: FontWeight.w700)),
         ),
-        const Spacer(),
-        SizedBox(
-          width: 200,
+        const SizedBox(width: 12),
+        // `Expanded` (au lieu d'une largeur fixe 200) : le bouton occupe la
+        // place restante et le label long « Démarrer mon essai 14 jours »
+        // n'est plus tronqué/comprimé.
+        Expanded(
           child: AppPrimaryButton(
             isLoading: state._submitting,
             enabled: canForward && !state._submitting,

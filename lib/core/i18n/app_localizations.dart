@@ -76,7 +76,7 @@ class AppLocalizations {
   String get registerTitle         => _isFr ? 'Créer un compte'               : 'Create an account';
   String get registerName          => _isFr ? 'Nom complet'                   : 'Full name';
   String get registerNameHint      => _isFr ? 'Jean Dupont'                   : 'John Doe';
-  String get registerPhone         => _isFr ? 'Téléphone'                     : 'Phone';
+  String get registerPhone         => _isFr ? 'Contact WhatsApp'              : 'WhatsApp contact';
   String get registerButton        => _isFr ? 'Créer mon compte'              : 'Create my account';
   String get registerHasAccount    => _isFr ? 'Déjà un compte ? '             : 'Already have an account? ';
   String get registerAlreadyAccount => registerHasAccount;
