@@ -276,7 +276,11 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
                 ref.read(myShopsProvider.notifier).addShop(state.shop);
                 AppSnack.success(ctx,
                     'Bienvenue ! Votre essai 14 jours commence maintenant.');
-                ctx.go('/shop/${state.shop.id}/dashboard');
+                // Création de compte terminée → slides d'intro (une seule
+                // fois, ICI uniquement). Le redirect ne force plus les slides
+                // au login ; c'est donc ce flux qui les déclenche. La page
+                // slides marque ensuite le flag serveur et entre dans l'app.
+                ctx.go(RouteNames.onboardingSlides);
               } else if (state is ShopSelectorError && _submitting) {
                 // Compte créé OK mais shop KO → on envoie l'utilisateur sur
                 // le formulaire create-shop classique pour qu'il retente

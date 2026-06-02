@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/router/route_names.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
@@ -181,7 +182,9 @@ class _ShopOnboardingWizardState
             ref.read(myShopsProvider.notifier).addShop(state.shop);
             AppSnack.success(ctx,
                 '${state.shop.name} créée. Bienvenue chez Fortress !');
-            ctx.go('/shop/${state.shop.id}/dashboard');
+            // Fin de création → slides d'intro (une seule fois, ICI). Le
+            // redirect ne force plus les slides au login.
+            ctx.go(RouteNames.onboardingSlides);
           } else if (state is ShopSelectorError && _submitting) {
             setState(() => _submitting = false);
             AppSnack.error(ctx, state.message);

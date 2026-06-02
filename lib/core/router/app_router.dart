@@ -360,13 +360,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // neuf → slides. `true` = déjà vu.
       if (!plan.isSuperAdmin) {
         final slidesSeen = ref.read(onboardingSlidesSeenProvider);
-        if (loc == RouteNames.onboardingSlides) {
-          // Sur la page slides : si déjà vues (refresh / retour), entrer dans
-          // l'app ; sinon (false/null) laisser la page s'afficher.
-          if (slidesSeen == true) return postAuthDestination();
-        } else if (!isOnboardingRoute) {
-          if (slidesSeen == null)  return null;
-          if (slidesSeen == false) return RouteNames.onboardingSlides;
+        // Les slides d'intro s'affichent UNIQUEMENT à la fin de la création
+        // de compte : le flux d'inscription (RegisterPage / wizard onboarding)
+        // navigue EXPLICITEMENT vers `/onboarding/slides`. On ne FORCE plus
+        // les slides via le redirect — un compte existant qui se (re)connecte
+        // ne doit jamais les revoir. Seul garde-fou conservé : si on atterrit
+        // sur la page slides alors qu'elles sont déjà vues (refresh / retour
+        // arrière), on entre directement dans l'app.
+        if (loc == RouteNames.onboardingSlides && slidesSeen == true) {
+          return postAuthDestination();
         }
       }
 
