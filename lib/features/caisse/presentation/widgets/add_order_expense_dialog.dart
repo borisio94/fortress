@@ -6,6 +6,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../domain/entities/sale.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -33,8 +34,11 @@ class AddOrderExpenseDialog extends StatefulWidget {
   const AddOrderExpenseDialog({super.key, required this.order});
 
   /// Helper d'ouverture. Retourne null si annulé.
+  /// Ouvert via [showAdaptiveFormSheet] : page plein écran scrollable sur
+  /// mobile (clavier géré nativement par le Scaffold) et bottom sheet
+  /// clavier-aware sur desktop — fini les champs masqués par le clavier.
   static Future<OrderExpenseResult?> show(BuildContext context, Sale order) {
-    return showDialog<OrderExpenseResult>(
+    return showAdaptiveFormSheet<OrderExpenseResult>(
       context: context,
       builder: (_) => AddOrderExpenseDialog(order: order),
     );
@@ -88,24 +92,19 @@ class _AddOrderExpenseDialogState extends State<AddOrderExpenseDialog> {
     final theme = Theme.of(context);
     final fmt = NumberFormat('#,###', 'fr_FR');
     final sym = CurrencyFormatter.currentSymbol;
-    return AlertDialog(
-      backgroundColor: theme.colorScheme.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      title: Row(children: [
-        Icon(Icons.attach_money_rounded,
-            size: 20, color: AppColors.warning),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text('Ajouter une dépense',
-              style: AppTextStyles.subtitleBold.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: theme.colorScheme.onSurface)),
-        ),
-      ]),
-      content: Column(
+    return AdaptiveFormFrame(
+      title: 'Ajouter une dépense',
+      icon: Icons.attach_money_rounded,
+      iconColor: AppColors.warning,
+      body: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
           // Bandeau explicatif : la dépense devient une dette envers le
           // partenaire-livreur. Le ledger compensera automatiquement au
           // prochain encaissement de ce partenaire.
@@ -214,32 +213,46 @@ class _AddOrderExpenseDialogState extends State<AddOrderExpenseDialog> {
                 style: AppTextStyles.captionHint
                     .copyWith(color: theme.colorScheme.error)),
           ],
+              ],
+            ),
+          ),
+          // Pied de formulaire : actions toujours accessibles (elles
+          // défilent avec le contenu sur mobile, au-dessus du clavier).
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+            child: Row(children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 44),
+                    foregroundColor: theme.colorScheme.onSurface
+                        .withValues(alpha: 0.7),
+                  ),
+                  child: const Text('Annuler'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _validate,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.warning,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    minimumSize: const Size(0, 44),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: Text('Enregistrer en dette',
+                      style: AppTextStyles.bodyBold
+                          .copyWith(color: Colors.white)),
+                ),
+              ),
+            ]),
+          ),
         ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text('Annuler',
-              style: TextStyle(
-                  color: theme.colorScheme.onSurface
-                      .withValues(alpha: 0.6))),
-        ),
-        ElevatedButton(
-          onPressed: _validate,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.warning,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            padding: const EdgeInsets.symmetric(
-                horizontal: 18, vertical: 10),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8)),
-          ),
-          child: Text('Enregistrer en dette',
-              style: AppTextStyles.bodyBold
-                  .copyWith(color: Colors.white)),
-        ),
-      ],
     );
   }
 }

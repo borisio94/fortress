@@ -6,6 +6,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../domain/entities/sale.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -27,8 +28,11 @@ class RecordAcompteDialog extends StatefulWidget {
 
   /// Helper : ouvre le dialog et retourne le nouveau `amountPaid` total
   /// (somme cumulée). Null si annulé.
+  /// Ouvert via [showAdaptiveFormSheet] : page plein écran scrollable sur
+  /// mobile (clavier géré nativement) et bottom sheet clavier-aware sur
+  /// desktop, pour que le champ montant ne soit jamais masqué.
   static Future<double?> show(BuildContext context, Sale order) {
-    return showDialog<double>(
+    return showAdaptiveFormSheet<double>(
       context: context,
       builder: (_) => RecordAcompteDialog(order: order),
     );
@@ -89,24 +93,19 @@ class _RecordAcompteDialogState extends State<RecordAcompteDialog> {
     final theme = Theme.of(context);
     final fmt = NumberFormat('#,###', 'fr_FR');
     final sym = CurrencyFormatter.currentSymbol;
-    return AlertDialog(
-      backgroundColor: theme.colorScheme.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      title: Row(children: [
-        Icon(Icons.payments_outlined,
-            size: 20, color: AppColors.primary),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text('Enregistrer un acompte',
-              style: AppTextStyles.subtitleBold.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: theme.colorScheme.onSurface)),
-        ),
-      ]),
-      content: Column(
+    return AdaptiveFormFrame(
+      title: 'Enregistrer un acompte',
+      icon: Icons.payments_outlined,
+      iconColor: AppColors.primary,
+      body: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
           // Récap montants
           _row(theme, 'Total commande',
               '${fmt.format(_total)} $sym',
@@ -162,32 +161,46 @@ class _RecordAcompteDialogState extends State<RecordAcompteDialog> {
                 style: AppTextStyles.captionHint
                     .copyWith(color: theme.colorScheme.error)),
           ],
+              ],
+            ),
+          ),
+          // Pied de formulaire : actions toujours accessibles (défilent
+          // avec le contenu sur mobile, au-dessus du clavier).
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+            child: Row(children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 44),
+                    foregroundColor: theme.colorScheme.onSurface
+                        .withValues(alpha: 0.7),
+                  ),
+                  child: const Text('Annuler'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _due > 0 ? _validate : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    minimumSize: const Size(0, 44),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: Text('Enregistrer',
+                      style: AppTextStyles.bodyBold
+                          .copyWith(color: Colors.white)),
+                ),
+              ),
+            ]),
+          ),
         ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text('Annuler',
-              style: TextStyle(
-                  color: theme.colorScheme.onSurface
-                      .withValues(alpha: 0.6))),
-        ),
-        ElevatedButton(
-          onPressed: _due > 0 ? _validate : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            padding:
-                const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8)),
-          ),
-          child: Text('Enregistrer',
-              style: AppTextStyles.bodyBold
-                  .copyWith(color: Colors.white)),
-        ),
-      ],
     );
   }
 
