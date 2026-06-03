@@ -67,6 +67,13 @@ class AdaptiveFormFrame extends StatelessWidget {
   /// "Enregistrer" en haut.
   final List<Widget>? actions;
 
+  /// Barre d'actions ÉPINGLÉE en bas (hors du scroll) — toujours visible
+  /// au-dessus du clavier. À utiliser pour les boutons Annuler/Valider des
+  /// formulaires au contenu long : sinon, placés en fin de `body`, ils
+  /// défilent sous la ligne de flottaison et disparaissent derrière le
+  /// clavier (l'utilisateur croit qu'« aucun bouton n'apparaît »).
+  final Widget? footer;
+
   const AdaptiveFormFrame({
     super.key,
     required this.title,
@@ -75,6 +82,7 @@ class AdaptiveFormFrame extends StatelessWidget {
     this.iconColor,
     required this.body,
     this.actions,
+    this.footer,
   });
 
   @override
@@ -115,12 +123,27 @@ class AdaptiveFormFrame extends StatelessWidget {
           ),
           actions: actions,
         ),
-        body: SingleChildScrollView(
-          // Permet au scroll de "rebondir" jusqu'au-dessus du clavier.
-          padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom),
-          child: body,
-        ),
+        // Sans footer : comportement historique (boutons en fin de body,
+        // qui défilent). Avec footer : le body défile dans l'espace restant
+        // et la barre d'actions est épinglée en bas (le Scaffold se
+        // redimensionne au-dessus du clavier → footer toujours visible).
+        body: footer == null
+            ? SingleChildScrollView(
+                // Permet au scroll de "rebondir" jusqu'au-dessus du clavier.
+                padding: EdgeInsets.only(
+                    bottom: MediaQuery.of(context).viewInsets.bottom),
+                child: body,
+              )
+            : Column(
+                children: [
+                  Expanded(child: SingleChildScrollView(child: body)),
+                  Material(
+                    color: scheme.surface,
+                    elevation: 8,
+                    child: SafeArea(top: false, child: footer!),
+                  ),
+                ],
+              ),
       );
     }
     // Mode sheet desktop : verrouillé, bouton X intégré au header.
@@ -147,6 +170,8 @@ class AdaptiveFormFrame extends StatelessWidget {
               Flexible(
                 child: SingleChildScrollView(child: body),
               ),
+              // Barre d'actions épinglée sous le scroll (cf. footer mobile).
+              if (footer != null) footer!,
             ],
           ),
         ),

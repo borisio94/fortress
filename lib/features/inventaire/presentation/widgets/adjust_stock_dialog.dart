@@ -110,15 +110,12 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
     return AdaptiveFormFrame(
       title: 'Corriger le stock',
       icon: Icons.edit_note_rounded,
-      body: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
                 Text('Variante : ${widget.variant.name}',
                     style: TextStyle(
                         fontSize: 12,
@@ -259,42 +256,41 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
-            child: Row(children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _submitting
-                      ? null
-                      : () => Navigator.of(context).pop(false),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(0, 44),
-                  ),
-                  child: const Text('Annuler'),
-                ),
+      // ── Actions épinglées (toujours visibles au-dessus du clavier) ──
+      footer: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+        child: Row(children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: _submitting
+                  ? null
+                  : () => Navigator.of(context).pop(false),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(0, 44),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _submitting ? null : _submit,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size(0, 44),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                  ),
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 14, height: 14,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
-                      : const Text('Corriger'),
-                ),
-              ),
-            ]),
+              child: const Text('Annuler'),
+            ),
           ),
-        ],
+          const SizedBox(width: 10),
+          Expanded(
+            child: ElevatedButton(
+              onPressed: _submitting ? null : _submit,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(0, 44),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              child: _submitting
+                  ? const SizedBox(
+                      width: 14, height: 14,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Text('Corriger'),
+            ),
+          ),
+        ]),
       ),
     );
   }

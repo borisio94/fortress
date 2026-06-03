@@ -93,15 +93,12 @@ class _DeleteSaleDialogState extends State<DeleteSaleDialog> {
       title: 'Supprimer cette commande',
       icon: Icons.delete_outline_rounded,
       iconColor: AppColors.error,
-      body: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
               // ── Récap commande ─────────────────────────────────────────
               Container(
                 padding: const EdgeInsets.symmetric(
@@ -243,48 +240,46 @@ class _DeleteSaleDialogState extends State<DeleteSaleDialog> {
             ),
           ),
 
-          // ── Actions ────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: _submitting
-                      ? null
-                      : () => Navigator.of(context).pop(false),
-                  child: const Text('Annuler',
-                      style: TextStyle(color: AppColors.textSecondary)),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton.icon(
-                  onPressed: _canSubmit ? _submit : null,
-                  icon: _submitting
-                      ? const SizedBox(
-                          width: 14, height: 14,
-                          child: CircularProgressIndicator(
-                              color: Colors.white, strokeWidth: 2))
-                      : const Icon(Icons.delete_outline_rounded,
-                          size: 18),
-                  label: Text(_submitting ? 'Suppression…' : 'Supprimer'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.error,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor:
-                        AppColors.error.withValues(alpha: 0.4),
-                    disabledForegroundColor:
-                        Colors.white.withValues(alpha: 0.7),
-                    elevation: 0,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 12),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-              ],
+      // ── Actions épinglées (toujours visibles au-dessus du clavier) ──
+      footer: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            TextButton(
+              onPressed: _submitting
+                  ? null
+                  : () => Navigator.of(context).pop(false),
+              child: const Text('Annuler',
+                  style: TextStyle(color: AppColors.textSecondary)),
             ),
-          ),
-        ],
+            const SizedBox(width: 8),
+            ElevatedButton.icon(
+              onPressed: _canSubmit ? _submit : null,
+              icon: _submitting
+                  ? const SizedBox(
+                      width: 14, height: 14,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2))
+                  : const Icon(Icons.delete_outline_rounded,
+                      size: 18),
+              label: Text(_submitting ? 'Suppression…' : 'Supprimer'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor:
+                    AppColors.error.withValues(alpha: 0.4),
+                disabledForegroundColor:
+                    Colors.white.withValues(alpha: 0.7),
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 12),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
