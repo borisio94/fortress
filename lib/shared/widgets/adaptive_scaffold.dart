@@ -1520,6 +1520,7 @@ class _NotificationsSheet extends StatelessWidget {
       case NotifKind.stockLow:        return Icons.warning_amber_rounded;
       case NotifKind.stockOut:        return Icons.remove_shopping_cart_rounded;
       case NotifKind.orderNew:        return Icons.receipt_long_rounded;
+      case NotifKind.orderValidated:  return Icons.verified_rounded;
       case NotifKind.orderCompleted:  return Icons.task_alt_rounded;
       case NotifKind.orderCancelled:  return Icons.cancel_outlined;
       case NotifKind.orderRejected:   return Icons.block_rounded;
@@ -1535,6 +1536,7 @@ class _NotificationsSheet extends StatelessWidget {
       case NotifKind.stockLow:        return sem.warning;
       case NotifKind.stockOut:        return theme.colorScheme.error;
       case NotifKind.orderNew:        return theme.colorScheme.primary;
+      case NotifKind.orderValidated:  return sem.success;
       case NotifKind.orderCompleted:  return sem.success;
       case NotifKind.orderCancelled:  return sem.warning;
       case NotifKind.orderRejected:   return theme.colorScheme.error;
