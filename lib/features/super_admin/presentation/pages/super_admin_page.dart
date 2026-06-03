@@ -11,6 +11,7 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../shared/widgets/app_switch.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../widgets/shop_payments_sheet.dart';
 import '../../../../shared/widgets/plan_card.dart';
@@ -828,41 +829,62 @@ class _ShopsSectionState extends ConsumerState<_ShopsSection> {
   /// si annulé. Le motif est obligatoire (cf. RPC suspend_shop).
   Future<String?> _promptSuspendReason(String shopName) async {
     final ctrl = TextEditingController();
-    final theme = Theme.of(context);
-    return showDialog<String>(
+    return showAdaptiveFormSheet<String>(
       context: context,
-      builder: (c) => AlertDialog(
-        backgroundColor: theme.colorScheme.surface,
-        title: const Text('Suspendre la boutique'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text('« $shopName » sera totalement bloquée : ses membres verront '
-              'un écran « Compte suspendu ».',
-              style: AppTextStyles.bodySmSecondary),
-          const SizedBox(height: 12),
-          TextField(
-            controller: ctrl,
-            autofocus: true,
-            maxLines: 2,
-            decoration: const InputDecoration(
-              labelText: 'Motif (obligatoire)',
-              hintText: 'Ex : impayé, abus, demande du propriétaire…',
+      builder: (c) => AdaptiveFormFrame(
+        title: 'Suspendre la boutique',
+        icon: Icons.block_rounded,
+        iconColor: AppColors.error,
+        body: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                      '« $shopName » sera totalement bloquée : ses membres '
+                      'verront un écran « Compte suspendu ».',
+                      style: AppTextStyles.bodySmSecondary),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: ctrl,
+                    autofocus: true,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Motif (obligatoire)',
+                      hintText: 'Ex : impayé, abus, demande du propriétaire…',
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ]),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(c).pop(),
-              child: const Text('Annuler')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            onPressed: () {
-              final r = ctrl.text.trim();
-              if (r.isEmpty) return;
-              Navigator.of(c).pop(r);
-            },
-            child: const Text('Suspendre'),
-          ),
-        ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                      onPressed: () => Navigator.of(c).pop(),
+                      child: const Text('Annuler')),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    style:
+                        FilledButton.styleFrom(backgroundColor: AppColors.error),
+                    onPressed: () {
+                      final r = ctrl.text.trim();
+                      if (r.isEmpty) return;
+                      Navigator.of(c).pop(r);
+                    },
+                    child: const Text('Suspendre'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

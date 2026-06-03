@@ -444,59 +444,68 @@ class _FeesSection extends StatelessWidget {
     final labelCtrl  = TextEditingController();
     final amountCtrl = TextEditingController();
     final suggestions = AppDatabase.getDistinctOrderFeeLabels(shopId);
-    showDialog(
+    showAdaptiveFormSheet(
       context: context,
-      builder: (dc) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-        contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-        actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        title: Row(children: [
-          Container(width: 32, height: 32,
-              decoration: BoxDecoration(color: AppColors.primarySurface,
-                  borderRadius: BorderRadius.circular(8)),
-              child: Icon(Icons.local_shipping_outlined,
-                  size: 16, color: AppColors.primary)),
-          const SizedBox(width: 10),
-          const Text('Ajouter un frais',
-              style: AppTextStyles.subtitleBold),
-        ]),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          AutocompleteTextField(
-            controller:  labelCtrl,
-            label:       'Libellé',
-            hint:        'Ex: Frais de livraison',
-            prefixIcon:  Icons.label_outline_rounded,
-            suggestions: suggestions,
-          ),
-          const SizedBox(height: 10),
-          _FeeField(ctrl: amountCtrl, hint: 'Montant (${CurrencyFormatter.currentSymbol})',
-              icon: Icons.payments_outlined, inputType: TextInputType.number),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(dc).pop(),
-              child: const Text('Annuler',
-                  style: TextStyle(color: AppColors.textSecondary))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white, elevation: 0,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10))),
-            onPressed: () {
-              final label  = labelCtrl.text.trim();
-              final amount = double.tryParse(amountCtrl.text.trim()) ?? 0;
-              if (label.isEmpty || amount <= 0) return;
-              Navigator.of(dc).pop();
-              context.read<CaisseBloc>().add(AddOrderFee(OrderFee(
-                id:     DateTime.now().millisecondsSinceEpoch.toString(),
-                label:  label,
-                amount: amount,
-              )));
-            },
-            child: const Text('Ajouter'),
-          ),
-        ],
+      builder: (dc) => AdaptiveFormFrame(
+        title: 'Ajouter un frais',
+        icon: Icons.local_shipping_outlined,
+        body: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AutocompleteTextField(
+                    controller:  labelCtrl,
+                    label:       'Libellé',
+                    hint:        'Ex: Frais de livraison',
+                    prefixIcon:  Icons.label_outline_rounded,
+                    suggestions: suggestions,
+                  ),
+                  const SizedBox(height: 10),
+                  _FeeField(ctrl: amountCtrl,
+                      hint: 'Montant (${CurrencyFormatter.currentSymbol})',
+                      icon: Icons.payments_outlined,
+                      inputType: TextInputType.number),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(onPressed: () => Navigator.of(dc).pop(),
+                      child: const Text('Annuler',
+                          style: TextStyle(color: AppColors.textSecondary))),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white, elevation: 0,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10))),
+                    onPressed: () {
+                      final label  = labelCtrl.text.trim();
+                      final amount =
+                          double.tryParse(amountCtrl.text.trim()) ?? 0;
+                      if (label.isEmpty || amount <= 0) return;
+                      Navigator.of(dc).pop();
+                      context.read<CaisseBloc>().add(AddOrderFee(OrderFee(
+                        id:     DateTime.now().millisecondsSinceEpoch.toString(),
+                        label:  label,
+                        amount: amount,
+                      )));
+                    },
+                    child: const Text('Ajouter'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -505,47 +514,64 @@ class _FeesSection extends StatelessWidget {
     final labelCtrl  = TextEditingController(text: fee.label);
     final amountCtrl = TextEditingController(text: fee.amount.toStringAsFixed(0));
     final suggestions = AppDatabase.getDistinctOrderFeeLabels(shopId);
-    showDialog(
+    showAdaptiveFormSheet(
       context: context,
-      builder: (dc) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-        contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-        actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        title: const Text('Modifier le frais',
-            style: AppTextStyles.subtitleBold),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          AutocompleteTextField(
-            controller:  labelCtrl,
-            label:       'Libellé',
-            prefixIcon:  Icons.label_outline_rounded,
-            suggestions: suggestions,
-          ),
-          const SizedBox(height: 10),
-          _FeeField(ctrl: amountCtrl, hint: 'Montant (${CurrencyFormatter.currentSymbol})',
-              icon: Icons.payments_outlined, inputType: TextInputType.number),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(dc).pop(),
-              child: const Text('Annuler',
-                  style: TextStyle(color: AppColors.textSecondary))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white, elevation: 0,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10))),
-            onPressed: () {
-              final label  = labelCtrl.text.trim();
-              final amount = double.tryParse(amountCtrl.text.trim()) ?? 0;
-              if (label.isEmpty || amount <= 0) return;
-              Navigator.of(dc).pop();
-              context.read<CaisseBloc>().add(UpdateOrderFee(
-                  fee.id, label: label, amount: amount));
-            },
-            child: const Text('Enregistrer'),
-          ),
-        ],
+      builder: (dc) => AdaptiveFormFrame(
+        title: 'Modifier le frais',
+        icon: Icons.local_shipping_outlined,
+        body: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AutocompleteTextField(
+                    controller:  labelCtrl,
+                    label:       'Libellé',
+                    prefixIcon:  Icons.label_outline_rounded,
+                    suggestions: suggestions,
+                  ),
+                  const SizedBox(height: 10),
+                  _FeeField(ctrl: amountCtrl,
+                      hint: 'Montant (${CurrencyFormatter.currentSymbol})',
+                      icon: Icons.payments_outlined,
+                      inputType: TextInputType.number),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(onPressed: () => Navigator.of(dc).pop(),
+                      child: const Text('Annuler',
+                          style: TextStyle(color: AppColors.textSecondary))),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white, elevation: 0,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10))),
+                    onPressed: () {
+                      final label  = labelCtrl.text.trim();
+                      final amount =
+                          double.tryParse(amountCtrl.text.trim()) ?? 0;
+                      if (label.isEmpty || amount <= 0) return;
+                      Navigator.of(dc).pop();
+                      context.read<CaisseBloc>().add(UpdateOrderFee(
+                          fee.id, label: label, amount: amount));
+                    },
+                    child: const Text('Enregistrer'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1010,89 +1036,90 @@ class _TvaLine extends StatelessWidget {
     final ctrl = TextEditingController(
         text: rate == 0 ? '' : rate.toStringAsFixed(
             rate % 1 == 0 ? 0 : 2));
-    showDialog(
+    showAdaptiveFormSheet(
       context: context,
-      builder: (dc) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
-        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-        contentPadding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-        actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        title: Row(children: [
-          Container(
-              width: 34, height: 34,
-              decoration: BoxDecoration(
-                  color: AppColors.primarySurface,
-                  borderRadius: BorderRadius.circular(9)),
-              child: Icon(Icons.receipt_long_outlined,
-                  size: 17, color: AppColors.primary)),
-          const SizedBox(width: 10),
-          const Text('Taux de TVA',
-              style: AppTextStyles.subtitleBold),
-        ]),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          const SizedBox(height: 4),
-          TextField(
-            controller: ctrl,
-            autofocus: true,
-            keyboardType: const TextInputType.numberWithOptions(
-                decimal: true),
-            inputFormatters: [FilteringTextInputFormatter.allow(
-                RegExp(r'[0-9.]'))],
-            style: AppTextStyles.subtitleBold,
-            textAlign: TextAlign.center,
-            decoration: InputDecoration(
-              hintText: '0',
-              hintStyle: const TextStyle(color: Color(0xFFBBBBBB)),
-              suffixText: '%',
-              suffixStyle: AppTextStyles.label
-                  .copyWith(color: AppColors.primary),
-              filled: true,
-              fillColor: AppColors.primarySurface,
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 13),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(
-                      color: AppColors.primary, width: 1.5)),
-              enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(
-                      color: AppColors.primary.withValues(alpha:0.3),
-                      width: 1)),
-              focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(
-                      color: AppColors.primary, width: 1.5)),
+      builder: (dc) => AdaptiveFormFrame(
+        title: 'Taux de TVA',
+        icon: Icons.receipt_long_outlined,
+        body: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: ctrl,
+                    autofocus: true,
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true),
+                    inputFormatters: [FilteringTextInputFormatter.allow(
+                        RegExp(r'[0-9.]'))],
+                    style: AppTextStyles.subtitleBold,
+                    textAlign: TextAlign.center,
+                    decoration: InputDecoration(
+                      hintText: '0',
+                      hintStyle: const TextStyle(color: Color(0xFFBBBBBB)),
+                      suffixText: '%',
+                      suffixStyle: AppTextStyles.label
+                          .copyWith(color: AppColors.primary),
+                      filled: true,
+                      fillColor: AppColors.primarySurface,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 13),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(
+                              color: AppColors.primary, width: 1.5)),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(
+                              color: AppColors.primary.withValues(alpha:0.3),
+                              width: 1)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(
+                              color: AppColors.primary, width: 1.5)),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('Laissez vide ou 0 pour aucune TVA',
+                      style: AppTextStyles.captionHint),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          const Text('Laissez vide ou 0 pour aucune TVA',
-              style: AppTextStyles.captionHint),
-        ]),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(dc).pop(),
-              child: const Text('Annuler',
-                  style: TextStyle(color: AppColors.textSecondary))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10))),
-            onPressed: () {
-              final v = double.tryParse(ctrl.text.trim()) ?? 0;
-              Navigator.of(dc).pop();
-              context.read<CaisseBloc>()
-                  .add(SetTaxRate(v.clamp(0, 100)));
-            },
-            child: const Text('Appliquer'),
-          ),
-        ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                      onPressed: () => Navigator.of(dc).pop(),
+                      child: const Text('Annuler',
+                          style: TextStyle(color: AppColors.textSecondary))),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10))),
+                    onPressed: () {
+                      final v = double.tryParse(ctrl.text.trim()) ?? 0;
+                      Navigator.of(dc).pop();
+                      context.read<CaisseBloc>()
+                          .add(SetTaxRate(v.clamp(0, 100)));
+                    },
+                    child: const Text('Appliquer'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -7,6 +7,7 @@ import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../data/ticket_repository.dart';
@@ -160,35 +161,58 @@ class _TicketDetailPageState extends ConsumerState<TicketDetailPage> {
 
   Future<String?> _askReason(BuildContext context) {
     final ctrl = TextEditingController();
-    return showDialog<String?>(
+    return showAdaptiveFormSheet<String?>(
       context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Escalader au niveau supérieur'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Indique brièvement pourquoi tu transmets ce ticket '
-              '(optionnel).',
-              style: AppTextStyles.bodySm),
-          const SizedBox(height: 10),
-          TextField(
-            controller: ctrl,
-            maxLines: 3,
-            minLines: 2,
-            decoration: const InputDecoration(
-              hintText: 'Ex : nécessite l\'accord du propriétaire pour…',
-              border: OutlineInputBorder(),
+      builder: (c) => AdaptiveFormFrame(
+        title: 'Escalader au niveau supérieur',
+        icon: Icons.arrow_upward_rounded,
+        body: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                      'Indique brièvement pourquoi tu transmets ce ticket '
+                      '(optionnel).',
+                      style: AppTextStyles.bodySm),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: ctrl,
+                    autofocus: true,
+                    maxLines: 3,
+                    minLines: 2,
+                    decoration: const InputDecoration(
+                      hintText: 'Ex : nécessite l\'accord du propriétaire pour…',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ]),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(c).pop(null),
-              child: const Text('Annuler')),
-          FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
-              onPressed: () => Navigator.of(c).pop(ctrl.text.trim()),
-              child: const Text('Escalader',
-                  style: TextStyle(color: Colors.white))),
-        ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                      onPressed: () => Navigator.of(c).pop(null),
+                      child: const Text('Annuler')),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                      style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primary),
+                      onPressed: () => Navigator.of(c).pop(ctrl.text.trim()),
+                      child: const Text('Escalader',
+                          style: TextStyle(color: Colors.white))),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

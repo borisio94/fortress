@@ -1063,53 +1063,70 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     final ctrl = TextEditingController(
         text: defaultFee > 0 ? defaultFee.toStringAsFixed(0) : '');
 
-    final amount = await showDialog<double>(
+    final amount = await showAdaptiveFormSheet<double>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
-        title: const Text('Livraison refusée',
-            style: AppTextStyles.subtitleBold),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text(
-              'Le client a refusé mais ${loc?.name ?? 'le partenaire'} '
-              's\'est déplacé. Frais de course à lui devoir ?',
-              style: AppTextStyles.body.copyWith(color: AppColors.textHint)),
-          const SizedBox(height: 14),
-          TextField(
-            controller: ctrl,
-            autofocus: true,
-            keyboardType:
-                const TextInputType.numberWithOptions(decimal: true),
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-            ],
-            decoration: InputDecoration(
-              isDense: true,
-              suffixText: 'FCFA',
-              hintText: 'Montant',
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8)),
+      builder: (ctx) => AdaptiveFormFrame(
+        title: 'Livraison refusée',
+        icon: Icons.local_shipping_outlined,
+        body: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                      'Le client a refusé mais ${loc?.name ?? 'le partenaire'} '
+                      's\'est déplacé. Frais de course à lui devoir ?',
+                      style: AppTextStyles.body
+                          .copyWith(color: AppColors.textHint)),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: ctrl,
+                    autofocus: true,
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    ],
+                    decoration: InputDecoration(
+                      isDense: true,
+                      suffixText: 'FCFA',
+                      hintText: 'Montant',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ]),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(0.0),
-            child: const Text('Aucun frais'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final v = double.tryParse(
-                  ctrl.text.trim().replaceAll(',', '.'));
-              Navigator.of(ctx).pop(v ?? 0.0);
-            },
-            style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primary),
-            child: const Text('Enregistrer la charge'),
-          ),
-        ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(0.0),
+                    child: const Text('Aucun frais'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: () {
+                      final v = double.tryParse(
+                          ctrl.text.trim().replaceAll(',', '.'));
+                      Navigator.of(ctx).pop(v ?? 0.0);
+                    },
+                    style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.primary),
+                    child: const Text('Enregistrer la charge'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
     ctrl.dispose();

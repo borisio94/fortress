@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/usecases/delete_product_usecase.dart';
 
@@ -102,35 +103,19 @@ class _DeleteProductDialogState extends State<DeleteProductDialog> {
     final imageUrl = p.mainImageUrl;
     final sku = (p.sku ?? '').isNotEmpty ? p.sku! : '—';
 
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 460),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── En-tête ────────────────────────────────────────────────
-              Row(children: [
-                Container(
-                  width: 40, height: 40,
-                  decoration: BoxDecoration(
-                    color: AppColors.error.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(Icons.delete_outline_rounded,
-                      color: AppColors.error, size: 22),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Text('Supprimer ce produit',
-                      style: AppTextStyles.subtitleBold),
-                ),
-              ]),
-              const SizedBox(height: 16),
-
+    return AdaptiveFormFrame(
+      title: 'Supprimer ce produit',
+      icon: Icons.delete_outline_rounded,
+      iconColor: AppColors.error,
+      body: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               // ── Récap produit : image + nom + SKU + variantes ─────────
               Container(
                 padding: const EdgeInsets.all(10),
@@ -289,49 +274,52 @@ class _DeleteProductDialogState extends State<DeleteProductDialog> {
                 ),
               ],
 
-              const SizedBox(height: 16),
-
-              // ── Actions ────────────────────────────────────────────────
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: _submitting
-                        ? null
-                        : () => Navigator.of(context).pop(false),
-                    child: const Text('Annuler',
-                        style: TextStyle(color: AppColors.textSecondary)),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton.icon(
-                    onPressed: _canSubmit ? _submit : null,
-                    icon: _submitting
-                        ? const SizedBox(
-                            width: 14, height: 14,
-                            child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2))
-                        : const Icon(Icons.delete_outline_rounded,
-                            size: 18),
-                    label: Text(_submitting ? 'Suppression…' : 'Supprimer'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.error,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor:
-                          AppColors.error.withValues(alpha: 0.4),
-                      disabledForegroundColor:
-                          Colors.white.withValues(alpha: 0.7),
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
+
+          // ── Actions ────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: _submitting
+                      ? null
+                      : () => Navigator.of(context).pop(false),
+                  child: const Text('Annuler',
+                      style: TextStyle(color: AppColors.textSecondary)),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton.icon(
+                  onPressed: _canSubmit ? _submit : null,
+                  icon: _submitting
+                      ? const SizedBox(
+                          width: 14, height: 14,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.delete_outline_rounded,
+                          size: 18),
+                  label: Text(_submitting ? 'Suppression…' : 'Supprimer'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.error,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor:
+                        AppColors.error.withValues(alpha: 0.4),
+                    disabledForegroundColor:
+                        Colors.white.withValues(alpha: 0.7),
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -354,9 +342,8 @@ Future<bool?> showDeleteProductDialog(
   required Product product,
   required Future<void> Function(String reason) onConfirm,
 }) {
-  return showDialog<bool>(
+  return showAdaptiveFormSheet<bool>(
     context: context,
-    barrierDismissible: false,
     builder: (_) => DeleteProductDialog(product: product, onConfirm: onConfirm),
   );
 }
