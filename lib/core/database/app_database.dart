@@ -775,6 +775,30 @@ class AppDatabase {
   static Future<void> pullAllForShop(String shopId) =>
       _initialPullForShop(shopId);
 
+  /// Re-sync rapide déclenché au RETOUR de l'app au premier plan (cf.
+  /// observateur de cycle de vie dans `app.dart`).
+  ///
+  /// Sur web, le navigateur SUSPEND le websocket Realtime quand l'onglet
+  /// (ou l'écran du téléphone) passe en arrière-plan. Les changements
+  /// distants survenus pendant ce temps — typiquement une commande
+  /// validée par le client via le lien de suivi — n'arrivent qu'à la
+  /// reconnexion spontanée du socket, parfois après un long délai. D'où
+  /// le ressenti « le statut change et la notif arrive, mais très tard ».
+  ///
+  /// Ce hook force un pull immédiat des commandes de chaque boutique
+  /// abonnée dès le retour → statut à jour et cloche quasi-instantanés.
+  /// `syncOrders` détecte les transitions par diff du statut Hive et émet
+  /// les notifications manquées (dédup → pas de double avec le realtime).
+  static Future<void> onAppResumed() async {
+    for (final shopId in List.of(_i._channels.keys)) {
+      try {
+        await syncOrders(shopId);
+      } catch (e) {
+        debugPrint('[DB] onAppResumed syncOrders($shopId) err: $e');
+      }
+    }
+  }
+
   /// Pull initial de toutes les tables métier pour une boutique.
   /// Appelé au `subscribeToShop` — idempotent, safe à rappeler.
   /// Fire-and-forget : n'attend pas, ne bloque pas l'UI.
@@ -3731,7 +3755,6 @@ end \$\$;""",
     // sur la cloche d'un vendeur qui ne peut rien faire avec.
     if (!_isAdminOrOwner(shopId)) return;
     final status = (row['status'] as String?) ?? 'scheduled';
-    final clientName = (row['client_name'] as String?)?.trim() ?? '';
     final amount = ((row['amount_total'] ?? row['total'] ?? 0) as num)
         .toStringAsFixed(0);
     final shortId = id.length > 6 ? id.substring(0, 6).toUpperCase() : id;
@@ -3751,39 +3774,69 @@ end \$\$;""",
       return;
     }
     if (p.eventType == PostgresChangeEvent.update) {
-      // Ne notifier que si le status a changé.
       final oldStatus = (p.oldRecord['status'] as String?) ?? '';
-      if (oldStatus == status) return;
-      switch (status) {
-        case 'completed':
-          NotificationService.notify(
-            kind:    NotifKind.orderCompleted,
-            title:   'Commande terminée',
-            message: '#$shortId · ${clientName.isEmpty ? '—' : clientName}',
-            shopId:   shopId,
-            targetId: id,
-          );
-          break;
-        case 'cancelled':
-          NotificationService.notify(
-            kind:    NotifKind.orderCancelled,
-            title:   'Commande annulée',
-            message: '#$shortId · ${clientName.isEmpty ? '—' : clientName}',
-            shopId:   shopId,
-            targetId: id,
-          );
-          break;
-        case 'rejected':
-        case 'refused':
-          NotificationService.notify(
-            kind:    NotifKind.orderRejected,
-            title:   'Commande rejetée',
-            message: '#$shortId · ${clientName.isEmpty ? '—' : clientName}',
-            shopId:   shopId,
-            targetId: id,
-          );
-          break;
-      }
+      _notifyOrderStatusTransition(shopId, id, row, oldStatus, status);
+    }
+  }
+
+  /// Émet la cloche pour une TRANSITION de statut de commande. Appelée :
+  ///   * depuis le callback realtime `_emitOrderNotification` (UPDATE) ;
+  ///   * depuis `syncOrders` (rattrapage) — indispensable quand le client
+  ///     valide pendant que l'app est en arrière-plan : le websocket
+  ///     realtime est suspendu par le navigateur et l'event est PERDU ;
+  ///     le re-sync au retour de l'app (onAppResumed) le détecte par diff
+  ///     du statut Hive et déclenche la notif manquée.
+  ///
+  /// Inclut la validation client `scheduled → processing` (lien de suivi),
+  /// qui n'était couverte par AUCUN cas auparavant → aucune cloche.
+  /// Idempotent côté NotificationService (dédup 60 s + id par catégorie),
+  /// donc realtime + resync sur le même event ne double-notifient pas.
+  void _notifyOrderStatusTransition(String shopId, String id,
+      Map<String, dynamic> row, String oldStatus, String newStatus) {
+    if (oldStatus == newStatus) return;
+    if (!NotificationService.enabledForCurrentUser.value) return;
+    if (!_isAdminOrOwner(shopId)) return;
+    final clientName = (row['client_name'] as String?)?.trim() ?? '';
+    final shortId = id.length > 6 ? id.substring(0, 6).toUpperCase() : id;
+    final who = clientName.isEmpty ? '—' : clientName;
+    switch (newStatus) {
+      case 'processing':
+        NotificationService.notify(
+          kind:    NotifKind.orderValidated,
+          title:   'Commande validée par le client',
+          message: '#$shortId · $who',
+          shopId:   shopId,
+          targetId: id,
+        );
+        break;
+      case 'completed':
+        NotificationService.notify(
+          kind:    NotifKind.orderCompleted,
+          title:   'Commande terminée',
+          message: '#$shortId · $who',
+          shopId:   shopId,
+          targetId: id,
+        );
+        break;
+      case 'cancelled':
+        NotificationService.notify(
+          kind:    NotifKind.orderCancelled,
+          title:   'Commande annulée',
+          message: '#$shortId · $who',
+          shopId:   shopId,
+          targetId: id,
+        );
+        break;
+      case 'rejected':
+      case 'refused':
+        NotificationService.notify(
+          kind:    NotifKind.orderRejected,
+          title:   'Commande rejetée',
+          message: '#$shortId · $who',
+          shopId:   shopId,
+          targetId: id,
+        );
+        break;
     }
   }
 
@@ -4113,6 +4166,13 @@ end \$\$;""",
         final id = row['id']?.toString();
         if (id == null) continue;
         remoteIds.add(id);
+        // Statut local AVANT écrasement — sert à détecter une transition
+        // survenue à distance (ex. client qui valide via le lien de suivi
+        // pendant que l'app était en arrière-plan : l'event realtime a été
+        // perdu, ce diff le rattrape et déclenche la cloche manquée).
+        final prevRaw = HiveBoxes.ordersBox.get(id);
+        final prevStatus =
+            (prevRaw is Map) ? prevRaw['status']?.toString() : null;
         // Écrire dans Hive — format compatible avec getOrders().
         // IMPORTANT : inclure TOUS les champs livraison/expédition/audit
         // sinon la sync écrase localement le snapshot de localisation
@@ -4153,6 +4213,18 @@ end \$\$;""",
           'payment_status': row['payment_status'] ?? 'unpaid',
         };
         await HiveBoxes.ordersBox.put(id, hiveMap);
+        // Notif de rattrapage si le statut a changé depuis le dernier état
+        // local connu. `prevStatus == null` (commande inconnue jusque-là)
+        // → pas de notif transition (évite de sonner pour tout l'historique
+        // au premier chargement). La dédup NotificationService empêche le
+        // double avec un éventuel event realtime du même changement.
+        if (prevStatus != null) {
+          final newStatus =
+              (hiveMap['status'] as String?) ?? 'scheduled';
+          _i._notifyOrderStatusTransition(
+              shopId, id, Map<String, dynamic>.from(row),
+              prevStatus, newStatus);
+        }
       }
       // Diff purge : supprimer les commandes locales de ce shop
       // qui ne sont plus distantes.

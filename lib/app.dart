@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'core/router/app_router.dart';
+import 'core/database/app_database.dart';
 import 'core/services/deep_link_service.dart';
 import 'core/services/session_service.dart';
 import 'shared/widgets/app_snack.dart';
@@ -33,7 +34,8 @@ class PosApp extends ConsumerStatefulWidget {
   ConsumerState<PosApp> createState() => _PosAppState();
 }
 
-class _PosAppState extends ConsumerState<PosApp> {
+class _PosAppState extends ConsumerState<PosApp>
+    with WidgetsBindingObserver {
   // Blocs créés une seule fois — stables pour toute la durée de vie de l'app
   late final ShopSelectorBloc _shopSelectorBloc;
   late final CaisseBloc        _caisseBloc;
@@ -42,6 +44,12 @@ class _PosAppState extends ConsumerState<PosApp> {
   @override
   void initState() {
     super.initState();
+    // Observateur de cycle de vie GLOBAL : au retour de l'app au premier
+    // plan (onglet web ré-affiché / téléphone déverrouillé), on force un
+    // re-sync immédiat des commandes. Sans ça, le websocket Realtime
+    // suspendu en arrière-plan ne livre la validation client qu'après un
+    // long délai (cf. AppDatabase.onAppResumed).
+    WidgetsBinding.instance.addObserver(this);
     _shopSelectorBloc = ShopSelectorBloc(
       getMyShopsUseCase: ref.read(getMyShopsUseCaseProvider),
       createShopUseCase: ref.read(createShopUseCaseProvider),
@@ -65,7 +73,18 @@ class _PosAppState extends ConsumerState<PosApp> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      // Fire-and-forget : ne bloque pas le thread UI au réveil.
+      // ignore: discarded_futures
+      AppDatabase.onAppResumed();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     DeepLinkService.dispose();
     _shopSelectorBloc.close();
     _caisseBloc.close();

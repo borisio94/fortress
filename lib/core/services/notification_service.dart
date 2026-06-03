@@ -8,6 +8,7 @@ enum NotifKind {
   stockLow,
   stockOut,
   orderNew,
+  orderValidated,   // commande programmée validée par le client via le lien
   orderCompleted,
   orderCancelled,
   orderRejected,
@@ -22,6 +23,7 @@ extension NotifKindX on NotifKind {
         NotifKind.stockLow        => 'stock_low',
         NotifKind.stockOut        => 'stock_out',
         NotifKind.orderNew        => 'order_new',
+        NotifKind.orderValidated  => 'order_validated',
         NotifKind.orderCompleted  => 'order_completed',
         NotifKind.orderCancelled  => 'order_cancelled',
         NotifKind.orderRejected   => 'order_rejected',
@@ -39,6 +41,7 @@ extension NotifKindX on NotifKind {
         NotifKind.stockLow        => 'stock',
         NotifKind.stockOut        => 'stock',
         NotifKind.orderNew        => 'order_new',     // distinct des transitions
+        NotifKind.orderValidated  => 'order_state',
         NotifKind.orderCompleted  => 'order_state',
         NotifKind.orderCancelled  => 'order_state',
         NotifKind.orderRejected   => 'order_state',
