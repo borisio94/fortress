@@ -170,8 +170,17 @@ class AdaptiveFormFrame extends StatelessWidget {
               Flexible(
                 child: SingleChildScrollView(child: body),
               ),
-              // Barre d'actions épinglée sous le scroll (cf. footer mobile).
-              if (footer != null) footer!,
+              // Barre d'actions épinglée sous le scroll, séparée par une
+              // bordure pour bien la distinguer du contenu (cf. footer mobile).
+              if (footer != null)
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: scheme.surface,
+                    border: Border(
+                        top: BorderSide(color: theme.semantic.borderSubtle)),
+                  ),
+                  child: footer!,
+                ),
             ],
           ),
         ),
