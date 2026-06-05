@@ -1860,6 +1860,9 @@ class _UserCard extends StatelessWidget {
     final now       = DateTime.now();
     final exp       = sub?['expires_at'] != null ? DateTime.tryParse(sub!['expires_at']) : null;
     final isExpired = exp != null && exp.isBefore(now);
+    final subStatus = sub?['sub_status'] as String?;
+    // Réactivation requise : aucun abo, abo expiré, ou statut non-actif.
+    final needsReactivation = sub == null || isExpired || subStatus != 'active';
     final initials  = name.trim().split(' ')
         .map((w) => w.isNotEmpty ? w[0] : '').take(2).join().toUpperCase();
 
@@ -1918,7 +1921,12 @@ class _UserCard extends StatelessWidget {
                   _item('unblock', Icons.check_circle_outline, 'Activer', AppColors.secondary)
                 else
                   _item('block', Icons.block_rounded, 'Bloquer', AppColors.error),
-                _item('sub', Icons.card_membership_rounded, 'Abonnement', AppColors.primary),
+                if (needsReactivation)
+                  _item('sub', Icons.autorenew_rounded,
+                      'Réactiver l\'abonnement', AppColors.secondary)
+                else
+                  _item('sub', Icons.card_membership_rounded,
+                      'Abonnement', AppColors.primary),
                 _item('reset', Icons.lock_reset_rounded, 'Réinitialiser mdp', AppColors.warning),
                 _item('delete', Icons.delete_outline_rounded, 'Supprimer', AppColors.error),
               ],
@@ -2494,62 +2502,161 @@ class _SubSheet extends StatefulWidget {
 }
 
 class _SubSheetState extends State<_SubSheet> {
-  late String _plan;
-  String _cycle = 'monthly';
-  bool _saving  = false;
-  final _refCtrl   = TextEditingController();
-  final _notesCtrl = TextEditingController();
+  // Plans chargés dynamiquement depuis `plans` (prix à jour + tous les
+  // plans actifs — fini les prix Normal/Pro codés en dur).
+  List<Map<String, dynamic>> _plans = const [];
+  bool    _loadingPlans = true;
+  String? _planId;
+  String  _cycle  = 'monthly';
+  String  _method = 'cash';
+  bool    _saving = false;
+  final _amountCtrl = TextEditingController();
+  final _refCtrl    = TextEditingController();
+  final _notesCtrl  = TextEditingController();
 
-  @override void initState() { super.initState(); _plan = widget.currentPlanName ?? 'normal'; }
-  @override void dispose() { _refCtrl.dispose(); _notesCtrl.dispose(); super.dispose(); }
+  static const _methods = [
+    ('cash', 'Espèces'), ('mobile_money', 'Mobile Money'),
+    ('transfer', 'Virement'), ('other', 'Autre'),
+  ];
 
-  double get _price => switch ('${_plan}_$_cycle') {
-    'normal_monthly'   => 5000,  'normal_quarterly' => 13500,
-    'normal_yearly'    => 50000, 'pro_monthly'      => 10000,
-    'pro_quarterly'    => 27000, 'pro_yearly'       => 100000,
-    _                  => 0,
+  @override
+  void initState() { super.initState(); _loadPlans(); }
+
+  @override
+  void dispose() {
+    _amountCtrl.dispose(); _refCtrl.dispose(); _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadPlans() async {
+    try {
+      final rows = List<Map<String, dynamic>>.from(
+          await Supabase.instance.client.from('plans')
+              .select('id, name, label, price_monthly, price_quarterly, '
+                  'price_yearly')
+              .eq('is_active', true).order('sort_order'));
+      // Plan par défaut : celui de l'utilisateur, sinon le 1er plan payant.
+      String? def;
+      if (widget.currentPlanName != null) {
+        for (final p in rows) {
+          if (p['name'] == widget.currentPlanName) {
+            def = p['id'] as String?; break;
+          }
+        }
+      }
+      if (def == null) {
+        for (final p in rows) {
+          if (((p['price_monthly'] as num?) ?? 0) > 0) {
+            def = p['id'] as String?; break;
+          }
+        }
+      }
+      def ??= rows.isNotEmpty ? rows.first['id'] as String? : null;
+      if (!mounted) return;
+      setState(() { _plans = rows; _planId = def; _loadingPlans = false; });
+      _syncAmount();
+    } catch (_) {
+      if (mounted) setState(() => _loadingPlans = false);
+    }
+  }
+
+  Map<String, dynamic>? get _selectedPlan {
+    for (final p in _plans) { if (p['id'] == _planId) return p; }
+    return null;
+  }
+
+  double _priceFor(Map<String, dynamic> plan, String cycle) => switch (cycle) {
+    'monthly'   => (plan['price_monthly']   as num?)?.toDouble() ?? 0,
+    'quarterly' => (plan['price_quarterly'] as num?)?.toDouble() ?? 0,
+    _           => (plan['price_yearly']    as num?)?.toDouble() ?? 0,
   };
+
+  /// Réaligne le montant sur le prix catalogue du plan/cycle. Le SA peut
+  /// ensuite l'éditer (remise, montant partiel…).
+  void _syncAmount() {
+    final p = _selectedPlan;
+    if (p == null) return;
+    _amountCtrl.text = _priceFor(p, _cycle).toStringAsFixed(0);
+  }
 
   @override
   Widget build(BuildContext context) => Container(
     decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20))),
     padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + MediaQuery.of(context).padding.bottom),
-    child: Column(mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Center(child: Container(width: 36, height: 4,
-              margin: const EdgeInsets.only(bottom: 14),
-              decoration: BoxDecoration(color: AppColors.inputBorder,
-                  borderRadius: BorderRadius.circular(2)))),
-          Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text("Gérer l'abonnement",
-                  style: AppTextStyles.label
-                      .copyWith(fontWeight: FontWeight.w700)),
-              Text(widget.userName, style: AppTextStyles.caption),
-            ])),
-            Text('${_price.toStringAsFixed(0)} XAF',
-                style: AppTextStyles.subtitleBold
-                    .copyWith(color: AppColors.primary)),
-          ]),
-          const SizedBox(height: 14),
-          Row(children: [
-            Expanded(child: _Btn('Normal', 'normal', _plan, (v) => setState(() => _plan = v))),
-            const SizedBox(width: 8),
-            Expanded(child: _Btn('Pro',    'pro',    _plan, (v) => setState(() => _plan = v))),
-          ]),
+    child: SingleChildScrollView(
+      child: Column(mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Center(child: Container(width: 36, height: 4,
+            margin: const EdgeInsets.only(bottom: 14),
+            decoration: BoxDecoration(color: AppColors.inputBorder,
+                borderRadius: BorderRadius.circular(2)))),
+        Text("Gérer l'abonnement",
+            style: AppTextStyles.label.copyWith(fontWeight: FontWeight.w700)),
+        Text(widget.userName, style: AppTextStyles.caption),
+        const SizedBox(height: 14),
+        if (_loadingPlans)
+          const Padding(padding: EdgeInsets.symmetric(vertical: 28),
+              child: Center(child: CircularProgressIndicator()))
+        else if (_plans.isEmpty)
+          Text('Aucun plan actif — créez/activez un plan dans '
+              '« Plans tarifaires ».',
+              style: AppTextStyles.bodySmSecondary)
+        else ...[
+          // Plan (dynamique : tous les plans actifs, prix lus en base).
+          for (int i = 0; i < _plans.length; i += 2) ...[
+            if (i > 0) const SizedBox(height: 8),
+            Row(children: [
+              Expanded(child: _Btn(
+                  _plans[i]['label']?.toString()
+                      ?? _plans[i]['name']?.toString() ?? '—',
+                  _plans[i]['id'] as String, _planId ?? '',
+                  (v) => setState(() { _planId = v; _syncAmount(); }))),
+              const SizedBox(width: 8),
+              Expanded(child: i + 1 < _plans.length
+                  ? _Btn(
+                      _plans[i + 1]['label']?.toString()
+                          ?? _plans[i + 1]['name']?.toString() ?? '—',
+                      _plans[i + 1]['id'] as String, _planId ?? '',
+                      (v) => setState(() { _planId = v; _syncAmount(); }))
+                  : const SizedBox()),
+            ]),
+          ],
           const SizedBox(height: 8),
           Row(children: [
-            Expanded(child: _Btn('Mensuel',     'monthly',   _cycle, (v) => setState(() => _cycle = v))),
+            Expanded(child: _Btn('Mensuel', 'monthly', _cycle,
+                (v) => setState(() { _cycle = v; _syncAmount(); }))),
             const SizedBox(width: 6),
-            Expanded(child: _Btn('Trimestriel', 'quarterly', _cycle, (v) => setState(() => _cycle = v))),
+            Expanded(child: _Btn('Trimestriel', 'quarterly', _cycle,
+                (v) => setState(() { _cycle = v; _syncAmount(); }))),
             const SizedBox(width: 6),
-            Expanded(child: _Btn('Annuel',      'yearly',    _cycle, (v) => setState(() => _cycle = v))),
+            Expanded(child: _Btn('Annuel', 'yearly', _cycle,
+                (v) => setState(() { _cycle = v; _syncAmount(); }))),
           ]),
           const SizedBox(height: 10),
-          _Field(controller: _refCtrl, hint: 'Référence paiement', icon: Icons.receipt_outlined),
+          _Field(controller: _amountCtrl, hint: 'Montant payé (XAF)',
+              icon: Icons.payments_outlined, type: TextInputType.number),
+          const SizedBox(height: 8),
+          // Méthode de paiement (consignée dans les notes — pas de colonne
+          // dédiée côté `subscriptions`).
+          for (int i = 0; i < _methods.length; i += 2) ...[
+            if (i > 0) const SizedBox(height: 6),
+            Row(children: [
+              Expanded(child: _Btn(_methods[i].$2, _methods[i].$1, _method,
+                  (v) => setState(() => _method = v))),
+              const SizedBox(width: 6),
+              Expanded(child: i + 1 < _methods.length
+                  ? _Btn(_methods[i + 1].$2, _methods[i + 1].$1, _method,
+                      (v) => setState(() => _method = v))
+                  : const SizedBox()),
+            ]),
+          ],
+          const SizedBox(height: 10),
+          _Field(controller: _refCtrl, hint: 'Référence paiement',
+              icon: Icons.receipt_outlined),
           const SizedBox(height: 6),
-          _Field(controller: _notesCtrl, hint: 'Notes internes', icon: Icons.notes_rounded),
+          _Field(controller: _notesCtrl, hint: 'Notes internes',
+              icon: Icons.notes_rounded),
           const SizedBox(height: 14),
           SizedBox(width: double.infinity, child: ElevatedButton(
             onPressed: _saving ? null : _save,
@@ -2559,18 +2666,25 @@ class _SubSheetState extends State<_SubSheet> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
             child: _saving
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(
-                strokeWidth: 2, color: Colors.white))
+                    strokeWidth: 2, color: Colors.white))
                 : Text('Enregistrer', style: AppTextStyles.label
-                .copyWith(fontWeight: FontWeight.w700)),
+                    .copyWith(fontWeight: FontWeight.w700)),
           )),
-        ]),
+        ],
+      ]),
+    ),
   );
 
   Future<void> _save() async {
+    final planId = _planId;
+    if (planId == null) {
+      AppSnack.error(context, 'Sélectionne un plan');
+      return;
+    }
+    final amount = double.tryParse(
+        _amountCtrl.text.trim().replaceAll(',', '.')) ?? 0;
     setState(() => _saving = true);
     try {
-      final planRow = await Supabase.instance.client
-          .from('plans').select('id').eq('name', _plan).single();
       final now = DateTime.now();
       final exp = switch (_cycle) {
         'monthly'   => DateTime(now.year, now.month + 1, now.day),
@@ -2589,19 +2703,29 @@ class _SubSheetState extends State<_SubSheet> {
           targetLabel: widget.userName,
         );
       }
+      // Méthode de paiement consignée dans les notes (pas de colonne dédiée
+      // côté `subscriptions`).
+      final methodLabel = _methods
+          .firstWhere((m) => m.$1 == _method, orElse: () => ('', '')).$2;
+      final noteText = _notesCtrl.text.trim();
+      final notes = [
+        if (methodLabel.isNotEmpty) 'Mode : $methodLabel',
+        if (noteText.isNotEmpty) noteText,
+      ].join(' — ');
       await Supabase.instance.client.from('subscriptions').insert({
-        'user_id': widget.userId, 'plan_id': planRow['id'],
+        'user_id': widget.userId, 'plan_id': planId,
         'billing_cycle': _cycle, 'sub_status': 'active',
-        'expires_at': exp.toIso8601String(), 'amount_paid': _price,
+        'expires_at': exp.toIso8601String(), 'amount_paid': amount,
         'payment_ref': _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
-        'notes': _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+        'notes': notes.isEmpty ? null : notes,
       });
       await ActivityLogService.log(
         action:      'subscription_activated',
         targetType:  'subscription',
         targetId:    widget.userId,
         targetLabel: widget.userName,
-        details:     {'plan': _plan, 'cycle': _cycle, 'amount': _price},
+        details:     {'plan_id': planId, 'cycle': _cycle,
+                      'amount': amount, 'method': _method},
       );
       widget.onSaved();
       if (mounted) Navigator.of(context).pop();
