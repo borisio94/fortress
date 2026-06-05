@@ -436,12 +436,12 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     return hay.contains(_normalize(q));
   }
 
-  List<Sale> get _orders {
-    final all = _ds.getOrders(widget.shopId);
-    final key = _filters[_filter.index].$1;
-    var list = key == 'all'
-        ? all
-        : all.where((o) => o.status.name == key).toList();
+  /// Socle commun à l'onglet courant ET au comptage par onglet
+  /// (cf. `_countsByStatus`) : toutes les commandes du shop filtrées par
+  /// créateur (employé restreint) + vue dashboard. N'applique NI le filtre
+  /// de statut, NI la date, NI la recherche.
+  List<Sale> get _baseList {
+    var list = _ds.getOrders(widget.shopId);
     // Filtre par créateur : un employé sans `canViewAllOrders` ne voit
     // que ses propres commandes (createdByUserId == self) ET les
     // commandes au statut `completed` (= validées par un supérieur).
@@ -488,10 +488,19 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
         return loc == viewFilter;
       }).toList();
     }
+    return list;
+  }
+
+  /// Applique au socle `base` le filtre de statut (`key`), la plage de
+  /// dates puis la recherche. Le filtre date porte sur la date
+  /// d'encaissement pour l'onglet « Complétée » (createdAt), sinon sur la
+  /// date de livraison programmée (scheduledAt).
+  List<Sale> _listForStatus(String key, List<Sale> base) {
+    var list = key == 'all'
+        ? base
+        : base.where((o) => o.status.name == key).toList();
     final r = _dateRange;
     if (r != null) {
-      // Pour l'onglet "Complétée" on filtre sur la date d'encaissement
-      // (createdAt), sinon sur la date de livraison programmée.
       final useCreated = key == 'completed';
       final start = DateTime(r.start.year, r.start.month, r.start.day);
       final end   = DateTime(r.end.year, r.end.month, r.end.day,
@@ -507,6 +516,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     }
     return list;
   }
+
+  /// Nombre de commandes par onglet — mêmes filtres vue/créateur/date/
+  /// recherche que la liste courante — pour les pastilles du TabBar.
+  Map<String, int> _countsByStatus(List<Sale> base) =>
+      { for (final f in _filters) f.$1: _listForStatus(f.$1, base).length };
 
   Future<void> _pickDateRange() async {
     final now = DateTime.now();
@@ -527,14 +541,86 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     return '${d(r.start)} → ${d(r.end)}';
   }
 
+  /// Onglet du TabBar : libellé + pastille compteur. La pastille n'apparaît
+  /// que si l'onglet contient au moins une commande.
+  Widget _tabLabel(String text, int count, bool selected) {
+    final color = selected ? AppColors.primary : AppColors.textHint;
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Text(text),
+      if (count > 0) ...[
+        const SizedBox(width: 5),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: selected ? 0.14 : 0.10),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Text('$count',
+              style: AppTextStyles.microBold.copyWith(color: color)),
+        ),
+      ],
+    ]);
+  }
+
+  /// Bandeau de synthèse de la sélection courante : total facturé et reste
+  /// à encaisser. Masqué quand la liste est vide (rien à résumer).
+  Widget _summaryBar(double totalCA, double totalDue) {
+    final sem = Theme.of(context).semantic;
+    Widget cell(IconData icon, String label, String value, Color color) =>
+        Expanded(
+          child: Row(children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 7),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(label,
+                    style: AppTextStyles.micro
+                        .copyWith(color: AppColors.textSecondary)),
+                Text(value,
+                    style: AppTextStyles.bodySmBold
+                        .copyWith(color: color, fontWeight: FontWeight.w800)),
+              ],
+            ),
+          ]),
+        );
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.12)),
+      ),
+      child: Row(children: [
+        cell(Icons.account_balance_wallet_outlined, 'Total facturé',
+            CurrencyFormatter.format(totalCA), AppColors.primary),
+        Container(width: 1, height: 28, color: sem.borderSubtle),
+        const SizedBox(width: 12),
+        cell(Icons.payments_outlined, 'Reste à encaisser',
+            CurrencyFormatter.format(totalDue),
+            totalDue > 0 ? AppColors.warning : sem.success),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Dette partenaire pour TOUTES les commandes visibles, en une seule
     // passe Hive (offline-first) au build de la liste — pas un calcul par
     // card. Recalculé quand le ledger change (cf. _onDataChanged écoute
     // 'partner_ledger_entries').
+    // Socle filtré une fois pour la liste, le bandeau de synthèse et les
+    // compteurs d'onglets.
+    final base    = _baseList;
+    final orders  = _listForStatus(_filters[_filter.index].$1, base);
+    final counts  = _countsByStatus(base);
     final orderDebts = PartnerLedgerService.debtByOrder(
-        widget.shopId, _orders.map((o) => o.id).whereType<String>());
+        widget.shopId, orders.map((o) => o.id).whereType<String>());
+    // Synthèse de la sélection courante : total facturé + reste à encaisser.
+    final totalCA  = orders.fold<double>(0, (s, o) => s + o.total);
+    final totalDue = orders.fold<double>(0, (s, o) => s + o.amountDue);
     return Column(children: [
       // ── Onglets « Vue » : Globale / Boutique / Partenaires ──────────
       // Le filtre s'applique aux lignes via `orderToPartnerLocId` plus haut
@@ -553,9 +639,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
           indicatorColor:       AppColors.primary,
           indicatorWeight:      2,
           labelStyle: AppTextStyles.bodySmBold,
-          tabs: _filters
-              .map((f) => Tab(text: f.$2))
-              .toList(),
+          tabs: [
+            for (var i = 0; i < _filters.length; i++)
+              Tab(child: _tabLabel(_filters[i].$2,
+                  counts[_filters[i].$1] ?? 0, _filter.index == i)),
+          ],
         ),
       ),
       Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
@@ -670,7 +758,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               ),
               const SizedBox(width: 8),
             ],
-            Text('${_orders.length} résultat${_orders.length > 1 ? 's' : ''}',
+            Text('${orders.length} résultat${orders.length > 1 ? 's' : ''}',
                 style: AppTextStyles.micro
                     .copyWith(fontWeight: FontWeight.w600)),
           ]),
@@ -678,11 +766,17 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
       ),
       Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
 
+      // ── Synthèse de la sélection (total facturé + reste à encaisser) ──
+      if (orders.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _summaryBar(totalCA, totalDue),
+      ],
+
       // ── Liste commandes ──────────────────────────────────────
       Expanded(
         child: RefreshIndicator(
           onRefresh: _pullAndReload,
-          child: _orders.isEmpty
+          child: orders.isEmpty
             ? ListView(children: [EmptyStateWidget(
                 icon: Icons.inbox_outlined,
                 title: _filter.index == 0
@@ -692,20 +786,20 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               )])
             : ListView.separated(
           padding: const EdgeInsets.all(12),
-          itemCount: _orders.length,
+          itemCount: orders.length,
           separatorBuilder: (_, __) =>
           const SizedBox(height: 8),
           itemBuilder: (_, i) {
             final perms = ref.watch(permissionsProvider(widget.shopId));
             return _OrderCard(
-            order:    _orders[i],
-            debt:     orderDebts[_orders[i].id],
+            order:    orders[i],
+            debt:     orderDebts[orders[i].id],
             canCancel: perms.canCancelSale,
             // Suppression autorisée UNIQUEMENT si la commande est annulée
             // (en plus de la permission). Empêche d'effacer une commande
             // active/complétée — on l'annule d'abord, puis on supprime.
             canDelete: perms.canDeleteOrder
-                && _orders[i].status == SaleStatus.cancelled,
+                && orders[i].status == SaleStatus.cancelled,
             canEdit:   perms.canEditOrder,
             onUpdate: (status) async {
               // Garde défensive : annulation/remboursement requièrent
@@ -718,7 +812,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                     'requiert la permission "sales.cancel".');
                 return;
               }
-              final order = _orders[i];
+              final order = orders[i];
               final wasScheduled  = order.status == SaleStatus.scheduled;
               final wasProcessing = order.status == SaleStatus.processing;
               final becomingProcessing = status == SaleStatus.processing
@@ -880,11 +974,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               setState(() {});
             },
             onCancelWithReason: (reason) async {
-              await _ds.cancelOrderWithReason(_orders[i].id!, reason);
+              await _ds.cancelOrderWithReason(orders[i].id!, reason);
               if (mounted) setState(() {});
             },
             onReschedule: (newDate, reason) async {
-              await _ds.rescheduleOrder(_orders[i].id!, newDate, reason);
+              await _ds.rescheduleOrder(orders[i].id!, newDate, reason);
               if (mounted) setState(() {});
             },
             onDelete: (reason) async {
@@ -895,7 +989,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               // Les exceptions DeleteSaleException sont propagées au dialog
               // qui les affiche en place.
               await DeleteSaleUseCase()
-                  .call(orderId: _orders[i].id!, reason: reason);
+                  .call(orderId: orders[i].id!, reason: reason);
               if (mounted) setState(() {});
             },
             // Rebuild parent → `_orders` relit Hive → card reçoit une Sale
@@ -1337,9 +1431,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                           shape: BoxShape.circle),
                     ),
                     const SizedBox(width: 5),
-                    Icon(Icons.person_outline_rounded,
-                        size: 11, color: AppColors.textHint),
-                    const SizedBox(width: 3),
+                    _ClientAvatar(name: client),
+                    const SizedBox(width: 5),
                     Flexible(
                       child: Text(client,
                           style: AppTextStyles.captionBold
@@ -2728,6 +2821,62 @@ class _PaymentStatusPill extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.35), width: 0.5),
       ),
       child: Text(status.label,
+          style: AppTextStyles.microBold.copyWith(color: color)),
+    );
+  }
+}
+
+// ─── Avatar client (initiales colorées) ──────────────────────────────────────
+/// Pastille ronde avec les initiales du client, couleur stable dérivée du
+/// nom. Rend la liste des commandes plus vivante et scannable qu'une icône
+/// générique. Couleur déterministe → un même client garde toujours la même.
+class _ClientAvatar extends StatelessWidget {
+  final String name;
+  const _ClientAvatar({required this.name});
+
+  // Palette douce — l'index est dérivé du nom (cf. _color).
+  static const _palette = [
+    Color(0xFF6366F1), // indigo
+    Color(0xFF0EA5E9), // sky
+    Color(0xFF10B981), // emerald
+    Color(0xFFF59E0B), // amber
+    Color(0xFFEF4444), // red
+    Color(0xFFEC4899), // pink
+    Color(0xFF8B5CF6), // violet
+    Color(0xFF14B8A6), // teal
+  ];
+
+  String get _initials {
+    final parts = name.trim().split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) {
+      final p = parts.first;
+      return (p.length >= 2 ? p.substring(0, 2) : p).toUpperCase();
+    }
+    return (parts.first[0] + parts.last[0]).toUpperCase();
+  }
+
+  Color get _color {
+    var h = 0;
+    for (final c in name.codeUnits) {
+      h = (h * 31 + c) & 0x7fffffff;
+    }
+    return _palette[h % _palette.length];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _color;
+    return Container(
+      width: 20, height: 20,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        shape: BoxShape.circle,
+        border: Border.all(color: color.withValues(alpha: 0.35), width: 0.5),
+      ),
+      child: Text(_initials,
           style: AppTextStyles.microBold.copyWith(color: color)),
     );
   }
