@@ -11,6 +11,8 @@ import '../../../../core/widgets/fortress_logo.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/autocomplete_text_field.dart';
 import '../../../../shared/widgets/product_grid_card.dart';
+import '../../../../shared/widgets/product_image_card.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../inventaire/domain/entities/product.dart';
 
 /// Catalogue public d'une boutique — accessible sans authentification via
@@ -406,6 +408,31 @@ class _CataloguePageState extends State<CataloguePage> {
         imageUrl:      item.imageUrl,
       );
 
+  /// Ouvre la fiche produit détaillée : grande image zoomable, galerie des
+  /// variantes (chaque variante porte sa propre image) et bouton
+  /// « Commander ». Déclenchée au tap sur une card hors mode sélection
+  /// multiple. Valorise les visuels pour déclencher l'achat côté client.
+  void _openProductSheet(_CatalogueData data, _CatalogueItem item) {
+    // Galerie = les variantes du même produit (1 item = 1 variante).
+    // Une seule → la rangée de miniatures est masquée dans la fiche.
+    final siblings = data.items
+        .where((it) => it.productId == item.productId)
+        .toList();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ProductDetailSheet(
+        item:     item,
+        siblings: siblings,
+        onOrder:  (chosen) {
+          Navigator.of(context).pop();
+          _placeOrder(data, [chosen]);
+        },
+      ),
+    );
+  }
+
   Future<void> _openFiltersSheet(_CatalogueData data) async {
     final result = await showModalBottomSheet<_FiltersResult>(
       context: context,
@@ -540,8 +567,14 @@ class _CataloguePageState extends State<CataloguePage> {
                                     selected:         selected,
                                     onSelectionChanged: (_) =>
                                         _toggleSelect(item.key),
+                                    // Hors mode sélection multiple, le tap
+                                    // ouvre la fiche produit (grande image
+                                    // zoomable + galerie variantes +
+                                    // commander). En mode sélection,
+                                    // ProductGridCard route le tap vers
+                                    // onSelectionChanged (coche la card).
                                     onTap: () =>
-                                        _toggleSelect(item.key),
+                                        _openProductSheet(data, item),
                                   );
                                 },
                                 childCount: filtered.length,
@@ -1703,4 +1736,247 @@ class _DeliveryPlaceholder extends StatelessWidget {
             color: Theme.of(context).colorScheme.onSurfaceVariant
                 .withValues(alpha: 0.4)),
       );
+}
+
+// ─── Fiche produit (catalogue public) ───────────────────────────────────────
+//
+// Bottom sheet ouverte au tap sur une card (hors mode sélection). Valorise le
+// visuel : grande image zoomable (pincer / molette), galerie des variantes du
+// même produit (chacune a sa propre image), prix bien visible, et bouton
+// « Commander » qui réutilise le flux `_placeOrder` (RPC place_public_order).
+// Objectif : laisser le client examiner le produit en grand → déclencher l'achat.
+class _ProductDetailSheet extends StatefulWidget {
+  final _CatalogueItem item;
+  final List<_CatalogueItem> siblings;
+  final ValueChanged<_CatalogueItem> onOrder;
+  const _ProductDetailSheet({
+    required this.item,
+    required this.siblings,
+    required this.onOrder,
+  });
+
+  @override
+  State<_ProductDetailSheet> createState() => _ProductDetailSheetState();
+}
+
+class _ProductDetailSheetState extends State<_ProductDetailSheet> {
+  late _CatalogueItem _active;
+  final _zoom = TransformationController();
+
+  @override
+  void initState() {
+    super.initState();
+    _active = widget.item;
+  }
+
+  @override
+  void dispose() {
+    _zoom.dispose();
+    super.dispose();
+  }
+
+  void _select(_CatalogueItem it) {
+    if (it.key == _active.key) return;
+    setState(() {
+      _active = it;
+      _zoom.value = Matrix4.identity(); // reset zoom au changement d'image
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sem   = theme.semantic;
+    final hasGallery = widget.siblings.length > 1;
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.92,
+      minChildSize:     0.55,
+      maxChildSize:     0.96,
+      expand: false,
+      builder: (ctx, scrollCtrl) => Container(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        ),
+        child: Column(children: [
+          // ── Poignée + fermer ──────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 10, 8, 2),
+            child: Row(children: [
+              const SizedBox(width: 32),
+              Expanded(
+                child: Center(
+                  child: Container(
+                    width: 40, height: 4,
+                    decoration: BoxDecoration(
+                      color: sem.borderSubtle,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close_rounded,
+                    size: 20, color: AppColors.textHint),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(
+                    minWidth: 32, minHeight: 32),
+              ),
+            ]),
+          ),
+
+          Expanded(
+            child: ListView(
+              controller: scrollCtrl,
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+              children: [
+                // ── Grande image zoomable ───────────────────────────
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: AspectRatio(
+                    aspectRatio: 1,
+                    child: Container(
+                      color: sem.brand.withValues(alpha: 0.06),
+                      child: InteractiveViewer(
+                        transformationController: _zoom,
+                        minScale: 1, maxScale: 4,
+                        child: ProductImageCard(
+                          imageUrl:   _active.imageUrl,
+                          fillParent: true,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  const Icon(Icons.zoom_in_rounded,
+                      size: 13, color: AppColors.textHint),
+                  const SizedBox(width: 4),
+                  Text('Pincez ou faites défiler pour zoomer',
+                      style: AppTextStyles.micro
+                          .copyWith(color: AppColors.textHint)),
+                ]),
+
+                // ── Galerie des variantes (miniatures) ──────────────
+                if (hasGallery) ...[
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    height: 60,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: widget.siblings.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (_, i) {
+                        final s  = widget.siblings[i];
+                        final on = s.key == _active.key;
+                        return GestureDetector(
+                          onTap: () => _select(s),
+                          child: Container(
+                            width: 60,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: on
+                                    ? AppColors.primary
+                                    : sem.borderSubtle,
+                                width: on ? 2 : 1,
+                              ),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(9),
+                              child: ProductImageCard(
+                                imageUrl:   s.imageUrl,
+                                fillParent: true,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+
+                // ── Nom + variante ──────────────────────────────────
+                const SizedBox(height: 18),
+                Text(_active.baseProductName,
+                    style: AppTextStyles.title.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: theme.colorScheme.onSurface)),
+                if (_active.variantName != null
+                    && _active.variantName!.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(_active.variantName!,
+                      style: AppTextStyles.bodySm
+                          .copyWith(color: AppColors.textSecondary)),
+                ],
+
+                // ── Prix + disponibilité ────────────────────────────
+                const SizedBox(height: 14),
+                Row(children: [
+                  Text(CurrencyFormatter.format(_active.price),
+                      style: AppTextStyles.display.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.primary)),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: sem.successSurface,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Container(width: 6, height: 6,
+                          decoration: BoxDecoration(
+                              color: sem.success, shape: BoxShape.circle)),
+                      const SizedBox(width: 6),
+                      Text('En stock',
+                          style: AppTextStyles.captionBold
+                              .copyWith(color: sem.successText)),
+                    ]),
+                  ),
+                ]),
+
+                if ((_active.sku ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text('Réf. ${_active.sku}',
+                      style: AppTextStyles.micro.copyWith(
+                          color: AppColors.textHint,
+                          fontFamily: 'monospace')),
+                ],
+              ],
+            ),
+          ),
+
+          // ── Bouton « Commander » épinglé en bas ────────────────────
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: SizedBox(
+                width: double.infinity, height: 50,
+                child: ElevatedButton.icon(
+                  onPressed: () => widget.onOrder(_active),
+                  icon: const Icon(Icons.shopping_bag_rounded, size: 18),
+                  label: Text('Commander',
+                      style: AppTextStyles.bodyBold
+                          .copyWith(color: Colors.white)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
 }
