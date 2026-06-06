@@ -15,6 +15,8 @@ import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../widgets/shop_payments_sheet.dart';
 import '../../../../shared/widgets/plan_card.dart';
+import '../../../../shared/widgets/form_sheet.dart';
+import '../widgets/plan_form_sheet.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../subscription/domain/models/plan_type.dart';
 import '../../../../core/storage/hive_boxes.dart';
@@ -1191,8 +1193,13 @@ class _PlansSection extends ConsumerWidget {
                             color: theme.colorScheme.onSurface)),
                   ),
                   ElevatedButton.icon(
-                    onPressed: () => AppSnack.info(context,
-                        'Ajout d\'un plan — à brancher.'),
+                    onPressed: () async {
+                      final created = await showFormSheet<bool>(
+                        context: context,
+                        builder: (_) => const PlanFormSheet(),
+                      );
+                      if (created == true) ref.invalidate(_saPlansProvider);
+                    },
                     icon: const Icon(Icons.add_rounded, size: 16),
                     label: Text(l.planAddNew,
                         maxLines: 1,
