@@ -4453,11 +4453,34 @@ end \$\$;""",
   }
 
   static Future<void> renameBrand(String shopId, String old, String neo) async {
-    await deleteBrand(shopId, old); await saveBrand(shopId, neo);
+    _assertNotFrozen();
+    if (old == neo) return;
+    // Cascade vers les produits AVANT de retirer l'ancienne marque (sinon
+    // deleteBrand jette : « utilisée par des produits »). Répercute le
+    // renommage partout où la marque est référencée.
+    int used = 0;
+    for (final p in LocalStorageService.getProductsForShop(shopId)) {
+      if (p.brand == old) {
+        final u = p.copyWith(brand: neo);
+        await HiveBoxes.productsBox.put(p.id!, _productToMap(u));
+        _bgWrite({'table': 'products', 'op': 'upsert', 'data': _productToSupabase(u)});
+        used++;
+      }
+    }
+    await saveBrand(shopId, neo);
+    // Retirer l'ancienne marque (déjà cascadée → plus référencée).
+    final list = LocalStorageService.getBrands(shopId)..remove(old);
+    await HiveBoxes.settingsBox.put('brands_$shopId', list);
+    _bgWrite({'table': 'brands', 'op': 'delete', 'col': 'name', 'val': old,
+              'data': {'shop_id': shopId, 'name': old}});
+    if (used > 0) {
+      LocalStorageService.invalidateProductsCache();
+      _notify('products', shopId);
+    }
     await ActivityLogService.log(
       action: 'brand_updated', targetType: 'brand',
       targetId: neo, targetLabel: neo, shopId: shopId,
-      details: {'old_name': old},
+      details: {'old_name': old, if (used > 0) 'used_by': used},
     );
   }
 
