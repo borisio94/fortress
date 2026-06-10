@@ -147,6 +147,14 @@ class ParametresPage extends ConsumerWidget {
                 color: AppColors.primary,
                 onTap: () => context.push('/shop/$shopId/parametres/theme'),
               ),
+              _Tile(
+                icon: Icons.format_size_rounded,
+                label: 'Taille du texte',
+                subtitle: 'Agrandir ou réduire le texte de l\'app',
+                color: AppColors.primary,
+                onTap: () =>
+                    context.push('/shop/$shopId/parametres/text-size'),
+              ),
               // Mode démo — affiche un cercle visible à chaque appui.
               // Utile pour les enregistrements promo sur mobile (iOS n'a
               // pas d'option système équivalente). Désactivé par défaut.
@@ -598,9 +606,7 @@ class _DemoModeTile extends ConsumerWidget {
                     maxLines: 1, overflow: TextOverflow.ellipsis,
                     style: AppTextStyles.bodyBold.copyWith(color: titleColor)),
                 Text(
-                  enabled
-                      ? 'Vos appuis sont visibles à l\'écran'
-                      : 'Affiche un cercle à chaque appui (enregistrement vidéo)',
+                  'Marque chaque appui d\'un cercle (enregistrement vidéo)',
                   maxLines: 1, overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.captionHint,
                 ),

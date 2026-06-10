@@ -3322,14 +3322,6 @@ class _ProductActionsMenu extends ConsumerWidget {
         Text('Partager via WhatsApp', style: AppTextStyles.body),
       ]),
     ));
-    items.add(PopupMenuItem<String>(
-      value: 'share',
-      child: Row(children: [
-        Icon(Icons.share_outlined, size: 16, color: AppColors.secondary),
-        const SizedBox(width: 8),
-        const Text('Partager', style: AppTextStyles.body),
-      ]),
-    ));
     if (perms.canEditProduct && !isPartnerView) {
       final promoActive = product.variants
           .any((v) => v.promoEnabled && (v.promoPrice ?? 0) > 0);

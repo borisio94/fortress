@@ -4,8 +4,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/config/app_modes.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/router/route_names.dart';
+import '../../../../core/router/registration_flag.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/country_phone_data.dart';
@@ -20,7 +22,6 @@ import '../../../../shared/widgets/language_switcher.dart';
 import '../../../../shared/widgets/phone_field.dart';
 import '../../../shop_selector/domain/usecases/create_shop_usecase.dart';
 import '../../../shop_selector/presentation/bloc/shop_selector_bloc.dart';
-import '../../../../shared/providers/current_shop_provider.dart';
 import '../bloc/auth_bloc.dart';
 import '../bloc/auth_event.dart';
 import '../bloc/auth_state.dart';
@@ -102,7 +103,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   // ── Step 2 — Boutique ─────────────────────────────────────────────────
   final _shopNameCtrl    = TextEditingController();
   final _shopAddressCtrl = TextEditingController();
-  String  _sector        = 'retail';
+  String  _sector        = kEcommerceOnlyMode ? 'ecommerce' : 'retail';
   String? _shopNameError;
   String? _shopAddressError;
 
@@ -166,6 +167,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
       c.dispose();
     }
     _pageCtrl.dispose();
+    registrationInProgress = false;
     super.dispose();
   }
 
@@ -226,6 +228,9 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   void _submit() {
     if (_submitting) return;
     setState(() => _submitting = true);
+    // Empêche le routeur de détourner /auth/register vers le paywall pendant
+    // l'auto-login → création boutique → déconnexion → login.
+    registrationInProgress = true;
     context.read<AuthBloc>().add(AuthSignUpAutoLoginRequested(
       name:     _namCtrl.text.trim(),
       email:    _mailCtrl.text.trim(),
@@ -261,6 +266,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
             listener: (ctx, state) {
               if (state is AuthError && _submitting) {
                 setState(() => _submitting = false);
+                registrationInProgress = false;
                 AppSnack.error(ctx, state.message);
               } else if (state is AuthAuthenticated && _submitting) {
                 // Sign-up OK → enchaîne sur la création de boutique. Le
@@ -272,21 +278,25 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
           BlocListener<ShopSelectorBloc, ShopSelectorState>(
             listener: (ctx, state) {
               if (state is ShopCreated && _submitting) {
-                ref.read(currentShopProvider.notifier).setShop(state.shop);
-                ref.read(myShopsProvider.notifier).addShop(state.shop);
+                // Nouveau flux (2026-06-06) : l'essai 14 jours est DÉJÀ activé
+                // en base par le trigger create_trial_subscription. Plutôt que
+                // d'enchaîner en auto-login (où get_user_plan pouvait être
+                // appelé AVANT que le trial soit visible → paywall « Expiré »),
+                // on déconnecte et on renvoie vers l'écran de connexion. Au
+                // login suivant, le trial existe → aucun paywall.
+                context.read<AuthBloc>().add(AuthLogoutRequested());
                 AppSnack.success(ctx,
-                    'Bienvenue ! Votre essai 14 jours commence maintenant.');
-                // Création de compte terminée → slides d'intro (une seule
-                // fois, ICI uniquement). Le redirect ne force plus les slides
-                // au login ; c'est donc ce flux qui les déclenche. La page
-                // slides marque ensuite le flag serveur et entre dans l'app.
-                ctx.go(RouteNames.onboardingSlides);
+                    'Compte créé ! Votre essai de 14 jours est activé. '
+                    'Connectez-vous pour commencer.');
+                ctx.go(RouteNames.login);
+                registrationInProgress = false;
               } else if (state is ShopSelectorError && _submitting) {
                 // Compte créé OK mais shop KO → on envoie l'utilisateur sur
                 // le formulaire create-shop classique pour qu'il retente
                 // manuellement. Pas de rollback du compte (impossible
                 // sans RPC dédié côté Supabase Auth).
                 setState(() => _submitting = false);
+                registrationInProgress = false;
                 AppSnack.error(ctx,
                     'Compte créé, mais la boutique n\'a pas pu être créée : '
                     '${state.message}. Réessayez ci-dessous.');

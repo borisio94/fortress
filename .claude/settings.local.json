@@ -141,7 +141,30 @@
       "Bash(Sort-Object)",
       "Bash(awk 'NR<=1291' \"C:/Users/DELL PRO/Desktop/flutter_projets/pratique_app/fortress/lib/features/hr/presentation/pages/employees_page.dart\")",
       "PowerShell(npx --yes supabase@latest --version 2>&1 | Select-Object -First 10)",
-      "PowerShell(npx --yes supabase@latest functions deploy reset-platform --project-ref hyxvussnlnvbkalqzovb 2>&1 | Select-Object -First 40)"
+      "PowerShell(npx --yes supabase@latest functions deploy reset-platform --project-ref hyxvussnlnvbkalqzovb 2>&1 | Select-Object -First 40)",
+      "Bash(git checkout *)",
+      "Bash(awk '$0 ~ /1[0-9][0-9][0-9]:|2[0-2][0-9][0-9]:|9[0-9][0-9]:/')",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\DELL PRO\\\\Downloads\" -File | Where-Object { $_.LastWriteTime -gt \\(Get-Date\\).AddHours\\(-6\\) } | Sort-Object LastWriteTime -Descending | Select-Object Name, LastWriteTime, Length | Format-Table -AutoSize)",
+      "Bash(git branch *)",
+      "Bash(timeout 4 powershell -Command \"\\(Invoke-WebRequest -Uri http://localhost:8000 -UseBasicParsing\\).StatusCode\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000)",
+      "Bash(curl -s -o /dev/null -w \"racine: %{http_code}\\\\n\" http://localhost:8000/)",
+      "Bash(curl -s -o /dev/null -w \"deep route /catalogue/test: %{http_code}\\\\n\" http://localhost:8000/catalogue/abc123)",
+      "Bash(curl -s -o /dev/null -w \"asset main.dart.js: %{http_code}\\\\n\" http://localhost:8000/main.dart.js)",
+      "Bash(curl -s -X POST 'https://hyxvussnlnvbkalqzovb.supabase.co/rest/v1/rpc/get_public_catalogue_products' -H \"apikey: sb_publishable_R7Jg-Tx4WRMkVI5TMC4jpQ_p8NHq4bd\" -H \"Authorization: Bearer sb_publishable_R7Jg-Tx4WRMkVI5TMC4jpQ_p8NHq4bd\" -H \"Content-Type: application/json\" -d '{\"p_shop_id\":\"977d8f64-f2fa-44f2-b2a3-480c2d86bb1c\",\"p_category\":null}')",
+      "Bash(git check-ignore *)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\DELL PRO\\\\Desktop\\\\flutter_projets\\\\pratique_app\\\\fortress\" -Recurse -Filter \"*.sql\")",
+      "PowerShell($c = Get-Command supabase -ErrorAction SilentlyContinue; if \\($c\\) { \"FOUND: \" + $c.Source } else { \"supabase not on PATH\" }; \"---npx---\"; \\(Get-Command npx -ErrorAction SilentlyContinue\\).Source; \"---ref---\"; if \\(Test-Path \"supabase\\\\.temp\\\\project-ref\"\\) { Get-Content \"supabase\\\\.temp\\\\project-ref\" })",
+      "PowerShell(npx --yes supabase@latest functions deploy shop-backup --no-verify-jwt --project-ref hyxvussnlnvbkalqzovb 2>&1 | Select-Object -Last 25)",
+      "PowerShell(Get-Process *)",
+      "PowerShell($f=\"C:\\\\Users\\\\DELL PRO\\\\Desktop\\\\flutter_projets\\\\pratique_app\\\\fortress\\\\lib\\\\features\\\\super_admin\\\\presentation\\\\pages\\\\super_admin_page.dart\"; \\(Get-Item $f\\).LastWriteTime; Start-Sleep -Milliseconds 1500; \\(Get-Item $f\\).LastWriteTime)",
+      "Bash(ls supabase/functions/)",
+      "Bash(ls -la supabase/functions/reset-platform/)",
+      "PowerShell($c = Get-Command supabase -ErrorAction SilentlyContinue; if \\($c\\) { \"FOUND: $\\($c.Source\\)\"; supabase --version } else { \"supabase introuvable dans le PATH\" ; \"Test npx:\"; \\(Get-Command npx -ErrorAction SilentlyContinue\\).Source })",
+      "PowerShell(npx supabase functions deploy reset-platform --project-ref hyxvussnlnvbkalqzovb 2>&1 | Select-Object -Last 30)",
+      "PowerShell(firebase serve *)",
+      "PowerShell(git *)"
     ]
   }
 }

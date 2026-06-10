@@ -16,10 +16,18 @@ enum PlanName { trial, starter, pro, business, normal, none }
 
 class UserPlan {
   final PlanName       plan;
+  /// Nom technique RÉEL du plan (ex. 'pro', 'business', ou un plan
+  /// personnalisé créé par le SA comme 'test'). `plan` (enum) ne couvre que
+  /// les types canoniques ; ce champ préserve les noms custom (ciblage
+  /// broadcast par plan).
+  final String         planNameRaw;
   final bool           offlineEnabled;
   final int            maxShops;
   final int            maxUsersPerShop;
   final int            maxProducts;
+  final int            maxPartnerDepots;     // total partenaires / compte
+  final int            maxEmployeesPerShop;  // employés par boutique
+  final int            maxWarehouses;        // total magasins / compte
   final List<Feature>  features;
   final String         subStatus;       // 'active' | 'trial' | 'expired' | 'cancelled' | 'none'
   final DateTime?      expiresAt;
@@ -28,10 +36,14 @@ class UserPlan {
 
   const UserPlan({
     this.plan            = PlanName.none,
+    this.planNameRaw     = 'none',
     this.offlineEnabled  = false,
     this.maxShops        = 0,
     this.maxUsersPerShop = 0,
     this.maxProducts     = 0,
+    this.maxPartnerDepots    = 0,
+    this.maxEmployeesPerShop = 0,
+    this.maxWarehouses       = 0,
     this.features        = const [],
     this.subStatus       = 'none',
     this.expiresAt,
@@ -45,10 +57,14 @@ class UserPlan {
   // Super admin — tous les droits, toutes les features
   factory UserPlan.superAdmin() => const UserPlan(
     plan:            PlanName.business,
+    planNameRaw:     'business',
     offlineEnabled:  true,
     maxShops:        999,
     maxUsersPerShop: 999,
     maxProducts:     2147483647,
+    maxPartnerDepots:    999,
+    maxEmployeesPerShop: 999,
+    maxWarehouses:       999,
     features:        Feature.values,
     subStatus:       'active',
     isBlocked:       false,
@@ -77,10 +93,14 @@ class UserPlan {
         'business' => PlanName.business,
         _          => PlanName.none,
       },
+      planNameRaw:     planStr,
       offlineEnabled:  m['offline_enabled']     as bool?   ?? false,
       maxShops:        (m['max_shops']           as num?)?.toInt() ?? 0,
       maxUsersPerShop: (m['max_users_per_shop']  as num?)?.toInt() ?? 0,
       maxProducts:     (m['max_products']        as num?)?.toInt() ?? 0,
+      maxPartnerDepots:    (m['max_partner_depots']     as num?)?.toInt() ?? 0,
+      maxEmployeesPerShop: (m['max_employees_per_shop'] as num?)?.toInt() ?? 0,
+      maxWarehouses:       (m['max_warehouses']         as num?)?.toInt() ?? 0,
       features:        features,
       subStatus:       m['sub_status']           as String? ?? 'none',
       expiresAt:       m['expires_at'] != null
@@ -93,18 +113,15 @@ class UserPlan {
 
   /// Sérialisation pour cache Hive (clé `user_plan_<userId>`).
   Map<String, dynamic> toMap() => {
-    'plan_name':           switch (plan) {
-      PlanName.trial    => 'trial',
-      PlanName.starter  => 'starter',
-      PlanName.normal   => 'starter',
-      PlanName.pro      => 'pro',
-      PlanName.business => 'business',
-      PlanName.none     => 'none',
-    },
+    // Nom réel (préserve les plans personnalisés au round-trip cache).
+    'plan_name':           planNameRaw,
     'offline_enabled':     offlineEnabled,
     'max_shops':           maxShops,
     'max_users_per_shop':  maxUsersPerShop,
     'max_products':        maxProducts,
+    'max_partner_depots':     maxPartnerDepots,
+    'max_employees_per_shop': maxEmployeesPerShop,
+    'max_warehouses':         maxWarehouses,
     'features':            features.map((f) => f.key).toList(),
     'sub_status':          subStatus,
     'expires_at':          expiresAt?.toIso8601String(),
@@ -181,6 +198,21 @@ class UserPlan {
       isSuperAdmin
       || (isActive
           && (maxProducts <= 0 || currentProductCount < maxProducts));
+
+  /// Peut ajouter un employé de plus dans une boutique (hors propriétaire) ?
+  bool canAddEmployee(int currentEmployeeCount) =>
+      isSuperAdmin
+      || (isActive && currentEmployeeCount < maxEmployeesPerShop);
+
+  /// Peut ajouter un dépôt partenaire de plus (total compte) ?
+  bool canAddPartner(int currentPartnerCount) =>
+      isSuperAdmin
+      || (isActive && currentPartnerCount < maxPartnerDepots);
+
+  /// Peut ajouter un magasin (entrepôt) de plus (total compte) ?
+  bool canAddWarehouse(int currentWarehouseCount) =>
+      isSuperAdmin
+      || (isActive && currentWarehouseCount < maxWarehouses);
 
   /// Test feature flag.
   bool hasFeature(Feature f) => isSuperAdmin || features.contains(f);

@@ -69,6 +69,7 @@ import '../../features/parametres/presentation/pages/apropos_page.dart';
 import '../../features/parametres/presentation/pages/language_page.dart';
 import '../../features/parametres/presentation/pages/currency_page.dart';
 import '../../features/parametres/presentation/pages/theme_page.dart';
+import '../../features/parametres/presentation/pages/text_size_page.dart';
 import '../../features/parametres/presentation/pages/caisse_config_page.dart';
 import '../../features/parametres/presentation/pages/whatsapp_templates_page.dart';
 import '../../features/parametres/presentation/pages/notifications_page.dart';
@@ -88,6 +89,8 @@ import '../../shared/widgets/offline_banner_widget.dart'
     show tokenRefreshFailedProvider, isOfflineProvider;
 import '../storage/local_storage_service.dart';
 import '../../shared/widgets/suspended_shop_screen.dart';
+import '../../shared/widgets/blocked_account_screen.dart';
+import 'registration_flag.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../storage/hive_boxes.dart';
@@ -181,6 +184,10 @@ class AuthRouterNotifier extends ChangeNotifier {
           SessionValidator.validate(),
           ref.read(subscriptionProvider.notifier).load(),
           _syncMemberships(ref),
+          // Statut des boutiques (status='suspended' inclus) en Hive AVANT le
+          // notifyListeners → la garde « Boutique suspendue » du shell voit le
+          // bon statut dès le 1er build (même principe que le blocage/plan).
+          _syncUserShops(),
           // Flag serveur des slides d'intro (1 fois par compte, cross-device).
           loadOnboardingSlidesSeen(ref),
         ]).whenComplete(() {
@@ -213,6 +220,14 @@ class AuthRouterNotifier extends ChangeNotifier {
       PresenceService.stop();
     }
     if (wasAuth != _isAuthenticated || justInitialized) notifyListeners();
+  }
+
+  /// Synchronise les boutiques de l'utilisateur (incluant status/suspension)
+  /// dans Hive. Bloque jusqu'à completion pour que getShop() soit à jour.
+  Future<void> _syncUserShops() async {
+    try {
+      await AppDatabase.getMyShops();
+    } catch (_) {}
   }
 
   /// Synchronise les memberships de l'utilisateur courant et met à jour
@@ -325,6 +340,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // On gère donc explicitement ici : loggé + plan chargé → postAuthDest.
       if (isPublicMarketing && !isLoggedIn) return null;
 
+      // ── Inscription en cours : ne pas détourner /auth/* ────────────
+      // Pendant le tunnel d'inscription, l'auto-login post-signup rend la
+      // session active ; sans ce garde, le redirect enverrait /auth/register
+      // vers /subscription (plan pas encore actif + 0 boutique) avant que le
+      // tunnel ait créé la boutique puis déconnecté. cf. registration_flag.
+      if (isAuthRoute && registrationInProgress) return null;
+
       // ── Boot : check session pas encore terminé ────────────────────
       // Au refresh navigateur, AuthBloc évalue la session Supabase de
       // façon asynchrone. Tant que ce check n'a pas émis de résultat,
@@ -349,6 +371,55 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       // Plan pas encore chargé → ne pas rediriger (évite le flash)
       if (plan == null) return null;
+
+      // ── Compte bloqué par le super-admin → écran dédié (priorité haute) ──
+      // get_user_plan.is_blocked reflète prof_status='blocked' (hotfix_106).
+      // Le SA n'est jamais bloqué ; il conserve l'accès pour gérer le blocage.
+      if (!plan.isSuperAdmin && plan.isBlocked) {
+        return loc == RouteNames.blocked ? null : RouteNames.blocked;
+      }
+      if (loc == RouteNames.blocked) {
+        // Plus bloqué (ou super-admin) → ressortir vers la destination normale.
+        return postAuthDestination();
+      }
+
+      // ── Boutique suspendue / membre suspendu → écran dédié ──────────
+      // Même mécanisme que le blocage (redirect, fiable). Les données
+      // (status boutique + statut membership) sont rafraîchies au login
+      // AVANT notifyListeners (cf. _syncUserShops / _syncMemberships).
+      if (!plan.isSuperAdmin) {
+        final suspUid = Supabase.instance.client.auth.currentUser?.id;
+        bool suspendedFor(String sid) {
+          if (sid.isEmpty) return false;
+          final shopSusp = LocalStorageService.getShop(sid)?.isSuspended ?? false;
+          final memberSusp = suspUid != null &&
+              AppDatabase.getMembershipStatus(suspUid, sid) == 'suspended';
+          return shopSusp || memberSusp;
+        }
+        if (loc.startsWith('${RouteNames.suspended}/')) {
+          final parts = loc.split('/');
+          final sid = parts.length >= 3 ? parts[2] : '';
+          return suspendedFor(sid) ? null : '/shop/$sid/dashboard';
+        }
+        if (loc.startsWith('/shop/')) {
+          final parts = loc.split('/');
+          final sid = parts.length >= 3 ? parts[2] : '';
+          if (suspendedFor(sid)) return '${RouteNames.suspended}/$sid';
+        }
+      }
+
+      // ── Garde super-admin (défense en profondeur, hotfix 2026-06-06) ──
+      // Le serveur refuse déjà toute RPC SA (_is_super_admin) et la RLS
+      // masque les données, mais SANS ce garde un utilisateur NON-SA muni
+      // d'un plan actif (ou en mode dégradé) pouvait charger la page
+      // `/super-admin` (ou `/admin`) en tapant l'URL — la redirection
+      // retombait sur `null` plus bas. On le renvoie vers sa destination
+      // normale. La confinement RÉCIPROQUE (SA hors de sa zone) est géré
+      // par le CAS 1 ci-dessous.
+      if (!plan.isSuperAdmin &&
+          (loc.startsWith('/super-admin') || loc.startsWith('/admin'))) {
+        return postAuthDestination();
+      }
 
       // ── Slides d'intro : UNE FOIS par compte, à la 1ʳᵉ connexion ────
       // Flag serveur profiles.onboarding_slides_seen (hotfix_099), chargé au
@@ -524,6 +595,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             builder: (c, s) => const AlertDemoPage()),
       GoRoute(path: RouteNames.login,          builder: (c, s) => const LoginPage()),
       GoRoute(path: RouteNames.register,        builder: (c, s) => const RegisterPage()),
+      GoRoute(path: RouteNames.blocked,         builder: (c, s) => const BlockedAccountScreen()),
+      GoRoute(path: '/suspended/:shopId', builder: (c, s) {
+        final sid = s.pathParameters['shopId'] ?? '';
+        final shop = LocalStorageService.getShop(sid);
+        final reason = (shop?.isSuspended ?? false)
+            ? shop?.suspendedReason
+            : 'Votre accès à cette boutique a été suspendu par un administrateur.';
+        return SuspendedShopScreen(reason: reason);
+      }),
       // Onboarding 1ʳᵉ ouverture (PR-1).
       GoRoute(path: RouteNames.onboardingSlides,
           builder: (c, s) => const OnboardingSlidesPage()),
@@ -628,7 +708,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         // navigatorKey unique — isole le ShellRoute du navigator racine
         navigatorKey: _shellNavigatorKey,
         builder: (context, state, child) {
-          final shopId = state.pathParameters['shopId'] ?? '';
+          // Au niveau d'un ShellRoute, state.pathParameters['shopId'] est
+          // souvent VIDE (le param appartient à la sous-route). On l'extrait
+          // donc du chemin /shop/<id>/… pour que les gardes (boutique
+          // suspendue / membre suspendu) reçoivent le bon shopId.
+          final segs = state.uri.pathSegments;
+          final shopId = (segs.length >= 2 && segs.first == 'shop')
+              ? segs[1]
+              : (state.pathParameters['shopId'] ?? '');
           return ShopShell(key: ValueKey(shopId), child: child, shopId: shopId);
         },
         routes: [
@@ -783,6 +870,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/parametres/theme',
               builder: (c, s) => ThemePage(
                   shopId: s.pathParameters['shopId'])),
+          GoRoute(path: '/shop/:shopId/parametres/text-size',
+              builder: (c, s) => TextSizePage(
+                  shopId: s.pathParameters['shopId'])),
           GoRoute(path: '/shop/:shopId/parametres/caisse',
               builder: (c, s) => CaisseConfigPage(
                   shopId: s.pathParameters['shopId']!)),
@@ -826,6 +916,42 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   );
 });
 
+/// Statut « suspendu » RÉACTIF d'une boutique. Écoute les changements
+/// AppDatabase (sync/realtime) et force un refresh serveur à l'entrée, pour
+/// que le shell bascule sur SuspendedShopScreen dès qu'une suspension SA
+/// arrive — y compris en cours de session. La valeur reflète getShop().
+final shopSuspendedProvider =
+    StreamProvider.autoDispose.family<bool, String>((ref, shopId) {
+  bool read() => LocalStorageService.getShop(shopId)?.isSuspended ?? false;
+  final controller = StreamController<bool>();
+  controller.add(read());
+  AppDatabase.refreshShop(shopId); // récupère le statut courant à l'entrée
+  void listener(String table, String _) {
+    if (table == 'shops' && !controller.isClosed) controller.add(read());
+  }
+  AppDatabase.addListener(listener);
+  ref.onDispose(() {
+    AppDatabase.removeListener(listener);
+    controller.close();
+  });
+  return controller.stream;
+});
+
+/// Le MEMBRE courant est-il suspendu de cette boutique ?
+/// (shop_memberships.status='suspended'). Rafraîchit les adhésions depuis le
+/// serveur à l'entrée. L'owner n'est jamais suspendu ainsi (set_employee_status
+/// le refuse) → seul un employé suspendu est bloqué de la boutique.
+final membershipSuspendedProvider =
+    FutureProvider.autoDispose.family<bool, String>((ref, shopId) async {
+  final uid = Supabase.instance.client.auth.currentUser?.id
+      ?? LocalStorageService.getCurrentUser()?.id;
+  if (uid == null) return false;
+  try {
+    await AppDatabase.syncMemberships(uid);
+  } catch (_) {}
+  return AppDatabase.getMembershipStatus(uid, shopId) == 'suspended';
+});
+
 class ShopShell extends ConsumerWidget {
   final Widget child;
   final String shopId;
@@ -852,10 +978,21 @@ class ShopShell extends ConsumerWidget {
     // Si la boutique courante a été suspendue par le super-admin, on
     // bloque TOUT le contenu derrière un écran « Compte suspendu ». Les
     // super-admins passent (ils doivent pouvoir gérer la suspension).
+    // Réactif : rebuild dès que le statut de la boutique change (suspension SA
+    // poussée par sync/realtime), et force un refresh serveur à l'entrée.
+    ref.watch(shopSuspendedProvider(shopId));
     final shop    = LocalStorageService.getShop(shopId);
     final isSuper = LocalStorageService.getCurrentUser()?.isSuperAdmin ?? false;
     if (shop != null && shop.isSuspended && !isSuper) {
       return SuspendedShopScreen(reason: shop.suspendedReason);
+    }
+    // Membre (employé) suspendu de cette boutique → accès bloqué.
+    final memberSuspended =
+        ref.watch(membershipSuspendedProvider(shopId)).valueOrNull ?? false;
+    if (memberSuspended && !isSuper) {
+      return const SuspendedShopScreen(
+          reason:
+              'Votre accès à cette boutique a été suspendu par un administrateur.');
     }
 
     final goState = GoRouterState.of(context);

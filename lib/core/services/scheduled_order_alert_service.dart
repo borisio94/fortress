@@ -192,12 +192,25 @@ class ScheduledOrderAlertService {
       const windowBackMs  =  6 * 60 * 60 * 1000; // overdue silencieux après 6h
 
       final box = HiveBoxes.ordersBox;
+      // Boutiques encore connues localement (shopsBox indexé par shop.id) :
+      // on ignore les commandes orphelines d'une boutique supprimée pour ne
+      // pas re-déclencher d'alerte après suppression/recréation. Liste vide
+      // (cache non chargé) ⇒ pas de filtre, pour ne pas masquer au boot.
+      final validShopIds =
+          HiveBoxes.shopsBox.keys.map((k) => k.toString()).toSet();
       for (final raw in box.values) {
         try {
           final m = Map<String, dynamic>.from(raw);
           final status = m['status'] as String?;
           final orderId = m['id'] as String?;
           if (orderId == null) continue;
+          // Commande orpheline (boutique supprimée) → ignorer.
+          final sid = m['shop_id']?.toString();
+          if (validShopIds.isNotEmpty &&
+              sid != null &&
+              !validShopIds.contains(sid)) {
+            continue;
+          }
 
           // Auto-purge des acquittements si la commande n'est plus 'scheduled'.
           if (status != 'scheduled') {

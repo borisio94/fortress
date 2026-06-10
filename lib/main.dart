@@ -50,11 +50,14 @@ void main() async {
   //       un flash de hash dans la barre d'adresse.
   if (kIsWeb) usePathUrlStrategy();
 
-  // 2. Splash Flutter animé — uniquement mobile/desktop.
-  // Sur web, le splash HTML inline est déjà visible (cf. web/index.html).
-  if (!kIsWeb) {
-    runApp(const _BootSplashApp());
-  }
+  // 2. Splash Flutter (logo + spinner) AVANT les init bloquantes — WEB INCLUS.
+  // Le splash HTML inline se masque au `flutter-first-frame` : handoff continu
+  // vers ce splash Flutter (même visuel violet + logo). Sans ça, sur web, le
+  // filet de sécurité 8 s du splash HTML révélait le fond violet NU du <body>
+  // pendant que `main()` était encore bloqué sur Hive/Supabase.init → l'« écran
+  // violet » long signalé. Les deux splashes étant identiques, aucun double
+  // écran perçu.
+  runApp(const _BootSplashApp());
 
   // 3. Init séquencé : Hive d'abord (AppDatabase + Notif en dépendent),
   //    puis Supabase + AppDatabase + purge SecureStorage en parallèle.
@@ -66,27 +69,14 @@ void main() async {
   } catch (e) {
     debugPrint('Hive init error: $e');
   }
-  await Future.wait([
-    // Migration mots de passe legacy → SecureStorage. Idempotent.
-    () async {
-      try {
-        final migrated =
-            await SecureStorageService.purgeLegacyPlaintextPasswords();
-        if (migrated > 0) {
-          debugPrint('[Security] $migrated mot(s) de passe legacy migrés '
-              'vers SecureStorage (Hive nettoyé)');
-        }
-      } catch (e) {
-        debugPrint('SecureStorage purge error: $e');
-      }
-    }(),
-    SupabaseService.init().catchError((Object e) {
-      debugPrint('Supabase init error: $e');
-    }),
-    AppDatabase.init().catchError((Object e) {
-      debugPrint('AppDatabase init error: $e');
-    }),
-  ]);
+  // Supabase DOIT être prêt avant le 1er build (auth + providers touchent
+  // `Supabase.instance`). On l'attend donc — mais on NE bloque PLUS le premier
+  // frame sur `AppDatabase.init()` (rapide/local) ni la migration SecureStorage,
+  // déportés en arrière-plan dans `_initBackgroundServices()` pour afficher
+  // l'app le plus tôt possible (sinon écran de chargement long à l'entrée).
+  await SupabaseService.init().catchError((Object e) {
+    debugPrint('Supabase init error: $e');
+  });
 
   // 4. Bascule vers l'app réelle. Le runApp précédent est remplacé.
   //    Le wrapper `_AudioUnlocker` capte le 1er pointer down (web only)
@@ -114,8 +104,10 @@ class _BootSplashApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => const MaterialApp(
         debugShowCheckedModeBanner: false,
+        // Fond aligné sur le splash HTML (#534AB7) pour un handoff sans saut
+        // de couleur perceptible.
         home: Scaffold(
-          backgroundColor: Color(0xFF6C3FC7),
+          backgroundColor: Color(0xFF534AB7),
           body: Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -149,6 +141,22 @@ class _BootSplashApp extends StatelessWidget {
 /// lancés en parallèle. Appelé après runApp pour ne pas retarder le
 /// premier frame.
 Future<void> _initBackgroundServices() async {
+  // Base offline-first (rapide, local : connectivity + timers + Hive). En
+  // PREMIER car les services de notif ci-dessous en dépendent. Déporté du
+  // chemin critique pour que le 1er frame s'affiche sans l'attendre.
+  await AppDatabase.init().catchError((Object e) {
+    debugPrint('AppDatabase init error: $e');
+  });
+  // Migration mots de passe legacy → SecureStorage. Idempotent, non urgent.
+  try {
+    final migrated = await SecureStorageService.purgeLegacyPlaintextPasswords();
+    if (migrated > 0) {
+      debugPrint('[Security] $migrated mot(s) de passe legacy migrés '
+          'vers SecureStorage (Hive nettoyé)');
+    }
+  } catch (e) {
+    debugPrint('SecureStorage purge error: $e');
+  }
   await Future.wait([
     // Sentry init — peut prendre 500-2000ms (validation DSN + native
     // crash handler). Capturé en background, l'app est déjà visible.

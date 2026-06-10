@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../bloc/shop_selector_bloc.dart';
+import '../../../../core/config/app_modes.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
@@ -16,6 +17,8 @@ import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/language_switcher.dart';
 import '../../domain/usecases/create_shop_usecase.dart';
 import '../../../../shared/providers/current_shop_provider.dart';
+import '../../../../core/permisions/subscription_provider.dart';
+import '../../../subscription/presentation/widgets/subscription_guard.dart';
 
 // ── Mapping pays → monnaie ────────────────────────────────────────────────────
 const _countryCurrency = {
@@ -50,7 +53,7 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
   final _phoneCtrl   = TextEditingController();
   final _emailCtrl   = TextEditingController();
 
-  String _sector   = 'retail';
+  String _sector   = kEcommerceOnlyMode ? 'ecommerce' : 'retail';
   late String _country;
   late String _currency;
 
@@ -109,6 +112,21 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
       _emailError = _validateEmail(_emailCtrl.text);
     });
     if (_nameError != null || _emailError != null) return;
+
+    // Garde quota boutiques — chokepoint : TOUTES les voies de création
+    // passent par ici (CTA état vide, URL directe, etc.), pas seulement les
+    // boutons gardés. Empêche de dépasser maxShops du plan.
+    final plan = ref.read(currentPlanProvider);
+    final uid = LocalStorageService.getCurrentUser()?.id ?? '';
+    final shopCount = uid.isEmpty
+        ? 0 : LocalStorageService.getShopsForUser(uid).length;
+    if (!plan.canAddShop(shopCount)) {
+      UpgradeSheet.showQuota(context,
+          label:   context.l10n.featMultiShop,
+          current: shopCount,
+          max:     plan.maxShops);
+      return;
+    }
 
     context.read<ShopSelectorBloc>().add(CreateShopRequested(
       CreateShopParams(
@@ -237,13 +255,18 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
                           const SizedBox(height: 14),
 
                           // ── Secteur ──────────────────────────────
-                          AppFieldLabel('Secteur d\'activité', required: true),
-                          const SizedBox(height: 8),
-                          _SectorPicker(
-                            value: _sector,
-                            onChanged: (v) => setState(() => _sector = v),
-                          ),
-                          const SizedBox(height: 14),
+                          // Masqué en mode e-commerce unique (réversible :
+                          // kEcommerceOnlyMode). Le code du sélecteur est
+                          // conservé pour réactivation future.
+                          if (!kEcommerceOnlyMode) ...[
+                            AppFieldLabel('Secteur d\'activité', required: true),
+                            const SizedBox(height: 8),
+                            _SectorPicker(
+                              value: _sector,
+                              onChanged: (v) => setState(() => _sector = v),
+                            ),
+                            const SizedBox(height: 14),
+                          ],
 
                           // ── Info pays/monnaie déduits automatiquement ─
                           _CountryInfo(country: _country, currency: _currency),

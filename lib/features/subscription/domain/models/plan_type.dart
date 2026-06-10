@@ -106,46 +106,46 @@ class PlanLimits {
 
   /// Limites par défaut pour chaque tier — valeurs à conserver synchrones
   /// avec le seed SQL `plans` (hotfix_017).
+  // Toutes les fonctionnalités (le modèle v3 différencie par QUOTAS, pas par
+  // features : Starter « accède au reste des fonctionnalités »).
+  static const List<Feature> _allFeatures = [
+    Feature.multiShop,
+    Feature.advancedReports,
+    Feature.csvExport,
+    Feature.finances,
+    Feature.apiIntegration,
+  ];
+
   static const Map<PlanType, PlanLimits> _byType = {
+    // Essai = quotas Business (accès max), 14 jours.
     PlanType.trial: PlanLimits(
-      maxShops:        1,
-      maxUsersPerShop: 2,
-      maxProducts:     50,
-      offlineEnabled:  false,
-      features:        [],
+      maxShops:        5,
+      maxUsersPerShop: 4,
+      maxProducts:     unlimited,
+      offlineEnabled:  true,
+      features:        _allFeatures,
       trialDays:       14,
     ),
     PlanType.starter: PlanLimits(
       maxShops:        1,
-      maxUsersPerShop: 2,
+      maxUsersPerShop: 1,
       maxProducts:     500,
-      offlineEnabled:  false,
-      features:        [],
+      offlineEnabled:  true,
+      features:        _allFeatures,
     ),
     PlanType.pro: PlanLimits(
       maxShops:        3,
-      maxUsersPerShop: 10,
-      maxProducts:     unlimited,
+      maxUsersPerShop: 3,
+      maxProducts:     1500,
       offlineEnabled:  true,
-      features:        [
-        Feature.multiShop,
-        Feature.advancedReports,
-        Feature.csvExport,
-        Feature.finances,
-      ],
+      features:        _allFeatures,
     ),
     PlanType.business: PlanLimits(
-      maxShops:        unlimited,
-      maxUsersPerShop: unlimited,
+      maxShops:        5,
+      maxUsersPerShop: 4,
       maxProducts:     unlimited,
       offlineEnabled:  true,
-      features:        [
-        Feature.multiShop,
-        Feature.advancedReports,
-        Feature.csvExport,
-        Feature.finances,
-        Feature.apiIntegration,
-      ],
+      features:        _allFeatures,
     ),
     PlanType.expired: PlanLimits(
       maxShops:        0,

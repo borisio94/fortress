@@ -150,12 +150,28 @@ class NewWebOrderService {
     final out = <Sale>[];
     final box = HiveBoxes.ordersBox;
     final purge = <String>[];
+    // Boutiques encore connues localement (shopsBox est indexé par shop.id).
+    // On ignore toute commande dont la boutique n'existe plus → évite de
+    // re-notifier une commande orpheline après suppression/recréation de la
+    // boutique (la commande purgée côté serveur peut subsister dans le cache
+    // Hive de l'appareil opérateur si la suppression n'est pas passée par
+    // resetShopData). Si la liste est vide (cache non encore chargé), on ne
+    // filtre pas pour ne pas masquer de vraies alertes pendant le boot.
+    final validShopIds =
+        HiveBoxes.shopsBox.keys.map((k) => k.toString()).toSet();
     for (final raw in box.values) {
       try {
         final m = Map<String, dynamic>.from(raw);
         final id = m['id'] as String?;
         if (id == null) continue;
         if ((m['source'] as String?) != 'web') continue;
+        // Commande orpheline (boutique supprimée) → ne pas notifier.
+        final sid = m['shop_id']?.toString();
+        if (validShopIds.isNotEmpty &&
+            sid != null &&
+            !validShopIds.contains(sid)) {
+          continue;
+        }
         final status = m['status'] as String?;
         // Auto-purge l'ack si la commande n'est plus 'scheduled' — utile
         // si elle est reprogrammée plus tard (on veut re-notifier).

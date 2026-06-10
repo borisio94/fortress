@@ -5,6 +5,7 @@ import '../../features/auth/domain/entities/user.dart';
 import '../../core/storage/local_storage_service.dart';
 import '../../core/storage/hive_boxes.dart';
 import '../../core/config/supabase_client.dart';
+import '../../core/database/app_database.dart';
 
 // ─── Boutique active ──────────────────────────────────────────────────────────
 
@@ -18,6 +19,19 @@ class CurrentShopNotifier extends Notifier<ShopSummary?> {
   ShopSummary? build() {
     // Survivre aux navigations — jamais recréé tant que ProviderScope vit
     ref.keepAlive();
+
+    // Réactif : quand AppDatabase resynchronise les boutiques (ex. logo_url
+    // récupéré après login via getMyShops), relire la boutique active pour
+    // rafraîchir l'UI (sinon le logo n'apparaît qu'après une actualisation).
+    void onShopsChanged(String table, String _) {
+      if (table != 'shops') return;
+      final cur = state;
+      if (cur == null) return;
+      final fresh = LocalStorageService.getShop(cur.id);
+      if (fresh != null && fresh.logoUrl != cur.logoUrl) state = fresh;
+    }
+    AppDatabase.addListener(onShopsChanged);
+    ref.onDispose(() => AppDatabase.removeListener(onShopsChanged));
 
     // Tout le chemin de lecture est wrapped : si Hive renvoie une map
     // corrompue / un cast échoue, on retourne null plutôt que de propager

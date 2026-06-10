@@ -32,11 +32,16 @@ class _PlanFormSheetState extends State<PlanFormSheet> {
   late final TextEditingController _maxProducts;
   late final TextEditingController _maxMembers;
   late final TextEditingController _maxShops;
+  late final TextEditingController _maxEmployees;   // par boutique
+  late final TextEditingController _maxPartners;    // total compte
+  late final TextEditingController _maxWarehouses;  // total compte
   late final TextEditingController _trialDays;
   late bool _offline;
   late bool _isActive;
   late Set<String> _features;
   bool _saving = false;
+  /// Édition : prévenir les abonnés du plan (broadcast cible 'plan').
+  bool _notifySubscribers = true;
 
   /// Features connues (alignées sur l'enum `Feature` côté abonnement +
   /// seed SQL hotfix_017). L'utilisateur en sélectionne via chips.
@@ -68,6 +73,9 @@ class _PlanFormSheetState extends State<PlanFormSheet> {
     _maxProducts = TextEditingController(text: _numStr(e?['max_products'], def: '50'));
     _maxMembers  = TextEditingController(text: _numStr(e?['max_users_per_shop'], def: '1'));
     _maxShops    = TextEditingController(text: _numStr(e?['max_shops'], def: '1'));
+    _maxEmployees  = TextEditingController(text: _numStr(e?['max_employees_per_shop'], def: '0'));
+    _maxPartners   = TextEditingController(text: _numStr(e?['max_partner_depots_per_shop'], def: '0'));
+    _maxWarehouses = TextEditingController(text: _numStr(e?['max_warehouses'], def: '0'));
     _trialDays   = TextEditingController(text: _numStr(e?['trial_days'], def: '0'));
     _offline     = e?['offline_enabled'] == true;
     _isActive    = e?['is_active'] as bool? ?? true;
@@ -84,6 +92,7 @@ class _PlanFormSheetState extends State<PlanFormSheet> {
     for (final c in [
       _name, _label, _priceM, _priceQ, _priceY,
       _maxProducts, _maxMembers, _maxShops, _trialDays,
+      _maxEmployees, _maxPartners, _maxWarehouses,
     ]) {
       c.dispose();
     }
@@ -113,7 +122,24 @@ class _PlanFormSheetState extends State<PlanFormSheet> {
         offlineEnabled:  _offline,
         trialDays:       _int(_trialDays, 0),
         isActive:        _isActive,
+        maxEmployeesPerShop: _int(_maxEmployees, 0),
+        maxPartnerDepots:    _int(_maxPartners, 0),
+        maxWarehouses:       _int(_maxWarehouses, 0),
       );
+      // Édition + opt-in → prévenir les abonnés de ce plan (s'applique au
+      // prochain renouvellement, cf. snapshot). Cible 'plan' = nom technique.
+      if (widget.existing != null && _notifySubscribers) {
+        try {
+          final lbl = _label.text.trim().isNotEmpty
+              ? _label.text.trim() : _name.text.trim();
+          await AppDatabase.sendBroadcast(
+            title: 'Votre formule évolue',
+            body: 'Les conditions de la formule « $lbl » ont été mises à jour. '
+                'Elles s\'appliqueront à votre prochain renouvellement.',
+            type: 'info', targetType: 'plan',
+            targetValue: _name.text.trim());
+        } catch (_) {/* notif best-effort */}
+      }
       if (mounted) {
         AppSnack.success(context,
             widget.existing == null ? 'Plan créé' : 'Plan mis à jour');
@@ -121,6 +147,45 @@ class _PlanFormSheetState extends State<PlanFormSheet> {
       }
     } catch (e) {
       if (mounted) AppSnack.error(context, 'Échec : $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _delete() async {
+    final id = widget.existing?['id'] as String?;
+    if (id == null) return;
+    final label = _label.text.trim().isNotEmpty
+        ? _label.text.trim() : _name.text.trim();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer le plan ?'),
+        content: Text('« $label » sera définitivement supprimé. '
+            'Possible uniquement si aucun abonnement ne l\'utilise '
+            '(sinon, désactivez-le).'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Annuler')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Supprimer',
+                  style: TextStyle(color: AppColors.error))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _saving = true);
+    try {
+      await AppDatabase.deletePlan(id);
+      if (mounted) {
+        AppSnack.success(context, 'Plan supprimé');
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      if (mounted) {
+        AppSnack.error(context,
+            'Échec : ${e.toString().replaceAll('Exception: ', '')}');
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -156,6 +221,12 @@ class _PlanFormSheetState extends State<PlanFormSheet> {
               Expanded(child: _field(_maxMembers, 'Max membres', number: true)),
             ]),
             _field(_maxShops, 'Max boutiques', number: true),
+            Row(children: [
+              Expanded(child: _field(_maxEmployees, 'Employés / boutique', number: true)),
+              const SizedBox(width: 10),
+              Expanded(child: _field(_maxPartners, 'Max partenaires', number: true)),
+            ]),
+            _field(_maxWarehouses, 'Max magasins', number: true),
             const SizedBox(height: 8),
             Align(
               alignment: Alignment.centerLeft,
@@ -193,6 +264,16 @@ class _PlanFormSheetState extends State<PlanFormSheet> {
               value: _isActive,
               onChanged: (v) => setState(() => _isActive = v),
             ),
+            if (isEdit)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('Prévenir les abonnés du changement',
+                    style: AppTextStyles.body),
+                subtitle: Text('Bandeau in-app — s\'applique au prochain '
+                    'renouvellement', style: AppTextStyles.caption),
+                value: _notifySubscribers,
+                onChanged: (v) => setState(() => _notifySubscribers = v),
+              ),
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
@@ -210,6 +291,20 @@ class _PlanFormSheetState extends State<PlanFormSheet> {
                             color: Colors.white, fontWeight: FontWeight.w600)),
               ),
             ),
+            if (isEdit) ...[
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: _saving ? null : _delete,
+                  icon: const Icon(Icons.delete_outline_rounded,
+                      size: 18, color: AppColors.error),
+                  label: Text('Supprimer le plan',
+                      style: AppTextStyles.bodySmBold
+                          .copyWith(color: AppColors.error)),
+                ),
+              ),
+            ],
           ]),
         ),
       ),

@@ -91,9 +91,11 @@ class AppColors {
   // En sombre, les Text principaux héritent du textTheme (cf. PR-1) ;
   // ces tokens ne servent que pour des couleurs explicites résiduelles.
   static const textPrimary   = Color(0xFF111827);
-  static const textSecondary = Color(0xFF6B7280);
-  // WCAG AA : #6B7280 atteint 5.5:1 sur fond blanc (vs 3:1 pour #9CA3AF).
-  static const textHint      = Color(0xFF6B7280);
+  // Assombri (gray-500 → gray-600) pour un texte/icônes secondaires plus
+  // lisibles — pilote aussi captions, iconTheme et icônes de champs. ~7:1 AA.
+  static const textSecondary = Color(0xFF4B5563);
+  // Hint (placeholders) légèrement assombri aussi (gray-500 → gray-600 doux).
+  static const textHint      = Color(0xFF5B6472);
 
   static const google   = Color(0xFFEA4335);
   static const facebook = Color(0xFF1877F2);

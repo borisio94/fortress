@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
+import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -15,7 +16,7 @@ import 'delivery_template_form_sheet.dart';
 
 /// Sheet bottom pour créer ou modifier un emplacement de stock
 /// (warehouse ou partner). Les locations type='shop' ne passent pas par ici.
-class LocationFormSheet extends StatefulWidget {
+class LocationFormSheet extends ConsumerStatefulWidget {
   final StockLocation? existing;
   final StockLocationType defaultType;
   /// Shop courant. Si fourni ET type=partner, expose un dropdown
@@ -36,10 +37,10 @@ class LocationFormSheet extends StatefulWidget {
   });
 
   @override
-  State<LocationFormSheet> createState() => _LocationFormSheetState();
+  ConsumerState<LocationFormSheet> createState() => _LocationFormSheetState();
 }
 
-class _LocationFormSheetState extends State<LocationFormSheet> {
+class _LocationFormSheetState extends ConsumerState<LocationFormSheet> {
   late TextEditingController _name;
   late TextEditingController _address;
   /// Ville du dépôt (séparé d'`address` depuis hotfix_051). Affiché
@@ -126,6 +127,32 @@ class _LocationFormSheetState extends State<LocationFormSheet> {
     if (userId.isEmpty) {
       setState(() { _submitting = false; _nameError = 'Connexion requise'; });
       return;
+    }
+
+    // ── Garde quota plan (création uniquement) ────────────────────────
+    // Partenaires & magasins = totaux par compte.
+    if (!_isEdit) {
+      final plan = ref.read(currentPlanProvider);
+      final locs = AppDatabase.getStockLocationsForOwner(userId);
+      if (_type == StockLocationType.partner) {
+        final n = locs.where((l) => l.type == StockLocationType.partner).length;
+        if (!plan.canAddPartner(n)) {
+          setState(() => _submitting = false);
+          AppSnack.error(context,
+              'Limite de partenaires atteinte (${plan.maxPartnerDepots}) pour '
+              'votre plan. Passez à un plan supérieur pour en ajouter.');
+          return;
+        }
+      } else if (_type == StockLocationType.warehouse) {
+        final n = locs.where((l) => l.type == StockLocationType.warehouse).length;
+        if (!plan.canAddWarehouse(n)) {
+          setState(() => _submitting = false);
+          AppSnack.error(context,
+              'Limite de magasins atteinte (${plan.maxWarehouses}) pour votre '
+              'plan. Passez à un plan supérieur pour en ajouter.');
+          return;
+        }
+      }
     }
 
     // Le contact partenaire est désormais un simple numéro WhatsApp (champ

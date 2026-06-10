@@ -1674,8 +1674,10 @@ end \$\$;""",
       'phone': phone, 'email': email, 'is_active': true,
     }).select().single();
 
-    await _db.from('shop_memberships').insert(
-        {'shop_id': row['id'], 'user_id': userId, 'role': 'owner'});
+    // La membership « owner » est créée côté serveur par le trigger
+    // trg_create_owner_membership (hotfix_115, SECURITY DEFINER). On n'insère
+    // plus depuis le client : l'INSERT applicatif dépendait du contexte
+    // RLS/session juste après le sign-up et échouait par moments (42501).
 
     final shop = _rowToShop(row);
     await LocalStorageService.saveShop(shop);
@@ -1819,6 +1821,9 @@ end \$\$;""",
     required bool      offlineEnabled,
     required int       trialDays,
     required bool      isActive,
+    int                maxPartnerDepots    = 0,
+    int                maxEmployeesPerShop = 0,
+    int                maxWarehouses       = 0,
   }) async {
     final res = await _db.rpc('upsert_plan', params: {
       'p_id':                 id,
@@ -1834,8 +1839,17 @@ end \$\$;""",
       'p_offline_enabled':    offlineEnabled,
       'p_trial_days':         trialDays,
       'p_is_active':          isActive,
+      'p_max_partner_depots':     maxPartnerDepots,
+      'p_max_employees_per_shop': maxEmployeesPerShop,
+      'p_max_warehouses':         maxWarehouses,
     });
     return res.toString();
+  }
+
+  /// Supprime un plan (super-admin). Échoue si le plan a déjà été utilisé
+  /// (RPC delete_plan → désactiver à la place). Voir hotfix_113.
+  static Future<void> deletePlan(String id) async {
+    await _db.rpc('delete_plan', params: {'p_id': id});
   }
 
   /// SA-3 — prolonge l'essai/abonnement de l'owner de [shopId] de [days]
@@ -2158,6 +2172,12 @@ end \$\$;""",
     }
   }
 
+  /// Rafraîchit le statut d'une boutique depuis le serveur (status/suspension
+  /// inclus) et notifie les écouteurs. Utilisé par le shell pour détecter une
+  /// suspension décidée par le super-admin, même en cours de session.
+  static Future<void> refreshShop(String shopId) =>
+      _refreshShopFromRemote(shopId);
+
   /// Active / désactive une boutique (Hive immédiat + Supabase background).
   static Future<void> setShopActive(String shopId, bool active) async {
     final cached = LocalStorageService.getShop(shopId);
@@ -2206,6 +2226,9 @@ end \$\$;""",
         }
       }
       debugPrint('[DB] ${shops.length} boutiques');
+      // Notifier les listeners (ex. currentShopProvider) que les boutiques
+      // ont été (re)synchronisées → rafraîchit logo/nom sans actualisation.
+      for (final s in shops) { _notify('shops', s.id); }
       return shops;
     } catch (e) {
       debugPrint('[DB] Erreur getMyShops: $e');
@@ -2275,6 +2298,13 @@ end \$\$;""",
         (_, ts) => nowMs - ts > _localWriteEchoWindowMs * 2);
     LocalStorageService.invalidateProductsCache();
     await HiveBoxes.productsBox.put(p.id!, _productToMap(p));
+    // Ré-invalidation APRÈS le put : entre l'invalidation pré-put et la fin du
+    // `await put`, une lecture concurrente (dashboard / bloc / onboarding)
+    // pouvait re-cacher l'état d'AVANT écriture (produit absent). Le `_notify`
+    // ci-dessous servait alors ce cache obsolète → le produit fraîchement créé
+    // n'apparaissait pas en Caisse (il fallait pull-to-refresh). On revide donc
+    // pour que le re-read post-notify relise Hive à jour.
+    LocalStorageService.invalidateProductsCache();
 
     // 3. Notifier les listeners locaux
     if (p.storeId != null) _notify('products', p.storeId!);

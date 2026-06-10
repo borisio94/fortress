@@ -14,14 +14,16 @@ import '../../../../shared/widgets/app_switch.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../widgets/shop_payments_sheet.dart';
+import '../widgets/shop_backup_sheet.dart';
 import '../../../../shared/widgets/plan_card.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../widgets/plan_form_sheet.dart';
-import '../../../../core/i18n/app_localizations.dart';
-import '../../../subscription/domain/models/plan_type.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/secure_storage.dart';
 import '../../../../core/database/app_database.dart';
+import '../../../../core/services/sa_notifications.dart';
+import '../../../../core/services/activity_actions.dart';
+import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../features/auth/presentation/bloc/auth_bloc.dart';
 import '../../../../features/auth/presentation/bloc/auth_event.dart';
 
@@ -83,9 +85,19 @@ final _saStatsProvider = FutureProvider.autoDispose<_SAStats>((ref) async {
 final _saUsersProvider = FutureProvider.autoDispose<List<Map<String,dynamic>>>((ref) async {
   final rows = await Supabase.instance.client
       .from('profiles')
-      .select('id,name,email,phone,prof_status,is_super_admin,created_at,subscriptions(sub_status,expires_at,billing_cycle,amount_paid,plans!subscriptions_plan_id_fkey(name,label))')
+      .select('id,name,email,phone,prof_status,is_super_admin,created_at,subscriptions(sub_status,expires_at,started_at,billing_cycle,amount_paid,plans!subscriptions_plan_id_fkey(name,label))')
       .eq('is_super_admin', false)           // ← exclure les super admins
       .order('created_at', ascending: false).limit(100);
+  return List<Map<String,dynamic>>.from(rows as List);
+});
+
+// Adhésions (qui est membre de quelle boutique) — sert à regrouper les
+// utilisateurs par boutique dans la section Utilisateurs.
+final _saMembershipsProvider =
+    FutureProvider.autoDispose<List<Map<String,dynamic>>>((ref) async {
+  final rows = await Supabase.instance.client
+      .from('shop_memberships')
+      .select('user_id, shop_id, role, status, shops(name)');
   return List<Map<String,dynamic>>.from(rows as List);
 });
 
@@ -93,7 +105,7 @@ final _saShopsProvider = FutureProvider.autoDispose<List<Map<String,dynamic>>>((
   final db = Supabase.instance.client;
   final rows = List<Map<String,dynamic>>.from(
       await db.from('shops')
-          .select('id,name,owner_id,sector,currency,country,is_active,created_at')
+          .select('id,name,owner_id,sector,currency,country,is_active,created_at,backup_enabled,status,suspended_reason')
           .order('created_at', ascending: false) as List);
   // Récupérer les profils des propriétaires en une seule requête
   final ownerIds = rows.map((s) => s['owner_id'] as String?)
@@ -136,6 +148,43 @@ final _saPlansProvider = FutureProvider.autoDispose<List<Map<String,dynamic>>>((
 List<Map<String,dynamic>>.from(await Supabase.instance.client
     .from('plans').select('*').order('price_monthly') as List));
 
+// ─── Sélection de l'abonnement « courant » ─────────────────────────────────────
+/// Un utilisateur peut cumuler plusieurs abonnements (ex. un essai annulé +
+/// un abonnement payant actif). PostgREST renvoie la liste nestée
+/// `subscriptions(...)` sans ordre garanti, donc `.firstOrNull` tombait parfois
+/// sur l'ancien essai → incohérence (« Essai » affiché sur la boutique alors
+/// que l'owner est passé à « Starter »). Ce helper choisit de façon
+/// déterministe l'abonnement à afficher :
+///   1. actif non expiré, le plus récent ;
+///   2. sinon essai non expiré, le plus récent ;
+///   3. sinon le plus récent toutes catégories confondues (started_at).
+Map<String, dynamic>? _currentSub(List? subs) {
+  if (subs == null || subs.isEmpty) return null;
+  final list = List<Map<String, dynamic>>.from(subs);
+  final now = DateTime.now();
+  bool notExpired(Map s) {
+    final exp = s['expires_at'] != null
+        ? DateTime.tryParse(s['expires_at'].toString()) : null;
+    return exp == null || exp.isAfter(now);
+  }
+  DateTime startedAt(Map s) =>
+      DateTime.tryParse(s['started_at']?.toString() ?? '') ??
+      DateTime.fromMillisecondsSinceEpoch(0);
+  int byRecency(Map a, Map b) => startedAt(b).compareTo(startedAt(a));
+
+  final active = list
+      .where((s) => s['sub_status'] == 'active' && notExpired(s))
+      .toList()..sort(byRecency);
+  if (active.isNotEmpty) return active.first;
+
+  final trial = list
+      .where((s) => s['sub_status'] == 'trial' && notExpired(s))
+      .toList()..sort(byRecency);
+  if (trial.isNotEmpty) return trial.first;
+
+  return (list..sort(byRecency)).first;
+}
+
 // ─── Modèle stats ─────────────────────────────────────────────────────────────
 class _SAStats {
   final int totalUsers, blocked, activeSubs, proSubs, normalSubs;
@@ -161,7 +210,7 @@ extension _SASectionX on _SASection {
   String get label => switch (this) {
     _SASection.dashboard    => 'Tableau de bord',
     _SASection.users        => 'Utilisateurs',
-    _SASection.shops        => 'Boutiques',
+    _SASection.shops        => 'Comptes & boutiques',
     _SASection.payments     => 'Paiements',
     _SASection.plans        => 'Plans tarifaires',
     _SASection.logs         => 'Logs',
@@ -215,10 +264,50 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage> {
 
   @override
   Widget build(BuildContext context) {
+    // ── Garde super-admin (défense en profondeur, hotfix 2026-06-06) ──
+    // Tant que le plan se charge (appel réseau de 1-3 s au boot), on
+    // n'affiche JAMAIS le contenu SA : sinon un non-SA voit la page
+    // clignoter avant que le routeur ne le redirige. Le serveur (RPC
+    // _is_super_admin) et la RLS bloquent déjà toute donnée — ceci ferme
+    // le dernier vecteur visuel.
+    final plan = ref.watch(subscriptionProvider).valueOrNull;
+    if (plan == null) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (!plan.isSuperAdmin) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) context.go(RouteNames.shopSelector);
+      });
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final stats = ref.watch(_saStatsProvider).valueOrNull;
     return Scaffold(
       key: _scaffoldKey,
       backgroundColor: AppColors.background,
+      // Bouton flottant d'action contextuel (visible quel que soit le rendu
+      // interne de la section) : création de plan uniquement.
+      floatingActionButton: switch (_section) {
+        _SASection.plans => FloatingActionButton.extended(
+            heroTag: 'sa_fab_plan',
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+            onPressed: () async {
+              final created = await showFormSheet<bool>(
+                context: context, builder: (_) => const PlanFormSheet());
+              if (created == true) ref.invalidate(_saPlansProvider);
+            },
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Nouveau plan'),
+          ),
+        _ => null,
+      },
       drawer: _isDesktop ? null : _SADrawer(
         current: _section, onNavigate: _navigate,
         stats: stats, onRefresh: _refresh,
@@ -254,6 +343,125 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage> {
   };
 }
 
+// ─── Notifications super-admin ──────────────────────────────────────────────
+// Feed des événements « entrants » (compte créé, paiement/abonnement, boutique
+// créée/supprimée…) dérivé d'activity_logs. Badge non-lus = événements postés
+// après la dernière ouverture (timestamp en Hive).
+const _kSaNotifSeenKey = 'sa_notifs_last_seen';
+
+final _saNotifsProvider =
+    FutureProvider.autoDispose<List<_LogEntry>>((ref) async {
+  final db = Supabase.instance.client;
+  final rows = List<Map<String, dynamic>>.from(
+      await db.from('activity_logs')
+          .select('id,action,actor_id,actor_email,target_type,target_id,'
+                  'target_label,shop_id,details,created_at')
+          .inFilter('action', SaNotifications.actions.toList())
+          .order('created_at', ascending: false)
+          .limit(50) as List);
+  final actorIds = rows
+      .map((r) => r['actor_id'] as String?)
+      .whereType<String>().toSet().toList();
+  final profileMap = <String, Map<String, dynamic>>{};
+  if (actorIds.isNotEmpty) {
+    final profs = List<Map<String, dynamic>>.from(
+        await db.from('profiles').select('id,name,email')
+            .inFilter('id', actorIds) as List);
+    for (final p in profs) { profileMap[p['id'] as String] = p; }
+  }
+  return rows.map((r) {
+    final prof  = profileMap[r['actor_id'] as String?];
+    final actor = prof?['name'] as String?
+        ?? r['actor_email'] as String? ?? prof?['email'] as String? ?? '—';
+    return _LogEntry.fromRow(r, actorName: actor);
+  }).toList();
+});
+
+final _saNotifSeenProvider = StateProvider<DateTime?>((ref) {
+  final raw = HiveBoxes.settingsBox.get(_kSaNotifSeenKey);
+  return raw is String ? DateTime.tryParse(raw) : null;
+});
+
+class _SANotifBell extends ConsumerWidget {
+  const _SANotifBell();
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final notifs   = ref.watch(_saNotifsProvider).valueOrNull
+        ?? const <_LogEntry>[];
+    final lastSeen = ref.watch(_saNotifSeenProvider);
+    final unread = notifs.where((n) => n.date != null
+        && (lastSeen == null || n.date!.isAfter(lastSeen))).length;
+    return Stack(children: [
+      IconButton(
+        onPressed: () {
+          // Marque vu = maintenant (persisté) avant d'ouvrir.
+          final now = DateTime.now().toUtc();
+          HiveBoxes.settingsBox.put(_kSaNotifSeenKey, now.toIso8601String());
+          ref.read(_saNotifSeenProvider.notifier).state = now;
+          showModalBottomSheet(
+            context: context, isScrollControlled: true,
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+            builder: (_) => _SANotifPanel(notifs: notifs),
+          );
+        },
+        icon: const Icon(Icons.notifications_outlined, size: 20,
+            color: AppColors.textSecondary),
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(minWidth: 32, minHeight: 32)),
+      if (unread > 0)
+        Positioned(top: 3, right: 3,
+            child: Container(
+                padding: const EdgeInsets.all(2),
+                constraints:
+                    const BoxConstraints(minWidth: 15, minHeight: 15),
+                decoration: const BoxDecoration(
+                    color: AppColors.error, shape: BoxShape.circle),
+                child: Center(child: Text(unread > 9 ? '9+' : '$unread',
+                    style: AppTextStyles.microBold
+                        .copyWith(color: Colors.white, fontSize: 8))))),
+    ]);
+  }
+}
+
+class _SANotifPanel extends StatelessWidget {
+  final List<_LogEntry> notifs;
+  const _SANotifPanel({required this.notifs});
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    child: Padding(
+      padding: EdgeInsets.fromLTRB(
+          16, 12, 16, 16 + MediaQuery.of(context).viewInsets.bottom),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Center(child: Container(width: 36, height: 4,
+            decoration: BoxDecoration(color: AppColors.inputBorder,
+                borderRadius: BorderRadius.circular(2)))),
+        const SizedBox(height: 14),
+        Row(children: [
+          Icon(Icons.notifications_active_rounded,
+              size: 18, color: AppColors.primary),
+          const SizedBox(width: 8),
+          Text('Notifications',
+              style: AppTextStyles.label.copyWith(fontWeight: FontWeight.w700)),
+        ]),
+        const SizedBox(height: 10),
+        if (notifs.isEmpty)
+          const Padding(padding: EdgeInsets.symmetric(vertical: 28),
+              child: Text('Aucune notification pour le moment.',
+                  style: AppTextStyles.bodySmSecondary))
+        else
+          Flexible(child: ListView.separated(
+            shrinkWrap: true,
+            itemCount: notifs.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 6),
+            itemBuilder: (_, i) => _LogTile(entry: notifs[i]),
+          )),
+      ]),
+    ),
+  );
+}
+
 // ─── AppBar ────────────────────────────────────────────────────────────────────
 class _SAAppBar extends StatelessWidget {
   final _SASection section;
@@ -265,7 +473,6 @@ class _SAAppBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final alertCount = (stats?.expireSoon ?? 0) + (stats?.blocked ?? 0);
     return Container(
       decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
@@ -288,21 +495,7 @@ class _SAAppBar extends StatelessWidget {
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32)),
         const SizedBox(width: 4),
-        Stack(children: [
-          IconButton(onPressed: () {},
-              icon: const Icon(Icons.notifications_outlined, size: 20,
-                  color: AppColors.textSecondary),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32)),
-          if (alertCount > 0)
-            Positioned(top: 4, right: 4,
-                child: Container(width: 14, height: 14,
-                    decoration: const BoxDecoration(
-                        color: AppColors.error, shape: BoxShape.circle),
-                    child: Center(child: Text('$alertCount',
-                        style: AppTextStyles.microBold
-                            .copyWith(color: Colors.white))))),
-        ]),
+        const _SANotifBell(),
         const SizedBox(width: 4),
         _SAAvatar(),
       ]),
@@ -440,11 +633,11 @@ class _SADrawerContent extends ConsumerWidget {
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
           children: [
             _DrawerLabel('Principal'),
-            ...[ _SASection.dashboard, _SASection.users,
+            ...[ _SASection.dashboard,
               _SASection.shops, _SASection.payments, _SASection.plans,
             ].map((s) => _DrawerTile(
               section: s, current: current, onTap: () => onNavigate(s),
-              badge: s == _SASection.users && (stats?.blocked ?? 0) > 0
+              badge: s == _SASection.shops && (stats?.blocked ?? 0) > 0
                   ? stats?.blocked
                   : s == _SASection.payments && (stats?.expireSoon ?? 0) > 0
                   ? stats?.expireSoon : null,
@@ -723,7 +916,7 @@ class _DashboardSection extends ConsumerWidget {
             const SizedBox(height: 18),
             _SectionTitle('Boutiques récentes'),
             const SizedBox(height: 8),
-            ...s.recentShops.map((sh) => _ShopRow(shop: sh, onToggle: null, onDelete: null)),
+            ...s.recentShops.map((sh) => _ShopRow(shop: sh, onToggle: null)),
           ]),
         ),
       ),
@@ -762,30 +955,78 @@ class _UsersSectionState extends ConsumerState<_UsersSection> {
           }
           list = switch (_filter) {
             'active' => list.where((u) {
-              final sub = (u['subscriptions'] as List?)?.firstOrNull as Map?;
+              final sub = _currentSub(u['subscriptions'] as List?);
               final exp = sub?['expires_at'] != null ? DateTime.tryParse(sub!['expires_at']) : null;
               return u['prof_status'] == 'active' && sub?['sub_status'] == 'active' && (exp == null || exp.isAfter(now));
             }).toList(),
             'blocked' => list.where((u) => u['prof_status'] == 'blocked').toList(),
             'no_plan' => list.where((u) => (u['subscriptions'] as List?)?.isEmpty != false).toList(),
             'expired' => list.where((u) {
-              final sub = (u['subscriptions'] as List?)?.firstOrNull as Map?;
+              final sub = _currentSub(u['subscriptions'] as List?);
               final exp = sub?['expires_at'] != null ? DateTime.tryParse(sub!['expires_at']) : null;
               return exp != null && exp.isBefore(now);
             }).toList(),
             _ => list,
           };
           if (list.isEmpty) return const _EmptyState('Aucun utilisateur trouvé');
+
+          // ── Regroupement par boutique ───────────────────────────────
+          // Chaque boutique → en-tête + ses membres (propriétaire + employés).
+          // Les utilisateurs sans adhésion (ex. inscription sans boutique)
+          // sont rassemblés sous « Sans boutique ».
+          void refresh() {
+            ref.invalidate(_saUsersProvider);
+            ref.invalidate(_saMembershipsProvider);
+            ref.invalidate(_saStatsProvider);
+          }
+          final memberships =
+              ref.watch(_saMembershipsProvider).valueOrNull ?? const [];
+          final byId = {for (final u in list) u['id'] as String: u};
+          final groups = <String, Map<String, dynamic>>{};
+          final assigned = <String>{};
+          for (final m in memberships) {
+            final uid = m['user_id'] as String?;
+            final sid = m['shop_id']?.toString();
+            if (uid == null || sid == null || !byId.containsKey(uid)) continue;
+            final shopName =
+                (m['shops'] as Map?)?['name'] as String? ?? 'Boutique';
+            final g = groups.putIfAbsent(
+                sid, () => {'name': shopName, 'members': <String>[]});
+            final members = g['members'] as List<String>;
+            if (!members.contains(uid)) members.add(uid);
+            assigned.add(uid);
+          }
+          final sortedShops = groups.entries.toList()
+            ..sort((a, b) => (a.value['name'] as String)
+                .toLowerCase()
+                .compareTo((b.value['name'] as String).toLowerCase()));
+          final orphans =
+              list.where((u) => !assigned.contains(u['id'])).toList();
+
+          final items = <Widget>[];
+          for (var gi = 0; gi < sortedShops.length; gi++) {
+            final entry = sortedShops[gi];
+            final memberIds = entry.value['members'] as List<String>;
+            if (gi > 0) items.add(const SizedBox(height: 14));
+            items.add(_OwnerGroupHeader(
+                owner: {'name': entry.value['name']}, count: memberIds.length));
+            items.add(const SizedBox(height: 6));
+            for (final uid in memberIds) {
+              items.add(_UserCard(user: byId[uid]!, onRefresh: refresh));
+            }
+          }
+          if (orphans.isNotEmpty) {
+            if (items.isNotEmpty) items.add(const SizedBox(height: 14));
+            items.add(_OwnerGroupHeader(
+                owner: const {'name': 'Sans boutique'}, count: orphans.length));
+            items.add(const SizedBox(height: 6));
+            for (final u in orphans) {
+              items.add(_UserCard(user: u, onRefresh: refresh));
+            }
+          }
           return RefreshIndicator(
-            onRefresh: () async => ref.invalidate(_saUsersProvider),
-            child: ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: list.length,
-              itemBuilder: (_, i) => _UserCard(user: list[i], onRefresh: () {
-                ref.invalidate(_saUsersProvider);
-                ref.invalidate(_saStatsProvider);
-              }),
-            ),
+            onRefresh: () async => refresh(),
+            child: ListView(padding: const EdgeInsets.all(12), children: items),
           );
         },
       )),
@@ -809,6 +1050,13 @@ class _ShopsSectionState extends ConsumerState<_ShopsSection> {
     try {
       if (suspended) {
         await AppDatabase.reactivateShop(id);
+        try {
+          await AppDatabase.sendBroadcast(
+            title: 'Boutique réactivée',
+            body: 'L\'accès à « ${shop['name'] ?? 'votre boutique'} » a été '
+                'rétabli. Bienvenue à nouveau !',
+            type: 'info', targetType: 'shop', targetValue: id);
+        } catch (_) {/* notif best-effort */}
         if (mounted) {
           AppSnack.success(context, 'Boutique réactivée');
         }
@@ -979,85 +1227,179 @@ class _ShopsSectionState extends ConsumerState<_ShopsSection> {
     );
   }
 
+  /// Suspend / réactive l'ACCÈS d'un employé à la boutique
+  /// (shop_memberships.status). Via set_employee_status (SA autorisé,
+  /// owner/self protégés côté RPC).
+  Future<void> _toggleMemberSuspend(
+      String shopId, String userId, bool suspended) async {
+    try {
+      await Supabase.instance.client.rpc('set_employee_status', params: {
+        'p_shop_id': shopId,
+        'p_user_id': userId,
+        'p_status':  suspended ? 'active' : 'suspended',
+      });
+      if (mounted) {
+        AppSnack.success(context,
+            suspended ? 'Accès réactivé' : 'Membre suspendu de la boutique');
+      }
+      ref.invalidate(_saUsersProvider);
+      ref.invalidate(_saMembershipsProvider);
+      ref.invalidate(_saStatsProvider);
+    } catch (e) {
+      if (mounted) {
+        AppSnack.error(context,
+            'Échec : ${e.toString().replaceAll('Exception: ', '')}');
+      }
+    }
+  }
+
+  /// Ouvre le sheet de gestion des sauvegardes d'une boutique
+  /// (toggle auto + liste snapshots + sauvegarder/restaurer/télécharger).
+  void _showBackups(Map<String, dynamic> shop) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => ShopBackupSheet(
+          shopId: shop['id'] as String,
+          shopName: shop['name'] as String? ?? '',
+          initialEnabled: shop['backup_enabled'] as bool? ?? true),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(_saShopsProvider);
+    final usersAsync = ref.watch(_saUsersProvider);
+    final membersAsync = ref.watch(_saMembershipsProvider);
     return Column(children: [
-      _FilterBar(hint: 'Rechercher une boutique…', onSearch: (v) => setState(() => _search = v),
-          filters: const ['Toutes', 'Actives', 'Inactives'],
-          filterValues: const ['all', 'active', 'inactive'],
+      _FilterBar(hint: 'Rechercher boutique ou membre…',
+          onSearch: (v) => setState(() => _search = v),
+          filters: const ['Toutes', 'Actives', 'Suspendues', 'Inactives'],
+          filterValues: const ['all', 'active', 'suspended', 'inactive'],
           selected: _filter, onFilter: (v) => setState(() => _filter = v)),
       Expanded(child: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => _ErrorState(e.toString()),
         data: (shops) {
-          var list = shops;
-          if (_search.isNotEmpty) {
-            final q = _search.toLowerCase();
-            list = list.where((s) => (s['name'] as String? ?? '').toLowerCase().contains(q)).toList();
+          // Page unifiée « Comptes & Boutiques » : chaque boutique (en-tête
+          // actionnable) suivie de ses membres (propriétaire + employés).
+          final users = usersAsync.valueOrNull ?? const <Map<String, dynamic>>[];
+          final memberships =
+              membersAsync.valueOrNull ?? const <Map<String, dynamic>>[];
+          final usersById = {for (final u in users) u['id'] as String: u};
+          final membersByShop = <String, List<Map<String, dynamic>>>{};
+          final ownerByShop = <String, Map<String, dynamic>>{};
+          final membershipBy = <String, Map<String, dynamic>>{}; // '$sid|$uid'
+          for (final m in memberships) {
+            final uid = m['user_id'] as String?;
+            final sid = m['shop_id']?.toString();
+            if (uid == null || sid == null) continue;
+            final u = usersById[uid];
+            if (u == null) continue;
+            (membersByShop[sid] ??= []).add(u);
+            membershipBy['$sid|$uid'] = m;
+            if (m['role'] == 'owner') ownerByShop[sid] = u;
           }
+          void refreshAll() {
+            ref.invalidate(_saShopsProvider);
+            ref.invalidate(_saUsersProvider);
+            ref.invalidate(_saMembershipsProvider);
+            ref.invalidate(_saStatsProvider);
+          }
+
+          var list = shops;
           list = switch (_filter) {
-            'active'   => list.where((s) => s['is_active'] == true).toList(),
-            'inactive' => list.where((s) => s['is_active'] != true).toList(),
+            'active'    => list.where((s) =>
+                s['is_active'] == true && s['status'] != 'suspended').toList(),
+            'suspended' => list.where((s) => s['status'] == 'suspended').toList(),
+            'inactive'  => list.where((s) => s['is_active'] != true).toList(),
             _           => list,
           };
+          if (_search.isNotEmpty) {
+            final q = _search.toLowerCase();
+            list = list.where((s) {
+              if ((s['name'] as String? ?? '').toLowerCase().contains(q)) {
+                return true;
+              }
+              final mem = membersByShop[s['id']?.toString()] ?? const [];
+              return mem.any((u) =>
+                  (u['name'] as String? ?? '').toLowerCase().contains(q) ||
+                  (u['email'] as String? ?? '').toLowerCase().contains(q));
+            }).toList();
+          }
           if (list.isEmpty) return const _EmptyState('Aucune boutique trouvée');
 
-          // ── Regroupement par propriétaire ───────────────────────────
-          // Toutes les boutiques d'un même owner_id sont rendues sous un
-          // en-tête « Propriétaire · N boutique(s) ». Les boutiques sans
-          // owner_id (anomalie données) sont regroupées sous « Inconnu ».
-          // Tri : alphabétique sur le nom du propriétaire ; à l'intérieur
-          // d'un groupe on conserve l'ordre du provider (created_at DESC).
-          final groups = <String, List<Map<String, dynamic>>>{};
-          for (final s in list) {
-            final oid = (s['owner_id'] as String?) ?? '__none__';
-            groups.putIfAbsent(oid, () => []).add(s);
-          }
-          String groupKeyName(String k) {
-            final o = groups[k]!.first['owner_profile'] as Map?;
-            return ((o?['name'] ?? o?['email'] ?? '~') as String).toLowerCase();
-          }
-          final sortedKeys = groups.keys.toList()
-            ..sort((a, b) => groupKeyName(a).compareTo(groupKeyName(b)));
-
           final items = <Widget>[];
-          for (var gi = 0; gi < sortedKeys.length; gi++) {
-            final k     = sortedKeys[gi];
-            final shops = groups[k]!;
-            final owner = shops.first['owner_profile'] as Map?;
-            if (gi > 0) items.add(const SizedBox(height: 14));
-            items.add(_OwnerGroupHeader(owner: owner, count: shops.length));
-            items.add(const SizedBox(height: 6));
-            for (final s in shops) {
-              items.add(_ShopRow(
-                shop: s,
-                onToggle: () async {
-                  final val = !(s['is_active'] as bool? ?? true);
-                  await Supabase.instance.client.from('shops')
-                      .update({'is_active': val}).eq('id', s['id']);
-                  ref.invalidate(_saShopsProvider);
-                  ref.invalidate(_saStatsProvider);
-                },
-                onToggleSuspend: () => _toggleSuspend(s),
-                onExtendTrial: () => _extendTrial(s),
-                onPayments: () => _showPayments(s),
-                onDelete: () => showDialog(context: context, builder: (_) => _ConfirmDialog(
-                  title: 'Supprimer la boutique',
-                  body: 'Supprimer « ${s['name']} » ? Irréversible.',
-                  confirmLabel: 'Supprimer', confirmColor: AppColors.error,
-                  onConfirm: () async {
-                    await Supabase.instance.client.from('shops').delete().eq('id', s['id']);
-                    ref.invalidate(_saShopsProvider);
-                    ref.invalidate(_saStatsProvider);
+          for (final s in list) {
+            final sid = s['id']?.toString() ?? '';
+            // Plan = abonnement de l'OWNER (affiché sur la boutique).
+            final owner = ownerByShop[sid] ??
+                usersById[(s['owner_id'] as String?) ?? ''];
+            final sub = _currentSub(owner?['subscriptions'] as List?);
+            final plan = sub?['plans'] as Map?;
+            final exp = sub?['expires_at'] != null
+                ? DateTime.tryParse(sub!['expires_at'].toString()) : null;
+            final planExpired = (exp != null && exp.isBefore(DateTime.now())) ||
+                (sub != null && sub['sub_status'] != 'active' &&
+                    sub['sub_status'] != 'trial');
+            final planLabel = plan?['label'] as String? ??
+                (owner != null ? 'Sans plan' : null);
+            items.add(_ShopRow(
+              shop: s,
+              planLabel: planLabel,
+              planExpired: planExpired,
+              onSubscription: owner == null ? null : () {
+                showModalBottomSheet(context: context, isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (_) => _SubSheet(
+                        userId: owner['id'], userName: owner['name'] ?? '—',
+                        currentPlanName: plan?['name'] as String?,
+                        onSaved: refreshAll));
+              },
+              onToggle: () async {
+                final val = !(s['is_active'] as bool? ?? true);
+                await Supabase.instance.client.from('shops')
+                    .update({'is_active': val}).eq('id', s['id']);
+                refreshAll();
+              },
+              onToggleSuspend: () => _toggleSuspend(s),
+              onExtendTrial: () => _extendTrial(s),
+              onPayments: () => _showPayments(s),
+              onBackups: () => _showBackups(s),
+            ));
+            // ── Membres de la boutique (indentés sous l'en-tête) ──────
+            final mem = membersByShop[sid] ?? const [];
+            for (final u in mem) {
+              final mInfo = membershipBy['$sid|${u['id']}'];
+              final isOwnerMember = mInfo?['role'] == 'owner';
+              final mStatus = mInfo?['status'] as String? ?? 'active';
+              items.add(Padding(
+                padding: const EdgeInsets.only(left: 14),
+                child: _UserCard(
+                  user: u,
+                  onRefresh: refreshAll,
+                  memberSuspended: isOwnerMember
+                      ? (s['status'] == 'suspended')
+                      : (mStatus == 'suspended'),
+                  onToggleSuspend: () {
+                    if (isOwnerMember) {
+                      _toggleSuspend(s); // owner → cascade boutique
+                    } else {
+                      _toggleMemberSuspend(
+                          sid, u['id'] as String, mStatus == 'suspended');
+                    }
                   },
-                )),
+                ),
               ));
             }
+            items.add(const SizedBox(height: 8));
           }
 
           return RefreshIndicator(
-            onRefresh: () async => ref.invalidate(_saShopsProvider),
+            onRefresh: () async => refreshAll(),
             child: ListView(
               padding: const EdgeInsets.all(12),
               children: items,
@@ -1138,22 +1480,20 @@ class _PaymentsSectionState extends ConsumerState<_PaymentsSection> {
 class _PlansSection extends ConsumerWidget {
   const _PlansSection();
 
-  void _openEdit(BuildContext context, WidgetRef ref,
-      Map<String, dynamic> plan) {
-    showModalBottomSheet(
+  Future<void> _openEdit(BuildContext context, WidgetRef ref,
+      Map<String, dynamic> plan) async {
+    // Éditeur COMPLET (libellés + tous les champs : produits, employés/boutique,
+    // partenaires, magasins…) via PlanFormSheet → upsert_plan (RPC, pas
+    // d'UPDATE direct bloqué par la RLS).
+    final saved = await showFormSheet<bool>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _EditPlanSheet(
-        plan: plan,
-        onSaved: () => ref.invalidate(_saPlansProvider),
-      ),
+      builder: (_) => PlanFormSheet(existing: plan),
     );
+    if (saved == true) ref.invalidate(_saPlansProvider);
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final l     = context.l10n;
     final theme = Theme.of(context);
     final async = ref.watch(_saPlansProvider);
 
@@ -1161,18 +1501,12 @@ class _PlansSection extends ConsumerWidget {
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => _ErrorState(e.toString()),
       data: (rawPlans) {
-        // Conversion vers PlanDisplay + tri canonique (Trial → Business).
-        final byType = <PlanType, ({PlanDisplay display, Map<String, dynamic> raw})>{};
-        for (final raw in rawPlans) {
-          final d = PlanDisplay.fromMap(raw);
-          byType[d.type] = (display: d, raw: raw);
-        }
-        const order = [
-          PlanType.trial, PlanType.starter, PlanType.pro, PlanType.business,
-        ];
+        // Affiche TOUS les plans (y compris ceux créés par le SA), dans
+        // l'ordre du provider (par prix). Ne plus filtrer sur les 4 types
+        // canoniques — sinon un plan personnalisé n'apparaissait jamais.
         final ordered = [
-          for (final t in order)
-            if (byType.containsKey(t)) byType[t]!,
+          for (final raw in rawPlans)
+            (display: PlanDisplay.fromMap(raw), raw: raw),
         ];
 
         return RefreshIndicator(
@@ -1185,7 +1519,7 @@ class _PlansSection extends ConsumerWidget {
               children: [
                 Row(children: [
                   Expanded(
-                    child: Text(l.planTitle,
+                    child: Text('Plans tarifaires',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppTextStyles.title.copyWith(
@@ -1201,7 +1535,7 @@ class _PlansSection extends ConsumerWidget {
                       if (created == true) ref.invalidate(_saPlansProvider);
                     },
                     icon: const Icon(Icons.add_rounded, size: 16),
-                    label: Text(l.planAddNew,
+                    label: const Text('Nouveau plan',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppTextStyles.bodySmBold),
@@ -1854,7 +2188,10 @@ class _SectionTitle extends StatelessWidget {
 class _UserCard extends StatelessWidget {
   final Map<String,dynamic> user;
   final VoidCallback onRefresh;
-  const _UserCard({required this.user, required this.onRefresh});
+  final bool memberSuspended;        // accès à la boutique suspendu
+  final VoidCallback? onToggleSuspend;
+  const _UserCard({required this.user, required this.onRefresh,
+      this.memberSuspended = false, this.onToggleSuspend});
 
   @override
   Widget build(BuildContext context) {
@@ -1862,21 +2199,17 @@ class _UserCard extends StatelessWidget {
     final email     = user['email'] as String? ?? '—';
     final isBlocked = user['prof_status'] == 'blocked';
     final isSA      = user['is_super_admin'] as bool? ?? false;
-    final sub       = (user['subscriptions'] as List?)?.firstOrNull as Map?;
-    final plan      = sub?['plans'] as Map?;
-    final now       = DateTime.now();
-    final exp       = sub?['expires_at'] != null ? DateTime.tryParse(sub!['expires_at']) : null;
-    final isExpired = exp != null && exp.isBefore(now);
-    final subStatus = sub?['sub_status'] as String?;
-    // Réactivation requise : aucun abo, abo expiré, ou statut non-actif.
-    final needsReactivation = sub == null || isExpired || subStatus != 'active';
     final initials  = name.trim().split(' ')
         .map((w) => w.isNotEmpty ? w[0] : '').take(2).join().toUpperCase();
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(12),
+          // Grisé quand bloqué.
+          color: isBlocked
+              ? const Color(0xFFF1F1F4)
+              : Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
               color: isBlocked ? AppColors.error.withValues(alpha:0.4) : AppColors.inputBorder,
               width: isBlocked ? 1.5 : 1)),
@@ -1891,7 +2224,30 @@ class _UserCard extends StatelessWidget {
                   color: isBlocked ? AppColors.error : AppColors.primary)),
         ),
         title: Row(children: [
-          Flexible(child: Text(name, style: AppTextStyles.bodyBold)),
+          Flexible(child: Text(name, style: AppTextStyles.bodyBold.copyWith(
+              color: isBlocked ? AppColors.textSecondary : null))),
+          if (isBlocked) ...[
+            const SizedBox(width: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                  color: AppColors.error.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(4)),
+              child: Text('Bloqué', style: AppTextStyles.microBold
+                  .copyWith(color: AppColors.error)),
+            ),
+          ],
+          if (memberSuspended) ...[
+            const SizedBox(width: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                  color: AppColors.warning.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(4)),
+              child: Text('Suspendu', style: AppTextStyles.microBold
+                  .copyWith(color: AppColors.warning)),
+            ),
+          ],
           if (isSA) ...[
             const SizedBox(width: 5),
             Container(
@@ -1905,19 +2261,6 @@ class _UserCard extends StatelessWidget {
         ]),
         subtitle: Text(email, style: AppTextStyles.caption),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (plan != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                  color: isExpired
-                      ? AppColors.error.withValues(alpha:0.1) : AppColors.primarySurface,
-                  borderRadius: BorderRadius.circular(5)),
-              child: Text(plan['label'] ?? '—', style: AppTextStyles
-                  .microBold.copyWith(
-                      color: isExpired ? AppColors.error : AppColors.primary)),
-            )
-          else
-            const Text('Sans plan', style: AppTextStyles.microSecondary),
           PopupMenuButton<String>(
             onSelected: (v) => _action(context, v),
             color: Theme.of(context).colorScheme.surface,
@@ -1928,12 +2271,11 @@ class _UserCard extends StatelessWidget {
                   _item('unblock', Icons.check_circle_outline, 'Activer', AppColors.secondary)
                 else
                   _item('block', Icons.block_rounded, 'Bloquer', AppColors.error),
-                if (needsReactivation)
-                  _item('sub', Icons.autorenew_rounded,
-                      'Réactiver l\'abonnement', AppColors.secondary)
-                else
-                  _item('sub', Icons.card_membership_rounded,
-                      'Abonnement', AppColors.primary),
+                if (onToggleSuspend != null)
+                  _item('susp',
+                      memberSuspended ? Icons.lock_open_rounded : Icons.pause_circle_outline,
+                      memberSuspended ? 'Réactiver l\'accès' : 'Suspendre',
+                      memberSuspended ? AppColors.secondary : AppColors.warning),
                 _item('reset', Icons.lock_reset_rounded, 'Réinitialiser mdp', AppColors.warning),
                 _item('delete', Icons.delete_outline_rounded, 'Supprimer', AppColors.error),
               ],
@@ -1955,7 +2297,7 @@ class _UserCard extends StatelessWidget {
     switch (v) {
       case 'block':   _setStatus(ctx, 'blocked');  break;
       case 'unblock': _setStatus(ctx, 'active');   break;
-      case 'sub':     _showSub(ctx);               break;
+      case 'susp':    onToggleSuspend?.call();      break;
       case 'reset':   _resetPwd(ctx);              break;
       case 'delete':  _confirmDel(ctx);            break;
       case 'details': _showDetails(ctx);           break;
@@ -1963,11 +2305,18 @@ class _UserCard extends StatelessWidget {
   }
 
   Future<void> _setStatus(BuildContext ctx, String status) async {
-    await Supabase.instance.client.from('profiles').update({
-      'prof_status': status,
-      if (status == 'blocked') 'blocked_at': DateTime.now().toIso8601String()
-      else 'blocked_at': null,
-    }).eq('id', user['id']);
+    // Passe par la RPC SECURITY DEFINER (hotfix_107) : un UPDATE direct était
+    // rejeté par la RLS profiles_update (SA ≠ propriétaire du profil) → le
+    // blocage n'avait aucun effet.
+    try {
+      await Supabase.instance.client.rpc('sa_set_user_status',
+          params: {'p_user_id': user['id'], 'p_status': status});
+    } catch (e) {
+      if (ctx.mounted) {
+        AppSnack.error(ctx, 'Échec : ${e.toString().replaceAll('Exception: ', '')}');
+      }
+      return;
+    }
     await ActivityLogService.log(
       action:      status == 'blocked' ? 'user_blocked' : 'user_unblocked',
       targetType:  'user',
@@ -1975,7 +2324,23 @@ class _UserCard extends StatelessWidget {
       targetLabel: user['name'] as String? ?? user['email'] as String?,
       details:     {'email': user['email']},
     );
+    // Notifier l'utilisateur du déblocage (le blocage, lui, est signalé par
+    // l'écran « Compte bloqué » — l'utilisateur ne verrait pas de bandeau).
+    if (status == 'active') {
+      try {
+        await AppDatabase.sendBroadcast(
+          title: 'Compte réactivé',
+          body: 'Votre compte a été réactivé. Vous avez de nouveau accès à '
+              'l\'application.',
+          type: 'info', targetType: 'user',
+          targetValue: user['id'] as String?);
+      } catch (_) {/* notif best-effort */}
+    }
     onRefresh();
+    if (ctx.mounted) {
+      AppSnack.success(ctx,
+          status == 'blocked' ? 'Compte bloqué' : 'Compte réactivé');
+    }
   }
 
   void _resetPwd(BuildContext ctx) {
@@ -2027,19 +2392,9 @@ class _UserCard extends StatelessWidget {
     ));
   }
 
-  void _showSub(BuildContext ctx) {
-    showModalBottomSheet(context: ctx, isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        builder: (_) => _SubSheet(
-            userId: user['id'], userName: user['name'] ?? '—',
-            currentPlanName: ((user['subscriptions'] as List?)?.firstOrNull
-            as Map?)?['plans']?['name'] as String?,
-            onSaved: onRefresh));
-  }
-
   void _showDetails(BuildContext ctx) {
     final fmt  = DateFormat('dd/MM/yyyy HH:mm');
-    final sub  = (user['subscriptions'] as List?)?.firstOrNull as Map?;
+    final sub  = _currentSub(user['subscriptions'] as List?);
     final plan = sub?['plans'] as Map?;
     showModalBottomSheet(context: ctx, backgroundColor: Theme.of(ctx).colorScheme.surface,
       shape: const RoundedRectangleBorder(
@@ -2069,11 +2424,14 @@ class _UserCard extends StatelessWidget {
 
 class _ShopRow extends StatelessWidget {
   final Map<String,dynamic> shop;
-  final VoidCallback? onToggle, onDelete, onToggleSuspend,
-      onExtendTrial, onPayments;
+  final String? planLabel;     // plan de l'owner (affiché sur la boutique)
+  final bool planExpired;
+  final VoidCallback? onToggle, onToggleSuspend,
+      onExtendTrial, onPayments, onBackups, onSubscription;
   const _ShopRow({required this.shop, required this.onToggle,
-      required this.onDelete, this.onToggleSuspend,
-      this.onExtendTrial, this.onPayments});
+      this.onToggleSuspend,
+      this.onExtendTrial, this.onPayments, this.onBackups,
+      this.onSubscription, this.planLabel, this.planExpired = false});
 
   @override
   Widget build(BuildContext context) {
@@ -2115,6 +2473,19 @@ class _ShopRow extends StatelessWidget {
                     .copyWith(color: AppColors.error)),
               ),
             ],
+            if (planLabel != null) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                    color: planExpired
+                        ? AppColors.error.withValues(alpha: 0.1)
+                        : AppColors.primarySurface,
+                    borderRadius: BorderRadius.circular(5)),
+                child: Text(planLabel!, style: AppTextStyles.microBold.copyWith(
+                    color: planExpired ? AppColors.error : AppColors.primary)),
+              ),
+            ],
           ]),
           Text(owner != null
               ? '${owner['name'] ?? ''} · ${shop['sector'] ?? ''}' : shop['sector'] ?? '—',
@@ -2131,10 +2502,11 @@ class _ShopRow extends StatelessWidget {
           PopupMenuButton<String>(
             onSelected: (v) {
               if (v == 't') onToggle?.call();
-              if (v == 'd') onDelete?.call();
               if (v == 's') onToggleSuspend?.call();
               if (v == 'x') onExtendTrial?.call();
               if (v == 'p') onPayments?.call();
+              if (v == 'b') onBackups?.call();
+              if (v == 'sub') onSubscription?.call();
             },
             color: Theme.of(context).colorScheme.surface,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -2147,6 +2519,15 @@ class _ShopRow extends StatelessWidget {
                     style: AppTextStyles.bodySm.copyWith(
                         color: isActive ? AppColors.warning : AppColors.secondary)),
               ])),
+              if (onSubscription != null)
+                PopupMenuItem(value: 'sub', child: Row(children: [
+                  Icon(planExpired ? Icons.autorenew_rounded : Icons.card_membership_rounded,
+                      size: 15, color: planExpired ? AppColors.secondary : AppColors.primary),
+                  const SizedBox(width: 8),
+                  Text(planExpired ? 'Réactiver l\'abonnement' : 'Abonnement',
+                      style: AppTextStyles.bodySm.copyWith(
+                          color: planExpired ? AppColors.secondary : AppColors.primary)),
+                ])),
               if (onExtendTrial != null)
                 PopupMenuItem(value: 'x', child: Row(children: [
                   const Icon(Icons.more_time_rounded, size: 15,
@@ -2163,6 +2544,14 @@ class _ShopRow extends StatelessWidget {
                   Text('Paiements', style: AppTextStyles.bodySm
                       .copyWith(color: AppColors.secondary)),
                 ])),
+              if (onBackups != null)
+                PopupMenuItem(value: 'b', child: Row(children: [
+                  Icon(Icons.backup_rounded, size: 15,
+                      color: AppColors.primary),
+                  const SizedBox(width: 8),
+                  Text('Sauvegardes', style: AppTextStyles.bodySm
+                      .copyWith(color: AppColors.primary)),
+                ])),
               if (onToggleSuspend != null)
                 PopupMenuItem(value: 's', child: Row(children: [
                   Icon(suspended ? Icons.lock_open_rounded : Icons.block_rounded,
@@ -2172,12 +2561,6 @@ class _ShopRow extends StatelessWidget {
                       style: AppTextStyles.bodySm.copyWith(
                           color: suspended ? AppColors.secondary : AppColors.error)),
                 ])),
-              PopupMenuItem(value: 'd', child: Row(children: [
-                const Icon(Icons.delete_outline, size: 15, color: AppColors.error),
-                const SizedBox(width: 8),
-                Text('Supprimer', style: AppTextStyles.bodySm
-                    .copyWith(color: AppColors.error)),
-              ])),
             ],
           )
         else
@@ -2392,7 +2775,7 @@ class _LogEntry {
     final meta = _metaFor(action);
     return _LogEntry(
       action:      action,
-      category:    meta.category,
+      category:    ActivityActions.categoryOf(action),
       icon:        meta.icon,
       color:       meta.color,
       actorName:   actorName,
@@ -2499,6 +2882,7 @@ class _LogTile extends StatelessWidget {
 }
 
 // ─── Sheet abonnement ─────────────────────────────────────────────────────────
+// ─── Sheet abonnement ─────────────────────────────────────────────────────────
 class _SubSheet extends StatefulWidget {
   final String userId, userName;
   final String? currentPlanName;
@@ -2586,6 +2970,38 @@ class _SubSheetState extends State<_SubSheet> {
     _amountCtrl.text = _priceFor(p, _cycle).toStringAsFixed(0);
   }
 
+  static String _cycleLabel(String c) => switch (c) {
+    'monthly'   => 'Mensuel',
+    'quarterly' => 'Trimestriel',
+    _           => 'Annuel',
+  };
+
+  /// % d'économie du cycle courant vs mensuel équivalent (0 si mensuel).
+  int _savings() {
+    final p = _selectedPlan;
+    if (p == null || _cycle == 'monthly') return 0;
+    final m = _priceFor(p, 'monthly');
+    final cur = _priceFor(p, _cycle);
+    final months = _cycle == 'quarterly' ? 3 : 12;
+    if (m <= 0 || cur <= 0) return 0;
+    final saved = (m * months - cur) / (m * months) * 100;
+    return saved <= 0 ? 0 : saved.round();
+  }
+
+  /// Prix complet avec séparateur de milliers (3500 → « 3 500 »).
+  static String _money(double v) {
+    final s = v.round().toString();
+    final b = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) b.write(' ');
+      b.write(s[i]);
+    }
+    return b.toString();
+  }
+
+  Widget _sectionLabel(String t) => Text(t,
+      style: AppTextStyles.captionBold.copyWith(color: const Color(0xFF6B7280)));
+
   @override
   Widget build(BuildContext context) => Container(
     decoration: BoxDecoration(color: Theme.of(context).colorScheme.surface,
@@ -2598,10 +3014,26 @@ class _SubSheetState extends State<_SubSheet> {
             margin: const EdgeInsets.only(bottom: 14),
             decoration: BoxDecoration(color: AppColors.inputBorder,
                 borderRadius: BorderRadius.circular(2)))),
-        Text("Gérer l'abonnement",
-            style: AppTextStyles.label.copyWith(fontWeight: FontWeight.w700)),
-        Text(widget.userName, style: AppTextStyles.caption),
-        const SizedBox(height: 14),
+        Row(children: [
+          Container(
+            width: 38, height: 38,
+            decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10)),
+            child: Icon(Icons.workspace_premium_rounded,
+                size: 20, color: AppColors.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min, children: [
+            Text("Gérer l'abonnement",
+                style: AppTextStyles.label.copyWith(fontWeight: FontWeight.w700)),
+            Text(widget.userName,
+                style: AppTextStyles.caption, overflow: TextOverflow.ellipsis),
+          ])),
+        ]),
+        const SizedBox(height: 18),
         if (_loadingPlans)
           const Padding(padding: EdgeInsets.symmetric(vertical: 28),
               child: Center(child: CircularProgressIndicator()))
@@ -2610,6 +3042,8 @@ class _SubSheetState extends State<_SubSheet> {
               '« Plans tarifaires ».',
               style: AppTextStyles.bodySmSecondary)
         else ...[
+          _sectionLabel('Plan'),
+          const SizedBox(height: 8),
           // Plan (dynamique : tous les plans actifs, prix lus en base).
           for (int i = 0; i < _plans.length; i += 2) ...[
             if (i > 0) const SizedBox(height: 8),
@@ -2629,6 +3063,8 @@ class _SubSheetState extends State<_SubSheet> {
                   : const SizedBox()),
             ]),
           ],
+          const SizedBox(height: 16),
+          _sectionLabel('Cycle de facturation'),
           const SizedBox(height: 8),
           Row(children: [
             Expanded(child: _Btn('Mensuel', 'monthly', _cycle,
@@ -2640,9 +3076,43 @@ class _SubSheetState extends State<_SubSheet> {
             Expanded(child: _Btn('Annuel', 'yearly', _cycle,
                 (v) => setState(() { _cycle = v; _syncAmount(); }))),
           ]),
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
+          // Récapitulatif prix (plan · cycle + économie éventuelle).
+          if (_selectedPlan != null) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.07),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                    color: AppColors.primary.withValues(alpha: 0.22)),
+              ),
+              child: Row(children: [
+                Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min, children: [
+                  Text('${_selectedPlan!['label'] ?? _selectedPlan!['name']}'
+                      ' · ${_cycleLabel(_cycle)}',
+                      style: AppTextStyles.bodySmBold),
+                  if (_savings() > 0)
+                    Text('Économie de ${_savings()} % vs mensuel',
+                        style: AppTextStyles.caption
+                            .copyWith(color: AppColors.secondary)),
+                ])),
+                Text('${_money(_priceFor(_selectedPlan!, _cycle))} XAF',
+                    style: AppTextStyles.subtitleBold
+                        .copyWith(color: AppColors.primary)),
+              ]),
+            ),
+            const SizedBox(height: 14),
+          ],
+          _sectionLabel('Montant encaissé (XAF)'),
+          const SizedBox(height: 6),
           _Field(controller: _amountCtrl, hint: 'Montant payé (XAF)',
               icon: Icons.payments_outlined, type: TextInputType.number),
+          const SizedBox(height: 16),
+          _sectionLabel('Mode de paiement'),
           const SizedBox(height: 8),
           // Méthode de paiement (consignée dans les notes — pas de colonne
           // dédiée côté `subscriptions`).
@@ -2658,18 +3128,20 @@ class _SubSheetState extends State<_SubSheet> {
                   : const SizedBox()),
             ]),
           ],
-          const SizedBox(height: 10),
+          const SizedBox(height: 16),
+          _sectionLabel('Détails'),
+          const SizedBox(height: 6),
           _Field(controller: _refCtrl, hint: 'Référence paiement',
               icon: Icons.receipt_outlined),
           const SizedBox(height: 6),
           _Field(controller: _notesCtrl, hint: 'Notes internes',
               icon: Icons.notes_rounded),
-          const SizedBox(height: 14),
+          const SizedBox(height: 18),
           SizedBox(width: double.infinity, child: ElevatedButton(
             onPressed: _saving ? null : _save,
             style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary, foregroundColor: Colors.white,
-                elevation: 0, padding: const EdgeInsets.symmetric(vertical: 13),
+                elevation: 0, padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
             child: _saving
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(
@@ -2698,9 +3170,12 @@ class _SubSheetState extends State<_SubSheet> {
         'quarterly' => DateTime(now.year, now.month + 3, now.day),
         _           => DateTime(now.year + 1, now.month, now.day),
       };
+      // Annule l'abonnement courant — active ET trial (l'index unique
+      // idx_subs_one_active_per_user couvre les deux → sinon collision 23505).
       final cancelled = await Supabase.instance.client.from('subscriptions')
           .update({'sub_status': 'cancelled', 'cancelled_at': now.toIso8601String()})
-          .eq('user_id', widget.userId).eq('sub_status', 'active')
+          .eq('user_id', widget.userId)
+          .inFilter('sub_status', ['active', 'trial'])
           .select();
       if ((cancelled as List).isNotEmpty) {
         await ActivityLogService.log(
@@ -2734,6 +3209,16 @@ class _SubSheetState extends State<_SubSheet> {
         details:     {'plan_id': planId, 'cycle': _cycle,
                       'amount': amount, 'method': _method},
       );
+      // Notifier l'utilisateur du changement (bandeau in-app, cible 'user').
+      try {
+        final planLabel = _selectedPlan?['label']?.toString()
+            ?? _selectedPlan?['name']?.toString() ?? 'votre formule';
+        await AppDatabase.sendBroadcast(
+          title: 'Abonnement mis à jour',
+          body: 'Votre abonnement « $planLabel » (${_cycleLabel(_cycle)}) est '
+              'actif jusqu\'au ${exp.day}/${exp.month}/${exp.year}.',
+          type: 'info', targetType: 'user', targetValue: widget.userId);
+      } catch (_) {/* notif best-effort */}
       widget.onSaved();
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
@@ -3003,34 +3488,6 @@ class _DetailRow extends StatelessWidget {
           style: AppTextStyles.caption)),
       Expanded(child: Text(value, style: AppTextStyles.captionBold)),
     ]),
-  );
-}
-
-class _ConfirmDialog extends StatelessWidget {
-  final String title, body, confirmLabel;
-  final Color confirmColor;
-  final VoidCallback onConfirm;
-  const _ConfirmDialog({required this.title, required this.body,
-    required this.confirmLabel, required this.confirmColor, required this.onConfirm});
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    backgroundColor: Theme.of(context).colorScheme.surface,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-    title: Text(title, style: AppTextStyles.label
-        .copyWith(fontWeight: FontWeight.w700)),
-    content: Text(body, style: AppTextStyles.body),
-    actions: [
-      TextButton(onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler', style: TextStyle(color: AppColors.textSecondary))),
-      ElevatedButton(
-        onPressed: () { Navigator.of(context).pop(); onConfirm(); },
-        style: ElevatedButton.styleFrom(
-            backgroundColor: confirmColor, foregroundColor: Colors.white,
-            elevation: 0, shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10))),
-        child: Text(confirmLabel),
-      ),
-    ],
   );
 }
 

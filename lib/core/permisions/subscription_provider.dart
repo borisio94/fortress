@@ -19,9 +19,12 @@ class SubscriptionNotifier extends StateNotifier<AsyncValue<UserPlan>> {
   bool get justActivated => _justActivated;
   void consumeJustActivated() => _justActivated = false;
 
-  // Charger le plan — Supabase en priorité, Hive en fallback offline
+  // Charger le plan — CACHE HIVE D'ABORD (exposé immédiatement pour que le
+  // routeur redirige vers le dashboard sans attendre le réseau), puis
+  // rafraîchissement réseau (Supabase) en continuité. Le `ref.listen` du
+  // router ré-évalue la redirection à CHAQUE changement d'état, donc le cache
+  // route tout de suite et le réseau corrige ensuite si besoin.
   Future<void> load() async {
-    state = const AsyncValue.loading();
     try {
       final uid = Supabase.instance.client.auth.currentUser?.id;
       if (uid == null) {
@@ -29,67 +32,62 @@ class SubscriptionNotifier extends StateNotifier<AsyncValue<UserPlan>> {
         return;
       }
 
-      // Essayer Supabase d'abord
+      // ── 1. CACHE D'ABORD : on N'affiche PAS `loading` si un plan est en
+      //    cache (sinon plan=null → le routeur garderait l'utilisateur sur la
+      //    landing pendant les 2 appels réseau → écran violet/landing long).
+      final cachedProfile = AppDatabase.getCachedProfile(uid);
+      if ((cachedProfile?['is_super_admin'] as bool?) ?? false) {
+        state = AsyncValue.data(UserPlan.superAdmin());
+      } else {
+        final cachedPlan = AppDatabase.getCachedPlan(uid);
+        if (cachedPlan != null) {
+          state = AsyncValue.data(UserPlan.fromMap(cachedPlan));
+        } else if (state.valueOrNull == null) {
+          // Aucun cache (1ʳᵉ connexion) → on attend le réseau.
+          state = const AsyncValue.loading();
+        }
+      }
+
+      // ── 2. RAFRAÎCHISSEMENT réseau (met à jour cache + état). ──────────
       try {
-        // 1. Vérifier is_super_admin
         final profile = await Supabase.instance.client
             .from('profiles')
             .select('is_super_admin, prof_status, blocked_at')
             .eq('id', uid)
             .maybeSingle();
 
-        final isSuperAdmin =
-            profile?['is_super_admin'] as bool? ?? false;
+        final isSuperAdmin = profile?['is_super_admin'] as bool? ?? false;
         if (isSuperAdmin) {
-          // Synchronise le cache lu par AppDatabase.isSubscriptionFrozen
-          // (super-admin → jamais gelé).
-          await AppDatabase.cachePlanMap(
-              uid, UserPlan.superAdmin().toMap());
+          await AppDatabase.cachePlanMap(uid, UserPlan.superAdmin().toMap());
           state = AsyncValue.data(UserPlan.superAdmin());
           return;
         }
 
-        // 2. Appeler get_user_plan()
         final result = await Supabase.instance.client
             .rpc('get_user_plan', params: {'p_user_id': uid});
 
         if (result == null || (result as List).isEmpty) {
-          // Aucun abonnement actif → on persiste un plan "vide" pour que
-          // le verrou (AppDatabase) gèle l'app immédiatement, et qu'un
-          // renouvellement (qui repassera ici avec un résultat) le lève.
           await AppDatabase.cachePlanMap(uid, UserPlan.empty().toMap());
           state = AsyncValue.data(UserPlan.empty());
           return;
         }
 
         final map = Map<String, dynamic>.from(result[0] as Map);
-        // Rafraîchit le cache plan lu par le verrou abonnement : c'est
-        // CE point qui « dégèle » l'app juste après un renouvellement.
         await AppDatabase.cachePlanMap(uid, map);
         state = AsyncValue.data(UserPlan.fromMap(map));
-        return;
       } catch (_) {
-        // Pas de réseau — fallback sur cache Hive
-      }
-
-      // Fallback offline : lire depuis Hive
-      final cachedProfile =
-      AppDatabase.getCachedProfile(uid);
-      final isSuperAdminCached =
-          cachedProfile?['is_super_admin'] as bool? ?? false;
-      if (isSuperAdminCached) {
-        state = AsyncValue.data(UserPlan.superAdmin());
-        return;
-      }
-
-      final cachedPlan = AppDatabase.getCachedPlan(uid);
-      if (cachedPlan != null) {
-        state = AsyncValue.data(UserPlan.fromMap(cachedPlan));
-      } else {
-        state = AsyncValue.data(UserPlan.empty());
+        // Pas de réseau : on conserve le cache déjà exposé en 1. Si aucun
+        // cache n'existait, on retombe sur un plan vide (verrou cohérent).
+        if (state.valueOrNull == null) {
+          state = AsyncValue.data(UserPlan.empty());
+        }
       }
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      // On ne casse pas l'app : si un état valide existe déjà (cache), on le
+      // garde plutôt que d'exposer une erreur qui bloquerait la redirection.
+      if (state.valueOrNull == null) {
+        state = AsyncValue.error(e, st);
+      }
     }
   }
 

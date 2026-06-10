@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/database/app_database.dart';
 import '../../core/permisions/subscription_provider.dart';
 import '../../core/storage/hive_boxes.dart';
+import '../../core/storage/local_storage_service.dart';
+import '../../core/config/supabase_client.dart';
 
 /// Message broadcast reçu côté client (SA-5). Lecture seule.
 class BroadcastMessage {
@@ -54,7 +56,10 @@ class BroadcastSeenStore {
 /// Les messages déjà fermés ([BroadcastSeenStore]) sont exclus.
 final unreadBroadcastsProvider = FutureProvider.autoDispose
     .family<List<BroadcastMessage>, String>((ref, shopId) async {
-  final planName = ref.watch(currentPlanProvider).plan.name; // ex 'pro'
+  // Nom réel du plan (couvre les plans personnalisés, pas seulement l'enum).
+  final planName = ref.watch(currentPlanProvider).planNameRaw; // ex 'pro', 'test'
+  final uid = SupabaseClientService.currentUserId
+      ?? LocalStorageService.getCurrentUser()?.id;
   final raw  = await AppDatabase.getBroadcasts();
   final seen = BroadcastSeenStore.seenIds();
 
@@ -68,6 +73,7 @@ final unreadBroadcastsProvider = FutureProvider.autoDispose
       'all'  => true,
       'shop' => targetValue == shopId,
       'plan' => targetValue == planName,
+      'user' => uid != null && targetValue == uid,
       _      => false,
     };
     if (matches) out.add(BroadcastMessage.fromMap(m));

@@ -7,6 +7,7 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/services/activity_log_service.dart';
+import '../../../../core/services/activity_actions.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/storage/hive_boxes.dart';
@@ -578,7 +579,10 @@ class _LogEntry {
     return _LogEntry(
       id:          r['id']?.toString(),
       action:      action,
-      category:    meta.category,
+      // Catégorie = catalogue central (source unique) → garantit qu'aucune
+      // action ne « passe entre les filtres ». L'icône/couleur restent dans
+      // _metaFor (présentation).
+      category:    ActivityActions.categoryOf(action),
       icon:        meta.icon,
       color:       meta.color,
       actorId:     actorId,
@@ -729,11 +733,52 @@ _LogMeta _metaFor(String action) {
     case 'purchase_order_deleted':
       return _LogMeta('shop', Icons.receipt_long_outlined, AppColors.primary);
 
-    // Ventes
+    // Ventes / commandes
     case 'sale_completed':
       return const _LogMeta('sale', Icons.point_of_sale_rounded, AppColors.secondary);
     case 'sale_cancelled':
+    case 'order_cancelled':
+    case 'order_cancelled_by_client_from_alert':
       return const _LogMeta('alert', Icons.cancel_outlined, AppColors.warning);
+    case 'sale_deleted':
+      return const _LogMeta('alert', Icons.delete_sweep_outlined, AppColors.error);
+    case 'order_refunded':
+      return const _LogMeta('alert', Icons.undo_rounded, AppColors.warning);
+    case 'order_delivered':
+      return const _LogMeta('sale', Icons.local_shipping_outlined, AppColors.secondary);
+    case 'order_rescheduled':
+      return _LogMeta('sale', Icons.event_repeat_rounded, AppColors.primary);
+    case 'order_status_changed':
+      return _LogMeta('sale', Icons.sync_alt_rounded, AppColors.primary);
+    case 'acompte_recorded':
+      return const _LogMeta('sale', Icons.savings_outlined, AppColors.secondary);
+
+    // Stock (audit / ajustement alias)
+    case 'stock_adjusted':
+      return _LogMeta('stock', Icons.tune_rounded, AppColors.primary);
+    case 'stock_audit_run':
+      return _LogMeta('stock', Icons.fact_check_outlined, AppColors.primary);
+    case 'stock_audit_drift':
+      return const _LogMeta('alert', Icons.rule_rounded, AppColors.warning);
+    case 'stock_audit_corrected':
+      return const _LogMeta('stock', Icons.published_with_changes_rounded, AppColors.secondary);
+
+    // Membres (suspension)
+    case 'member_suspended':
+      return const _LogMeta('account', Icons.person_off_outlined, AppColors.warning);
+    case 'member_reactivated':
+      return const _LogMeta('account', Icons.how_to_reg_rounded, AppColors.secondary);
+
+    // Plans / messages (super-admin)
+    case 'plan_created':
+    case 'plan_updated':
+      return _LogMeta('account', Icons.card_membership_rounded, AppColors.primary);
+    case 'plan_deleted':
+      return const _LogMeta('account', Icons.credit_card_off_rounded, AppColors.warning);
+    case 'broadcast_sent':
+      return _LogMeta('account', Icons.campaign_outlined, AppColors.primary);
+    case 'user_signup':
+      return const _LogMeta('auth', Icons.person_add_alt_1_rounded, AppColors.secondary);
 
     // Clients
     case 'client_created':
@@ -840,9 +885,29 @@ String _titleFor(String action, String? label) {
     case 'purchase_order_updated':      return 'Bon de commande modifié$l';
     case 'purchase_order_deleted':      return 'Bon de commande supprimé$l';
 
-    // Ventes
+    // Ventes / commandes
     case 'sale_completed':              return 'Vente encaissée${label == null ? '' : ' — $label'}';
     case 'sale_cancelled':              return 'Vente annulée${label == null ? '' : ' — $label'}';
+    case 'sale_deleted':                return 'Vente supprimée${label == null ? '' : ' — $label'}';
+    case 'order_cancelled':             return 'Commande annulée${label == null ? '' : ' — $label'}';
+    case 'order_cancelled_by_client_from_alert':
+      return 'Commande annulée (client)${label == null ? '' : ' — $label'}';
+    case 'order_refunded':              return 'Commande remboursée${label == null ? '' : ' — $label'}';
+    case 'order_delivered':             return 'Commande livrée${label == null ? '' : ' — $label'}';
+    case 'order_rescheduled':           return 'Commande reprogrammée${label == null ? '' : ' — $label'}';
+    case 'order_status_changed':        return 'Statut commande modifié${label == null ? '' : ' — $label'}';
+    case 'acompte_recorded':            return 'Acompte encaissé${label == null ? '' : ' — $label'}';
+    case 'stock_adjusted':              return 'Ajustement de stock$l';
+    case 'stock_audit_run':             return 'Audit de stock lancé$l';
+    case 'stock_audit_drift':           return 'Écart de stock détecté$l';
+    case 'stock_audit_corrected':       return 'Stock corrigé (audit)$l';
+    case 'member_suspended':            return 'Membre suspendu$l';
+    case 'member_reactivated':          return 'Membre réactivé$l';
+    case 'plan_created':                return 'Plan créé$l';
+    case 'plan_updated':                return 'Plan modifié$l';
+    case 'plan_deleted':                return 'Plan supprimé$l';
+    case 'broadcast_sent':              return 'Message envoyé$l';
+    case 'user_signup':                 return 'Inscription$l';
 
     // Clients
     case 'client_created':              return 'Client créé$l';

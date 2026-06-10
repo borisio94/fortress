@@ -49,20 +49,54 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage> {
   // pour le rendu offline-first ; à terme on lira la table `plans` depuis
   // Hive cache. Annuel = mensuel × 9 (≈ -25 % vs 12 mois).
   // Trimestriel = mensuel × 3 − 10 %.
+  // Fallback offline (si la table `plans` n'est pas joignable).
   static const _prices = <PlanType, Map<String, double>>{
     PlanType.starter:  {'monthly':  3500, 'quarterly':  9450, 'yearly':  31500},
     PlanType.pro:      {'monthly':  8500, 'quarterly': 22950, 'yearly':  76500},
     PlanType.business: {'monthly': 18000, 'quarterly': 48600, 'yearly': 162000},
   };
 
-  double _priceFor(PlanType p) => _prices[p]?[_cycle] ?? 0;
+  /// Prix lus depuis la table `plans` (source de vérité éditée par le SA).
+  /// Null tant que non chargé → on retombe sur _prices (offline-first).
+  Map<PlanType, Map<String, double>>? _livePrices;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPrices();
+  }
+
+  Future<void> _loadPrices() async {
+    try {
+      final rows = await Supabase.instance.client.from('plans')
+          .select('name, price_monthly, price_quarterly, price_yearly');
+      final map = <PlanType, Map<String, double>>{};
+      for (final r in rows as List) {
+        final pt = switch ((r['name'] as String?)?.toLowerCase()) {
+          'starter'  => PlanType.starter,
+          'pro'      => PlanType.pro,
+          'business' => PlanType.business,
+          _          => null,
+        };
+        if (pt == null) continue;
+        map[pt] = {
+          'monthly':   (r['price_monthly']   as num?)?.toDouble() ?? 0,
+          'quarterly': (r['price_quarterly'] as num?)?.toDouble() ?? 0,
+          'yearly':    (r['price_yearly']    as num?)?.toDouble() ?? 0,
+        };
+      }
+      if (mounted && map.isNotEmpty) setState(() => _livePrices = map);
+    } catch (_) {/* offline → fallback _prices */}
+  }
+
+  Map<String, double>? _srcFor(PlanType p) => _livePrices?[p] ?? _prices[p];
+  double _priceFor(PlanType p) => _srcFor(p)?[_cycle] ?? 0;
 
   /// Pourcentage d'économie annuelle réel basé sur les prix mensuel/annuel.
-  /// Pour starter : 5k×12=60k vs 50k → 17%. Pour matcher exactement -20%
-  /// il faudrait UPDATE plans SET price_yearly=48000 WHERE name='starter'.
   int _savingsPct(PlanType p) {
-    final m = _prices[p]?['monthly'] ?? 0;
-    final y = _prices[p]?['yearly']  ?? 0;
+    final src = _srcFor(p);
+    final m = src?['monthly'] ?? 0;
+    final y = src?['yearly']  ?? 0;
     if (m <= 0 || y <= 0) return 0;
     final saved = (m * 12 - y) / (m * 12) * 100;
     return saved.round();
@@ -492,7 +526,7 @@ class _PlanCard extends StatelessWidget {
                 style: AppTextStyles.subtitleBold.copyWith(
                     color: cs.onSurface)),
             const Spacer(),
-            Text('${_compact(price)} XAF',
+            Text('${_money(price)} XAF',
                 style: AppTextStyles.title.copyWith(
                     fontWeight: FontWeight.w800, color: accent)),
             const SizedBox(width: 2),
@@ -601,10 +635,16 @@ class _PlanCard extends StatelessWidget {
     return lines;
   }
 
-  static String _compact(double v) {
-    if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(1)}M';
-    if (v >= 1000)    return '${(v / 1000).toStringAsFixed(0)}k';
-    return v.toStringAsFixed(0);
+  /// Prix complet avec séparateur de milliers (espace) — aligné sur la page
+  /// SA Plans tarifaires : 3500 → « 3 500 ».
+  static String _money(double v) {
+    final s = v.round().toString();
+    final b = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) b.write(' ');
+      b.write(s[i]);
+    }
+    return b.toString();
   }
 
   static String _featureLabel(AppLocalizations l, Feature f) {

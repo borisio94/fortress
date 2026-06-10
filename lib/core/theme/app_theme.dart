@@ -231,6 +231,10 @@ class AppTheme {
 
   static ThemeData _buildLight(ThemePalette p) => ThemeData(
     useMaterial3: true,
+    // Ripple classique (cercle qui s'étend) sur TOUS les widgets à encre :
+    // boutons, IconButton, ListTile, InkWell… — bien plus visible que
+    // l'InkSparkle M3 par défaut, idéal pour les tutoriels en capture vidéo.
+    splashFactory: InkRipple.splashFactory,
     // Brand dynamique : suit la palette utilisateur. Les autres tokens
     // (success/warning/danger/etc.) restent universels via la factory.
     extensions: <ThemeExtension<dynamic>>[
@@ -474,11 +478,11 @@ class AppTheme {
       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: AppColors.inputBorder)),
       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: p.primary, width: 1.5)),
+          borderSide: BorderSide(color: p.primary, width: 2)),
       errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: AppColors.error)),
       focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.error, width: 1.5)),
+          borderSide: const BorderSide(color: AppColors.error, width: 2)),
       hintStyle: const TextStyle(color: AppColors.textHint, fontSize: 14),
       labelStyle: const TextStyle(color: AppColors.textSecondary),
       prefixIconColor: AppColors.textSecondary,
@@ -490,6 +494,8 @@ class AppTheme {
       style: ElevatedButton.styleFrom(
         backgroundColor: p.primary,
         foregroundColor: Colors.white,
+        // Ripple blanc visible sur fond primary (capture tuto).
+        overlayColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         minimumSize: const Size(double.infinity, 52),
@@ -502,6 +508,7 @@ class AppTheme {
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: AppColors.textPrimary,
+        overlayColor: p.primary,
         minimumSize: const Size(double.infinity, 52),
         side: BorderSide(color: AppColors.inputBorder),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -512,8 +519,19 @@ class AppTheme {
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
         foregroundColor: p.primary,
+        overlayColor: p.primary,
         textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
       ),
+    ),
+
+    // FilledButton (sheets, dialogues) — ripple blanc sur fond plein.
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(overlayColor: Colors.white),
+    ),
+
+    // IconButton (app bars, toolbars) — ripple primary visible.
+    iconButtonTheme: IconButtonThemeData(
+      style: IconButton.styleFrom(overlayColor: p.primary),
     ),
 
     // ── Textes ─────────────────────────────────────────────────────────
@@ -569,6 +587,8 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       fontFamily: 'Inter',
+      // Ripple classique visible sur tous les widgets à encre (cf. light).
+      splashFactory: InkRipple.splashFactory,
       extensions: <ThemeExtension<dynamic>>[
         AppSemanticColors.darkForBrand(p.primary),
       ],
@@ -678,11 +698,11 @@ class AppTheme {
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: _dBorder)),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: p.primaryLight, width: 1.5)),
+            borderSide: BorderSide(color: p.primaryLight, width: 2)),
         errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: AppColors.error)),
         focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: AppColors.error, width: 1.5)),
+            borderSide: const BorderSide(color: AppColors.error, width: 2)),
         hintStyle: const TextStyle(color: _dTextHint, fontSize: 14),
         labelStyle: const TextStyle(color: _dTextSecondary),
         prefixIconColor: _dTextSecondary,
@@ -693,6 +713,7 @@ class AppTheme {
         style: ElevatedButton.styleFrom(
           backgroundColor: p.primaryLight,
           foregroundColor: Colors.white,
+          overlayColor: Colors.white,
           surfaceTintColor: Colors.transparent,
           elevation: 0,
           minimumSize: const Size(double.infinity, 52),
@@ -705,6 +726,7 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: _dTextPrimary,
+          overlayColor: p.primaryLight,
           minimumSize: const Size(double.infinity, 52),
           side: const BorderSide(color: _dBorder),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -715,8 +737,17 @@ class AppTheme {
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: p.primaryLight,
+          overlayColor: p.primaryLight,
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
         ),
+      ),
+
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(overlayColor: Colors.white),
+      ),
+
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(overlayColor: p.primaryLight),
       ),
 
       listTileTheme: const ListTileThemeData(

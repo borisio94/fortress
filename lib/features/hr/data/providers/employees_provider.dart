@@ -146,6 +146,39 @@ class EmployeesNotifier
     return (result is String) ? result : '';
   }
 
+  /// Crée une INVITATION par lien (magic-link partageable) au lieu d'un
+  /// compte direct. Retourne le token ; l'appelant construit le lien
+  /// `/accept-invite?token=…` et le partage. L'employé crée lui-même son
+  /// mot de passe (ou se connecte) en ouvrant le lien, puis est rattaché
+  /// avec le même rôle + permissions + statut qu'une création directe.
+  Future<String> invite({
+    required String                  email,
+    required String                  fullName,
+    required Set<EmployeePermission> permissions,
+    Set<EmployeePermission>          denies = const {},
+    EmployeeStatus                   status = EmployeeStatus.active,
+    MemberRole                       role   = MemberRole.user,
+  }) async {
+    final shopId = arg;
+    final payload = MemberPermissions(grants: permissions, denies: denies).toList();
+    final result = await Supabase.instance.client.rpc(
+      'create_shop_invitation',
+      params: {
+        'p_shop_id':     shopId,
+        'p_email':       email,
+        'p_role':        role.key,
+        'p_permissions': payload,
+        'p_status':      status.key,
+        'p_full_name':   fullName,
+      },
+    );
+    final token = (result is Map) ? result['token'] as String? : null;
+    if (token == null || token.isEmpty) {
+      throw Exception('Token d\'invitation manquant');
+    }
+    return token;
+  }
+
   /// Met à jour les permissions granulaires d'un employé.
   ///
   /// Les `deny:` existants sont **préservés** sauf si [denies] est fourni

@@ -30,6 +30,9 @@ class AddProductParams extends Equatable {
     brand:       brand,
     sku:         sku,
     description: description,
+    // Visibilité web activée par défaut à la création (cohérent avec le
+    // formulaire produit complet).
+    isVisibleWeb: true,
   );
 
   @override List<Object?> get props => [shopId, name];

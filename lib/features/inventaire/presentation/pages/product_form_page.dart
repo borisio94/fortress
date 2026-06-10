@@ -158,7 +158,9 @@ class _ProductFormPageState extends State<ProductFormPage> {
 
   // ── Étape 3 ───────────────────────────────────────────────────────
   bool  _isActive     = true;
-  bool  _isVisibleWeb = false;
+  // Visibilité web activée par défaut à la CRÉATION (en édition, écrasée par
+  // la valeur du produit dans _fillFromProduct, gardé après `if (p == null)`).
+  bool  _isVisibleWeb = true;
   int   _rating       = 0;
 
   // ── Calculs ───────────────────────────────────────────────────────

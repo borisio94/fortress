@@ -32,38 +32,41 @@ class _StepShop extends StatelessWidget {
           if (state._shopNameError != null)
             _ErrText(state._shopNameError!),
           const SizedBox(height: 14),
-          // Secteur d'activité
-          const AppFieldLabel('Type d\'activité', required: true),
-          DropdownButtonFormField<String>(
-            initialValue: state._sector,
-            items: _kSectors
-                .map((o) => DropdownMenuItem(
-                    value: o.value,
-                    child: Text(o.label, style: AppTextStyles.body)))
-                .toList(),
-            onChanged: (v) {
-              if (v != null) {
-                // ignore: invalid_use_of_protected_member
-                state.setState(() => state._sector = v);
-              }
-            },
-            decoration: InputDecoration(
-              prefixIcon: Icon(Icons.category_outlined,
-                  size: 18, color: AppColors.textSecondary),
-              isDense: true,
-              filled: true,
-              fillColor: const Color(0xFFF9FAFB),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide:
-                      const BorderSide(color: Color(0xFFE5E7EB))),
-              enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide:
-                      const BorderSide(color: Color(0xFFE5E7EB))),
+          // Secteur d'activité — masqué en mode e-commerce unique (réversible :
+          // kEcommerceOnlyMode). Code conservé pour réactivation future.
+          if (!kEcommerceOnlyMode) ...[
+            const AppFieldLabel('Type d\'activité', required: true),
+            DropdownButtonFormField<String>(
+              initialValue: state._sector,
+              items: _kSectors
+                  .map((o) => DropdownMenuItem(
+                      value: o.value,
+                      child: Text(o.label, style: AppTextStyles.body)))
+                  .toList(),
+              onChanged: (v) {
+                if (v != null) {
+                  // ignore: invalid_use_of_protected_member
+                  state.setState(() => state._sector = v);
+                }
+              },
+              decoration: InputDecoration(
+                prefixIcon: Icon(Icons.category_outlined,
+                    size: 18, color: AppColors.textSecondary),
+                isDense: true,
+                filled: true,
+                fillColor: const Color(0xFFF9FAFB),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide:
+                        const BorderSide(color: Color(0xFFE5E7EB))),
+                enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide:
+                        const BorderSide(color: Color(0xFFE5E7EB))),
+              ),
             ),
-          ),
-          const SizedBox(height: 14),
+            const SizedBox(height: 14),
+          ],
           // Adresse / Ville (désormais obligatoire)
           const AppFieldLabel('Adresse / Ville', required: true),
           AppField(

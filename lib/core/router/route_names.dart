@@ -8,6 +8,8 @@ class RouteNames {
   static const register = '/auth/register';
   static const forgotPassword = '/auth/forgot-password';
   static const acceptInvite = '/accept-invite';
+  static const blocked = '/blocked';
+  static const suspended = '/suspended'; // /suspended/:shopId
 
   // Shop selector
   static const shopSelector = '/shop-selector';
@@ -40,6 +42,7 @@ class RouteNames {
   static const languagePage = '/shop/:shopId/parametres/language';
   static const currencyPage  = '/shop/:shopId/parametres/currency';
   static const themePage     = '/shop/:shopId/parametres/theme';
+  static const textSizePage  = '/shop/:shopId/parametres/text-size';
   static const caisseConfigPage  = '/shop/:shopId/parametres/caisse';
   static const whatsappTemplatesPage = '/shop/:shopId/parametres/whatsapp-templates';
   static const notificationsPage = '/shop/:shopId/parametres/notifications';

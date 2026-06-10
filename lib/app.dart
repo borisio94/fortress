@@ -21,10 +21,12 @@ import 'features/shop_selector/presentation/bloc/shop_selector_bloc.dart';
 import 'features/caisse/presentation/bloc/caisse_bloc.dart';
 import 'features/hub_central/presentation/bloc/hub_bloc.dart';
 import 'shared/widgets/alerts/scheduled_alerts_overlay.dart';
+import 'shared/widgets/demo_tap_indicator.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/stock_service.dart';
 import 'features/onboarding/presentation/providers/onboarding_seen_provider.dart';
 import 'core/providers/demo_mode_provider.dart';
+import 'core/providers/text_scale_provider.dart';
 
 // ConsumerStatefulWidget — les blocs sont créés UNE SEULE FOIS dans initState
 // évite la recréation de BlocProvider à chaque rebuild → plus de Duplicate GlobalKey
@@ -121,6 +123,15 @@ class _PosAppState extends ConsumerState<PosApp>
     final notifier = ref.watch(authRouterNotifierProvider);
     final authBloc = ref.watch(authBlocProvider);
     final router   = ref.watch(appRouterProvider);
+    // Taille de texte réglable par l'utilisateur (Paramètres → Taille du
+    // texte). Observée ici pour que tout changement reconstruise l'app et
+    // redimensionne le texte EN DIRECT (aperçu instantané).
+    final userTextScale = ref.watch(textScaleProvider);
+    // Mode démo observé au PREMIER niveau : indispensable pour que basculer
+    // l'interrupteur reconstruise l'app et (dés)active le détecteur de clic +
+    // le ripple amplifié. (Le `ref.watch` à l'intérieur du builder ne suffit
+    // pas à abonner PosApp.)
+    final demoEnabled = ref.watch(demoModeProvider);
 
     return MultiBlocProvider(
       providers: [
@@ -202,13 +213,19 @@ class _PosAppState extends ConsumerState<PosApp>
               minScaleFactor: 1.10,
               maxScaleFactor: 1.30,
             );
+            // Taille de texte choisie par l'utilisateur (réactive). On
+            // multiplie l'échelle effective (OS + clamp) par ce facteur —
+            // façon globale d'agrandir/réduire le texte sans toucher chaque
+            // style AppTextStyles. Aperçu instantané (cf. userTextScale watché).
+            final boosted =
+                TextScaler.linear(clamped.scale(1.0) * userTextScale);
             // Mode démo (enregistrements promo) : on amplifie le splash
             // Material via un sur-thème local. Chaque InkWell / ListTile /
             // bouton de l'app utilise alors un ripple violet bien visible,
             // exactement à l'endroit où l'utilisateur a tapé. Aucun cercle
             // sur les labels / espaces vides / pendant les scrolls : la
             // mécanique du splash Material gère déjà ces cas par défaut.
-            final demo = ref.watch(demoModeProvider);
+            final demo = demoEnabled; // valeur observée au 1er niveau (réactif)
             Widget content = ScheduledAlertsOverlay(
               child: child ?? const SizedBox.shrink(),
             );
@@ -225,8 +242,17 @@ class _PosAppState extends ConsumerState<PosApp>
                 child: content,
               );
             }
+            // Repère de tap GLOBAL : un cercle apparaît à chaque appui, pile
+            // où le doigt touche (tous les éléments, pas seulement Material) —
+            // pour savoir exactement quelle action est déclenchée à
+            // l'enregistrement d'écran.
+            content = DemoTapIndicator(
+              enabled: demo,
+              color: AppColors.primary,
+              child: content,
+            );
             return MediaQuery(
-              data: mq.copyWith(textScaler: clamped),
+              data: mq.copyWith(textScaler: boosted),
               child: content,
             );
           },

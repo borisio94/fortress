@@ -28,6 +28,7 @@ import 'sync_status_banner.dart';
 import 'order_source_badge.dart';
 import 'pin_lock_banner.dart';
 import 'shop_logo_avatar.dart';
+import '../../core/config/app_modes.dart';
 import '../../core/storage/local_storage_service.dart';
 import 'stock_nav_chips.dart';
 import 'alerts/new_web_order_banner.dart';
@@ -1367,13 +1368,26 @@ class _CartBadgeBtn extends ConsumerWidget {
   /// le rendu du `CartWidget` dans CaissePage (mode e-commerce active des
   /// champs livraison/expédition supplémentaires).
   void _openCart(BuildContext context, WidgetRef ref) {
-    if (_useDesktopLayout(context)) {
+    // DÉTERMINISTE par `shopId` (pas la boutique « courante » du provider qui
+    // peut être null/différente à l'ouverture) → évite le bug critique où le
+    // panier affichait « Encaisser » (vente immédiate, décrément stock) au lieu
+    // de « Enregistrer la commande » en mode e-commerce. Fallback Hive par id.
+    final cur      = ref.read(currentShopProvider);
+    final shop     = (cur != null && cur.id == shopId)
+        ? cur
+        : LocalStorageService.getShop(shopId);
+    // Mode e-commerce unique (réversible : kEcommerceOnlyMode) → panier
+    // toujours « Enregistrer la commande ».
+    final isEcom   = kEcommerceOnlyMode || shop?.sector == 'ecommerce';
+    // Desktop POS (non e-commerce) : raccourci vers la page de paiement.
+    // En e-commerce, on NE va JAMAIS sur /payment (flux Encaisser) → on ouvre
+    // le panier (Enregistrer la commande), même en desktop.
+    if (_useDesktopLayout(context) && !isEcom) {
       context.push('/shop/$shopId/caisse/payment');
       return;
     }
     final theme    = Theme.of(context);
     final bloc     = context.read<CaisseBloc>();
-    final isEcom   = ref.read(currentShopProvider)?.sector == 'ecommerce';
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,

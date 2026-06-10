@@ -32,6 +32,8 @@ import '../../../../core/permisions/app_permissions.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/services/export_models.dart';
 import '../../../../core/services/export_service.dart';
+import '../../../../core/services/activity_log_service.dart';
+import '../../../../core/config/app_modes.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../shared/widgets/export_scope_selector.dart';
 import '../../data/exports/orders_export_source.dart';
@@ -54,7 +56,6 @@ import '../../../../core/services/whatsapp/whatsapp_template_renderer.dart';
 import '../../../parametres/domain/entities/whatsapp_template.dart';
 import '../../../parametres/presentation/providers/whatsapp_template_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/utils/phone_formatter.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../crm/data/models/client_model.dart';
@@ -139,14 +140,31 @@ class _CaissePageState extends ConsumerState<CaissePage> {
     });
   }
 
+  /// Détermine le secteur de façon DÉTERMINISTE depuis la boutique de CETTE
+  /// page (`widget.shopId`), pas depuis la boutique « courante » du provider
+  /// qui peut être null/différente au 1er build → bug critique : le panier
+  /// affichait « Encaisser » (vente immédiate, décrément stock) au lieu de
+  /// « Enregistrer la commande ». Fallback Hive par id si le provider n'a pas
+  /// encore résolu. Le `ref.watch(currentShopProvider)` dans build() assure la
+  /// reconstruction dès que la boutique se charge.
   bool get _isEcommerce {
-    final shop = ref.read(currentShopProvider);
+    // Mode e-commerce unique (réversible : kEcommerceOnlyMode) → toujours
+    // « Enregistrer la commande », jamais « Encaisser ».
+    if (kEcommerceOnlyMode) return true;
+    final cur  = ref.read(currentShopProvider);
+    final shop = (cur != null && cur.id == widget.shopId)
+        ? cur
+        : LocalStorageService.getShop(widget.shopId);
     return shop?.sector == 'ecommerce';
   }
 
   @override
   Widget build(BuildContext context) {
     final l      = context.l10n;
+    // Réactif : la page se reconstruit dès que la boutique courante se charge,
+    // pour que `_isEcommerce` (et donc le bouton panier Encaisser/Enregistrer)
+    // reflète le bon secteur même si le provider était null au 1er build.
+    ref.watch(currentShopProvider);
 
     // Note : la `ViewFilterChipBar` (Boutique / Partenaires) côté Vente est
     // un FILTRE VISUEL pur. Elle ne dispatche plus `SetDeliveryMode` — sinon
@@ -955,6 +973,25 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 
               await _ds.updateOrderStatus(order.id!, status,
                   completedAt: completedAt);
+              // Audit du changement de statut (annulation/remboursement
+              // tracés spécifiquement ; autres transitions = générique).
+              ActivityLogService.log(
+                action: switch (status) {
+                  SaleStatus.cancelled => 'order_cancelled',
+                  SaleStatus.refunded  => 'order_refunded',
+                  SaleStatus.completed => 'order_delivered',
+                  _                    => 'order_status_changed',
+                },
+                targetType:  'order',
+                targetId:    order.id,
+                targetLabel: order.clientName ?? 'Commande',
+                shopId:      order.shopId,
+                details: {
+                  'from':  order.status.name,
+                  'to':    status.name,
+                  'total': order.total,
+                },
+              );
               if (!mounted) return;
               // Auto-switch vers l'onglet du nouveau statut si on est
               // sur un filtre dédié — sans ça la commande disparaissait
@@ -974,11 +1011,28 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               setState(() {});
             },
             onCancelWithReason: (reason) async {
-              await _ds.cancelOrderWithReason(orders[i].id!, reason);
+              final o = orders[i];
+              await _ds.cancelOrderWithReason(o.id!, reason);
+              ActivityLogService.log(
+                action: 'order_cancelled',
+                targetType: 'order', targetId: o.id,
+                targetLabel: o.clientName ?? 'Commande',
+                shopId: o.shopId,
+                details: {'reason': reason, 'total': o.total},
+              );
               if (mounted) setState(() {});
             },
             onReschedule: (newDate, reason) async {
-              await _ds.rescheduleOrder(orders[i].id!, newDate, reason);
+              final o = orders[i];
+              await _ds.rescheduleOrder(o.id!, newDate, reason);
+              ActivityLogService.log(
+                action: 'order_rescheduled',
+                targetType: 'order', targetId: o.id,
+                targetLabel: o.clientName ?? 'Commande',
+                shopId: o.shopId,
+                details: {'reason': reason,
+                          'new_date': newDate.toIso8601String()},
+              );
               if (mounted) setState(() {});
             },
             onDelete: (reason) async {
@@ -1337,10 +1391,10 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeInOut,
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
               color: _expanded
                   ? color.withValues(alpha:0.35)
@@ -1353,112 +1407,89 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
 
-            // ── Ligne résumé (toujours visible) ───────────────
+            // ── Ligne résumé (toujours visible) — disposition « card client »
+            //    avatar à gauche · nom + méta empilés · montant à droite.
             Row(children: [
-              // Partie gauche — prend tout l'espace disponible
+              _ClientAvatar(name: client ?? 'Client de passage', size: 36),
+              const SizedBox(width: 12),
               Expanded(
-                child: Row(children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 3),
-                    decoration: BoxDecoration(
-                        color: color.withValues(alpha:0.12),
-                        borderRadius: BorderRadius.circular(6)),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Text(_statusLabel(s),
-                          style: AppTextStyles.microBold
-                              .copyWith(color: color)),
-                      // Marqueur "reprogrammée" : icône repeat à côté du
-                      // libellé pour différencier visuellement les commandes
-                      // qui ont été déplacées dans le temps.
-                      if (s == SaleStatus.scheduled
-                          && (widget.order.rescheduleReason ?? '').isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 4),
-                          child: Icon(Icons.event_repeat_rounded,
-                              size: 10, color: color),
-                        ),
-                    ]),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                  Text(client ?? 'Client de passage',
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.captionBold.copyWith(
+                          color: Theme.of(context).colorScheme.onSurface)),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 6, runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      // Statut (+ marqueur "reprogrammée")
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                            color: color.withValues(alpha:0.12),
+                            borderRadius: BorderRadius.circular(6)),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Text(_statusLabel(s),
+                              style: AppTextStyles.microBold
+                                  .copyWith(color: color)),
+                          if (s == SaleStatus.scheduled
+                              && (widget.order.rescheduleReason ?? '').isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 4),
+                              child: Icon(Icons.event_repeat_rounded,
+                                  size: 10, color: color),
+                            ),
+                        ]),
+                      ),
+                      // Pastille statut paiement (hors annulée/refusée).
+                      if (s != SaleStatus.cancelled
+                          && s != SaleStatus.refused)
+                        _PaymentStatusPill(status: widget.order.paymentStatus),
+                      // Badge "Web"/"WhatsApp" si source != 'pos'.
+                      if (widget.order.source != 'pos')
+                        OrderSourceBadge(source: widget.order.source),
+                      Text(_formatDate(widget.order.createdAt),
+                          style: AppTextStyles.micro),
+                      if (widget.order.scheduledAt != null)
+                        Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.event_rounded,
+                              size: 11, color: AppColors.warning),
+                          const SizedBox(width: 3),
+                          Text('Livré ${_formatDate(widget.order.scheduledAt!)}',
+                              style: AppTextStyles.micro.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.warning)),
+                        ]),
+                    ],
                   ),
-                  // Pastille statut paiement (cf. hotfix_065) — affichée
-                  // uniquement si la commande n'est pas annulée/refusée
-                  // (ces statuts rendent le paiement non pertinent).
-                  if (s != SaleStatus.cancelled
-                      && s != SaleStatus.refused) ...[
-                    const SizedBox(width: 4),
-                    _PaymentStatusPill(status: widget.order.paymentStatus),
-                  ],
-                  // Badge "Web" / "WhatsApp" — ne s'affiche que si source != 'pos'.
-                  if (widget.order.source != 'pos') ...[
-                    const SizedBox(width: 5),
-                    OrderSourceBadge(source: widget.order.source),
-                  ],
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(
-                      _formatDate(widget.order.createdAt),
-                      style: AppTextStyles.micro,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (widget.order.scheduledAt != null) ...[
-                    const SizedBox(width: 5),
-                    Container(
-                      width: 3, height: 3,
-                      decoration: const BoxDecoration(
-                          color: Color(0xFFDDDDDD),
-                          shape: BoxShape.circle),
-                    ),
-                    const SizedBox(width: 5),
-                    Icon(Icons.event_rounded,
-                        size: 11, color: AppColors.warning),
-                    const SizedBox(width: 3),
-                    Flexible(
-                      child: Text('Livré ${_formatDate(widget.order.scheduledAt!)}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppTextStyles.micro.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.warning)),
-                    ),
-                  ],
-                  if (client != null) ...[
-                    const SizedBox(width: 5),
-                    Container(
-                      width: 3, height: 3,
-                      decoration: const BoxDecoration(
-                          color: Color(0xFFDDDDDD),
-                          shape: BoxShape.circle),
-                    ),
-                    const SizedBox(width: 5),
-                    _ClientAvatar(name: client),
-                    const SizedBox(width: 5),
-                    Flexible(
-                      child: Text(client,
-                          style: AppTextStyles.captionBold
-                              .copyWith(color: const Color(0xFF374151)),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1),
-                    ),
-                  ],
                 ]),
               ),
-              // Partie droite fixe — prix + chevron collés à droite
               const SizedBox(width: 8),
-              Text(
-                CurrencyFormatter.format(widget.order.total),
-                style: AppTextStyles.bodyBold.copyWith(
-                    fontWeight: FontWeight.w900,
-                    color: AppColors.primary),
-              ),
-              const SizedBox(width: 6),
-              AnimatedRotation(
-                turns: _expanded ? 0.5 : 0,
-                duration: const Duration(milliseconds: 220),
-                child: Icon(Icons.keyboard_arrow_down_rounded,
-                    size: 16,
-                    color: _expanded ? color : const Color(0xFFBBBBBB)),
-              ),
+              // Montant + chevron à droite.
+              Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                Text(
+                  CurrencyFormatter.format(widget.order.total),
+                  style: AppTextStyles.bodyBold.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.primary),
+                ),
+                const SizedBox(height: 2),
+                AnimatedRotation(
+                  turns: _expanded ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 220),
+                  child: Icon(Icons.keyboard_arrow_down_rounded,
+                      size: 18,
+                      color: _expanded ? color : const Color(0xFFBBBBBB)),
+                ),
+              ]),
             ]),
 
             // ── Bandeau dette enregistrée envers le partenaire ────
@@ -1774,13 +1805,6 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         onTap: (_sendingInvoice || _preparingInvoice)
                             ? null
                             : () => _sendInvoiceWhatsApp(context),
-                      ),
-                      const SizedBox(width: 6),
-                      _ActionBtn(
-                        icon: Icons.share_rounded,
-                        color: const Color(0xFF3B82F6),
-                        tooltip: 'Partager',
-                        onTap: () => _showFormatPicker(context),
                       ),
                       const SizedBox(width: 6),
                       // Bouton "Ajouter dépense en dette" — visible
@@ -2398,6 +2422,9 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     });
   }
 
+  // Sélecteur de format d'impression — conservé (dormant) après le retrait du
+  // bouton « Partager ». Réutilisable pour un futur bouton « Imprimer ».
+  // ignore: unused_element
   void _showFormatPicker(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -2832,7 +2859,8 @@ class _PaymentStatusPill extends StatelessWidget {
 /// générique. Couleur déterministe → un même client garde toujours la même.
 class _ClientAvatar extends StatelessWidget {
   final String name;
-  const _ClientAvatar({required this.name});
+  final double size;
+  const _ClientAvatar({required this.name, this.size = 20});
 
   // Palette douce — l'index est dérivé du nom (cf. _color).
   static const _palette = [
@@ -2869,7 +2897,7 @@ class _ClientAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = _color;
     return Container(
-      width: 20, height: 20,
+      width: size, height: size,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.15),
@@ -2877,7 +2905,8 @@ class _ClientAvatar extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.35), width: 0.5),
       ),
       child: Text(_initials,
-          style: AppTextStyles.microBold.copyWith(color: color)),
+          style: (size >= 30 ? AppTextStyles.captionBold : AppTextStyles.microBold)
+              .copyWith(color: color)),
     );
   }
 }

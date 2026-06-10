@@ -27,7 +27,8 @@ WITH checks(categorie, objet, genre, hotfix) AS (
     ('Sécurité RLS','orders',                           'rls',      'hotfix_041'),
     ('Sécurité RLS','clients',                          'rls',      'hotfix_041'),
     ('Sécurité RLS','profiles',                         'rls',      'hotfix_041'),
-    ('Sécurité RLS','sale_items',                       'rls',      'hotfix_042'),
+    ('Sécurité RLS','purchase_order_items',             'rls',      'hotfix_042'),
+    ('Sécurité RLS','reception_items',                  'rls',      'hotfix_042'),
     -- ── Abonnement / plans ──────────────────────────────────────────────────
     ('Abonnement',  'get_user_plan',                    'function', 'migrations/001 + hotfix_017'),
     -- ── Sessions actives ────────────────────────────────────────────────────
@@ -98,5 +99,6 @@ SELECT tablename,
 FROM pg_tables t
 WHERE schemaname='public'
   AND tablename IN ('shops','products','orders','clients','profiles',
-                    'sale_items','shop_memberships','expenses')
+                    'purchase_order_items','reception_items',
+                    'shop_memberships','expenses')
 ORDER BY tablename;

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/theme/app_text_styles.dart';
@@ -51,6 +53,10 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
   /// grants/denies est fait à la sauvegarde (`_buildPayload`).
   late Set<EmployeePermission> _selected;
   bool                 _busy        = false;
+  /// Mode d'ajout (création uniquement) : true = invitation par lien
+  /// partageable (l'employé définit son mot de passe), false = création
+  /// directe avec mot de passe défini par l'admin.
+  bool                 _inviteMode  = true;
 
   bool get _isEdit => widget.existing != null;
 
@@ -99,11 +105,28 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
       if (InputValidators.email(_emailCtrl.text) != null) {
         _snack(l.hrErrEmail, success: false); return;
       }
-      if (InputValidators.password(_passwordCtrl.text) != null) {
-        _snack(l.hrErrPassword, success: false); return;
+      if (!_inviteMode) {
+        if (InputValidators.password(_passwordCtrl.text) != null) {
+          _snack(l.hrErrPassword, success: false); return;
+        }
+        if (_passwordCtrl.text != _passwordCConfirmCtrl.text) {
+          _snack(l.hrErrPasswordMatch, success: false); return;
+        }
       }
-      if (_passwordCtrl.text != _passwordCConfirmCtrl.text) {
-        _snack(l.hrErrPasswordMatch, success: false); return;
+    }
+
+    // ── Garde quota plan : employés / boutique (création + invitation) ──
+    if (!_isEdit) {
+      final list = ref.read(employeesProvider(widget.shopId)).valueOrNull
+          ?? const <Employee>[];
+      final empCount = list.where((e) => !e.isOwner).length;
+      final plan = ref.read(currentPlanProvider);
+      if (!plan.canAddEmployee(empCount)) {
+        _snack(
+            'Limite d\'employés atteinte (${plan.maxEmployeesPerShop}/boutique) '
+            'pour votre plan. Passez à un plan supérieur pour en ajouter.',
+            success: false);
+        return;
       }
     }
 
@@ -173,6 +196,20 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
         if (_status != widget.existing!.status) {
           await notifier.setStatus(widget.existing!.userId, _status);
         }
+      } else if (_inviteMode) {
+        final token = await notifier.invite(
+          email:       _emailCtrl.text.trim(),
+          fullName:    _nameCtrl.text.trim(),
+          role:        effectiveRole,
+          permissions: grants,
+          denies:      denies,
+          status:      _status,
+        );
+        if (!mounted) return;
+        setState(() => _busy = false);
+        await _showInviteShareDialog(token);
+        if (mounted) Navigator.of(context).pop(true);
+        return;
       } else {
         await notifier.create(
           email:       _emailCtrl.text.trim(),
@@ -200,6 +237,64 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
       backgroundColor: success ? theme.semantic.success : theme.semantic.danger,
       behavior: SnackBarBehavior.floating,
     ));
+  }
+
+  /// Construit le lien d'invitation (`/accept-invite?token=…`) et propose de
+  /// le copier ou de le partager via WhatsApp. `Uri.base.origin` → marche sur
+  /// n'importe quel domaine (web).
+  Future<void> _showInviteShareDialog(String token) async {
+    final link = '${Uri.base.origin}/#/accept-invite?token=$token';
+    final waText = Uri.encodeComponent(
+        'Bonjour, voici votre lien pour rejoindre la boutique sur Fortress : $link');
+    await showDialog<void>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: Theme.of(c).colorScheme.surface,
+        title: const Text('Lien d\'invitation'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(
+            'Envoie ce lien à l\'employé. Il ouvrira la page, créera son mot '
+            'de passe (ou se connectera) et rejoindra la boutique. '
+            'Valable 7 jours.',
+            style: AppTextStyles.bodySmSecondary,
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+                color: Theme.of(c).colorScheme.surfaceContainerHighest
+                    .withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(8)),
+            child: SelectableText(link, style: AppTextStyles.caption),
+          ),
+        ]),
+        actions: [
+          TextButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: link));
+              if (c.mounted) {
+                ScaffoldMessenger.of(c).showSnackBar(const SnackBar(
+                    content: Text('Lien copié'),
+                    behavior: SnackBarBehavior.floating));
+              }
+            },
+            icon: const Icon(Icons.copy_rounded, size: 18),
+            label: const Text('Copier'),
+          ),
+          TextButton.icon(
+            onPressed: () => launchUrl(
+                Uri.parse('https://wa.me/?text=$waText'),
+                mode: LaunchMode.externalApplication),
+            icon: const Icon(Icons.chat_rounded, size: 18),
+            label: const Text('WhatsApp'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(c).pop(),
+            child: const Text('Terminé'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Applique un preset de permissions ET aligne automatiquement le rôle :
@@ -271,6 +366,35 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
             ),
             const SizedBox(height: 12),
 
+            // ── Méthode d'ajout (création seulement) ────────────
+            if (!_isEdit) ...[
+              _FieldLabel(text: 'Méthode d\'ajout'),
+              const SizedBox(height: 6),
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: true,
+                      label: Text('Lien d\'invitation'),
+                      icon: Icon(Icons.link_rounded, size: 16)),
+                  ButtonSegment(value: false,
+                      label: Text('Mot de passe'),
+                      icon: Icon(Icons.password_rounded, size: 16)),
+                ],
+                selected: {_inviteMode},
+                showSelectedIcon: false,
+                onSelectionChanged: (s) =>
+                    setState(() => _inviteMode = s.first),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _inviteMode
+                    ? 'Un lien sera généré : l\'employé définit son mot de '
+                      'passe et rejoint la boutique.'
+                    : 'Tu définis le mot de passe ; communique-le à l\'employé.',
+                style: AppTextStyles.caption,
+              ),
+              const SizedBox(height: 12),
+            ],
+
             // ── Email (création seulement, lecture seule en édition) ────
             EmailField(
               controller: _emailCtrl,
@@ -279,7 +403,7 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
               required: !_isEdit,
               enabled: !_isEdit,
             ),
-            if (!_isEdit) ...[
+            if (!_isEdit && !_inviteMode) ...[
               const SizedBox(height: 12),
 
               // ── Mot de passe (avec indicateur de force) ────────
@@ -320,36 +444,60 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
             ),
             const SizedBox(height: 14),
 
-            // ── Préréglages ─────────────────────────────────────
-            _FieldLabel(text: l.hrPresetTitle),
-            const SizedBox(height: 6),
-            _PresetSelector(
-              selected: _selected,
-              onApply: _applyPreset,
-            ),
-            const SizedBox(height: 14),
-
-            // ── Permissions par groupe ──────────────────────────
-            _FieldLabel(text: l.hrFieldPermissions),
-            const SizedBox(height: 8),
-            for (final g in EmployeePermissionGroup.values) ...[
-              _PermissionGroup(
-                group:         g,
-                selected:      _selected,
-                roleDefaults:  _roleDefaults,
-                showOwnerOnly: isOwnerCtx,
-                onToggleOne: (p, v) => setState(() {
-                  if (v) {
-                    _selected.add(p);
-                  } else {
-                    _selected.remove(p);
-                  }
-                }),
-                onToggleGroup: (v) =>
-                    _toggleGroup(g, v, includeOwnerOnly: isOwnerCtx),
+            // ── Autorisations (menu rétractable pour alléger l'UI) ──
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: cs.outlineVariant),
+                borderRadius: BorderRadius.circular(12),
               ),
-              const SizedBox(height: 10),
-            ],
+              child: Theme(
+                data: theme.copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  key: const PageStorageKey('employee_perms'),
+                  initiallyExpanded: false,
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+                  childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                  leading: const Icon(Icons.shield_outlined, size: 20),
+                  title: Text(l.hrFieldPermissions, style: AppTextStyles.bodyBold),
+                  subtitle: Text(
+                    '${_selected.length} autorisation(s) — appuyez pour configurer',
+                    style: AppTextStyles.caption,
+                  ),
+                  children: [
+                    // Préréglages
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: _FieldLabel(text: l.hrPresetTitle),
+                    ),
+                    const SizedBox(height: 6),
+                    _PresetSelector(
+                      selected: _selected,
+                      onApply: _applyPreset,
+                    ),
+                    const SizedBox(height: 14),
+                    // Permissions par groupe
+                    for (final g in EmployeePermissionGroup.values) ...[
+                      _PermissionGroup(
+                        group:         g,
+                        selected:      _selected,
+                        roleDefaults:  _roleDefaults,
+                        showOwnerOnly: isOwnerCtx,
+                        onToggleOne: (p, v) => setState(() {
+                          if (v) {
+                            _selected.add(p);
+                          } else {
+                            _selected.remove(p);
+                          }
+                        }),
+                        onToggleGroup: (v) =>
+                            _toggleGroup(g, v, includeOwnerOnly: isOwnerCtx),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                  ],
+                ),
+              ),
+            ),
             const SizedBox(height: 12),
 
             // ── CTA ──────────────────────────────────────────────
@@ -370,7 +518,9 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
                         width: 18, height: 18,
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: cs.onPrimary))
-                    : Text(_isEdit ? l.hrActionSave : l.hrActionCreate,
+                    : Text(_isEdit
+                            ? l.hrActionSave
+                            : (_inviteMode ? 'Générer le lien' : l.hrActionCreate),
                         style: AppTextStyles.label.copyWith(
                             fontWeight: FontWeight.w800,
                             color: cs.onPrimary)),

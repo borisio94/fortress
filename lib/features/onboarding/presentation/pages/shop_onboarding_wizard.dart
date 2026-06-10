@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/config/app_modes.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -89,7 +90,7 @@ class _ShopOnboardingWizardState
   final _districtCtrl = TextEditingController();
 
   int     _step    = 0;
-  String  _sector  = 'retail';
+  String  _sector  = kEcommerceOnlyMode ? 'ecommerce' : 'retail';
   String? _palette;
   bool    _submitting = false;
 
@@ -334,31 +335,35 @@ class _Step1NameSector extends StatelessWidget {
             hint:  'Ex. Boutique Etoile',
             onChanged: (_) => onChange(),
           ),
-          const SizedBox(height: 20),
-          const Text('Type d\'activité', style: AppTextStyles.label),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _kSectors.map((s) {
-              final sel = s.key == sector;
-              return ChoiceChip(
-                label: Text(s.label,
-                    style: AppTextStyles.bodySmBold.copyWith(
-                        color: sel ? Colors.white : AppColors.textPrimary)),
-                selected: sel,
-                onSelected: (_) => onSector(s.key),
-                selectedColor: AppColors.primary,
-                backgroundColor: AppColors.inputFill,
-                side: BorderSide(
-                    color: sel
-                        ? AppColors.primary
-                        : AppColors.inputBorder),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              );
-            }).toList(),
-          ),
+          // Type d'activité — masqué en mode e-commerce unique (réversible :
+          // kEcommerceOnlyMode). Code conservé pour réactivation future.
+          if (!kEcommerceOnlyMode) ...[
+            const SizedBox(height: 20),
+            const Text('Type d\'activité', style: AppTextStyles.label),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _kSectors.map((s) {
+                final sel = s.key == sector;
+                return ChoiceChip(
+                  label: Text(s.label,
+                      style: AppTextStyles.bodySmBold.copyWith(
+                          color: sel ? Colors.white : AppColors.textPrimary)),
+                  selected: sel,
+                  onSelected: (_) => onSector(s.key),
+                  selectedColor: AppColors.primary,
+                  backgroundColor: AppColors.inputFill,
+                  side: BorderSide(
+                      color: sel
+                          ? AppColors.primary
+                          : AppColors.inputBorder),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                );
+              }).toList(),
+            ),
+          ],
         ],
       ),
     );
