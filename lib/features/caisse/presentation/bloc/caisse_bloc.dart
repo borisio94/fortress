@@ -125,8 +125,14 @@ class SaveOrder extends CaisseEvent {
   /// (acompte ou paiement total upfront). 0 par défaut → commande naît
   /// `unpaid`. Si > 0 → `partial` ou `paid` selon montant vs total.
   final double amountPaid;
-  SaveOrder(this.shopId, {this.createdAt, this.amountPaid = 0});
-  @override List<Object?> get props => [shopId, createdAt, amountPaid];
+  /// Vente « à choisir sur place » : le livreur emporte plusieurs articles,
+  /// le client en garde certains, le reste revient. Si `true`, le stock est
+  /// RÉSERVÉ à la création (et la commande naît `processing`, isApprovalSale).
+  final bool isApprovalSale;
+  SaveOrder(this.shopId,
+      {this.createdAt, this.amountPaid = 0, this.isApprovalSale = false});
+  @override
+  List<Object?> get props => [shopId, createdAt, amountPaid, isApprovalSale];
 }
 
 /// Mise à jour statut d'une commande existante
@@ -227,6 +233,10 @@ class CaisseState extends Equatable {
   final bool?          orderSaved;
   final String?        editingOrderId;
   final Sale?          lastCompletedSale; // vente encaissée (pour reçu PDF)
+  /// Mode « à choisir sur place » du panier en cours (réserve le stock à la
+  /// création, réconcilié à la clôture). Initialisé depuis la commande en
+  /// édition ; remis à false sur un panier neuf.
+  final bool           isApprovalSale;
 
   /// Mode de livraison choisi pour la vente en cours. `null` = non défini.
   final DeliveryMode?  deliveryMode;
@@ -266,6 +276,7 @@ class CaisseState extends Equatable {
     this.orderSaved,
     this.editingOrderId,
     this.lastCompletedSale,
+    this.isApprovalSale = false,
     this.deliveryMode,
     this.deliveryLocationId,
     this.deliveryPersonName,
@@ -308,6 +319,7 @@ class CaisseState extends Equatable {
     String? editingOrderId,
     bool clearEditingOrderId = false,
     Sale? lastCompletedSale,
+    bool? isApprovalSale,
     DeliveryMode? deliveryMode,
     String? deliveryLocationId,
     String? deliveryPersonName,
@@ -343,6 +355,7 @@ class CaisseState extends Equatable {
         ? null
         : (editingOrderId ?? this.editingOrderId),
     lastCompletedSale:  lastCompletedSale ?? this.lastCompletedSale,
+    isApprovalSale:     isApprovalSale ?? this.isApprovalSale,
     deliveryMode:       clearDelivery ? null
                         : (deliveryMode ?? this.deliveryMode),
     deliveryLocationId: clearDelivery ? null
@@ -367,7 +380,7 @@ class CaisseState extends Equatable {
   List<Object?> get props =>
       [items, discountAmount, fees, paymentMethod, isProcessing, error,
        saleCompleted, taxRate, selectedClient, orderSaved, editingOrderId,
-       lastCompletedSale, idempotencyKey,
+       lastCompletedSale, isApprovalSale, idempotencyKey,
        deliveryMode, deliveryLocationId, deliveryPersonName, deliveryDate,
        deliveryCity, deliveryAddress,
        shipmentCity, shipmentAgency, shipmentHandler];
@@ -998,6 +1011,9 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
       shipmentAgency:     o.shipmentAgency,
       shipmentHandler:    o.shipmentHandler,
       editingOrderId: o.id,
+      // Pré-remplir le mode « à choisir sur place » depuis la commande éditée
+      // (sinon le switch repartait toujours désactivé en édition).
+      isApprovalSale: o.isApprovalSale,
       orderSaved:     null,
       saleCompleted:  false,
       isProcessing:   false,
@@ -1073,6 +1089,10 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
           shipmentHandler:    state.shipmentHandler ?? existing.shipmentHandler,
           // Édition : on garde l'auteur original (ne change pas après update).
           createdByUserId: existing.createdByUserId,
+          // Préserver l'état « à choisir sur place » + la réservation : le
+          // switch est verrouillé en édition (la réservation est déjà faite).
+          isApprovalSale: existing.isApprovalSale,
+          stockReserved:  existing.stockReserved,
         );
         await ds.updateOrder(updated);
         // Reprogrammer le rappel (remplace le précédent grâce à l'id déterministe)
@@ -1123,8 +1143,25 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
           // GF-1 : clé d'idempotence du panier — protège contre les doublons
           // côté Supabase (UNIQUE constraint sur orders.idempotency_key).
           idempotencyKey: state.idempotencyKey,
+          // Vente « à choisir sur place » : le moteur réservera le stock et
+          // passera la commande en `processing` (cf. reserveApprovalOrder).
+          isApprovalSale: event.isApprovalSale,
         );
-        await ds.saveOrder(order);
+        if (event.isApprovalSale) {
+          // Réserve (décrémente) tous les articles + persiste la commande en
+          // `processing, stockReserved=true`. Peut throw si stock insuffisant
+          // → dans ce cas on n'enregistre PAS la commande et on signale.
+          try {
+            await ds.reserveApprovalOrder(order);
+          } catch (e) {
+            emit(state.copyWith(
+                isProcessing: false,
+                error: 'Stock insuffisant pour réserver : $e'));
+            return;
+          }
+        } else {
+          await ds.saveOrder(order);
+        }
         // Programmer la notification de rappel à la date de livraison
         await DeliveryReminderService.scheduleFor(order);
         await ActivityLogService.log(

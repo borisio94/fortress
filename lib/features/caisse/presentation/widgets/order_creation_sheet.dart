@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../shared/widgets/app_switch.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
@@ -36,6 +37,10 @@ class OrderCreationResult {
   /// paiement total upfront sans devoir ouvrir un dialog supplémentaire
   /// après création. `0` = aucun versement (la commande naît `unpaid`).
   final double    amountPaid;
+  /// Vente « à choisir sur place » : le livreur emporte plusieurs articles,
+  /// le client en garde certains, le reste revient. Si `true`, le stock est
+  /// réservé à la création puis réconcilié à la clôture de la tournée.
+  final bool      isApprovalSale;
   const OrderCreationResult({
     required this.client,
     required this.scheduledAt,
@@ -43,6 +48,7 @@ class OrderCreationResult {
     required this.deliveryAddress,
     required this.createdAt,
     this.amountPaid = 0,
+    this.isApprovalSale = false,
   });
 }
 
@@ -59,6 +65,8 @@ Future<OrderCreationResult?> showOrderCreationSheet(
   String?   initialAddress,
   DateTime? initialCreatedAt,
   double?   orderTotal,
+  bool      initialIsApprovalSale = false,
+  bool      lockApproval = false,
 }) {
   return showFormSheet<OrderCreationResult>(
     context: context,
@@ -70,6 +78,8 @@ Future<OrderCreationResult?> showOrderCreationSheet(
       initialAddress:   initialAddress,
       initialCreatedAt: initialCreatedAt,
       orderTotal:       orderTotal,
+      initialIsApprovalSale: initialIsApprovalSale,
+      lockApproval:          lockApproval,
     ),
   );
 }
@@ -82,6 +92,8 @@ class _OrderCreationSheet extends StatefulWidget {
   final String?   initialAddress;
   final DateTime? initialCreatedAt;
   final double?   orderTotal;
+  final bool      initialIsApprovalSale;
+  final bool      lockApproval;
   const _OrderCreationSheet({
     required this.shopId,
     this.initialClient,
@@ -90,6 +102,8 @@ class _OrderCreationSheet extends StatefulWidget {
     this.initialAddress,
     this.initialCreatedAt,
     this.orderTotal,
+    this.initialIsApprovalSale = false,
+    this.lockApproval = false,
   });
   @override
   State<_OrderCreationSheet> createState() => _OrderCreationSheetState();
@@ -111,11 +125,15 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
   //   • partial : `_amountPaid = saisi par l'utilisateur`
   _PaymentChoice _paymentChoice = _PaymentChoice.none;
   late final TextEditingController _amountPaidCtrl;
+  // Vente « à choisir sur place » : réserve le stock à la création puis
+  // réconcilie à la clôture de la tournée (cf. reserveApprovalOrder).
+  bool _isApprovalSale = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
+    _isApprovalSale = widget.initialIsApprovalSale;
     _client    = widget.initialClient;
     _date      = widget.initialDate;
     _createdAt = widget.initialCreatedAt ?? DateTime.now();
@@ -257,6 +275,7 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
       deliveryAddress: address,
       createdAt:       _createdAt,
       amountPaid:      _resolveAmountPaid(),
+      isApprovalSale:  _isApprovalSale,
     ));
   }
 
@@ -344,6 +363,16 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
                   style: AppTextStyles.captionHint.copyWith(
                       color: Theme.of(context).colorScheme.onSurface
                           .withValues(alpha: 0.55)),
+                ),
+                // ── Vente « à choisir sur place » ────────────────────
+                // Le livreur emporte plusieurs articles, le client en garde
+                // certains, le reste revient. Le stock est réservé à la
+                // création puis réconcilié à la clôture de la tournée.
+                const SizedBox(height: 16),
+                _ApprovalSaleToggle(
+                  value: _isApprovalSale,
+                  enabled: !widget.lockApproval,
+                  onChanged: (v) => setState(() => _isApprovalSale = v),
                 ),
                 // ── Section paiement (cf. hotfix_065) ────────────────
                 // Affiché seulement si orderTotal connu (l'appelant l'a
@@ -494,6 +523,85 @@ class _PickerTile extends StatelessWidget {
           else const Icon(Icons.chevron_right_rounded,
               size: 18, color: Color(0xFF9CA3AF)),
         ]),
+      ),
+    );
+  }
+}
+
+/// Bascule « À choisir sur place » : active la réservation de stock pour une
+/// tournée d'approbation (le livreur emporte plusieurs articles, le client en
+/// garde certains, le reste revient et est remis en stock à la clôture).
+class _ApprovalSaleToggle extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  /// Quand false (édition d'une commande existante), le switch est verrouillé :
+  /// il reflète l'état mais n'est pas modifiable (la réservation est déjà faite).
+  final bool enabled;
+  const _ApprovalSaleToggle({
+    required this.value,
+    required this.onChanged,
+    this.enabled = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return Opacity(
+      opacity: enabled ? 1 : 0.65,
+      child: InkWell(
+        onTap: enabled ? () => onChanged(!value) : null,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: value ? sem.brandSurface : const Color(0xFFF9FAFB),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: value
+                    ? sem.brand.withValues(alpha: 0.35)
+                    : sem.borderSubtle),
+          ),
+          child: Row(children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(children: [
+                    Flexible(
+                      child: Text('À choisir sur place',
+                          style: AppTextStyles.body.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: value
+                                  ? sem.brandText
+                                  : const Color(0xFF111827))),
+                    ),
+                    if (!enabled) ...[
+                      const SizedBox(width: 6),
+                      Icon(Icons.lock_outline_rounded,
+                          size: 13, color: sem.brandText),
+                    ],
+                  ]),
+                  const SizedBox(height: 2),
+                  Text(
+                    enabled
+                        ? 'Le livreur apporte plusieurs articles, le client en '
+                          'garde certains, le reste revient. Le stock est '
+                          'réservé puis réconcilié à la clôture.'
+                        : 'Mode défini à la création — non modifiable ici.',
+                    style: AppTextStyles.captionHint
+                        .copyWith(color: const Color(0xFF6B7280)),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            AppSwitch(
+              value: value,
+              onChanged: enabled ? onChanged : null,
+            ),
+          ]),
+        ),
       ),
     );
   }

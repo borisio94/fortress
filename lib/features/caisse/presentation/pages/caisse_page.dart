@@ -23,6 +23,7 @@ import '../../../../shared/widgets/empty_state_widget.dart';
 import '../../../../shared/widgets/order_source_badge.dart';
 import '../../../../shared/widgets/view_filter_chip_bar.dart';
 import '../widgets/copy_delivery_message_sheet.dart';
+import '../widgets/approval_closure_sheet.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -813,11 +814,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
             order:    orders[i],
             debt:     orderDebts[orders[i].id],
             canCancel: perms.canCancelSale,
-            // Suppression autorisée UNIQUEMENT si la commande est annulée
-            // (en plus de la permission). Empêche d'effacer une commande
-            // active/complétée — on l'annule d'abord, puis on supprime.
-            canDelete: perms.canDeleteOrder
-                && orders[i].status == SaleStatus.cancelled,
+            // Suppression : permission + statut éligible. La règle de statut
+            // (scheduled/processing/refused/cancelled, non encaissée) est
+            // centralisée dans DeleteSaleUseCase.allowedStatuses et appliquée
+            // sur le bouton lui-même (_OrderCard) — cohérent use case + RPC.
+            canDelete: perms.canDeleteOrder,
             canEdit:   perms.canEditOrder,
             onUpdate: (status) async {
               // Garde défensive : annulation/remboursement requièrent
@@ -1049,6 +1050,37 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
             // Rebuild parent → `_orders` relit Hive → card reçoit une Sale
             // fraîche (bandeau « Reste à payer » disparaît une fois soldé).
             onChanged: () { if (mounted) setState(() {}); },
+            // Clôture d'une tournée « à choisir sur place » : réconcilie le
+            // stock réservé (gardé = vendu, reste = remis en stock).
+            onCloseApproval: (kept) async {
+              final o = orders[i];
+              await _ds.closeApprovalOrder(o.id!, kept);
+              ActivityLogService.log(
+                action: 'approval_closed',
+                targetType: 'order', targetId: o.id,
+                targetLabel: o.clientName ?? 'Commande',
+                shopId: o.shopId,
+                details: {
+                  'kept_total':
+                      kept.values.fold<int>(0, (s, v) => s + v),
+                },
+              );
+              if (mounted) setState(() {});
+            },
+            // Annulation d'une tournée : restaure tout le stock réservé.
+            onCancelApproval: () async {
+              final o = orders[i];
+              await _ds.cancelApprovalOrder(o.id!,
+                  reason: 'annulation tournée');
+              ActivityLogService.log(
+                action: 'approval_cancelled',
+                targetType: 'order', targetId: o.id,
+                targetLabel: o.clientName ?? 'Commande',
+                shopId: o.shopId,
+                details: const {'reason': 'annulation tournée'},
+              );
+              if (mounted) setState(() {});
+            },
           );
           },
         ),
@@ -1328,6 +1360,13 @@ class _OrderCard extends ConsumerStatefulWidget {
   /// True si l'utilisateur peut éditer une commande déjà créée
   /// (permission caisseEditOrders).
   final bool canEdit;
+  /// Clôture d'une tournée « à choisir sur place » : reçoit la map
+  /// `{ productId: quantité gardée }` saisie dans le sheet de clôture et doit
+  /// appeler `SaleLocalDatasource.closeApprovalOrder`.
+  final Future<void> Function(Map<String, int> kept) onCloseApproval;
+  /// Annulation d'une tournée « à choisir sur place » : restaure tout le
+  /// stock réservé (`cancelApprovalOrder`).
+  final Future<void> Function() onCancelApproval;
   const _OrderCard({required this.order,
     this.debt,
     required this.onUpdate,
@@ -1337,7 +1376,9 @@ class _OrderCard extends ConsumerStatefulWidget {
     this.onChanged,
     required this.canCancel,
     required this.canDelete,
-    required this.canEdit});
+    required this.canEdit,
+    required this.onCloseApproval,
+    required this.onCancelApproval});
   @override
   ConsumerState<_OrderCard> createState() => _OrderCardState();
 }
@@ -1446,6 +1487,24 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                             ),
                         ]),
                       ),
+                      // Chip « À choisir sur place » — visible uniquement
+                      // pour les ventes d'approbation (tournée à réconcilier).
+                      if (widget.order.isApprovalSale)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 3),
+                          decoration: BoxDecoration(
+                              color: AppColors.primary.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(6)),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(Icons.fact_check_outlined,
+                                size: 10, color: AppColors.primary),
+                            const SizedBox(width: 3),
+                            Text('À choisir',
+                                style: AppTextStyles.microBold
+                                    .copyWith(color: AppColors.primary)),
+                          ]),
+                        ),
                       // Pastille statut paiement (hors annulée/refusée).
                       if (s != SaleStatus.cancelled
                           && s != SaleStatus.refused)
@@ -1780,12 +1839,49 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   ],
                   // Actions
                   Row(children: [
-                    Expanded(
-                      child: _StatusMenu(
-                          current: s, onSelect: widget.onUpdate,
-                          canCancel: widget.canCancel),
-                    ),
-                    const SizedBox(width: 6),
+                    // Tournée « à choisir sur place » en cours : le stock est
+                    // géré par close/cancelApprovalOrder, on n'expose donc PAS
+                    // le menu de transition générique (qui re-décrémenterait /
+                    // restaurerait le stock à tort). À la place : 2 actions
+                    // dédiées (clôturer / annuler la tournée).
+                    if (widget.order.isApprovalSale
+                        && (s == SaleStatus.scheduled
+                            || s == SaleStatus.processing)) ...[
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _closeApproval(context),
+                          icon: const Icon(Icons.fact_check_outlined,
+                              size: 16),
+                          label: const Text('Clôturer la tournée'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.primary,
+                            side: BorderSide(
+                                color: AppColors.primary
+                                    .withValues(alpha: 0.5)),
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 8),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      _ActionBtn(
+                        icon: Icons.cancel_outlined,
+                        color: AppColors.error,
+                        bgColor: const Color(0xFFFEF2F2),
+                        tooltip: 'Annuler la tournée',
+                        onTap: () => _cancelApproval(context),
+                      ),
+                      const SizedBox(width: 6),
+                    ] else ...[
+                      Expanded(
+                        child: _StatusMenu(
+                            current: s, onSelect: widget.onUpdate,
+                            canCancel: widget.canCancel),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
                     if (widget.order.status == SaleStatus.completed) ...[
                       _ActionBtn(
                         icon: Icons.picture_as_pdf_rounded,
@@ -2476,6 +2572,44 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         }
       }
     }
+  }
+
+  /// Ouvre le sheet de clôture de tournée « à choisir sur place ». Récupère
+  /// les quantités gardées par article puis délègue au callback parent qui
+  /// appelle `closeApprovalOrder` (réconciliation du stock réservé).
+  Future<void> _closeApproval(BuildContext context) async {
+    final kept = await showApprovalClosureSheet(context, order: widget.order);
+    if (kept == null) return; // annulé
+    await widget.onCloseApproval(kept);
+    if (mounted) setState(() {});
+  }
+
+  /// Annule une tournée « à choisir sur place » après confirmation : tout le
+  /// stock réservé est restauré (callback parent → `cancelApprovalOrder`).
+  Future<void> _cancelApproval(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Annuler la tournée'),
+        content: const Text(
+            'Tous les articles réservés seront remis en stock et la commande '
+            'sera annulée. Continuer ?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Retour'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('Annuler la tournée'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await widget.onCancelApproval();
+    if (mounted) setState(() {});
   }
 
   Future<void> _confirmDelete(BuildContext context) async {

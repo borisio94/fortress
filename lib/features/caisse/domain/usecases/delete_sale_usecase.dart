@@ -9,7 +9,7 @@ import '../entities/sale.dart';
 /// Contrat
 /// ───────
 /// 1. La commande doit exister localement.
-/// 2. Statut ∈ {scheduled, processing, refused}.
+/// 2. Statut ∈ {scheduled, processing, refused, cancelled}.
 /// 3. `amount_paid == 0` (aucun encaissement boutique ou partenaire).
 /// 4. Motif ≥ 10 caractères.
 ///
@@ -32,11 +32,13 @@ class DeleteSaleUseCase {
   DeleteSaleUseCase({SaleLocalDatasource? datasource})
       : _ds = datasource ?? SaleLocalDatasource();
 
-  /// Statuts qui autorisent la suppression (cohérent avec la RPC SQL).
+  /// Statuts qui autorisent la suppression (cohérent avec la RPC SQL —
+  /// cf. hotfix_117 qui ajoute `cancelled`).
   static const allowedStatuses = <SaleStatus>{
     SaleStatus.scheduled,
     SaleStatus.processing,
     SaleStatus.refused,
+    SaleStatus.cancelled,
   };
 
   /// Longueur minimale du motif. Doit RESTER alignée avec la RPC SQL

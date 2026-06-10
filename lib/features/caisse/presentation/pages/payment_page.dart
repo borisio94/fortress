@@ -197,6 +197,8 @@ class _PaymentView extends StatelessWidget {
                           initialCity:    state.deliveryCity,
                           initialAddress: state.deliveryAddress,
                           orderTotal:     state.total,
+                          initialIsApprovalSale: state.isApprovalSale,
+                          lockApproval:          state.editingOrderId != null,
                         );
                         if (res == null) return; // annulé
                         if (!context.mounted) return;
@@ -210,7 +212,8 @@ class _PaymentView extends StatelessWidget {
                           ))
                           ..add(SaveOrder(shopId,
                               createdAt:  res.createdAt,
-                              amountPaid: res.amountPaid));
+                              amountPaid: res.amountPaid,
+                              isApprovalSale: res.isApprovalSale));
                         // Retour panier puis page commandes : l'opérateur
                         // verra la commande en "Programmée" et pourra
                         // l'avancer.

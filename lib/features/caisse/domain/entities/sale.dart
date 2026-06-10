@@ -283,6 +283,15 @@ class Sale extends Equatable {
   /// est non-null. Null si non supprimée.
   final String?   deleteReason;
 
+  /// Vente « à choisir sur place » : le livreur emporte plusieurs articles
+  /// candidats, le client en garde certains, le reste revient. Le stock est
+  /// RÉSERVÉ (décrémenté) dès la création, puis réconcilié à la clôture
+  /// (gardé = vendu, retourné = remis en stock). Cf. ApprovalClosure.
+  final bool isApprovalSale;
+  /// Garde-fou anti-double-comptage : `true` une fois les articles candidats
+  /// décrémentés (réservés). Évite de re-décrémenter à la complétion.
+  final bool stockReserved;
+
   const Sale({
     this.id,
     required this.shopId,
@@ -317,6 +326,8 @@ class Sale extends Equatable {
     this.deletedAt,
     this.deletedBy,
     this.deleteReason,
+    this.isApprovalSale = false,
+    this.stockReserved  = false,
   });
 
   /// True si la commande est soft-deleted (cf. hotfix_084).
@@ -374,6 +385,8 @@ class Sale extends Equatable {
     String?   deletedBy,
     String?   deleteReason,
     bool      clearDeleted = false,
+    bool?     isApprovalSale,
+    bool?     stockReserved,
   }) => Sale(
     id:                 id             ?? this.id,
     shopId:             shopId         ?? this.shopId,
@@ -408,6 +421,8 @@ class Sale extends Equatable {
     deletedAt:    clearDeleted ? null : (deletedAt    ?? this.deletedAt),
     deletedBy:    clearDeleted ? null : (deletedBy    ?? this.deletedBy),
     deleteReason: clearDeleted ? null : (deleteReason ?? this.deleteReason),
+    isApprovalSale: isApprovalSale ?? this.isApprovalSale,
+    stockReserved:  stockReserved  ?? this.stockReserved,
   );
 
   @override

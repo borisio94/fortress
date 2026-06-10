@@ -164,7 +164,8 @@
       "PowerShell($c = Get-Command supabase -ErrorAction SilentlyContinue; if \\($c\\) { \"FOUND: $\\($c.Source\\)\"; supabase --version } else { \"supabase introuvable dans le PATH\" ; \"Test npx:\"; \\(Get-Command npx -ErrorAction SilentlyContinue\\).Source })",
       "PowerShell(npx supabase functions deploy reset-platform --project-ref hyxvussnlnvbkalqzovb 2>&1 | Select-Object -Last 30)",
       "PowerShell(firebase serve *)",
-      "PowerShell(git *)"
+      "PowerShell(git *)",
+      "Bash(Select-String -Pattern \"error|approval_closure\")"
     ]
   }
 }

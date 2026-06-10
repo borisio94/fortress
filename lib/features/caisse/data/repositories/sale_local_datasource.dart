@@ -7,6 +7,7 @@ import '../../../../core/services/delivery_reminder_service.dart';
 import '../../../../core/database/app_database.dart';
 import '../../domain/entities/sale.dart';
 import '../../domain/entities/sale_item.dart';
+import '../../domain/approval_closure.dart';
 
 /// Datasource local Hive pour les ventes offline et le panier persistant.
 /// Nommé SaleLocalDatasource (pas de conflit avec l'entité Sale).
@@ -100,6 +101,8 @@ class SaleLocalDatasource {
       'payment_status':       order.paymentStatus.key,
       'created_at':     order.createdAt.toUtc().toIso8601String(),
       'completed_at':   completedAt,
+      'is_approval_sale': order.isApprovalSale,
+      'stock_reserved':   order.stockReserved,
       'fees':           order.fees,
       // GF-1 : clé d'idempotence du panier — persistée en Hive ET pushée
       // à Supabase pour bénéficier de l'UNIQUE constraint (hotfix_080).
@@ -147,6 +150,8 @@ class SaleLocalDatasource {
       'completed_at':   completedAt,
       'synced_to_cloud': false,
       'idempotency_key': order.idempotencyKey, // GF-1
+      'is_approval_sale': order.isApprovalSale,
+      'stock_reserved':   order.stockReserved,
       'fees':           order.fees,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
@@ -257,6 +262,8 @@ class SaleLocalDatasource {
       'payment_status':       order.paymentStatus.key,
       'created_at':     order.createdAt.toUtc().toIso8601String(),
       'completed_at':   completedAt,
+      'is_approval_sale': order.isApprovalSale,
+      'stock_reserved':   order.stockReserved,
       'fees':           order.fees,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
@@ -303,6 +310,8 @@ class SaleLocalDatasource {
       'amount_paid':          order.amountPaid,
       'payment_status':       order.paymentStatus.key,
       'completed_at':   completedAt,
+      'is_approval_sale': order.isApprovalSale,
+      'stock_reserved':   order.stockReserved,
       'fees':           order.fees,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
@@ -535,6 +544,11 @@ class SaleLocalDatasource {
     if (wasCompleted == nowCompleted) return;
 
     final order = _mapToSaleWithStatus(map);
+    // Vente « à choisir sur place » : le stock est géré EXPLICITEMENT par
+    // reserveApprovalOrder / closeApprovalOrder / cancelApprovalOrder. On ne
+    // laisse donc PAS la logique générique décrémenter/restaurer ici, sinon
+    // double-comptage (le réservé serait re-décrémenté à la complétion).
+    if (order.isApprovalSale) return;
     if (wasCompleted && !nowCompleted) {
       await _restoreOrderStock(order);
     } else {
@@ -601,6 +615,181 @@ class SaleLocalDatasource {
         );
       }
     }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // VENTE « À CHOISIR SUR PLACE » (vente-ou-retour) — Phase 1b
+  // Le livreur emporte plusieurs articles candidats ; le client en garde
+  // certains, le reste revient. Le stock est géré EXPLICITEMENT ici (jamais
+  // par la transition générique, cf. garde-fou `isApprovalSale`) afin de
+  // garantir l'invariant anti-perte : total = disponible + réservé(livreur).
+  // ══════════════════════════════════════════════════════════════════════
+
+  /// Décrément stock d'UN article pour une commande approval, routé comme
+  /// `_decrementOrderStock` : emplacement partenaire (StockLevel) si la
+  /// commande est livrée par un partenaire, sinon stock boutique (variante).
+  /// C'EST le routage manquant qui faisait échouer la réservation quand on
+  /// vend depuis un emplacement partenaire (stock boutique = 0).
+  static Future<void> _approvalTakeStock(
+      Sale order, String pid, String vid, int qty) async {
+    final usePartner = order.deliveryMode == DeliveryMode.partner
+        && (order.deliveryLocationId ?? '').isNotEmpty;
+    if (usePartner) {
+      await StockService.saleFromLocation(
+        locationId: order.deliveryLocationId!,
+        variantId:  vid,
+        quantity:   qty,
+        shopId:     order.shopId,
+        productId:  pid,
+        orderId:    order.id,
+      );
+    } else {
+      await StockService.sale(
+        shopId:    order.shopId,
+        productId: pid,
+        variantId: vid,
+        quantity:  qty,
+        orderId:   order.id,
+      );
+    }
+  }
+
+  /// Remise en stock d'UN article (retour / annulation / rollback), routée de
+  /// la même façon que `_approvalTakeStock`.
+  static Future<void> _approvalReturnStock(
+      Sale order, String pid, String vid, int qty, String reason) async {
+    final usePartner = order.deliveryMode == DeliveryMode.partner
+        && (order.deliveryLocationId ?? '').isNotEmpty;
+    if (usePartner) {
+      await StockService.reverseSaleFromLocation(
+        locationId: order.deliveryLocationId!,
+        variantId:  vid,
+        quantity:   qty,
+        shopId:     order.shopId,
+        productId:  pid,
+        orderId:    order.id,
+      );
+    } else {
+      await StockService.reverseSale(
+        shopId:    order.shopId,
+        productId: pid,
+        variantId: vid,
+        quantity:  qty,
+        orderId:   order.id,
+        reason:    reason,
+      );
+    }
+  }
+
+  /// Réserve (sort du disponible) TOUS les articles candidats d'une commande
+  /// « à choisir sur place », puis la persiste en statut `scheduled` avec
+  /// `stockReserved = true`. Atomique : si le stock manque sur un article, ce
+  /// qui a déjà été décrémenté est restauré avant de relancer l'erreur
+  /// (jamais de réservation partielle). Le stock est pris depuis le bon
+  /// emplacement (partenaire ou boutique) via `_approvalTakeStock`.
+  Future<void> reserveApprovalOrder(Sale order) async {
+    if (order.stockReserved) return; // idempotent
+    final products = AppDatabase.getProductsForShop(order.shopId);
+    final done = <SaleItem>[];
+    try {
+      for (final item in order.items) {
+        final (pid, vid) = _resolveProductVariant(products, item.productId);
+        if (pid == null) {
+          throw Exception(
+              'Article introuvable pour la réservation : ${item.productName}');
+        }
+        await _approvalTakeStock(order, pid, vid, item.quantity);
+        done.add(item);
+      }
+    } catch (e) {
+      // Rollback : restaurer les articles déjà réservés avant l'échec.
+      for (final item in done) {
+        final (pid, vid) = _resolveProductVariant(products, item.productId);
+        if (pid == null) continue;
+        await _approvalReturnStock(
+            order, pid, vid, item.quantity, 'rollback réservation à choisir');
+      }
+      rethrow;
+    }
+    // Naît « Programmée » (comme une commande e-commerce normale) mais avec le
+    // flag + stock réservé : l'opérateur la voit dans sa liste avec le badge
+    // « À choisir » et la clôture depuis là (la transition générique ne touche
+    // jamais à son stock, cf. garde-fou isApprovalSale).
+    final reserved = order.copyWith(
+      isApprovalSale: true,
+      stockReserved:  true,
+      status:         SaleStatus.scheduled,
+    );
+    await saveOrder(reserved);
+  }
+
+  /// Clôture une commande « à choisir sur place ». [keptByItemId] = quantité
+  /// GARDÉE (vendue) par article. Les quantités retournées sont remises en
+  /// stock ; les gardées restent sorties (déjà décrémentées à la réservation)
+  /// et forment la vente finale (`completed`). Si rien n'est gardé → tout
+  /// remis en stock et commande `cancelled`.
+  Future<void> closeApprovalOrder(
+      String orderId, Map<String, int> keptByItemId) async {
+    final raw = _ordersBox.get(orderId);
+    if (raw is! Map) return;
+    final order = _mapToSaleWithStatus(Map<String, dynamic>.from(raw));
+    if (!order.isApprovalSale || !order.stockReserved) return;
+
+    final reserved = {for (final i in order.items) i.productId: i.quantity};
+    final recon =
+        ApprovalClosure.reconcile(reserved: reserved, kept: keptByItemId);
+
+    // 1. Remettre en stock les quantités retournées.
+    final products = AppDatabase.getProductsForShop(order.shopId);
+    for (final entry in recon.returned.entries) {
+      if (entry.value <= 0) continue;
+      final (pid, vid) = _resolveProductVariant(products, entry.key);
+      if (pid == null) continue;
+      await _approvalReturnStock(
+          order, pid, vid, entry.value, 'retour vente à choisir');
+    }
+
+    // 2. Vente finale = articles gardés (qty = quantité gardée).
+    final keptItems = <SaleItem>[];
+    for (final item in order.items) {
+      final k = recon.kept[item.productId] ?? 0;
+      if (k > 0) keptItems.add(item.copyWith(quantity: k));
+    }
+
+    // 3. Persister.
+    final closed = keptItems.isEmpty
+        ? order.copyWith(
+            status:        SaleStatus.cancelled,
+            stockReserved: false, // tout a été remis en stock
+            cancellationReason: 'aucun article gardé sur place',
+          )
+        : order.copyWith(items: keptItems, status: SaleStatus.completed);
+    await updateOrder(closed);
+  }
+
+  /// Annule une commande « à choisir sur place » réservée : remet en stock
+  /// TOUS les articles encore portés par la commande, puis passe à `cancelled`.
+  Future<void> cancelApprovalOrder(String orderId, {String? reason}) async {
+    final raw = _ordersBox.get(orderId);
+    if (raw is! Map) return;
+    final order = _mapToSaleWithStatus(Map<String, dynamic>.from(raw));
+    if (!order.isApprovalSale) return;
+    if (order.stockReserved) {
+      final products = AppDatabase.getProductsForShop(order.shopId);
+      for (final item in order.items) {
+        final (pid, vid) = _resolveProductVariant(products, item.productId);
+        if (pid == null) continue;
+        await _approvalReturnStock(
+            order, pid, vid, item.quantity,
+            reason ?? 'annulation vente à choisir');
+      }
+    }
+    final cancelled = order.copyWith(
+      status:             SaleStatus.cancelled,
+      stockReserved:      false,
+      cancellationReason: reason,
+    );
+    await updateOrder(cancelled);
   }
 
   /// Résout (productId, variantId) à partir de l'id stocké dans l'item de
@@ -852,6 +1041,10 @@ class SaleLocalDatasource {
       paymentStatus:      PaymentStatusX.fromKey(
                               m['payment_status'] as String?),
       idempotencyKey:     m['idempotency_key'] as String?, // GF-1
+      // Vente « à choisir sur place » (lecture tolérante : colonnes absentes
+      // sur les commandes legacy → false).
+      isApprovalSale:     (m['is_approval_sale'] as bool?) ?? false,
+      stockReserved:      (m['stock_reserved'] as bool?) ?? false,
     );
   }
 

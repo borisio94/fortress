@@ -21,6 +21,7 @@ import '../../features/expenses/domain/entities/expense.dart';
 import '../../features/caisse/domain/entities/sale.dart' show PaymentMethod;
 import '../../features/auth/data/models/user_model.dart';
 import '../services/activity_log_service.dart';
+import '../services/entity_cascade.dart';
 import '../services/pending_image_upload_service.dart';
 import '../permisions/user_plan.dart';
 
@@ -2296,6 +2297,15 @@ end \$\$;""",
     // sur quelques entrées au plus).
     _i._recentLocalProductWrites.removeWhere(
         (_, ts) => nowMs - ts > _localWriteEchoWindowMs * 2);
+    // Capture l'identité PRÉCÉDENTE (avant écrasement) pour répercuter un
+    // éventuel changement de nom/image sur les commandes existantes.
+    String? prevProdName, prevProdImage;
+    final prevRaw = HiveBoxes.productsBox.get(p.id!);
+    if (prevRaw != null) {
+      final pm = Map<String, dynamic>.from(prevRaw);
+      prevProdName  = pm['name']      as String?;
+      prevProdImage = pm['image_url'] as String?;
+    }
     LocalStorageService.invalidateProductsCache();
     await HiveBoxes.productsBox.put(p.id!, _productToMap(p));
     // Ré-invalidation APRÈS le put : entre l'invalidation pré-put et la fin du
@@ -2308,6 +2318,10 @@ end \$\$;""",
 
     // 3. Notifier les listeners locaux
     if (p.storeId != null) _notify('products', p.storeId!);
+
+    // 3bis. Répercuter un changement d'identité (nom/image) du produit sur
+    //       les snapshots des lignes de commande existantes (prix figé).
+    _cascadeProductToOrders(p, prevProdName, prevProdImage);
 
     // 4. Supabase en arrière-plan
     _bgWrite({'table': 'products', 'op': 'upsert', 'data': _productToSupabase(p)});
@@ -4195,6 +4209,15 @@ end \$\$;""",
       for (final row in rowList) {
         final id = row['id']?.toString();
         if (id == null) continue;
+        // Suppression douce serveur : si la commande est marquée `deleted_at`
+        // côté Supabase, on la RETIRE du Hive local au lieu de la réécrire en
+        // active — sinon le pull « ressuscitait » une commande supprimée
+        // (le hiveMap ci-dessous n'inclut pas deleted_at). Symétrique du
+        // handler realtime (« deleted_at renseigné → retirer du Hive »).
+        if (row['deleted_at'] != null) {
+          await HiveBoxes.ordersBox.delete(id);
+          continue; // pas ajoutée à remoteIds → reste supprimée localement
+        }
         remoteIds.add(id);
         // Statut local AVANT écrasement — sert à détecter une transition
         // survenue à distance (ex. client qui valide via le lien de suivi
@@ -4383,6 +4406,11 @@ end \$\$;""",
         _bgWrite({'table': 'products', 'op': 'upsert', 'data': _productToSupabase(u)});
         used++;
       }
+    }
+    // Rafraîchir les écrans (grille caisse / inventaire) après le renommage.
+    if (used > 0) {
+      LocalStorageService.invalidateProductsCache();
+      _notify('products', shopId);
     }
     await ActivityLogService.log(
       action: 'category_updated', targetType: 'category',
@@ -5396,6 +5424,41 @@ end \$\$;""",
       'match': {'client_id': c.id, 'shop_id': c.storeId},
     });
     if (touched) _notify('orders', c.storeId);
+  }
+
+  /// Propage l'IDENTITÉ d'un produit (nom + image) vers les snapshots des
+  /// lignes (`items`) de TOUTES les commandes qui le référencent — y compris
+  /// l'historique — pour que le produit s'affiche partout avec ses valeurs à
+  /// jour. Le PRIX des lignes reste FIGÉ (intégrité comptable). Hive immédiat
+  /// + push Supabase par commande touchée + notify.
+  static void _cascadeProductToOrders(
+      Product p, String? prevName, String? prevImage) {
+    final shopId = p.storeId;
+    final pid = p.id;
+    if (shopId == null || pid == null) return;
+    // Rien à propager si l'identité n'a pas changé (ex. création, ou édition
+    // de prix/stock seuls).
+    if (p.name == prevName && p.imageUrl == prevImage) return;
+    var touched = false;
+    for (final key in HiveBoxes.ordersBox.keys) {
+      final raw = HiveBoxes.ordersBox.get(key);
+      if (raw == null) continue;
+      final m = Map<String, dynamic>.from(raw);
+      if (m['shop_id'] != shopId) continue;
+      if (EntityCascade.applyProductIdentityToOrder(m,
+          productId: pid, newName: p.name, newImageUrl: p.imageUrl)) {
+        HiveBoxes.ordersBox.put(key, m);
+        touched = true;
+        // jsonb `items` mis à jour pour cette commande précise.
+        _bgWrite({
+          'table': 'orders',
+          'op':    'update',
+          'data':  {'items': m['items']},
+          'match': {'id': m['id']},
+        });
+      }
+    }
+    if (touched) _notify('orders', shopId);
   }
 
   /// Vérifie en local (Hive) qu'aucun autre client de la même boutique

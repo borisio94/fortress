@@ -935,6 +935,8 @@ class _CartFooter extends StatelessWidget {
                     initialCity:    st.deliveryCity,
                     initialAddress: st.deliveryAddress,
                     orderTotal:     st.total,
+                    initialIsApprovalSale: st.isApprovalSale,
+                    lockApproval:          st.editingOrderId != null,
                   );
                   if (res == null) return; // annulé
                   if (!context.mounted) return;
@@ -947,8 +949,9 @@ class _CartFooter extends StatelessWidget {
                       deliveryAddress: res.deliveryAddress,
                     ))
                     ..add(SaveOrder(shopId,
-                        createdAt:  res.createdAt,
-                        amountPaid: res.amountPaid));
+                        createdAt:      res.createdAt,
+                        amountPaid:     res.amountPaid,
+                        isApprovalSale: res.isApprovalSale));
                 } else {
                   context.push('/shop/$shopId/caisse/payment');
                 }

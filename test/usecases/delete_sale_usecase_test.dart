@@ -121,18 +121,13 @@ void main() {
       );
     });
 
-    test('throws SuppressionStatutInvalideException si statut cancelled',
-        () async {
-      final ds = _FakeSaleDatasource({
-        'sale_1': _sale(status: SaleStatus.cancelled),
-      });
-      final useCase = DeleteSaleUseCase(datasource: ds);
-      await expectLater(
-        useCase.call(
-            orderId: 'sale_1',
-            reason:  'Motif valide >10 caractères.'),
-        throwsA(isA<SuppressionStatutInvalideException>()),
-      );
+    test('cancelled est désormais éligible à la suppression (hotfix_117)',
+        () {
+      // La demande produit autorise la suppression des commandes annulées
+      // (en plus de programmée/en cours/refusée). cancelled n'est donc plus
+      // dans les statuts refusés.
+      expect(DeleteSaleUseCase.allowedStatuses,
+          contains(SaleStatus.cancelled));
     });
 
     test('throws SuppressionCommandePayeeException si amountPaid > 0',
@@ -150,12 +145,13 @@ void main() {
       );
     });
 
-    test('autorise les 3 statuts éligibles : scheduled, processing, refused',
-        () {
+    test('autorise les 4 statuts éligibles : scheduled, processing, refused, '
+        'cancelled', () {
       expect(DeleteSaleUseCase.allowedStatuses,
           {SaleStatus.scheduled,
            SaleStatus.processing,
-           SaleStatus.refused});
+           SaleStatus.refused,
+           SaleStatus.cancelled});
     });
   });
 
