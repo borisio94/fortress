@@ -34,6 +34,12 @@ import '../widgets/adjust_stock_dialog.dart';
 // ─── Modèles internes ─────────────────────────────────────────────────────────
 
 class _Variant {
+  /// Id de la variante PERSISTÉE (null = variante neuve, non encore sauvée).
+  /// C4 — sert à ré-associer chaque ligne du formulaire à sa variante existante
+  /// PAR ID (et non par position), sinon supprimer une variante du milieu
+  /// décale les index et réassigne les ids des variantes suivantes → corruption
+  /// d'identité (commandes ouvertes cassées, StockLevel orphelins).
+  String? id;
   final TextEditingController name          = TextEditingController();
   final TextEditingController sku           = TextEditingController();
   final TextEditingController barcode       = TextEditingController();
@@ -255,6 +261,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
       for (int i = 0; i < p.variants.length; i++) {
         final v  = p.variants[i];
         final nv = _Variant();
+        nv.id                 = v.id; // C4 — conserver l'id pour matcher au save
         nv.name.text          = v.name;
         nv.sku.text           = v.sku ?? '';
         nv.barcode.text       = v.barcode ?? '';
@@ -401,10 +408,13 @@ class _ProductFormPageState extends State<ProductFormPage> {
 
     for (int i = 0; i < _variants.length; i++) {
       final v = _variants[i];
-      final existingVariant = freshProduct != null
-          && i < freshProduct.variants.length
-          ? freshProduct.variants[i]
-          : null;
+      // C4 — retrouver la variante existante PAR ID (jamais par index).
+      ProductVariant? existingVariant;
+      if (freshProduct != null && v.id != null) {
+        for (final e in freshProduct.variants) {
+          if (e.id == v.id) { existingVariant = e; break; }
+        }
+      }
 
       // Image URL : utiliser ce qui existe déjà (distant). Si l'utilisateur
       // vient de choisir une nouvelle image (bytes en mémoire), on laisse
@@ -436,7 +446,8 @@ class _ProductFormPageState extends State<ProductFormPage> {
       final formStock = int.tryParse(v.stock.text) ?? 0;
 
       variants.add(ProductVariant(
-        id:                   existingVariant?.id ?? 'var_${baseTs}_$i',
+        // C4 — variante existante → garder SON id ; neuve (v.id null) → générer.
+        id:                   v.id ?? 'var_${baseTs}_$i',
         name:                 v.name.text.trim().isEmpty ? 'Base' : v.name.text.trim(),
         sku:                  v.sku.text.trim().isEmpty ? null : v.sku.text.trim(),
         barcode:              v.barcode.text.trim().isEmpty ? null : v.barcode.text.trim(),
