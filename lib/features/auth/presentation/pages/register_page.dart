@@ -102,10 +102,8 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   // ── Step 2 — Boutique ─────────────────────────────────────────────────
   final _shopNameCtrl    = TextEditingController();
-  final _shopAddressCtrl = TextEditingController();
   String  _sector        = kEcommerceOnlyMode ? 'ecommerce' : 'retail';
   String? _shopNameError;
-  String? _shopAddressError;
 
   bool   _isOnline = true;
 
@@ -142,12 +140,6 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
               ? 'Minimum 2 caractères'
               : v.length > 60 ? 'Maximum 60 caractères' : null;
     }));
-    _shopAddressCtrl.addListener(() => setState(() {
-      final v = _shopAddressCtrl.text.trim();
-      _shopAddressError = v.isEmpty
-          ? null
-          : v.length < 2 ? 'Minimum 2 caractères' : null;
-    }));
   }
 
   Future<void> _checkConnectivity() async {
@@ -163,7 +155,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   @override
   void dispose() {
     for (final c in [_namCtrl, _mailCtrl, _telCtrl, _passCtrl, _confCtrl,
-                     _shopNameCtrl, _shopAddressCtrl]) {
+                     _shopNameCtrl]) {
       c.dispose();
     }
     _pageCtrl.dispose();
@@ -185,9 +177,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   bool get _step2Valid =>
       _shopNameError == null &&
-      _shopNameCtrl.text.trim().length >= 2 &&
-      _shopAddressError == null &&
-      _shopAddressCtrl.text.trim().length >= 2;
+      _shopNameCtrl.text.trim().length >= 2;
 
   void _next() {
     if (_step == 0) {
@@ -203,8 +193,6 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
       setState(() {
         _shopNameError = _shopNameCtrl.text.trim().isEmpty
             ? 'Nom de boutique requis' : _shopNameError;
-        _shopAddressError = _shopAddressCtrl.text.trim().isEmpty
-            ? 'Adresse / ville requise' : _shopAddressError;
       });
       if (!_step2Valid) return;
     }
@@ -250,8 +238,6 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
         country:  country,
         phone:    null,
         email:    null,
-        address:  _shopAddressCtrl.text.trim().isNotEmpty
-            ? _shopAddressCtrl.text.trim() : null,
       ),
     ));
   }

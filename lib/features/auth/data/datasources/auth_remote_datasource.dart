@@ -121,7 +121,12 @@ class AuthRemoteDataSourceMock implements AuthRemoteDataSource {
   @override
   Future<void> logout() async {
     try { await _supabase.logout(); } catch (_) {}
-    await LocalStorageService.clearCurrentUser();
+    // Anti-fuite inter-comptes (appareil partagé) : purge TOUTES les données
+    // métier locales (produits, prix d'achat, clients, panier, ventes
+    // offline…) en conservant les préférences device (taille de texte, thème,
+    // dernier email…). Remplace l'ancien clearCurrentUser (qui n'effaçait que
+    // l'id et laissait tout le reste en clair dans Hive).
+    await LocalStorageService.purgeOnLogout();
     await SecureStorageService.clearTokens();
   }
 

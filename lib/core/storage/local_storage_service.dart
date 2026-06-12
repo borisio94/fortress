@@ -599,4 +599,31 @@ class LocalStorageService {
     await HiveBoxes.settingsBox.clear();
     await HiveBoxes.cartBox.clear();
   }
+
+  /// Clés de PRÉFÉRENCES liées à l'APPAREIL (pas au compte) — conservées au
+  /// logout. Tout le reste (caches compte/boutique `*_$userId`/`*_$shopId`,
+  /// `current_user_id`, tokens, ventes offline…) est purgé. Les chaînes sont
+  /// les clés posées par : TextScale (`text_scale`), DemoMode
+  /// (`demo_mode_enabled`), ThemeMode (`app_theme_mode`), ThemePalette
+  /// (`app_theme_palette*`), locale (`app_locale`), onboarding
+  /// (`onboarding_seen`), ce service (`last_login_email`, `whatsapp_provider`).
+  static const _deviceSettingKeys = <String>{
+    'last_login_email',
+    'text_scale',
+    'demo_mode_enabled',
+    'app_theme_mode',
+    'app_theme_palette',
+    'app_theme_palette_last_manual',
+    'app_locale',
+    'onboarding_seen',
+    'whatsapp_provider',
+  };
+
+  /// Purge anti-fuite inter-comptes (appareil partagé) : efface TOUTES les
+  /// données locales liées au compte/boutique en conservant les préférences
+  /// device ci-dessus. À appeler au logout (remplace `clearCurrentUser`, qui
+  /// n'effaçait que `current_user_id` et laissait fuiter produits, prix
+  /// d'achat, clients, panier…).
+  static Future<void> purgeOnLogout() =>
+      HiveBoxes.clearAllForLogout(_deviceSettingKeys);
 }

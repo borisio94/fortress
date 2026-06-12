@@ -228,6 +228,48 @@ class HiveBoxes {
     } catch (_) {}
   }
 
+  /// Vide TOUTES les box (logout / reset) en CONSERVANT un ensemble de clés de
+  /// la box `settings` (préférences device : taille de texte, thème, locale,
+  /// dernier email…). Anti-fuite inter-comptes sur appareil partagé : sans
+  /// cette purge, les données métier (produits, prix d'achat, clients, panier)
+  /// d'un compte survivaient à la déconnexion et fuyaient vers le suivant.
+  /// L'accès non typé `Hive.box(name)` est volontaire (même mécanisme que
+  /// `_safeClose`) — `.clear()` ne dépend pas du type de la box.
+  static Future<void> clearAllForLogout(Set<String> preserveSettingsKeys) async {
+    // 1. Snapshot des préférences device à conserver.
+    final keep = <String, dynamic>{};
+    try {
+      if (Hive.isBoxOpen(settings)) {
+        final box = Hive.box(settings);
+        for (final k in preserveSettingsKeys) {
+          final v = box.get(k);
+          if (v != null) keep[k] = v;
+        }
+      }
+    } catch (e) {
+      debugPrint('[Hive] purge snapshot err: $e');
+    }
+    // 2. Vider chaque box ouverte.
+    for (final name in _allBoxes) {
+      try {
+        if (Hive.isBoxOpen(name)) await Hive.box(name).clear();
+      } catch (e) {
+        debugPrint('[Hive] purge clear($name) err: $e');
+      }
+    }
+    // 3. Restaurer les préférences device.
+    try {
+      if (Hive.isBoxOpen(settings)) {
+        final box = Hive.box(settings);
+        for (final e in keep.entries) {
+          await box.put(e.key, e.value);
+        }
+      }
+    } catch (e) {
+      debugPrint('[Hive] purge restore err: $e');
+    }
+  }
+
   // ── Accesseurs ─────────────────────────────────────────────────────────────
   static Box        get cartBox        => Hive.box(cart);
   static Box        get settingsBox    => Hive.box(settings);
