@@ -1021,6 +1021,26 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
     ));
   }
 
+  /// Compare les ARTICLES (productId × quantité cumulée) de deux listes.
+  /// Sert au verrou d'intégrité stock en édition (C2/C3) : on ne regarde que
+  /// ce qui impacte le stock (produit + quantité), pas les prix/remises.
+  bool _orderItemsChanged(List<SaleItem> before, List<SaleItem> after) {
+    Map<String, int> qtyByProduct(List<SaleItem> items) {
+      final m = <String, int>{};
+      for (final i in items) {
+        m[i.productId] = (m[i.productId] ?? 0) + i.quantity;
+      }
+      return m;
+    }
+    final a = qtyByProduct(before);
+    final b = qtyByProduct(after);
+    if (a.length != b.length) return true;
+    for (final e in a.entries) {
+      if (b[e.key] != e.value) return true;
+    }
+    return false;
+  }
+
   Future<void> _onSaveOrder(SaveOrder event, Emitter<CaisseState> emit) async {
     // Règle métier : toute commande doit être rattachée à un client enregistré.
     if (state.selectedClient == null) {
@@ -1059,6 +1079,25 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
         // ── Mode ÉDITION : mise à jour de la commande existante ──
         final existing = ds.getOrders(event.shopId)
             .firstWhere((o) => o.id == state.editingOrderId);
+        // C2/C3 — Verrou d'intégrité stock. `updateOrder` ne recalcule JAMAIS
+        // le stock ; modifier les ARTICLES de ces deux familles laisserait le
+        // stock désynchronisé (fuite ou survente) :
+        //   • commande déjà `completed`  → décrément figé, jamais réajusté ;
+        //   • vente « à choisir sur place » encore réservée (stockReserved) →
+        //     le réservé reste calé sur les anciens articles.
+        // Les autres champs (client, date, livraison) restent éditables.
+        final lockItems = existing.status == SaleStatus.completed
+            || (existing.isApprovalSale && existing.stockReserved);
+        if (lockItems && _orderItemsChanged(existing.items, state.items)) {
+          emit(state.copyWith(
+            isProcessing: false,
+            error: existing.status == SaleStatus.completed
+                ? 'Impossible de modifier les articles d\'une commande déjà '
+                  'complétée. Crée plutôt un retour/avoir.'
+                : 'Impossible de modifier les articles d\'une vente « à choisir '
+                  'sur place » réservée. Clôture ou annule la tournée d\'abord.'));
+          return;
+        }
         final updated = Sale(
           id:             state.editingOrderId,
           shopId:         event.shopId,
