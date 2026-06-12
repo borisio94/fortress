@@ -937,6 +937,9 @@ class _CartFooter extends StatelessWidget {
                     orderTotal:     st.total,
                     initialIsApprovalSale: st.isApprovalSale,
                     lockApproval:          st.editingOrderId != null,
+                    // FIX 2 — transmet le mode courant : en pickup le sheet
+                    // masque/optionnalise ville/quartier.
+                    deliveryMode:          st.deliveryMode,
                   );
                   if (res == null) return; // annulé
                   if (!context.mounted) return;

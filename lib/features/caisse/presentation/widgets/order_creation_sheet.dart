@@ -12,6 +12,7 @@ import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../crm/domain/entities/client.dart';
 import '../../../crm/presentation/pages/clients_page.dart' show ClientFormSheet;
+import '../../domain/entities/sale.dart' show DeliveryMode;
 
 /// Résultat du sheet "Enregistrer commande" (sprint UX commande).
 /// Capture les 3 informations minimales pour qu'une commande puisse être
@@ -67,6 +68,11 @@ Future<OrderCreationResult?> showOrderCreationSheet(
   double?   orderTotal,
   bool      initialIsApprovalSale = false,
   bool      lockApproval = false,
+  // FIX 2 — mode de livraison courant (set par les chips / « Détails de
+  // livraison »). Si `pickup`, les champs ville/quartier sont masqués et non
+  // exigés (retrait en boutique = pas d'adresse). `null` ou tout autre mode →
+  // comportement historique (ville/quartier requis).
+  DeliveryMode? deliveryMode,
 }) {
   return showFormSheet<OrderCreationResult>(
     context: context,
@@ -80,6 +86,7 @@ Future<OrderCreationResult?> showOrderCreationSheet(
       orderTotal:       orderTotal,
       initialIsApprovalSale: initialIsApprovalSale,
       lockApproval:          lockApproval,
+      deliveryMode:          deliveryMode,
     ),
   );
 }
@@ -94,6 +101,7 @@ class _OrderCreationSheet extends StatefulWidget {
   final double?   orderTotal;
   final bool      initialIsApprovalSale;
   final bool      lockApproval;
+  final DeliveryMode? deliveryMode;
   const _OrderCreationSheet({
     required this.shopId,
     this.initialClient,
@@ -104,6 +112,7 @@ class _OrderCreationSheet extends StatefulWidget {
     this.orderTotal,
     this.initialIsApprovalSale = false,
     this.lockApproval = false,
+    this.deliveryMode,
   });
   @override
   State<_OrderCreationSheet> createState() => _OrderCreationSheetState();
@@ -258,21 +267,26 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
       setState(() => _error = 'Choisis la date et l\'heure de livraison.');
       return;
     }
+    // FIX 2 — en retrait boutique (pickup), pas d'adresse de livraison :
+    // ville/quartier ni exigés ni transmis (le bloc les nulle déjà pour pickup).
+    final isPickup = widget.deliveryMode == DeliveryMode.pickup;
     final city    = _cityCtrl.text.trim();
     final address = _addressCtrl.text.trim();
-    if (city.isEmpty) {
-      setState(() => _error = 'Renseigne la ville de livraison.');
-      return;
-    }
-    if (address.isEmpty) {
-      setState(() => _error = 'Renseigne le quartier de livraison.');
-      return;
+    if (!isPickup) {
+      if (city.isEmpty) {
+        setState(() => _error = 'Renseigne la ville de livraison.');
+        return;
+      }
+      if (address.isEmpty) {
+        setState(() => _error = 'Renseigne le quartier de livraison.');
+        return;
+      }
     }
     Navigator.of(context).pop(OrderCreationResult(
       client:          _client!,
       scheduledAt:     _date,
-      deliveryCity:    city,
-      deliveryAddress: address,
+      deliveryCity:    isPickup ? null : city,
+      deliveryAddress: isPickup ? null : address,
       createdAt:       _createdAt,
       amountPaid:      _resolveAmountPaid(),
       isApprovalSale:  _isApprovalSale,
@@ -343,27 +357,55 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
                         ),
                 ),
                 const SizedBox(height: 14),
-                _SectionLabel('Lieu de livraison'),
-                _LabeledField(
-                  label: 'Ville',
-                  controller: _cityCtrl,
-                  hint: 'Douala',
-                ),
-                const SizedBox(height: 8),
-                _LabeledField(
-                  label: 'Quartier / adresse',
-                  controller: _addressCtrl,
-                  hint: 'Bonapriso',
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Pré-rempli depuis la fiche client. Si modifié, la fiche '
-                  'sera mise à jour ; cette commande conservera l\'adresse '
-                  'exacte saisie ici.',
-                  style: AppTextStyles.captionHint.copyWith(
-                      color: Theme.of(context).colorScheme.onSurface
-                          .withValues(alpha: 0.55)),
-                ),
+                // FIX 2 — retrait en boutique : pas d'adresse à saisir.
+                if (widget.deliveryMode == DeliveryMode.pickup) ...[
+                  _SectionLabel('Lieu de livraison'),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF9FAFB),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: Theme.of(context).semantic.borderSubtle),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.storefront_outlined,
+                          size: 16, color: AppColors.textSecondary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Retrait en boutique — aucune adresse de livraison requise.',
+                          style: AppTextStyles.captionHint.copyWith(
+                              color: AppColors.textSecondary),
+                        ),
+                      ),
+                    ]),
+                  ),
+                ] else ...[
+                  _SectionLabel('Lieu de livraison'),
+                  _LabeledField(
+                    label: 'Ville',
+                    controller: _cityCtrl,
+                    hint: 'Douala',
+                  ),
+                  const SizedBox(height: 8),
+                  _LabeledField(
+                    label: 'Quartier / adresse',
+                    controller: _addressCtrl,
+                    hint: 'Bonapriso',
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Pré-rempli depuis la fiche client. Si modifié, la fiche '
+                    'sera mise à jour ; cette commande conservera l\'adresse '
+                    'exacte saisie ici.',
+                    style: AppTextStyles.captionHint.copyWith(
+                        color: Theme.of(context).colorScheme.onSurface
+                            .withValues(alpha: 0.55)),
+                  ),
+                ],
                 // ── Vente « à choisir sur place » ────────────────────
                 // Le livreur emporte plusieurs articles, le client en garde
                 // certains, le reste revient. Le stock est réservé à la

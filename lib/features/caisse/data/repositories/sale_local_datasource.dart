@@ -502,7 +502,12 @@ class SaleLocalDatasource {
       } else {
         map['completed_at'] ??= DateTime.now().toUtc().toIso8601String();
       }
-    } else {
+    } else if (status != SaleStatus.refunded) {
+      // FIX 1 — un remboursement CONSERVE la date d'encaissement d'origine
+      // (completed_at) : la vente a bien eu lieu, les rapports/CA doivent
+      // garder cette date. On n'efface completed_at que pour un retour vers un
+      // etat non finalise (cas defensif : l'automate n'autorise de toute facon
+      // que completed -> refunded en sortie de completed).
       map['completed_at'] = null;
     }
     // Sync paiement avec le statut (cf. hotfix_065). Transition vers

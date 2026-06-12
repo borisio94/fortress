@@ -2444,10 +2444,14 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     final reason = await _ReasonDialog.ask(
       context,
       title: 'Reprogrammer la commande',
-      hint: 'Empêchement client / boutique — précise la raison.',
+      hint: 'Raison (facultatif) — ex : empêchement client / boutique.',
       confirmLabel: 'Reprogrammer',
       confirmColor: AppColors.warning,
+      // FIX 3 — la reprogrammation est une opération courante : motif facultatif.
+      optional: true,
     );
+    // `null` = fermé via X/Annuler → on abandonne. Chaîne vide = confirmé sans
+    // motif → on reprogramme quand même.
     if (reason == null) return;
     await widget.onReschedule(newDate, reason);
   }
@@ -3527,21 +3531,28 @@ class _ReasonDialog extends StatefulWidget {
   final String hint;
   final String confirmLabel;
   final Color confirmColor;
+  /// FIX 3 — quand `true`, le motif n'est PAS obligatoire : le bouton de
+  /// confirmation reste actif même sans texte (retourne alors une chaîne vide).
+  /// Utilisé pour la reprogrammation (opération courante). L'annulation, elle,
+  /// garde `optional = false` (motif requis pour l'audit).
+  final bool optional;
   const _ReasonDialog({
     required this.title,
     required this.hint,
     required this.confirmLabel,
     required this.confirmColor,
+    this.optional = false,
   });
 
-  /// Ouvre le sheet et retourne la raison saisie (trim non vide), ou null
-  /// si l'utilisateur ferme via X / Annuler.
+  /// Ouvre le sheet et retourne la raison saisie (éventuellement vide si
+  /// `optional`), ou null si l'utilisateur ferme via X / Annuler.
   static Future<String?> ask(
     BuildContext context, {
     required String title,
     required String hint,
     required String confirmLabel,
     required Color confirmColor,
+    bool optional = false,
   }) =>
       showAdaptiveFormSheet<String>(
         context: context,
@@ -3550,6 +3561,7 @@ class _ReasonDialog extends StatefulWidget {
           hint: hint,
           confirmLabel: confirmLabel,
           confirmColor: confirmColor,
+          optional: optional,
         ),
       );
 
@@ -3569,6 +3581,8 @@ class _ReasonDialogState extends State<_ReasonDialog> {
   @override
   Widget build(BuildContext context) {
     final hasText = _ctrl.text.trim().isNotEmpty;
+    // FIX 3 — motif optionnel : on autorise la confirmation sans texte.
+    final canConfirm = widget.optional || hasText;
     return AdaptiveFormFrame(
       title: widget.title,
       icon: Icons.edit_note_rounded,
@@ -3614,7 +3628,7 @@ class _ReasonDialogState extends State<_ReasonDialog> {
                 width: double.infinity,
                 height: 44,
                 child: ElevatedButton(
-                  onPressed: hasText
+                  onPressed: canConfirm
                       ? () => Navigator.of(context).pop(_ctrl.text.trim())
                       : null,
                   style: ElevatedButton.styleFrom(
