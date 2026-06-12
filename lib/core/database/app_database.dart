@@ -3724,6 +3724,18 @@ end \$\$;""",
         case PostgresChangeEvent.update:
           final id = p.newRecord['id']?.toString();
           if (id == null) return;
+          // Suppression douce serveur — PRIORITAIRE sur tout (y compris la
+          // fenêtre d'écho) : une commande marquée `deleted_at` doit QUITTER
+          // le Hive. Sans ça, l'écho realtime du RPC `delete_sale` réécrivait
+          // la commande en active (le hiveMap ci-dessous n'inclut pas
+          // deleted_at) → la suppression « ne réagissait pas » avant un
+          // refresh manuel (seul syncOrders honorait deleted_at). Symétrique
+          // de syncOrders.
+          if (p.newRecord['deleted_at'] != null) {
+            await HiveBoxes.ordersBox.delete(id);
+            _notify('orders', shopId);
+            return;
+          }
           // Anti-écho temporel : on vient d'écrire localement, l'event
           // realtime peut être le nôtre (OK, valeur identique) OU un
           // snapshot pré-update arrivé après notre commit (KO, écrase
@@ -3775,6 +3787,11 @@ end \$\$;""",
             // écraserait localement amount_paid/payment_status.
             'amount_paid':    row['amount_paid'] ?? 0,
             'payment_status': row['payment_status'] ?? 'unpaid',
+            // Vente « à choisir sur place » (hotfix_116) — cf. syncOrders :
+            // sans ces 2 lignes, un push realtime écrasait le flag local et
+            // le badge « À choisir » disparaissait après synchronisation.
+            'is_approval_sale': row['is_approval_sale'] ?? false,
+            'stock_reserved':   row['stock_reserved'] ?? false,
           };
           await HiveBoxes.ordersBox.put(id, hiveMap);
           _emitOrderNotification(p, shopId, id, row);
@@ -4264,6 +4281,12 @@ end \$\$;""",
           // → unpaid 0) à chaque refresh navigateur.
           'amount_paid':    row['amount_paid'] ?? 0,
           'payment_status': row['payment_status'] ?? 'unpaid',
+          // Vente « à choisir sur place » (hotfix_116). Sans ces 2 lignes, le
+          // pull Supabase écrasait le flag local → le badge « À choisir »
+          // disparaissait à chaque actualisation ET le garde-fou anti-double-
+          // comptage stock (stock_reserved) était perdu.
+          'is_approval_sale': row['is_approval_sale'] ?? false,
+          'stock_reserved':   row['stock_reserved'] ?? false,
         };
         await HiveBoxes.ordersBox.put(id, hiveMap);
         // Notif de rattrapage si le statut a changé depuis le dernier état
