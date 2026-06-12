@@ -16,7 +16,15 @@ final textScaleProvider =
 class TextScaleNotifier extends Notifier<double> {
   static const double minScale = 0.9;
   static const double maxScale = 1.6;
-  static const double defaultScale = 1.25; // = ancien réglage figé (+25 %)
+
+  /// Taille de référence affichée comme « 100 % » dans l'écran de réglage
+  /// (= ancien réglage figé, +25 %). Sert d'unité au pourcentage montré à
+  /// l'utilisateur, indépendamment de la valeur par défaut.
+  static const double referenceScale = 1.25;
+
+  /// Valeur par défaut à la première ouverture = 80 % de la référence.
+  /// (0.80 × 1.25 = 1.0 → taille normale, sans agrandissement.)
+  static const double defaultScale = 1.0;
 
   @override
   double build() {

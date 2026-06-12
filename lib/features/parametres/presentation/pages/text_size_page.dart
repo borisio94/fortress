@@ -18,8 +18,8 @@ class TextSizePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final scale = ref.watch(textScaleProvider);
     final notifier = ref.read(textScaleProvider.notifier);
-    // Pourcentage relatif à la taille par défaut (= 100 %).
-    final pct = (scale / TextScaleNotifier.defaultScale * 100).round();
+    // Pourcentage relatif à la taille de référence (= 100 %).
+    final pct = (scale / TextScaleNotifier.referenceScale * 100).round();
 
     return AppScaffold(
       shopId: shopId ?? '',
@@ -103,7 +103,7 @@ class TextSizePage extends ConsumerWidget {
             child: TextButton.icon(
               onPressed: () => notifier.reset(),
               icon: const Icon(Icons.restart_alt_rounded, size: 18),
-              label: const Text('Réinitialiser (100 %)'),
+              label: const Text('Réinitialiser (80 %)'),
               style: TextButton.styleFrom(foregroundColor: AppColors.primary),
             ),
           ),
