@@ -1117,7 +1117,17 @@ class StockService {
 
     // 2. Crédit destination (variantId destination, possiblement remappé)
     final beforeDst = _availableAtLocation(toLoc, dstVid);
-    await _creditLocation(toLoc, dstVid, qty, now);
+    try {
+      await _creditLocation(toLoc, dstVid, qty, now);
+    } catch (e) {
+      // H5 — atomicité par ligne : si le crédit destination échoue APRÈS le
+      // débit source, on RÉ-CRÉDITE la source pour ne pas « évaporer » le
+      // stock (sortie sans entrée), puis on relance l'erreur.
+      debugPrint('[StockService] crédit transfert échoué → rollback du débit '
+          'source (variant=$srcVid qty=$qty) : $e');
+      await _creditLocation(fromLoc, srcVid, qty, now);
+      rethrow;
+    }
     final afterDst = beforeDst + qty;
 
     // 3. Logs (2x) — un par "shop de rattachement" pour rester compatible
