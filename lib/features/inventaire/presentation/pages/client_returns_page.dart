@@ -364,7 +364,12 @@ class _ReturnSheetState extends State<_ReturnSheet> {
     // temps (ex : déjà refunded). On capture pour ne pas laisser une
     // exception non gérée bloquer le flow stock.
     try {
-      await ds.updateOrderStatus(widget.order.id!, SaleStatus.refunded);
+      // C1 — le stock retourné a déjà été recrédité ci-dessus, ligne-à-ligne
+      // (returnGood/returnDefective). On demande à updateOrderStatus de NE PAS
+      // rejouer la compensation générique, sinon double-crédit (et restauration
+      // de la quantité TOTALE de la commande au lieu de la quantité retournée).
+      await ds.updateOrderStatus(widget.order.id!, SaleStatus.refunded,
+          skipStockCompensation: true);
     } on TransitionInterditeException catch (e) {
       if (!mounted) return;
       AppSnack.error(context, e.message);

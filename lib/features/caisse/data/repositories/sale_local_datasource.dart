@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/services/stock_service.dart';
+import '../../../../core/services/activity_log_service.dart';
 import '../../../../core/services/delivery_reminder_service.dart';
 import '../../../../core/database/app_database.dart';
 import '../../domain/entities/sale.dart';
@@ -351,8 +352,19 @@ class SaleLocalDatasource {
     if (paymentMethod != null) {
       map['payment_method'] = paymentMethod.name;
     }
-    map['delivery_mode']        = mode?.key;
-    map['delivery_location_id'] = locationId;
+    // H3 — verrou de routage stock. Une fois le stock engagé sur un
+    // emplacement (commande `completed`, OU vente à choisir réservée), changer
+    // le mode/emplacement de livraison ferait diverger le décrément (pris à un
+    // endroit) de la restitution future (rendue ailleurs) → fuite asymétrique.
+    // On fige donc mode + location_id dans ces cas ; les autres champs
+    // (personne, ville, adresse, agence…) restent modifiables.
+    final committed = (map['status'] as String?) == 'completed'
+        || ((map['is_approval_sale'] as bool? ?? false)
+            && (map['stock_reserved'] as bool? ?? false));
+    if (!committed) {
+      map['delivery_mode']        = mode?.key;
+      map['delivery_location_id'] = locationId;
+    }
     map['delivery_person_name'] = personName;
     map['delivery_city']        = deliveryCity;
     map['delivery_address']     = deliveryAddress;
@@ -449,6 +461,12 @@ class SaleLocalDatasource {
   /// initial, conservation si déjà stampé).
   Future<void> updateOrderStatus(String orderId, SaleStatus status, {
     DateTime? completedAt,
+    // C1 — quand `true`, on NE rejoue PAS la compensation de stock générique
+    // (restore/décrément). Utilisé par la page Retours qui a déjà restitué le
+    // stock ligne-à-ligne via StockService.returnGood/returnDefective : sans
+    // ce drapeau, le passage à `refunded` recréditait EN PLUS la quantité
+    // totale de la commande → double-crédit.
+    bool skipStockCompensation = false,
   }) async {
     final raw = _ordersBox.get(orderId);
     if (raw == null) return;
@@ -534,6 +552,40 @@ class SaleLocalDatasource {
       await DeliveryReminderService.scheduleFor(_mapToSaleWithStatus(map));
     }
 
+    // C1 — l'appelant a déjà compensé le stock lui-même (page Retours :
+    // returnGood/returnDefective ligne-à-ligne). On saute la compensation
+    // générique pour ne pas double-créditer.
+    if (skipStockCompensation) return;
+
+    // H1(b) — vente « à choisir sur place » ENCORE réservée passée à
+    // cancelled/refused par une voie GÉNÉRIQUE (cancelOrderWithReason / menu
+    // statut), hors `cancelApprovalOrder`. Aucune frontière `completed` n'est
+    // franchie → le bloc ci-dessous retournerait sans rien faire → le stock
+    // réservé resterait sorti (fuite). On le restitue ici puis on éteint le
+    // flag.
+    if (shopId != null
+        && (status == SaleStatus.cancelled || status == SaleStatus.refused)) {
+      final ord = _mapToSaleWithStatus(map);
+      if (ord.isApprovalSale && ord.stockReserved) {
+        final products = AppDatabase.getProductsForShop(ord.shopId);
+        for (final item in ord.items) {
+          final (pid, vid) = _resolveProductVariant(products, item.productId);
+          if (pid == null) {
+            _logRestockMiss(ord, item.productId, item.quantity,
+                'annulation/refus générique vente à choisir');
+            continue;
+          }
+          await _approvalReturnStock(ord, pid, vid, item.quantity,
+              'restitution ${status.name} vente à choisir');
+        }
+        map['stock_reserved'] = false;
+        await _ordersBox.put(orderId, map);
+        final supa = Map<String, dynamic>.from(map)..remove('image_url');
+        AppDatabase.bgWriteOrder(supa);
+        return;
+      }
+    }
+
     // ── Compensation de stock selon la transition ──
     // - completed → autre  : la vente n'est plus finalisée → restaurer le stock
     // - autre → completed  : la vente est finalisée → décrémenter le stock
@@ -545,15 +597,40 @@ class SaleLocalDatasource {
 
     final order = _mapToSaleWithStatus(map);
     // Vente « à choisir sur place » : le stock est géré EXPLICITEMENT par
-    // reserveApprovalOrder / closeApprovalOrder / cancelApprovalOrder. On ne
-    // laisse donc PAS la logique générique décrémenter/restaurer ici, sinon
-    // double-comptage (le réservé serait re-décrémenté à la complétion).
-    if (order.isApprovalSale) return;
+    // reserveApprovalOrder / closeApprovalOrder / cancelApprovalOrder. On NE
+    // laisse donc PAS la logique générique agir, SAUF le remboursement d'une
+    // vente déjà complétée (completed → refunded) : là, il faut restituer le
+    // stock des articles GARDÉS (post-clôture la commande ne porte plus que
+    // ceux-ci, et `stockReserved` est déjà false), exactement comme une vente
+    // normale. H1(a).
+    if (order.isApprovalSale && !(wasCompleted && !nowCompleted)) return;
     if (wasCompleted && !nowCompleted) {
       await _restoreOrderStock(order);
     } else {
       await _decrementOrderStock(order);
     }
+  }
+
+  /// H4 — une restitution de stock n'a PAS pu être appliquée (produit ou
+  /// variante introuvable : supprimé, archivé, ou id changé). On NE l'avale
+  /// plus en silence (`continue` muet = fuite invisible) : on trace dans le
+  /// journal d'activité (visible par l'owner) pour correction manuelle.
+  static void _logRestockMiss(
+      Sale order, String productId, int qty, String context) {
+    debugPrint('[Stock] ⚠️ restitution IMPOSSIBLE ($context) — produit '
+        '$productId qty=$qty commande ${order.id} : STOCK NON RESTITUÉ');
+    ActivityLogService.log(
+      action:      'stock_restore_failed',
+      targetType:  'sale',
+      targetId:    order.id,
+      targetLabel: order.clientName,
+      shopId:      order.shopId,
+      details: {
+        'context':    context,
+        'product_id': productId,
+        'quantity':   qty,
+      },
+    );
   }
 
   /// Restaure le stock d'une commande qui passe de `completed` à un autre
@@ -565,7 +642,11 @@ class SaleLocalDatasource {
         && (order.deliveryLocationId ?? '').isNotEmpty;
     for (final item in order.items) {
       final (pid, vid) = _resolveProductVariant(products, item.productId);
-      if (pid == null) continue;
+      if (pid == null) {
+        _logRestockMiss(order, item.productId, item.quantity,
+            'restauration commande');
+        continue;
+      }
       if (usePartner) {
         await StockService.reverseSaleFromLocation(
           locationId: order.deliveryLocationId!,
@@ -705,7 +786,11 @@ class SaleLocalDatasource {
       // Rollback : restaurer les articles déjà réservés avant l'échec.
       for (final item in done) {
         final (pid, vid) = _resolveProductVariant(products, item.productId);
-        if (pid == null) continue;
+        if (pid == null) {
+          _logRestockMiss(order, item.productId, item.quantity,
+              'rollback réservation à choisir');
+          continue;
+        }
         await _approvalReturnStock(
             order, pid, vid, item.quantity, 'rollback réservation à choisir');
       }
@@ -744,7 +829,10 @@ class SaleLocalDatasource {
     for (final entry in recon.returned.entries) {
       if (entry.value <= 0) continue;
       final (pid, vid) = _resolveProductVariant(products, entry.key);
-      if (pid == null) continue;
+      if (pid == null) {
+        _logRestockMiss(order, entry.key, entry.value, 'retour clôture à choisir');
+        continue;
+      }
       await _approvalReturnStock(
           order, pid, vid, entry.value, 'retour vente à choisir');
     }
@@ -763,7 +851,15 @@ class SaleLocalDatasource {
             stockReserved: false, // tout a été remis en stock
             cancellationReason: 'aucun article gardé sur place',
           )
-        : order.copyWith(items: keptItems, status: SaleStatus.completed);
+        : order.copyWith(
+            items: keptItems,
+            status: SaleStatus.completed,
+            // H2 — le réservé est consommé (gardé = vendu définitif, retours
+            // déjà recrédités ci-dessus). On éteint le flag : sinon une
+            // suppression/annulation ultérieure verrait stock_reserved=true
+            // et recréditerait du stock déjà vendu (double-crédit).
+            stockReserved: false,
+          );
     await updateOrder(closed);
   }
 
@@ -778,7 +874,11 @@ class SaleLocalDatasource {
       final products = AppDatabase.getProductsForShop(order.shopId);
       for (final item in order.items) {
         final (pid, vid) = _resolveProductVariant(products, item.productId);
-        if (pid == null) continue;
+        if (pid == null) {
+          _logRestockMiss(order, item.productId, item.quantity,
+              'annulation vente à choisir');
+          continue;
+        }
         await _approvalReturnStock(
             order, pid, vid, item.quantity,
             reason ?? 'annulation vente à choisir');
@@ -847,14 +947,38 @@ class SaleLocalDatasource {
     final shopId   = map['shop_id']   as String?;
     final clientId = map['client_id'] as String?;
 
-    // Defensive : si l'état actuel est `completed`, on restaure quand
-    // même le stock avant de marquer supprimé. Ne devrait pas se produire
-    // (le use case bloque en amont) mais protège contre les rejeux et
-    // les commandes legacy.
-    final wasCompleted = (map['status'] as String?) == 'completed';
-    if (wasCompleted) {
+    // Restitution du stock AVANT marquage supprimé — garde-fou intégrité.
+    // Idempotence : si la commande est DÉJÀ supprimée, on ne rejoue PAS la
+    // restitution (sinon double-crédit de stock). Seuls le marquage Hive et
+    // la RPC, eux idempotents, se réappliquent.
+    final alreadyDeleted = map['deleted_at'] != null;
+    if (!alreadyDeleted) {
       final order = _mapToSaleWithStatus(map);
-      await _restoreOrderStock(order);
+      if (order.isApprovalSale && order.stockReserved) {
+        // Vente « à choisir sur place » encore réservée : le stock a été
+        // SORTI du disponible à la réservation (reserveApprovalOrder). La
+        // supprimer sans le remettre = perte sèche. On restitue TOUS les
+        // articles portés, puis on éteint le flag réservé pour rester
+        // idempotent (comme cancelApprovalOrder).
+        final products = AppDatabase.getProductsForShop(order.shopId);
+        for (final item in order.items) {
+          final (pid, vid) = _resolveProductVariant(products, item.productId);
+          if (pid == null) {
+            _logRestockMiss(order, item.productId, item.quantity,
+                'suppression vente à choisir');
+            continue;
+          }
+          await _approvalReturnStock(
+              order, pid, vid, item.quantity, 'suppression vente à choisir');
+        }
+        map['stock_reserved'] = false;
+      } else if (!order.isApprovalSale &&
+          (map['status'] as String?) == 'completed') {
+        // Defensive : commande `completed` standard (ne devrait pas arriver
+        // — le use case bloque en amont — mais protège rejeux / legacy mal
+        // sourcés). Les ventes à choisir gèrent leur stock ci-dessus.
+        await _restoreOrderStock(order);
+      }
     }
 
     // Marquer le soft-delete dans Hive.
