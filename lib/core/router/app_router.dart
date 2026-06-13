@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import '../../shared/widgets/alerts/_alert_demo_page.dart';
 import '../../features/auth/presentation/bloc/auth_state.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
@@ -206,6 +207,13 @@ class AuthRouterNotifier extends ChangeNotifier {
       // Démarre le heartbeat de présence (PresenceService).
       // Permet au workflow d'approbation owner de fonctionner.
       PresenceService.start();
+      // Phase 0 — enrichissement Sentry : associe la cible exacte (qui est
+      // connecté) à tout event remonté.
+      if (state is AuthAuthenticated) {
+        final u = state.user;
+        Sentry.configureScope((scope) =>
+            scope.setUser(SentryUser(id: u.id, email: u.email)));
+      }
     } else if (wasAuth && !_isAuthenticated) {
       _ref?.read(subscriptionProvider.notifier).reset();
       _ref?.read(shopRolesMapProvider.notifier).state = {};
@@ -218,6 +226,12 @@ class AuthRouterNotifier extends ChangeNotifier {
       } catch (_) {}
       AppDatabase.notifyAllChanged();
       PresenceService.stop();
+      // Phase 0 — Sentry : on oublie l'utilisateur ET la boutique au logout
+      // (les events suivants ne doivent pas être attribués au compte précédent).
+      Sentry.configureScope((scope) {
+        scope.setUser(null);
+        scope.removeTag('shop_id');
+      });
     }
     if (wasAuth != _isAuthenticated || justInitialized) notifyListeners();
   }
@@ -282,6 +296,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: RouteNames.landing,
     refreshListenable: notifier, // ← le router se rafraîchit quand notifier change
+    // Phase 0 — enrichissement Sentry : pose le nom de la route courante
+    // (cible « écran ») sur chaque event + breadcrumbs de navigation.
+    observers: [SentryNavigatorObserver(setRouteNameAsTransaction: true)],
     redirect: (context, state) {
       // Helper : destination après login. Si l'utilisateur a EXACTEMENT
       // 1 boutique en cache (owner ou membre), on saute la page

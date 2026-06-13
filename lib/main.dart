@@ -162,9 +162,40 @@ Future<void> _initBackgroundServices() async {
     // crash handler). Capturé en background, l'app est déjà visible.
     SentryFlutter.init((options) {
       options.dsn = 'https://5e24ab164b4eecefc3756bd5aa3b902c@o4511301758222336.ingest.de.sentry.io/4511301770477648';
-      options.tracesSampleRate = 1.0;
+      // Phase 0 — échantillonnage des traces de perf abaissé : 1.0 = 100 %
+      // (cher + bruyant). 0.15 suffit largement pour le suivi de bugs.
+      options.tracesSampleRate = 0.15;
       // ignore: experimental_member_use
       options.profilesSampleRate = 1.0;
+      // Phase 0 — RGPD/souveraineté : on retire les données sensibles (prix
+      // d'achat, coûts) AVANT envoi à Sentry, en scrubant les clés sensibles
+      // dans `extra` et dans le `data` des breadcrumbs.
+      options.beforeSend = (event, hint) {
+        bool sensitive(String k) {
+          final lk = k.toLowerCase();
+          return lk.contains('price_buy')
+              || lk.contains('pricebuy')
+              || lk.contains('purchase')
+              || lk.contains('prix_achat')
+              || lk.contains('buy_price')
+              || lk.contains('cost');
+        }
+        Map<String, dynamic>? scrub(Map<String, dynamic>? m) {
+          if (m == null) return null;
+          return {
+            for (final e in m.entries)
+              e.key: sensitive(e.key) ? '[redacted]' : e.value,
+          };
+        }
+        try {
+          // ignore: deprecated_member_use
+          event.extra = scrub(event.extra);
+          for (final b in (event.breadcrumbs ?? const <Breadcrumb>[])) {
+            b.data = scrub(b.data);
+          }
+        } catch (_) {}
+        return event;
+      };
     }).catchError((Object e) {
       debugPrint('Sentry init error: $e');
     }),
