@@ -297,11 +297,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: RouteNames.landing,
     refreshListenable: notifier, // ← le router se rafraîchit quand notifier change
-    // Phase 0 — SentryNavigatorObserver DÉSACTIVÉ TEMPORAIREMENT (debug gel
-    // logout) : suspecté de s'emballer avec go_router + refreshListenable qui
-    // notifie en boucle pendant la redirection de déconnexion. À réactiver
-    // une fois la cause confirmée.
-    // observers: [SentryNavigatorObserver(setRouteNameAsTransaction: true)],
+    // Phase 0 — SentryNavigatorObserver RÉACTIVÉ : pose le nom de la route
+    // courante (cible « écran ») sur chaque event + breadcrumbs de navigation.
+    // (Désactivé un temps pendant le debug du gel logout ; la cause réelle
+    // était le signOut bloquant — corrigée. La déconnexion redirige désormais
+    // en une seule navigation, l'observer ne s'emballe plus.)
+    observers: [SentryNavigatorObserver(setRouteNameAsTransaction: true)],
     redirect: (context, state) {
       // Helper : destination après login. Si l'utilisateur a EXACTEMENT
       // 1 boutique en cache (owner ou membre), on saute la page

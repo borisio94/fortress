@@ -9,7 +9,7 @@ import 'core/storage/secure_storage.dart';
 import 'core/services/supabase_service.dart';
 import 'core/database/app_database.dart';
 import 'core/database/supabase_migrations.dart';
-// import 'core/observability/error_reporter.dart'; // désactivé temp. (debug gel logout)
+import 'core/observability/error_reporter.dart';
 import 'core/services/delivery_reminder_service.dart';
 import 'core/services/new_web_order_service.dart';
 import 'core/services/scheduled_order_alert_service.dart';
@@ -40,20 +40,22 @@ void main() async {
   // 1. Binding minimal — requis avant tout `runApp`.
   SentryWidgetsFlutterBinding.ensureInitialized();
 
-  // 1ter. Phase 1 observabilité — DÉSACTIVÉ TEMPORAIREMENT (debug gel logout).
-  // Le chaînage des handlers d'erreurs globaux est suspecté de contribuer au
-  // gel de la page au logout. On le neutralise pour isoler la cause ; Sentry
-  // (Phase 0) garde sa capture. À réactiver une fois la cause confirmée.
-  // final prevFlutterOnError = FlutterError.onError;
-  // FlutterError.onError = (details) {
-  //   prevFlutterOnError?.call(details);
-  //   ErrorReporter.fromFlutterError(details);
-  // };
-  // final prevPlatformOnError = WidgetsBinding.instance.platformDispatcher.onError;
-  // WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
-  //   ErrorReporter.fromZoneError(error, stack);
-  //   return prevPlatformOnError?.call(error, stack) ?? true;
-  // };
+  // 1ter. Phase 1 observabilité — handlers d'erreurs globaux RÉACTIVÉS.
+  // (Ils avaient été coupés le temps de debugger le gel logout ; la vraie
+  // cause était le signOut bloquant sur le verrou multi-onglet GoTrue,
+  // désormais corrigée — cf. AuthBloc._onLogout émission-immédiate.)
+  // On CHAÎNE les handlers existants pour ne pas perdre la capture Sentry
+  // (Phase 0) : prev?.call(...) AVANT/APRÈS notre report dédupliqué.
+  final prevFlutterOnError = FlutterError.onError;
+  FlutterError.onError = (details) {
+    prevFlutterOnError?.call(details);
+    ErrorReporter.fromFlutterError(details);
+  };
+  final prevPlatformOnError = WidgetsBinding.instance.platformDispatcher.onError;
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    ErrorReporter.fromZoneError(error, stack);
+    return prevPlatformOnError?.call(error, stack) ?? true;
+  };
 
   // 1bis. Web : passe en path routing (sans #). Élimine le fragment qui
   //       posait problème quand un lien court (Edge `r` → 302) était
