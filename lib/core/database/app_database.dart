@@ -769,6 +769,26 @@ class AppDatabase {
     _i._channels.remove(shopId)?.unsubscribe();
   }
 
+  /// Coupe TOUS les abonnements Realtime de boutique. À appeler au LOGOUT.
+  ///
+  /// Sans ça, après la purge Hive du logout le websocket de l'ancienne
+  /// boutique restait ouvert (AdaptiveScaffold ne se désabonne pas au dispose)
+  /// et pouvait RE-REMPLIR les box vidées → fuite des données du compte
+  /// précédent vers le suivant sur un appareil partagé.
+  ///
+  /// Contrairement à [dispose] (réservé à l'arrêt complet de l'app), on
+  /// PRÉSERVE le monitoring de connectivité et le timer de flush de la file :
+  /// ils sont initialisés UNE FOIS au boot dans [init] et ne sont PAS recréés
+  /// au login — les tuer ici casserait la synchro offline du prochain compte.
+  /// Les canaux, eux, sont recréés au prochain login via
+  /// `AdaptiveScaffold.initState → subscribeToShop`.
+  static void unsubscribeAllShops() {
+    for (final ch in List.of(_i._channels.values)) {
+      try { ch.unsubscribe(); } catch (_) {}
+    }
+    _i._channels.clear();
+  }
+
   /// Pull complet déclenchable depuis l'UI (pull-to-refresh) — variante
   /// publique de `_initialPullForShop`. À utiliser depuis un
   /// `RefreshIndicator.onRefresh`. Awaitable, pour que le spinner

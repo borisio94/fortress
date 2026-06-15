@@ -21,6 +21,14 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
   StreamSubscription? _supaAuthSub;
 
+  /// `true` pendant l'exécution de [_onLogout]. Empêche le listener
+  /// `onAuthStateChange(signedOut)` de ré-ajouter un `AuthLogoutRequested`
+  /// REDONDANT quand c'est NOTRE propre `signOut()` qui a émis l'évènement
+  /// (sinon la purge + revoke + emit s'exécutaient deux fois). Reste à `false`
+  /// pour les signOut EXTERNES (SessionValidator, kick d'une autre session),
+  /// qui doivent bien déclencher la logique de déconnexion.
+  bool _logoutInProgress = false;
+
   AuthBloc({
     required this.loginUseCase,
     required this.registerUseCase,
@@ -49,10 +57,14 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       // Réagit uniquement aux signedOut externes : les login passent
       // déjà par `_onLogin` (qui émet AuthAuthenticated correctement).
       if (data.event == AuthChangeEvent.signedOut) {
-        // L'état Supabase est déjà nettoyé ; on émet seulement la
-        // transition côté Bloc + on déclenche la logique cleanup
-        // standard via l'event AuthLogoutRequested (qui sera idempotent
-        // car la session est déjà révoquée).
+        // Si c'est NOTRE propre logout en cours qui a déclenché le signOut,
+        // _onLogout gère déjà tout le cleanup + l'emit : ne pas ré-ajouter
+        // un évènement redondant (évitait une double purge / double revoke).
+        if (_logoutInProgress) return;
+        // signOut EXTERNE (SessionValidator force un signOut sur compte
+        // zombie, kick d'une autre session). L'état Supabase est déjà
+        // nettoyé ; on déclenche la logique cleanup standard via
+        // AuthLogoutRequested (idempotent : la session est déjà révoquée).
         if (state is! AuthUnauthenticated) {
           add(AuthLogoutRequested());
         }
@@ -188,10 +200,38 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     // `logoutUseCase` peuvent échouer parce qu'il n'y a plus de token,
     // mais on doit quand même finir en `AuthUnauthenticated` pour que
     // le router redirige vers /login.
-    try { await SessionService.revokeCurrent(); } catch (_) {}
-    try { SessionService.stop();                } catch (_) {}
-    try { await logoutUseCase();                } catch (_) {}
-    emit(AuthUnauthenticated());
+    // Marque le logout en cours → le listener onAuthStateChange ignore le
+    // signedOut que NOTRE signOut va émettre (pas de double déconnexion).
+    _logoutInProgress = true;
+    try {
+      // 1. Révocation serveur de la session courante — lancée EN PREMIER (tant
+      //    que le token est encore valide → le RPC a son contexte d'auth) mais
+      //    NON bloquante : on n'attend PAS sa réponse pour déconnecter. Si elle
+      //    échoue/expire, le backend purge de toute façon les sessions inactives.
+      unawaited(SessionService.revokeCurrent()
+          .timeout(const Duration(seconds: 5))
+          .catchError((_) {}));
+      // 2. Arrêt local immédiat du heartbeat + listener realtime de session
+      //    (aucun réseau).
+      try { SessionService.stop(); } catch (_) {}
+      // 2bis. Coupe TOUS les canaux Realtime de boutique AVANT la purge Hive
+      //    (étape 3). Sinon le websocket de l'ancienne boutique reste ouvert
+      //    (AdaptiveScaffold ne se désabonne pas au dispose) et RE-REMPLIT les
+      //    box juste vidées → fuite des données du compte précédent.
+      try { AppDatabase.unsubscribeAllShops(); } catch (_) {}
+      // 3. Nettoyage local (purge Hive anti-fuite + tokens + signOut GoTrue),
+      //    BORNÉ par un timeout. CAUSE RACINE du « ne redirige pas vers /login »:
+      //    auparavant `revokeCurrent` PUIS `logoutUseCase` étaient awaités SANS
+      //    timeout → si l'un se bloquait (réseau lent, verrou GoTrue web),
+      //    l'`emit` final n'était jamais atteint et le router ne redirigeait pas.
+      try { await logoutUseCase().timeout(const Duration(seconds: 4)); } catch (_) {}
+      // 4. Émet l'état déconnecté → `refreshListenable` notifie → le router
+      //    redirige vers /login. Garanti : cet emit ne dépend plus d'aucun await
+      //    réseau non borné.
+      emit(AuthUnauthenticated());
+    } finally {
+      _logoutInProgress = false;
+    }
   }
 
   Future<void> _onForgotPassword(

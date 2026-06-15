@@ -120,7 +120,12 @@ class AuthRemoteDataSourceMock implements AuthRemoteDataSource {
 
   @override
   Future<void> logout() async {
-    try { await _supabase.logout(); } catch (_) {}
+    // Nettoyage LOCAL D'ABORD — ne dépend d'aucun réseau, donc ne peut JAMAIS
+    // bloquer la déconnexion. CAUSE RACINE du « ne redirige pas vers /login » :
+    // quand `_supabase.logout()` (signOut) se bloquait (réseau lent / verrou
+    // multi-onglet GoTrue sur web), la purge + le clear tokens placés APRÈS ne
+    // s'exécutaient pas, et `_onLogout` n'atteignait jamais son `emit`.
+    //
     // Anti-fuite inter-comptes (appareil partagé) : purge TOUTES les données
     // métier locales (produits, prix d'achat, clients, panier, ventes
     // offline…) en conservant les préférences device (taille de texte, thème,
@@ -128,6 +133,13 @@ class AuthRemoteDataSourceMock implements AuthRemoteDataSource {
     // l'id et laissait tout le reste en clair dans Hive).
     await LocalStorageService.purgeOnLogout();
     await SecureStorageService.clearTokens();
+    // signOut Supabase (efface la session GoTrue locale) — BORNÉ par un timeout
+    // pour ne jamais figer la déconnexion si le réseau ou le verrou GoTrue
+    // multi-onglet (web) bloque. Best-effort : la session locale est déjà
+    // purgée ci-dessus.
+    try {
+      await _supabase.logout().timeout(const Duration(seconds: 3));
+    } catch (_) {}
   }
 
   @override
