@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import '../observability/error_reporter.dart';
 import '../../shared/widgets/alerts/_alert_demo_page.dart';
 import '../../features/auth/presentation/bloc/auth_state.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
@@ -296,9 +297,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: RouteNames.landing,
     refreshListenable: notifier, // ← le router se rafraîchit quand notifier change
-    // Phase 0 — enrichissement Sentry : pose le nom de la route courante
-    // (cible « écran ») sur chaque event + breadcrumbs de navigation.
-    observers: [SentryNavigatorObserver(setRouteNameAsTransaction: true)],
+    // Phase 0 — SentryNavigatorObserver DÉSACTIVÉ TEMPORAIREMENT (debug gel
+    // logout) : suspecté de s'emballer avec go_router + refreshListenable qui
+    // notifie en boucle pendant la redirection de déconnexion. À réactiver
+    // une fois la cause confirmée.
+    // observers: [SentryNavigatorObserver(setRouteNameAsTransaction: true)],
     redirect: (context, state) {
       // Helper : destination après login. Si l'utilisateur a EXACTEMENT
       // 1 boutique en cache (owner ou membre), on saute la page
@@ -323,6 +326,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       final isLoggedIn           = notifier.isAuthenticated;
       final loc                  = state.matchedLocation;
+      // Phase 1 observabilité — cible « écran » des rapports de bugs.
+      ErrorReporter.lastRoute = loc;
       final isAuthRoute          = loc.startsWith('/auth');
       final isSubscriptionRoute  = loc.startsWith('/subscription');
       final isAcceptInviteRoute  = loc.startsWith('/accept-invite');

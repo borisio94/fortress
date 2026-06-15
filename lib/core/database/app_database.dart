@@ -2001,6 +2001,55 @@ end \$\$;""",
     }
   }
 
+  // ── Observabilité (Phase 1) — rapports de bugs vers le SA ──────────────────
+
+  /// Pousse un rapport d'erreur via la RPC `report_error` (dédupliquée côté
+  /// serveur). Offline-first : online direct, sinon enqueue dans la file RPC
+  /// existante (rejoué au retour réseau). Ne throw jamais.
+  static Future<void> reportError(Map<String, dynamic> params) async {
+    try {
+      if (_i._isOnline) {
+        try {
+          await _db.rpc('report_error', params: params);
+        } catch (_) {
+          // Transitoire (réseau) → réessai différé via la file RPC.
+          _enqueue({'table': 'rpc', 'op': 'rpc', 'name': 'report_error',
+                    'data': params});
+        }
+      } else {
+        _enqueue({'table': 'rpc', 'op': 'rpc', 'name': 'report_error',
+                  'data': params});
+      }
+    } catch (_) {
+      // L'observabilité ne doit jamais faire échouer l'appelant.
+    }
+  }
+
+  /// Lecture des rapports de bugs (réservée super-admin par la policy
+  /// `error_reports_sa_read`). Dédupliqués (1 ligne/bug), triés par dernière
+  /// occurrence. Exclut les bugs « ignorés ».
+  static Future<List<Map<String, dynamic>>> getErrorReports() async {
+    try {
+      final rows = await _db.from('error_reports')
+          .select('id, severity, error_type, message, route, action, '
+                  'shop_id, platform, app_version, count, status, '
+                  'first_seen_at, last_seen_at, sentry_event_id, stack')
+          .neq('status', 'ignored')
+          .order('last_seen_at', ascending: false)
+          .limit(500);
+      return List<Map<String, dynamic>>.from(rows);
+    } catch (e) {
+      debugPrint('[DB] getErrorReports: $e');
+      return const [];
+    }
+  }
+
+  /// Met à jour le statut d'un rapport (résolu / ignoré / en cours). Gardé
+  /// côté serveur par la policy `error_reports_sa_update` (super-admin).
+  static Future<void> setErrorReportStatus(String id, String status) async {
+    await _db.from('error_reports').update({'status': status}).eq('id', id);
+  }
+
   /// SA-6 — statistiques plateforme (super-admin). Agrégations directes
   /// Supabase. Retourne une map prête pour l'UI :
   ///   revenue, shopsActive, shopsSuspended, shopsTrial,
