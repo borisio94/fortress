@@ -193,45 +193,52 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
   Future<void> _onLogout(
       AuthLogoutRequested event, Emitter<AuthState> emit) async {
-    // Révoque la session courante côté Supabase AVANT le logout local —
-    // sinon on perd le token nécessaire pour appeler le RPC. Chaque étape
-    // est encapsulée pour rester idempotente : si `SessionValidator` a
-    // déjà signé out le user (cas compte zombie), `revokeCurrent` /
-    // `logoutUseCase` peuvent échouer parce qu'il n'y a plus de token,
-    // mais on doit quand même finir en `AuthUnauthenticated` pour que
-    // le router redirige vers /login.
     // Marque le logout en cours → le listener onAuthStateChange ignore le
-    // signedOut que NOTRE signOut va émettre (pas de double déconnexion).
+    // signedOut que NOTRE signOut (en arrière-plan) va émettre (pas de double
+    // déconnexion).
     _logoutInProgress = true;
+
+    // 1. Arrêts LOCAUX immédiats (aucun réseau, aucun verrou) : heartbeat +
+    //    listener de session, et canaux Realtime de boutique. Couper les
+    //    canaux empêche un push de re-remplir les box après la purge (fuite
+    //    inter-comptes).
+    try { SessionService.stop(); } catch (_) {}
+    try { AppDatabase.unsubscribeAllShops(); } catch (_) {}
+
+    // 2. ÉMET L'ÉTAT DÉCONNECTÉ TOUT DE SUITE → `refreshListenable` notifie →
+    //    le router redirige vers /login IMMÉDIATEMENT.
+    //
+    //    CAUSE RACINE DU GEL : auparavant l'`emit` était placé APRÈS l'await de
+    //    `signOut()` (via logoutUseCase). Or sur web, `signOut()` passe par le
+    //    verrou multi-onglet de GoTrue (navigator.locks) : avec 2 onglets
+    //    ouverts sur l'app, ce verrou peut bloquer LONGTEMPS → le handler
+    //    restait suspendu → `emit` jamais atteint → l'app figée (mais la
+    //    session finissait nettoyée, d'où « déconnecté au ré-ouverture »).
+    //    En émettant AVANT tout appel réseau/IO, l'UI ne peut plus se figer.
+    emit(AuthUnauthenticated());
+
+    // 3. Reste du nettoyage (révocation serveur + purge Hive + tokens +
+    //    signOut GoTrue) en ARRIÈRE-PLAN, borné, jamais bloquant pour l'UI.
+    unawaited(_finishLogoutCleanup());
+
+    _logoutInProgress = false;
+  }
+
+  /// Nettoyage de déconnexion hors chemin critique de l'UI. Chaque étape est
+  /// bornée par un timeout pour qu'un blocage réseau / verrou GoTrue ne laisse
+  /// jamais traîner indéfiniment. Idempotent.
+  Future<void> _finishLogoutCleanup() async {
+    // Révocation serveur PENDANT que le token est encore valide (le signOut
+    // ci-dessous l'invalidera). Best-effort : le backend purge de toute façon
+    // les sessions inactives.
     try {
-      // 1. Révocation serveur de la session courante — lancée EN PREMIER (tant
-      //    que le token est encore valide → le RPC a son contexte d'auth) mais
-      //    NON bloquante : on n'attend PAS sa réponse pour déconnecter. Si elle
-      //    échoue/expire, le backend purge de toute façon les sessions inactives.
-      unawaited(SessionService.revokeCurrent()
-          .timeout(const Duration(seconds: 5))
-          .catchError((_) {}));
-      // 2. Arrêt local immédiat du heartbeat + listener realtime de session
-      //    (aucun réseau).
-      try { SessionService.stop(); } catch (_) {}
-      // 2bis. Coupe TOUS les canaux Realtime de boutique AVANT la purge Hive
-      //    (étape 3). Sinon le websocket de l'ancienne boutique reste ouvert
-      //    (AdaptiveScaffold ne se désabonne pas au dispose) et RE-REMPLIT les
-      //    box juste vidées → fuite des données du compte précédent.
-      try { AppDatabase.unsubscribeAllShops(); } catch (_) {}
-      // 3. Nettoyage local (purge Hive anti-fuite + tokens + signOut GoTrue),
-      //    BORNÉ par un timeout. CAUSE RACINE du « ne redirige pas vers /login »:
-      //    auparavant `revokeCurrent` PUIS `logoutUseCase` étaient awaités SANS
-      //    timeout → si l'un se bloquait (réseau lent, verrou GoTrue web),
-      //    l'`emit` final n'était jamais atteint et le router ne redirigeait pas.
-      try { await logoutUseCase().timeout(const Duration(seconds: 4)); } catch (_) {}
-      // 4. Émet l'état déconnecté → `refreshListenable` notifie → le router
-      //    redirige vers /login. Garanti : cet emit ne dépend plus d'aucun await
-      //    réseau non borné.
-      emit(AuthUnauthenticated());
-    } finally {
-      _logoutInProgress = false;
-    }
+      await SessionService.revokeCurrent()
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {}
+    // Purge Hive anti-fuite + clear tokens + signOut GoTrue (datasource).
+    try {
+      await logoutUseCase().timeout(const Duration(seconds: 6));
+    } catch (_) {}
   }
 
   Future<void> _onForgotPassword(
