@@ -6,6 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/router/route_names.dart';
 import 'super_admin_deleted_hub_page.dart' show superAdminDeletedTotalProvider;
+import 'platform_bugs_page.dart';
+import 'sa_tickets_page.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -203,7 +205,7 @@ class _SAStats {
 // ─── Sections drawer ──────────────────────────────────────────────────────────
 enum _SASection {
   dashboard, users, shops, payments, plans, logs, messages,
-  maintenance, monitoring, settings,
+  maintenance, monitoring, bugs, settings,
 }
 
 extension _SASectionX on _SASection {
@@ -214,9 +216,10 @@ extension _SASectionX on _SASection {
     _SASection.payments     => 'Paiements',
     _SASection.plans        => 'Plans tarifaires',
     _SASection.logs         => 'Logs',
-    _SASection.messages     => 'Messages',
+    _SASection.messages     => 'Tickets',
     _SASection.maintenance  => 'Maintenance',
     _SASection.monitoring   => 'Monitoring',
+    _SASection.bugs         => 'Bugs',
     _SASection.settings     => 'Configuration',
   };
   IconData get icon => switch (this) {
@@ -226,9 +229,10 @@ extension _SASectionX on _SASection {
     _SASection.payments     => Icons.payments_rounded,
     _SASection.plans        => Icons.card_membership_rounded,
     _SASection.logs         => Icons.terminal_rounded,
-    _SASection.messages     => Icons.chat_bubble_outline_rounded,
+    _SASection.messages     => Icons.forum_rounded,
     _SASection.maintenance  => Icons.build_circle_rounded,
     _SASection.monitoring   => Icons.monitor_heart_rounded,
+    _SASection.bugs         => Icons.bug_report_rounded,
     _SASection.settings     => Icons.settings_outlined,
   };
 }
@@ -244,6 +248,11 @@ class SuperAdminPage extends ConsumerStatefulWidget {
 class _SuperAdminPageState extends ConsumerState<SuperAdminPage> {
   _SASection _section = _SASection.dashboard;
   final _scaffoldKey = GlobalKey<ScaffoldState>();
+  // Garde one-shot : empêche de re-planifier `context.go` à CHAQUE build quand
+  // le plan n'est pas (plus) super-admin. Sans elle, au logout depuis le
+  // panneau SA, `reset()` pose UserPlan.empty() (non-SA) → la page replanifie
+  // un addPostFrameCallback→go à chaque frame → boucle qui FIGE la page web.
+  bool _redirectScheduled = false;
 
   void _navigate(_SASection s) {
     setState(() => _section = s);
@@ -278,9 +287,15 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage> {
       );
     }
     if (!plan.isSuperAdmin) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) context.go(RouteNames.shopSelector);
-      });
+      // One-shot : on ne planifie la sortie qu'UNE fois (cf. _redirectScheduled).
+      // Le `go` unique est de toute façon intercepté par le redirect du router
+      // (→ /login si déconnecté, → shop-selector si non-SA authentifié).
+      if (!_redirectScheduled) {
+        _redirectScheduled = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && context.mounted) context.go(RouteNames.shopSelector);
+        });
+      }
       return Scaffold(
         backgroundColor: AppColors.background,
         body: const Center(child: CircularProgressIndicator()),
@@ -336,9 +351,10 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage> {
     _SASection.payments     => const _PaymentsSection(),
     _SASection.plans        => const _PlansSection(),
     _SASection.logs         => const _LogsSection(),
-    _SASection.messages     => const _MessagesSection(),
+    _SASection.messages     => const SaTicketsSection(),
     _SASection.maintenance  => const _MaintenanceSection(),
     _SASection.monitoring   => const _MonitoringSection(),
+    _SASection.bugs         => const PlatformBugsSection(),
     _SASection.settings     => const _SettingsSection(),
   };
 }
@@ -645,10 +661,17 @@ class _SADrawerContent extends ConsumerWidget {
             const _Divider(),
             _DrawerLabel('Outils'),
             ...[ _SASection.logs, _SASection.messages,
-              _SASection.maintenance, _SASection.monitoring,
-            ].map((s) => _DrawerTile(
-              section: s, current: current, onTap: () => onNavigate(s),
-            )),
+              _SASection.maintenance, _SASection.monitoring, _SASection.bugs,
+            ].map((s) {
+              // Badge temps réel sur « Tickets » : nombre de tickets ouverts
+              // remontés au support (escaladés à super_admin).
+              final escalated = ref.watch(saTicketBadgeProvider).valueOrNull ?? 0;
+              return _DrawerTile(
+                section: s, current: current, onTap: () => onNavigate(s),
+                badge: s == _SASection.messages && escalated > 0
+                    ? escalated : null,
+              );
+            }),
           ],
         )),
 
@@ -1693,27 +1716,6 @@ class _LogsSectionState extends ConsumerState<_LogsSection> {
           ))),
     ]);
   }
-}
-
-// ─── Messages ─────────────────────────────────────────────────────────────────
-class _MessagesSection extends StatelessWidget {
-  const _MessagesSection();
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(padding: const EdgeInsets.all(32),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.chat_bubble_outline_rounded, size: 48, color: Color(0xFFD1D5DB)),
-          const SizedBox(height: 12),
-          Text('Messagerie — Prochaine version',
-              style: AppTextStyles.label
-                  .copyWith(color: AppColors.textSecondary)),
-          const SizedBox(height: 6),
-          Text('Les messages des utilisateurs apparaîtront ici.',
-              style: AppTextStyles.bodySm
-                  .copyWith(color: AppColors.textHint),
-              textAlign: TextAlign.center),
-        ])),
-  );
 }
 
 // ─── Configuration ────────────────────────────────────────────────────────────
