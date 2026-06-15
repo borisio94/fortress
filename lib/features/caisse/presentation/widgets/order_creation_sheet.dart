@@ -365,7 +365,7 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF9FAFB),
+                      color: AppColors.inputFill,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
                           color: Theme.of(context).semantic.borderSubtle),
@@ -446,7 +446,7 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
                         suffixText: CurrencyFormatter.currentSymbol,
                         isDense: true,
                         filled: true,
-                        fillColor: const Color(0xFFF9FAFB),
+                        fillColor: AppColors.inputFill,
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: BorderSide(
@@ -535,7 +535,7 @@ class _PickerTile extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
-          color: highlight ? sem.brandSurface : const Color(0xFFF9FAFB),
+          color: highlight ? sem.brandSurface : AppColors.inputFill,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
               color: highlight ? sem.brand.withValues(alpha: 0.35)
@@ -543,7 +543,7 @@ class _PickerTile extends StatelessWidget {
         ),
         child: Row(children: [
           Icon(icon, size: 18,
-              color: highlight ? sem.brand : const Color(0xFF6B7280)),
+              color: highlight ? sem.brand : AppColors.textSecondary),
           const SizedBox(width: 10),
           Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -552,18 +552,18 @@ class _PickerTile extends StatelessWidget {
                 maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: AppTextStyles.body.copyWith(
                     fontWeight: highlight ? FontWeight.w700 : FontWeight.w500,
-                    color: highlight ? sem.brandText : const Color(0xFF111827))),
+                    color: highlight ? sem.brandText : AppColors.onSurface)),
             if (hint != null && hint!.isNotEmpty) ...[
               const SizedBox(height: 1),
               Text(hint!,
                   maxLines: 1, overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.captionHint
-                      .copyWith(color: const Color(0xFF6B7280))),
+                      .copyWith(color: AppColors.textSecondary)),
             ],
           ])),
           if (trailing != null) trailing!
           else const Icon(Icons.chevron_right_rounded,
-              size: 18, color: Color(0xFF9CA3AF)),
+              size: 18, color: AppColors.textHint),
         ]),
       ),
     );
@@ -596,7 +596,7 @@ class _ApprovalSaleToggle extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: value ? sem.brandSurface : const Color(0xFFF9FAFB),
+            color: value ? sem.brandSurface : AppColors.inputFill,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
                 color: value
@@ -616,7 +616,7 @@ class _ApprovalSaleToggle extends StatelessWidget {
                               fontWeight: FontWeight.w700,
                               color: value
                                   ? sem.brandText
-                                  : const Color(0xFF111827))),
+                                  : AppColors.onSurface)),
                     ),
                     if (!enabled) ...[
                       const SizedBox(width: 6),
@@ -632,7 +632,7 @@ class _ApprovalSaleToggle extends StatelessWidget {
                           'réservé puis réconcilié à la clôture.'
                         : 'Mode défini à la création — non modifiable ici.',
                     style: AppTextStyles.captionHint
-                        .copyWith(color: const Color(0xFF6B7280)),
+                        .copyWith(color: AppColors.textSecondary),
                   ),
                 ],
               ),
@@ -660,14 +660,14 @@ class _LabeledField extends StatelessWidget {
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
-      style: AppTextStyles.body.copyWith(color: const Color(0xFF111827)),
+      style: AppTextStyles.body.copyWith(color: AppColors.onSurface),
       decoration: InputDecoration(
         labelText: label,
         labelStyle: AppTextStyles.bodySm
-            .copyWith(color: const Color(0xFF6B7280)),
+            .copyWith(color: AppColors.textSecondary),
         hintText: hint,
         hintStyle: AppTextStyles.bodySm
-            .copyWith(color: const Color(0xFFBBBBBB)),
+            .copyWith(color: AppColors.textHint),
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
             horizontal: 12, vertical: 11),
@@ -746,7 +746,7 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
         Container(margin: const EdgeInsets.only(top: 10, bottom: 8),
             width: 36, height: 4,
             decoration: BoxDecoration(
-                color: const Color(0xFFDDDDDD),
+                color: AppColors.divider,
                 borderRadius: BorderRadius.circular(2))),
         // Titre
         const Padding(
@@ -767,10 +767,10 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
               decoration: InputDecoration(
                 hintText: 'Rechercher par numéro ou nom…',
                 hintStyle: AppTextStyles.bodySm
-                    .copyWith(color: const Color(0xFFBBBBBB)),
+                    .copyWith(color: AppColors.textHint),
                 prefixIcon: const Icon(Icons.search_rounded,
                     size: 16, color: AppColors.textHint),
-                filled: true, fillColor: const Color(0xFFF9FAFB),
+                filled: true, fillColor: AppColors.inputFill,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 10),
@@ -829,7 +829,7 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
                               .where((s) => s.isNotEmpty)
                               .join(' · '),
                           style: AppTextStyles.captionHint
-                              .copyWith(color: const Color(0xFF6B7280))),
+                              .copyWith(color: AppColors.textSecondary)),
                     );
                   },
                 ),
@@ -906,7 +906,7 @@ class _PaymentChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
-          color: active ? sem.brandSurface : const Color(0xFFF9FAFB),
+          color: active ? sem.brandSurface : AppColors.inputFill,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
               color: active
@@ -916,12 +916,12 @@ class _PaymentChip extends StatelessWidget {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon,
               size: 14,
-              color: active ? sem.brandText : const Color(0xFF6B7280)),
+              color: active ? sem.brandText : AppColors.textSecondary),
           const SizedBox(width: 6),
           Text(label,
               style: AppTextStyles.bodySm.copyWith(
                   fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                  color: active ? sem.brandText : const Color(0xFF111827))),
+                  color: active ? sem.brandText : AppColors.onSurface)),
         ]),
       ),
     );

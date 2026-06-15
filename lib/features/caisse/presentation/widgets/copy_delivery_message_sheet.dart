@@ -252,7 +252,7 @@ class _CopyDeliveryMessageSheetState
                     ? 'Génération du message…'
                     : 'Le message apparaîtra ici',
                 filled: true,
-                fillColor: const Color(0xFFF9FAFB),
+                fillColor: AppColors.inputFill,
                 contentPadding: const EdgeInsets.all(12),
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),

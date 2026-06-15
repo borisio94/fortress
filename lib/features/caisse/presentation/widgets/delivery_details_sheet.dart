@@ -444,11 +444,11 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
   Widget _paymentTiles() {
     const methods = [
       (PaymentMethod.cash,        Icons.payments_rounded,
-          'Espèces',        Color(0xFF10B981)),
+          'Espèces',        AppColors.secondary),
       (PaymentMethod.mobileMoney, Icons.phone_android_rounded,
           'Mobile Money',   Color(0xFFF97316)),
       (PaymentMethod.card,        Icons.credit_card_rounded,
-          'Carte bancaire', Color(0xFF3B82F6)),
+          'Carte bancaire', AppColors.info),
       (PaymentMethod.credit,      Icons.handshake_rounded,
           'Crédit',         Color(0xFFB45309)),
     ];
@@ -612,7 +612,7 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
         decoration: BoxDecoration(
           color: has
               ? AppColors.primary.withValues(alpha:0.06)
-              : const Color(0xFFF9FAFB),
+              : AppColors.inputFill,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: has
@@ -712,12 +712,12 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
       InputDecoration(
         hintText: hint,
         hintStyle: AppTextStyles.bodySm
-            .copyWith(color: const Color(0xFFBBBBBB)),
+            .copyWith(color: AppColors.textHint),
         prefixIcon: icon != null
-            ? Icon(icon, size: 15, color: const Color(0xFFAAAAAA))
+            ? Icon(icon, size: 15, color: AppColors.textHint)
             : null,
         filled: true,
-        fillColor: const Color(0xFFF9FAFB),
+        fillColor: AppColors.inputFill,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
             horizontal: 12, vertical: 10),
@@ -780,12 +780,12 @@ class _ModeTile extends StatelessWidget {
                   style: AppTextStyles.bodyBold.copyWith(
                       color: onTap == null
                           ? AppColors.textHint
-                          : (selected ? color : const Color(0xFF0F172A)))),
+                          : (selected ? color : AppColors.onSurface))),
               if (subtitle.isNotEmpty) ...[
                 const SizedBox(height: 2),
                 Text(subtitle,
                     style: AppTextStyles.captionHint
-                        .copyWith(color: const Color(0xFF9CA3AF))),
+                        .copyWith(color: AppColors.textHint)),
               ],
             ],
           ),
@@ -795,7 +795,7 @@ class _ModeTile extends StatelessWidget {
                 ? Icons.radio_button_checked
                 : Icons.radio_button_off_rounded,
             size: 16,
-            color: selected ? color : const Color(0xFFBBBBBB)),
+            color: selected ? color : AppColors.textHint),
       ]),
     ),
   );

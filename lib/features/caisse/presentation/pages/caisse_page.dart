@@ -1546,7 +1546,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   duration: const Duration(milliseconds: 220),
                   child: Icon(Icons.keyboard_arrow_down_rounded,
                       size: 18,
-                      color: _expanded ? color : const Color(0xFFBBBBBB)),
+                      color: _expanded ? color : AppColors.textHint),
                 ),
               ]),
             ]),
@@ -1667,7 +1667,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       Expanded(
                         child: Text(i.productName,
                             style: AppTextStyles.captionHint
-                                .copyWith(color: const Color(0xFF374151)),
+                                .copyWith(color: AppColors.textSecondary),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis),
                       ),
@@ -1714,7 +1714,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                                 width: 14, height: 14,
                                 child: CircularProgressIndicator(
                                     strokeWidth: 2,
-                                    color: Color(0xFF25D366)),
+                                    color: AppColors.whatsapp),
                               )
                             : const Icon(Icons.phonelink_ring_rounded,
                                 size: 15),
@@ -1723,10 +1723,10 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                                 ? 'Préparation du rappel…'
                                 : 'Relancer via WhatsApp',
                             style: AppTextStyles.bodySmBold
-                                .copyWith(color: const Color(0xFF25D366))),
+                                .copyWith(color: AppColors.whatsapp)),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF25D366),
-                          side: const BorderSide(color: Color(0xFF25D366)),
+                          foregroundColor: AppColors.whatsapp,
+                          side: const BorderSide(color: AppColors.whatsapp),
                           padding:
                               const EdgeInsets.symmetric(vertical: 8),
                           shape: RoundedRectangleBorder(
@@ -1754,11 +1754,11 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                             style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
-                                color: Color(0xFF25D366))),
+                                color: AppColors.whatsapp)),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF25D366),
+                          foregroundColor: AppColors.whatsapp,
                           side: const BorderSide(
-                              color: Color(0xFF25D366), width: 1.2),
+                              color: AppColors.whatsapp, width: 1.2),
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8)),
@@ -1894,7 +1894,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         icon: (_sendingInvoice || _preparingInvoice)
                             ? Icons.hourglass_top_rounded
                             : Icons.send_rounded,
-                        color: const Color(0xFF25D366),
+                        color: AppColors.whatsapp,
                         tooltip: _preparingInvoice
                             ? 'Préparation de la facture…'
                             : 'Envoyer la facture par WhatsApp',
@@ -1946,7 +1946,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         widget.order.status == SaleStatus.processing) ...[
                       _ActionBtn(
                         icon: Icons.notifications_active_outlined,
-                        color: const Color(0xFF25D366),
+                        color: AppColors.whatsapp,
                         tooltip: context.l10n.orderRelaunchBtn,
                         onTap: () => _relaunchClient(context),
                       ),
@@ -2765,7 +2765,7 @@ class _FormatPickerSheetState extends State<_FormatPickerSheet> {
                             style: AppTextStyles.micro.copyWith(
                                 color: sel
                                     ? AppColors.primary
-                                    : const Color(0xFFBBBBBB),
+                                    : AppColors.textHint,
                                 fontWeight: FontWeight.w600),
                           ),
                           if (sel) ...[
@@ -3004,9 +3004,9 @@ class _ClientAvatar extends StatelessWidget {
   static const _palette = [
     Color(0xFF6366F1), // indigo
     Color(0xFF0EA5E9), // sky
-    Color(0xFF10B981), // emerald
-    Color(0xFFF59E0B), // amber
-    Color(0xFFEF4444), // red
+    AppColors.secondary, // emerald
+    AppColors.warning, // amber
+    AppColors.error, // red
     Color(0xFFEC4899), // pink
     Color(0xFF8B5CF6), // violet
     Color(0xFF14B8A6), // teal
@@ -3143,7 +3143,7 @@ class _StatusMenu extends StatelessWidget {
                         : FontWeight.normal,
                     color: s == current
                         ? s.color
-                        : const Color(0xFF374151))),
+                        : AppColors.textSecondary)),
             if (s == current) ...[
               const Spacer(),
               Icon(Icons.check_rounded,
@@ -3605,7 +3605,7 @@ class _ReasonDialogState extends State<_ReasonDialog> {
                       fontSize: 12, color: AppColors.textHint),
                   isDense: true,
                   filled: true,
-                  fillColor: const Color(0xFFF9FAFB),
+                  fillColor: AppColors.inputFill,
                   contentPadding: const EdgeInsets.all(12),
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
@@ -3634,7 +3634,7 @@ class _ReasonDialogState extends State<_ReasonDialog> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: widget.confirmColor,
                     foregroundColor: Colors.white,
-                    disabledBackgroundColor: const Color(0xFFE5E7EB),
+                    disabledBackgroundColor: AppColors.inputBorder,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10)),
                     elevation: 0,

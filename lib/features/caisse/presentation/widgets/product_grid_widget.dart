@@ -191,16 +191,16 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
           decoration: InputDecoration(
             hintText: 'Rechercher par nom, SKU, code-barres…',
             prefixIcon: const Icon(Icons.search_rounded,
-                size: 18, color: Color(0xFF9CA3AF)),
+                size: 18, color: AppColors.textHint),
             suffixIcon: _query.isNotEmpty
                 ? IconButton(
               icon: const Icon(Icons.clear_rounded,
-                  size: 16, color: Color(0xFF9CA3AF)),
+                  size: 16, color: AppColors.textHint),
               onPressed: () => setState(() => _query = ''),
             )
                 : null,
             filled: true,
-            fillColor: const Color(0xFFF3F4F6),
+            fillColor: AppColors.inputFill,
             isDense: true,
             contentPadding: const EdgeInsets.symmetric(
                 horizontal: 14, vertical: 10),
@@ -240,7 +240,7 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
           Text(
             '${products.length} produit${products.length > 1 ? 's' : ''}',
             style: AppTextStyles.caption
-                .copyWith(color: const Color(0xFF9CA3AF)),
+                .copyWith(color: AppColors.textHint),
           ),
         ]),
       ),
@@ -359,7 +359,7 @@ class _SheetHeader extends StatelessWidget {
       Container(
         width: 36, height: 4,
         decoration: BoxDecoration(
-          color: const Color(0xFFE5E7EB),
+          color: AppColors.inputBorder,
           borderRadius: BorderRadius.circular(2),
         ),
       ),
@@ -368,7 +368,7 @@ class _SheetHeader extends StatelessWidget {
         child: Row(children: [
           Text('Ajouter des produits',
               style: AppTextStyles.subtitleBold
-                  .copyWith(color: const Color(0xFF0F172A))),
+                  .copyWith(color: AppColors.onSurface)),
           const Spacer(),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -402,9 +402,9 @@ class _ProductCard extends StatelessWidget {
     final outOfStockAt = stockAt <= 0;
     final lowStockAt   = stockAt > 0 && stockAt <= product.stockMinAlert;
     final stockColor = outOfStockAt
-        ? const Color(0xFFEF4444)
+        ? AppColors.error
         : lowStockAt
-        ? const Color(0xFFF59E0B)
+        ? AppColors.warning
         : AppColors.secondary;
     final hasVariants = product.variants.length > 1;
     // Bug : avant on désactivait le clic dès que le total stock était à 0,
@@ -466,7 +466,7 @@ class _ProductCard extends StatelessWidget {
                           child: Text(
                             product.name,
                             style: AppTextStyles.captionBold
-                                .copyWith(color: const Color(0xFF0F172A)),
+                                .copyWith(color: AppColors.onSurface),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -565,7 +565,7 @@ class _VariantPickerSheet extends StatelessWidget {
             child: Container(
               width: 36, height: 4,
               decoration: BoxDecoration(
-                color: const Color(0xFFE5E7EB),
+                color: AppColors.inputBorder,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -588,10 +588,10 @@ class _VariantPickerSheet extends StatelessWidget {
                   children: [
                     Text(product.name,
                         style: AppTextStyles.subtitleBold
-                            .copyWith(color: const Color(0xFF0F172A))),
+                            .copyWith(color: AppColors.onSurface)),
                     Text('${product.variants.length} variantes disponibles',
                         style: AppTextStyles.bodySm
-                            .copyWith(color: const Color(0xFF9CA3AF))),
+                            .copyWith(color: AppColors.textHint)),
                   ])),
             ]),
           ),
@@ -600,7 +600,7 @@ class _VariantPickerSheet extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Text('Choisissez une variante',
                 style: AppTextStyles.bodySmBold
-                    .copyWith(color: const Color(0xFF6B7280))),
+                    .copyWith(color: AppColors.textSecondary)),
           ),
           const SizedBox(height: 8),
 
@@ -614,7 +614,7 @@ class _VariantPickerSheet extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               itemCount: product.variants.length,
               separatorBuilder: (_, __) =>
-              const Divider(height: 1, color: Color(0xFFF3F4F6)),
+              Divider(height: 1, color: AppColors.inputFill),
               itemBuilder: (ctx, i) {
                 final v = product.variants[i];
                 // Stock à afficher / valider selon la source active
@@ -675,7 +675,7 @@ class _VariantPickerSheet extends StatelessWidget {
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                       style: AppTextStyles.bodyBold
-                                          .copyWith(color: const Color(0xFF0F172A))),
+                                          .copyWith(color: AppColors.onSurface)),
                                 ),
                                 if (v.isMain) ...[
                                   const SizedBox(width: 6),
@@ -697,7 +697,7 @@ class _VariantPickerSheet extends StatelessWidget {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: AppTextStyles.micro
-                                        .copyWith(color: const Color(0xFF9CA3AF))),
+                                        .copyWith(color: AppColors.textHint)),
                             ])),
 
                         // Prix + stock
@@ -718,9 +718,9 @@ class _VariantPickerSheet extends StatelessWidget {
                                   width: 5, height: 5,
                                   decoration: BoxDecoration(
                                     color: outOfStock
-                                        ? const Color(0xFFEF4444)
+                                        ? AppColors.error
                                         : lowStock
-                                        ? const Color(0xFFF59E0B)
+                                        ? AppColors.warning
                                         : AppColors.secondary,
                                     shape: BoxShape.circle,
                                   ),
@@ -732,9 +732,9 @@ class _VariantPickerSheet extends StatelessWidget {
                                       : '$stockAt dispo',
                                   style: AppTextStyles.micro.copyWith(
                                       color: outOfStock
-                                          ? const Color(0xFFEF4444)
+                                          ? AppColors.error
                                           : lowStock
-                                          ? const Color(0xFFF59E0B)
+                                          ? AppColors.warning
                                           : AppColors.secondary),
                                 ),
                               ]),
@@ -785,7 +785,7 @@ class _Chip extends StatelessWidget {
       child: Text(label,
           style: AppTextStyles.captionBold.copyWith(
               color:
-              selected ? Colors.white : const Color(0xFF6B7280))),
+              selected ? Colors.white : AppColors.textSecondary)),
     ),
   );
 }
@@ -801,14 +801,14 @@ class _EmptyProducts extends StatelessWidget {
         query.isNotEmpty
             ? Icons.search_off_rounded
             : Icons.inventory_2_outlined,
-        size: 48, color: const Color(0xFFD1D5DB),
+        size: 48, color: AppColors.inputBorder,
       ),
       const SizedBox(height: 12),
       Text(
         query.isNotEmpty
             ? 'Aucun résultat pour "$query"'
             : 'Aucun produit actif dans cette boutique',
-        style: AppTextStyles.body.copyWith(color: const Color(0xFF6B7280)),
+        style: AppTextStyles.body.copyWith(color: AppColors.textSecondary),
         textAlign: TextAlign.center,
       ),
     ]),

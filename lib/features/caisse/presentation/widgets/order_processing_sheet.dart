@@ -181,12 +181,12 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                       color: const Color(0xFFECFDF5),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color: const Color(0xFF10B981)
+                          color: AppColors.secondary
                               .withValues(alpha: 0.3)),
                     ),
                     child: Row(children: [
                       const Icon(Icons.check_circle_rounded,
-                          size: 14, color: Color(0xFF10B981)),
+                          size: 14, color: AppColors.secondary),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -208,14 +208,14 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                       Icon(_mode == DeliveryMode.partner
                               ? Icons.handshake_outlined
                               : Icons.storefront_outlined,
-                          size: 13, color: const Color(0xFF6B7280)),
+                          size: 13, color: AppColors.textSecondary),
                       const SizedBox(width: 4),
                       Flexible(
                         child: Text(
                           'Origine : ${widget.originLocationName}',
                           maxLines: 1, overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                              fontSize: 11, color: Color(0xFF6B7280)),
+                              fontSize: 11, color: AppColors.textSecondary),
                         ),
                       ),
                     ]),
@@ -242,14 +242,13 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                       : 'Contact partenaire (optionnel)'),
                   TextField(
                     controller: _personCtrl,
-                    style: const TextStyle(
-                        fontSize: 13, color: Color(0xFF111827)),
+                    style: TextStyle(fontSize: 13, color: AppColors.onSurface),
                     decoration: InputDecoration(
                       hintText: _mode == DeliveryMode.inHouse
                           ? 'Nom du livreur'
                           : 'Contact chez le partenaire',
                       hintStyle: const TextStyle(
-                          color: Color(0xFFBBBBBB), fontSize: 12),
+                          color: AppColors.textHint, fontSize: 12),
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 11),
@@ -293,7 +292,7 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                         suffixText: CurrencyFormatter.currentSymbol,
                         isDense: true,
                         filled: true,
-                        fillColor: const Color(0xFFF9FAFB),
+                        fillColor: AppColors.inputFill,
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: BorderSide(
@@ -397,7 +396,7 @@ class _ChipsRow<T> extends StatelessWidget {
             decoration: BoxDecoration(
               color: v == selected
                   ? sem.brandSurface
-                  : const Color(0xFFF9FAFB),
+                  : AppColors.inputFill,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
                   color: v == selected
@@ -408,7 +407,7 @@ class _ChipsRow<T> extends StatelessWidget {
               Icon(iconOf(v), size: 14,
                   color: v == selected
                       ? sem.brandText
-                      : const Color(0xFF6B7280)),
+                      : AppColors.textSecondary),
               const SizedBox(width: 6),
               Text(labelOf(v),
                   style: TextStyle(
@@ -417,7 +416,7 @@ class _ChipsRow<T> extends StatelessWidget {
                           ? FontWeight.w700 : FontWeight.w500,
                       color: v == selected
                           ? sem.brandText
-                          : const Color(0xFF111827))),
+                          : AppColors.onSurface)),
             ]),
           ),
         ),
@@ -493,7 +492,7 @@ class _ProcChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
-          color: active ? sem.brandSurface : const Color(0xFFF9FAFB),
+          color: active ? sem.brandSurface : AppColors.inputFill,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
               color: active
@@ -503,13 +502,13 @@ class _ProcChip extends StatelessWidget {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon,
               size: 14,
-              color: active ? sem.brandText : const Color(0xFF6B7280)),
+              color: active ? sem.brandText : AppColors.textSecondary),
           const SizedBox(width: 6),
           Text(label,
               style: TextStyle(
                   fontSize: 12,
                   fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                  color: active ? sem.brandText : const Color(0xFF111827))),
+                  color: active ? sem.brandText : AppColors.onSurface)),
         ]),
       ),
     );

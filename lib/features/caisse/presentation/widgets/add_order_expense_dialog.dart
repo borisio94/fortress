@@ -161,7 +161,7 @@ class _AddOrderExpenseDialogState extends State<AddOrderExpenseDialog> {
               suffixText: sym,
               isDense: true,
               filled: true,
-              fillColor: const Color(0xFFF9FAFB),
+              fillColor: AppColors.inputFill,
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide:
@@ -191,7 +191,7 @@ class _AddOrderExpenseDialogState extends State<AddOrderExpenseDialog> {
               hintText: 'Ex : carburant, péage, dépassement frais…',
               isDense: true,
               filled: true,
-              fillColor: const Color(0xFFF9FAFB),
+              fillColor: AppColors.inputFill,
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide:

@@ -85,7 +85,7 @@ class _ApprovalClosureSheetState extends State<_ApprovalClosureSheet> {
                     'Indique pour chaque article la quantité GARDÉE par le '
                     'client. Le reste est automatiquement remis en stock.',
                     style: AppTextStyles.captionHint
-                        .copyWith(color: const Color(0xFF6B7280)),
+                        .copyWith(color: AppColors.textSecondary),
                   ),
                   const SizedBox(height: 12),
                   for (final item in widget.order.items)
@@ -125,7 +125,7 @@ class _ApprovalClosureSheetState extends State<_ApprovalClosureSheet> {
                 child: _RecapCell(
                   label: 'Retourné (stock)',
                   value: recon.totalReturned,
-                  color: const Color(0xFF6B7280),
+                  color: AppColors.textSecondary,
                 ),
               ),
             ]),
@@ -167,7 +167,7 @@ class _ApprovalItemRow extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
+        color: AppColors.inputFill,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: sem.borderSubtle),
       ),
@@ -182,11 +182,11 @@ class _ApprovalItemRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.body.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: const Color(0xFF111827))),
+                      color: AppColors.onSurface)),
               const SizedBox(height: 2),
               Text('Réservé : $reserved',
                   style: AppTextStyles.captionHint
-                      .copyWith(color: const Color(0xFF6B7280))),
+                      .copyWith(color: AppColors.textSecondary)),
             ],
           ),
         ),
@@ -198,7 +198,7 @@ class _ApprovalItemRow extends StatelessWidget {
               textAlign: TextAlign.center,
               style: AppTextStyles.bodyBold.copyWith(
                   fontWeight: FontWeight.w800,
-                  color: const Color(0xFF111827))),
+                  color: AppColors.onSurface)),
         ),
         _StepBtn(icon: Icons.add_rounded, onTap: onInc),
       ]),
@@ -258,7 +258,7 @@ class _RecapCell extends StatelessWidget {
         const SizedBox(height: 2),
         Text(label,
             style: AppTextStyles.captionHint
-                .copyWith(color: const Color(0xFF6B7280))),
+                .copyWith(color: AppColors.textSecondary)),
       ],
     );
   }

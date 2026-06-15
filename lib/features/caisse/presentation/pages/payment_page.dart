@@ -76,12 +76,12 @@ class _PaymentView extends StatelessWidget {
             return Center(child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.shopping_cart_outlined,
-                    size: 48, color: Color(0xFFD1D5DB)),
+                Icon(Icons.shopping_cart_outlined,
+                    size: 48, color: AppColors.inputBorder),
                 const SizedBox(height: 12),
                 Text('Panier vide',
                     style: AppTextStyles.labelRegular
-                        .copyWith(color: const Color(0xFF9CA3AF))),
+                        .copyWith(color: AppColors.textHint)),
                 const SizedBox(height: 16),
                 TextButton(
                   onPressed: () => context.pop(),
@@ -107,7 +107,7 @@ class _PaymentView extends StatelessWidget {
               child: Column(children: [
                 Text(l.boutiqueTotal,
                     style: AppTextStyles.body
-                        .copyWith(color: const Color(0xFF6B7280))),
+                        .copyWith(color: AppColors.textSecondary)),
                 const SizedBox(height: 8),
                 Text(CurrencyFormatter.format(state.total),
                     style: AppTextStyles.display
@@ -126,7 +126,7 @@ class _PaymentView extends StatelessWidget {
                   const SizedBox(height: 4),
                   _SummaryLine('Remise',
                       '- ${CurrencyFormatter.format(state.discountAmount)}',
-                      color: const Color(0xFFF59E0B)),
+                      color: AppColors.warning),
                 ],
                 if (state.taxAmount > 0) ...[
                   const SizedBox(height: 4),
@@ -136,7 +136,7 @@ class _PaymentView extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text('${state.itemCount} article${state.itemCount > 1 ? 's' : ''}',
                     style: AppTextStyles.captionHint
-                        .copyWith(color: const Color(0xFF9CA3AF))),
+                        .copyWith(color: AppColors.textHint)),
               ]),
             ),
             const SizedBox(height: 24),
@@ -247,7 +247,7 @@ class _PaymentView extends StatelessWidget {
               const SizedBox(height: 12),
               Text(state.error!,
                   style: AppTextStyles.bodySm
-                      .copyWith(color: const Color(0xFFEF4444)),
+                      .copyWith(color: AppColors.error),
                   textAlign: TextAlign.center),
             ],
           ]);
@@ -267,9 +267,9 @@ class _SummaryLine extends StatelessWidget {
     mainAxisAlignment: MainAxisAlignment.spaceBetween,
     children: [
       Text(label, style: AppTextStyles.bodySm
-          .copyWith(color: color ?? const Color(0xFF6B7280))),
+          .copyWith(color: color ?? AppColors.textSecondary)),
       Text(value, style: AppTextStyles.bodySmBold
-          .copyWith(color: color ?? const Color(0xFF374151))),
+          .copyWith(color: color ?? AppColors.textSecondary)),
     ],
   );
 }
@@ -411,18 +411,18 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
               child: Container(
                 width: 80, height: 80,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withValues(alpha:0.12),
+                  color: AppColors.secondary.withValues(alpha:0.12),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.check_rounded,
-                    size: 40, color: Color(0xFF10B981)),
+                    size: 40, color: AppColors.secondary),
               ),
             ),
             const SizedBox(height: 20),
             Text('Vente encaissée !',
                 style: AppTextStyles.title.copyWith(
                     fontWeight: FontWeight.w800,
-                    color: const Color(0xFF0F172A))),
+                    color: AppColors.onSurface)),
             const SizedBox(height: 6),
             Text(CurrencyFormatter.format(sale.total),
                 style: AppTextStyles.display
@@ -430,12 +430,12 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
             const SizedBox(height: 4),
             Text(_paymentLabel(sale.paymentMethod),
                 style: AppTextStyles.body
-                    .copyWith(color: const Color(0xFF6B7280))),
+                    .copyWith(color: AppColors.textSecondary)),
             if (sale.clientName != null) ...[
               const SizedBox(height: 4),
               Text('Client : ${sale.clientName}',
                   style: AppTextStyles.bodySm
-                      .copyWith(color: const Color(0xFF9CA3AF))),
+                      .copyWith(color: AppColors.textHint)),
             ],
 
             const Spacer(),
@@ -479,7 +479,7 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
                         fontWeight: FontWeight.w700,
                         color: Colors.white)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF25D366),
+                  backgroundColor: AppColors.whatsapp,
                   foregroundColor: Colors.white,
                   elevation: 0,
                   shape: RoundedRectangleBorder(
@@ -532,7 +532,7 @@ class _SuccessScreenState extends ConsumerState<_SuccessScreen> {
               onPressed: () => context.go('/shop/$shopId/dashboard'),
               child: Text('Retour au dashboard',
                   style: AppTextStyles.body
-                      .copyWith(color: const Color(0xFF6B7280))),
+                      .copyWith(color: AppColors.textSecondary)),
             ),
 
             const Spacer(),

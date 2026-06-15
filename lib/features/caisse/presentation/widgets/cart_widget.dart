@@ -315,17 +315,17 @@ class _CartItemRow extends StatelessWidget {
                       // visible (vs l'ancienne icône 10px à 50% opacity).
                       // Tailles adaptées au breakpoint 900 (mobile/desktop).
                       Container(
-                        width: isCompact ? 22 : 26,
-                        height: isCompact ? 22 : 26,
+                        width: isCompact ? 30 : 32,
+                        height: isCompact ? 30 : 32,
                         decoration: BoxDecoration(
                           color: Theme.of(context).colorScheme.primary
                               .withValues(alpha: 0.10),
                           borderRadius: BorderRadius.circular(
-                              isCompact ? 6 : 7),
+                              isCompact ? 8 : 9),
                         ),
                         alignment: Alignment.center,
                         child: Icon(Icons.edit_rounded,
-                            size: isCompact ? 12 : 14,
+                            size: isCompact ? 16 : 18,
                             color: Theme.of(context).colorScheme.primary),
                       ),
                     ],
@@ -652,7 +652,7 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
           margin: const EdgeInsets.only(top: 10, bottom: 8),
           width: 36, height: 4,
           decoration: BoxDecoration(
-              color: const Color(0xFFDDDDDD),
+              color: AppColors.divider,
               borderRadius: BorderRadius.circular(2))),
 
       // Titre — restitué tel qu'avant (pas de X demandé sur cette page).
@@ -702,10 +702,10 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
           decoration: InputDecoration(
             hintText: 'Rechercher par nom ou téléphone…',
             hintStyle: AppTextStyles.bodySm
-                .copyWith(color: const Color(0xFFBBBBBB)),
+                .copyWith(color: AppColors.textHint),
             prefixIcon: const Icon(Icons.search_rounded,
                 size: 16, color: AppColors.textHint),
-            filled: true, fillColor: const Color(0xFFF9FAFB),
+            filled: true, fillColor: AppColors.inputFill,
             isDense: true,
             contentPadding: const EdgeInsets.symmetric(
                 horizontal: 12, vertical: 10),
@@ -856,17 +856,32 @@ class _CartFooter extends StatelessWidget {
             '- ${CurrencyFormatter.format(state.discountAmount)}',
             color: AppColors.warning),
       ],
-      const SizedBox(height: 8),
-      Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
-      const SizedBox(height: 8),
-      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(l.total.toUpperCase(),
-            style: AppTextStyles.subtitleBold
-                .copyWith(fontWeight: FontWeight.w800)),
-        Text(CurrencyFormatter.format(state.total),
-            style: AppTextStyles.subtitleBold.copyWith(
-                fontWeight: FontWeight.w800, color: AppColors.primary)),
-      ]),
+      const SizedBox(height: 10),
+      // Bloc TOTAL mis en relief : fond teinté primaire + bordure + montant
+      // agrandi (échelon `title`). Donne le relief qui manquait pour que le
+      // caissier relise le montant avant de valider (au lieu du même fond
+      // blanc que les articles).
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        decoration: BoxDecoration(
+          color: AppColors.primarySurface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: AppColors.primary.withValues(alpha: 0.20)),
+        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center, children: [
+          Text(l.total.toUpperCase(),
+              style: AppTextStyles.subtitleBold.copyWith(
+                  fontWeight: FontWeight.w800, color: AppColors.primary)),
+          Flexible(
+            child: Text(CurrencyFormatter.format(state.total),
+                textAlign: TextAlign.end,
+                maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.title.copyWith(color: AppColors.primary)),
+          ),
+        ]),
+      ),
       const SizedBox(height: 12),
       // Date de livraison déplacée vers le sheet "Enregistrer la commande"
       // qui s'ouvre au clic sur le bouton du panier (allège l'UI panier).
@@ -1066,7 +1081,7 @@ class _TvaLine extends StatelessWidget {
                     textAlign: TextAlign.center,
                     decoration: InputDecoration(
                       hintText: '0',
-                      hintStyle: const TextStyle(color: Color(0xFFBBBBBB)),
+                      hintStyle: const TextStyle(color: AppColors.textHint),
                       suffixText: '%',
                       suffixStyle: AppTextStyles.label
                           .copyWith(color: AppColors.primary),
@@ -1241,7 +1256,21 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
     _ctrl = TextEditingController(
         text: (widget.item.customPrice ?? widget.item.unitPrice)
             .toStringAsFixed(0));
+    // Sélection totale d'emblée : combiné à l'autofocus, taper remplace
+    // directement la valeur sans avoir à l'effacer (édition plus rapide).
+    _ctrl.selection = TextSelection(
+        baseOffset: 0, extentOffset: _ctrl.text.length);
     _ctrl.addListener(() => setState(() {}));
+  }
+
+  /// Renseigne le champ prix programmatiquement (raccourcis de remise) et
+  /// place le curseur en fin. Le listener rafraîchit l'aperçu marge.
+  void _setPrice(double v) {
+    final txt = v.toStringAsFixed(0);
+    _ctrl.value = TextEditingValue(
+      text: txt,
+      selection: TextSelection.collapsed(offset: txt.length),
+    );
   }
 
   @override
@@ -1453,6 +1482,25 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
             ),
           ),
           const SizedBox(height: 10),
+          // Raccourcis de remise : applique une valeur en 1 tap (édition
+          // rapide). Le statut marge se met à jour en temps réel et bloque
+          // toujours si on passe sous le prix de revient.
+          Wrap(
+            spacing: 8, runSpacing: 8, alignment: WrapAlignment.center,
+            children: [
+              _QuickPriceChip(
+                label: l.priceEditOriginal,
+                onTap: () => _setPrice(original),
+              ),
+              for (final pct in const [5, 10, 15])
+                _QuickPriceChip(
+                  label: '-$pct%',
+                  onTap: () => _setPrice(
+                      (original * (1 - pct / 100)).roundToDouble()),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
 
           // Infos temps réel
           Container(
@@ -1576,6 +1624,31 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
 }
 
 // ─── Widgets atomiques ────────────────────────────────────────────────────────
+/// Puce de raccourci dans le sheet d'édition de prix (origine, -5%, -10%…).
+/// Cible tactile ≥34px, style cohérent avec le bloc total (teinte primaire).
+class _QuickPriceChip extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _QuickPriceChip({required this.label, required this.onTap});
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(20),
+    child: Container(
+      constraints: const BoxConstraints(minHeight: 34),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      decoration: BoxDecoration(
+        color: AppColors.primarySurface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+      ),
+      alignment: Alignment.center,
+      child: Text(label,
+          style: AppTextStyles.bodySmBold.copyWith(color: AppColors.primary)),
+    ),
+  );
+}
+
 class _QtyBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
@@ -1586,8 +1659,10 @@ class _QtyBtn extends StatelessWidget {
     // (22 mobile / 26 desktop) pour cohérence visuelle. Plus discret
     // qu'avant — la card produit reste lisible avec moins de bruit.
     final isCompact = MediaQuery.of(context).size.width < 900;
-    final boxSize  = isCompact ? 22.0 : 26.0;
-    final iconSize = isCompact ? 12.0 : 14.0;
+    // Cibles tactiles agrandies (≈34/38 vs 22/26) : l'ancien 22px était
+    // sous le seuil ergonomique et générait des erreurs de tap sur mobile.
+    final boxSize  = isCompact ? 34.0 : 38.0;
+    final iconSize = isCompact ? 18.0 : 20.0;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
@@ -1623,9 +1698,9 @@ class _FeeField extends StatelessWidget {
     decoration: InputDecoration(
       hintText: hint,
       hintStyle: AppTextStyles.bodySm
-          .copyWith(color: const Color(0xFFBBBBBB)),
-      prefixIcon: Icon(icon, size: 16, color: const Color(0xFFAAAAAA)),
-      filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
+          .copyWith(color: AppColors.textHint),
+      prefixIcon: Icon(icon, size: 16, color: AppColors.textHint),
+      filled: true, fillColor: AppColors.inputFill, isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(
@@ -1706,7 +1781,7 @@ class _ScheduledDeliveryField extends StatelessWidget {
         decoration: BoxDecoration(
           color: has
               ? AppColors.primary.withValues(alpha:0.06)
-              : const Color(0xFFF9FAFB),
+              : AppColors.inputFill,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: has

@@ -42,7 +42,11 @@ class _AppPrimaryButtonState extends State<AppPrimaryButton> {
   @override
   Widget build(BuildContext context) {
     final active = widget.enabled && !widget.isLoading;
-    final base   = widget.color ?? const Color(0xFF0F172A);
+    // En clair : fond sombre signature (#0F172A). En sombre, ce navy serait
+    // quasi invisible sur le scaffold slate → on bascule sur la couleur
+    // primaire de la palette (lisible sur fond sombre).
+    final base   = widget.color ??
+        (AppColors.isDark ? AppColors.primary : const Color(0xFF0F172A));
     final hover  = widget.color ?? AppColors.primary;
 
     return MouseRegion(
@@ -54,7 +58,9 @@ class _AppPrimaryButtonState extends State<AppPrimaryButton> {
         height: widget.height,
         decoration: BoxDecoration(
           color: !active
-              ? const Color(0xFFCBD5E1)
+              ? (AppColors.isDark
+                  ? const Color(0xFF475569)   // slate-600 lisible en sombre
+                  : const Color(0xFFCBD5E1))
               : _hovered ? hover : base,
           borderRadius: BorderRadius.circular(8),
         ),
@@ -121,7 +127,8 @@ class AppIconBadge extends StatelessWidget {
     // Suit la couleur de l'IconTheme ambiant (AppBar.actionsIconTheme en mobile,
     // IconButtonTheme/onSurface en desktop) pour rester cohérent avec le
     // hamburger / back button.
-    final iconColor = IconTheme.of(context).color ?? const Color(0xFF374151);
+    final iconColor = IconTheme.of(context).color
+        ?? Theme.of(context).colorScheme.onSurface;
     final btn = InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
@@ -188,7 +195,8 @@ class AppOutlineIconButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         ),
-        child: Icon(icon, size: 18, color: const Color(0xFF374151)),
+        child: Icon(icon, size: 18,
+            color: Theme.of(context).colorScheme.onSurface),
       ),
     );
     if (tooltip != null) return Tooltip(message: tooltip!, child: btn);

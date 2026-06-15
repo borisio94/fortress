@@ -214,12 +214,12 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                       color: const Color(0xFFECFDF5),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color: const Color(0xFF10B981)
+                          color: AppColors.secondary
                               .withValues(alpha: 0.3)),
                     ),
                     child: Row(children: [
                       const Icon(Icons.check_circle_rounded,
-                          size: 14, color: Color(0xFF10B981)),
+                          size: 14, color: AppColors.secondary),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -455,8 +455,8 @@ class _RadioRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final sem = Theme.of(context).semantic;
     final textColor = disabled
-        ? const Color(0xFFBBBBBB)
-        : (selected ? sem.brandText : const Color(0xFF111827));
+        ? AppColors.textHint
+        : (selected ? sem.brandText : AppColors.onSurface);
     return InkWell(
       onTap: disabled ? null : onTap,
       borderRadius: BorderRadius.circular(8),

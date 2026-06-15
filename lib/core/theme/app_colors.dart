@@ -86,6 +86,14 @@ class AppColors {
   static Color get inputBorder => _isDark ? _borderDark     : _borderLight;
   static Color get divider     => _isDark ? _borderDark     : _borderLight;
 
+  // Texte PRINCIPAL adaptatif (brightness-aware) — pendant de `colorScheme
+  // .onSurface` mais lisible sans `context`. Remplace les `Color(0xFF111827)`
+  // / `Color(0xFF0F172A)` posés en dur sur des textes/icônes : quasi-noir en
+  // clair, quasi-blanc (slate-100) en sombre.
+  static const _onSurfaceLight = Color(0xFF111827);
+  static const _onSurfaceDark  = Color(0xFFF1F5F9);
+  static Color get onSurface => _isDark ? _onSurfaceDark : _onSurfaceLight;
+
   // ── Textes ─────────────────────────────────────────────────────────────────
   // Restent const : utilisés dans des `const TextStyle` (AppTextStyles).
   // En sombre, les Text principaux héritent du textTheme (cf. PR-1) ;
@@ -100,6 +108,11 @@ class AppColors {
   static const google   = Color(0xFFEA4335);
   static const facebook = Color(0xFF1877F2);
   static const apple    = Color(0xFF000000);
+
+  /// Vert officiel WhatsApp — couleur de marque (identique clair/sombre),
+  /// utilisée par les CTA « partager sur WhatsApp ». Nommée ici pour éviter
+  /// les `Color(0xFF25D366)` dispersés.
+  static const whatsapp = Color(0xFF25D366);
 
   /// Palette stable utilisée pour dériver une couleur identifiable par
   /// hash du nom de variante quand le champ `variant.color` n'est pas
