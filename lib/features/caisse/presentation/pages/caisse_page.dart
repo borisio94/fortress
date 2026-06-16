@@ -325,6 +325,16 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
   // Plage de dates [du / au] — bornes inclusives sur la date de création
   // pour les commandes encaissées, sur la date de livraison sinon.
   DateTimeRange? _dateRange;
+  // Filtre « En retard / à planifier » actif (toggle via la pastille). Quand
+  // vrai, la liste n'affiche QUE les commandes programmées en retard > 6h ou
+  // sans heure de livraison — celles que le radar d'alertes ne couvre plus
+  // (fenêtre overdue de 6h) ou pas du tout (scheduledAt absent).
+  bool _lateFilter = false;
+
+  /// Au-delà de cette ancienneté après l'heure prévue, une commande
+  /// programmée sort du radar d'alertes sonores (cf. windowBackMs = 6h dans
+  /// ScheduledOrderAlertService) → on la rapatrie dans la pastille persistante.
+  static const _lateThreshold = Duration(hours: 6);
 
   static const _filters = [
     ('all',        'Toutes'),
@@ -541,6 +551,91 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
   Map<String, int> _countsByStatus(List<Sale> base) =>
       { for (final f in _filters) f.$1: _listForStatus(f.$1, base).length };
 
+  /// Commandes programmées « En retard / à planifier » (cf. pastille) :
+  ///   * en retard > 6h : `scheduled` dont `scheduledAt` est antérieur à
+  ///     (maintenant − 6h) → hors de la fenêtre du radar d'alertes ;
+  ///   * à planifier     : `scheduled` SANS `scheduledAt` → jamais surveillé.
+  /// La recherche libre courante s'applique aussi (cohérent avec la liste).
+  List<Sale> _lateUnplanned(List<Sale> base) {
+    final cutoff = DateTime.now().subtract(_lateThreshold);
+    var list = base.where((o) {
+      if (o.status != SaleStatus.scheduled) return false;
+      final s = o.scheduledAt;
+      if (s == null) return true;          // à planifier
+      return s.isBefore(cutoff);           // en retard > 6h
+    }).toList();
+    if (_query.isNotEmpty) {
+      list = list.where((o) => _matches(o, _query)).toList();
+    }
+    // Plus en retard d'abord ; les « à planifier » (sans date) en tête.
+    list.sort((a, b) {
+      final sa = a.scheduledAt, sb = b.scheduledAt;
+      if (sa == null && sb == null) return 0;
+      if (sa == null) return -1;
+      if (sb == null) return 1;
+      return sa.compareTo(sb);
+    });
+    return list;
+  }
+
+  /// (en retard, à planifier) — pour le libellé de la pastille.
+  (int, int) _lateCounts(List<Sale> base) {
+    final cutoff = DateTime.now().subtract(_lateThreshold);
+    var late = 0, unplanned = 0;
+    for (final o in base) {
+      if (o.status != SaleStatus.scheduled) continue;
+      final s = o.scheduledAt;
+      if (s == null) {
+        unplanned++;
+      } else if (s.isBefore(cutoff)) {
+        late++;
+      }
+    }
+    return (late, unplanned);
+  }
+
+  /// Pastille persistante d'attention sur les livraisons à traiter. Tap =
+  /// bascule le filtre `_lateFilter` (affiche uniquement ces commandes).
+  Widget _lateBanner(int late, int unplanned) {
+    final parts = <String>[
+      if (late > 0) '$late en retard',
+      if (unplanned > 0) '$unplanned à planifier',
+    ];
+    final active = _lateFilter;
+    final color = late > 0 ? AppColors.error : AppColors.warning;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: InkWell(
+        onTap: () => setState(() => _lateFilter = !_lateFilter),
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: active ? 0.16 : 0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: color.withValues(alpha: active ? 0.6 : 0.25)),
+          ),
+          child: Row(children: [
+            Icon(active ? Icons.filter_alt_rounded : Icons.notifications_active_rounded,
+                size: 16, color: color),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Livraisons à traiter : ${parts.join(' · ')}',
+                style: AppTextStyles.bodySmBold.copyWith(color: color),
+              ),
+            ),
+            Text(active ? 'Tout voir' : 'Filtrer',
+                style: AppTextStyles.captionBold.copyWith(color: color)),
+            Icon(active ? Icons.close_rounded : Icons.chevron_right_rounded,
+                size: 16, color: color),
+          ]),
+        ),
+      ),
+    );
+  }
+
   Future<void> _pickDateRange() async {
     final now = DateTime.now();
     final picked = await showDateRangePicker(
@@ -633,8 +728,14 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     // Socle filtré une fois pour la liste, le bandeau de synthèse et les
     // compteurs d'onglets.
     final base    = _baseList;
-    final orders  = _listForStatus(_filters[_filter.index].$1, base);
     final counts  = _countsByStatus(base);
+    // Pastille « En retard / à planifier » : commandes programmées hors radar.
+    final (lateCount, unplannedCount) = _lateCounts(base);
+    final hasLate  = lateCount > 0 || unplannedCount > 0;
+    final showLate = _lateFilter && hasLate;
+    final orders   = showLate
+        ? _lateUnplanned(base)
+        : _listForStatus(_filters[_filter.index].$1, base);
     final orderDebts = PartnerLedgerService.debtByOrder(
         widget.shopId, orders.map((o) => o.id).whereType<String>());
     // Synthèse de la sélection courante : total facturé + reste à encaisser.
@@ -666,6 +767,9 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
         ),
       ),
       Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
+
+      // ── Pastille « Livraisons à traiter » (en retard > 6h / à planifier) ──
+      if (hasLate) _lateBanner(lateCount, unplannedCount),
 
       // ── Recherche + filtre plage de dates ────────────────────
       Container(

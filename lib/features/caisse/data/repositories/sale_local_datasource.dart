@@ -9,6 +9,7 @@ import '../../../../core/database/app_database.dart';
 import '../../domain/entities/sale.dart';
 import '../../domain/entities/sale_item.dart';
 import '../../domain/approval_closure.dart';
+import '../../domain/stock_engagement.dart';
 
 /// Datasource local Hive pour les ventes offline et le panier persistant.
 /// Nommé SaleLocalDatasource (pas de conflit avec l'entité Sale).
@@ -592,27 +593,44 @@ class SaleLocalDatasource {
     }
 
     // ── Compensation de stock selon la transition ──
-    // - completed → autre  : la vente n'est plus finalisée → restaurer le stock
-    // - autre → completed  : la vente est finalisée → décrémenter le stock
-    // - autres transitions : aucun impact stock
+    // MODÈLE « stock engagé » : le stock sort des disponibles dès que la
+    // commande est `processing` (partie en livraison) OU `completed`
+    // (encaissée), et revient quand elle régresse en deçà. Cf.
+    // `StockEngagement` (logique pure testée). Le flag persistant
+    // `stock_reserved` évite tout double-mouvement et reste rétro-compatible
+    // avec les données antérieures (jamais flaggées).
     if (oldStatus == status || shopId == null) return;
-    final wasCompleted = oldStatus == SaleStatus.completed;
-    final nowCompleted = status    == SaleStatus.completed;
-    if (wasCompleted == nowCompleted) return;
-
     final order = _mapToSaleWithStatus(map);
+    final reserved = map['stock_reserved'] == true;
+
     // Vente « à choisir sur place » : le stock est géré EXPLICITEMENT par
     // reserveApprovalOrder / closeApprovalOrder / cancelApprovalOrder. On NE
     // laisse donc PAS la logique générique agir, SAUF le remboursement d'une
-    // vente déjà complétée (completed → refunded) : là, il faut restituer le
+    // vente déjà complétée (completed → autre) : là, il faut restituer le
     // stock des articles GARDÉS (post-clôture la commande ne porte plus que
-    // ceux-ci, et `stockReserved` est déjà false), exactement comme une vente
-    // normale. H1(a).
-    if (order.isApprovalSale && !(wasCompleted && !nowCompleted)) return;
-    if (wasCompleted && !nowCompleted) {
-      await _restoreOrderStock(order);
-    } else {
+    // ceux-ci, et `stockReserved` est déjà false). H1(a).
+    if (order.isApprovalSale) {
+      if (oldStatus == SaleStatus.completed && status != SaleStatus.completed) {
+        await _restoreOrderStock(order);
+      }
+      return;
+    }
+
+    final decision = StockEngagement.decide(
+      oldStatus: oldStatus, newStatus: status, reserved: reserved);
+    if (decision.action == StockAction.decrement) {
       await _decrementOrderStock(order);
+    } else if (decision.action == StockAction.restore) {
+      await _restoreOrderStock(order);
+    }
+    // Persister le flag « stock sorti » s'il change (mouvement OU simple
+    // réalignement d'idempotence), pour que les transitions ultérieures et les
+    // autres devices décident correctement.
+    if (decision.reserved != reserved) {
+      map['stock_reserved'] = decision.reserved;
+      await _ordersBox.put(orderId, map);
+      final supa2 = Map<String, dynamic>.from(map)..remove('image_url');
+      AppDatabase.bgWriteOrder(supa2);
     }
   }
 
