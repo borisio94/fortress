@@ -17,23 +17,37 @@ import '../../../../shared/widgets/form_sheet.dart';
 import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../domain/entities/partner_ledger_entry.dart';
 
-/// Détail du compte d'un partenaire :
+/// Résout le nom d'un partenaire (StockLocation type=partner) depuis Hive.
+/// Top-level pour être partagé par la vue et son wrapper plein écran.
+String partnerNameOf(String id) {
+  try {
+    final raw = HiveBoxes.stockLocationsBox.get(id);
+    if (raw == null) return 'Partenaire';
+    final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+    return loc.name;
+  } catch (_) { return 'Partenaire'; }
+}
+
+/// Vue réutilisable du livre de comptes d'un partenaire (SANS Scaffold) :
 /// - Solde actuel + bandeau "qui doit qui"
 /// - Bouton "Enregistrer un versement" (boutique ↔ partenaire)
 /// - Historique chronologique des mouvements (commandes + versements)
-class PartnerLedgerDetailPage extends ConsumerStatefulWidget {
+///
+/// Embarquée comme onglet « Solde » du hub partenaire ([PartnerHubDetailPage])
+/// ou enveloppée par [PartnerLedgerDetailPage] pour un accès plein écran.
+class PartnerLedgerView extends ConsumerStatefulWidget {
   final String shopId;
   final String partnerLocationId;
-  const PartnerLedgerDetailPage({
+  const PartnerLedgerView({
     super.key, required this.shopId, required this.partnerLocationId,
   });
   @override
-  ConsumerState<PartnerLedgerDetailPage> createState() =>
-      _PartnerLedgerDetailPageState();
+  ConsumerState<PartnerLedgerView> createState() =>
+      _PartnerLedgerViewState();
 }
 
-class _PartnerLedgerDetailPageState
-    extends ConsumerState<PartnerLedgerDetailPage> {
+class _PartnerLedgerViewState
+    extends ConsumerState<PartnerLedgerView> {
   late void Function(String, String) _listener;
 
   @override
@@ -53,14 +67,7 @@ class _PartnerLedgerDetailPageState
     super.dispose();
   }
 
-  String get _partnerName {
-    try {
-      final raw = HiveBoxes.stockLocationsBox.get(widget.partnerLocationId);
-      if (raw == null) return 'Partenaire';
-      final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
-      return loc.name;
-    } catch (_) { return 'Partenaire'; }
-  }
+  String get _partnerName => partnerNameOf(widget.partnerLocationId);
 
   /// Confirme + supprime une entrée du partner_ledger. Utile pour
   /// corriger une saisie erronée (ex: faux saleCollected créé par le bug
@@ -252,12 +259,7 @@ class _PartnerLedgerDetailPageState
             ? 'Vous devez au partenaire'
             : 'Comptes à jour');
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_partnerName,
-            style: const TextStyle(fontWeight: FontWeight.w700)),
-      ),
-      body: Column(children: [
+    return Column(children: [
         // Bandeau solde
         Container(
           width: double.infinity,
@@ -348,9 +350,28 @@ class _PartnerLedgerDetailPageState
                   ),
                 ),
         ),
-      ]),
-    );
+      ]);
   }
+}
+
+/// Page plein écran autonome (route directe `/parametres/partner-accounts`
+/// → détail legacy). Le hub partenaire embarque directement
+/// [PartnerLedgerView] dans un onglet, sans cet AppBar.
+class PartnerLedgerDetailPage extends StatelessWidget {
+  final String shopId;
+  final String partnerLocationId;
+  const PartnerLedgerDetailPage({
+    super.key, required this.shopId, required this.partnerLocationId,
+  });
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(
+          title: Text(partnerNameOf(partnerLocationId),
+              style: const TextStyle(fontWeight: FontWeight.w700)),
+        ),
+        body: PartnerLedgerView(
+            shopId: shopId, partnerLocationId: partnerLocationId),
+      );
 }
 
 class _MovementTile extends StatelessWidget {

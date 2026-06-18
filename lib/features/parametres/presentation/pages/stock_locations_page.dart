@@ -54,7 +54,15 @@ class _StockLocationsPageState extends ConsumerState<StockLocationsPage> {
   }
 
   void _openContents(StockLocation loc) {
-    context.push('/shop/${widget.shopId}/parametres/locations/${loc.id}');
+    // Les dépôts partenaires ouvrent le hub partenaire unifié (onglet Stock) :
+    // stock + solde + mouvements au même endroit. Boutiques/magasins gardent
+    // la page de contenu d'emplacement classique.
+    if (loc.type == StockLocationType.partner) {
+      context.push(
+          '/shop/${widget.shopId}/parametres/partner/${loc.id}?tab=stock');
+    } else {
+      context.push('/shop/${widget.shopId}/parametres/locations/${loc.id}');
+    }
   }
 
   Future<void> _openForm({

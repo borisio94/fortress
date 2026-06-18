@@ -79,6 +79,7 @@ import '../../features/parametres/presentation/pages/exports_page.dart';
 import '../../features/parametres/presentation/pages/payments_page.dart';
 import '../../features/parametres/presentation/pages/delivery_templates_page.dart';
 import '../../features/parametres/presentation/pages/partner_accounts_page.dart';
+import '../../features/parametres/presentation/pages/partner_hub_detail_page.dart';
 import '../../features/parametres/presentation/pages/pin_delete_page.dart';
 import '../../features/parametres/presentation/pages/sessions_page.dart';
 import '../permisions/admin_panel_page.dart';
@@ -914,6 +915,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/parametres/partner-accounts',
               builder: (c, s) => PartnerAccountsPage(
                   shopId: s.pathParameters['shopId']!)),
+          // Hub partenaire unifié (Solde + Stock déposé). `?tab=stock` ouvre
+          // directement l'onglet Stock (depuis la page Emplacements).
+          GoRoute(path: '/shop/:shopId/parametres/partner/:partnerId',
+              builder: (c, s) => PartnerHubDetailPage(
+                  shopId: s.pathParameters['shopId']!,
+                  partnerLocationId: s.pathParameters['partnerId']!,
+                  initialTab:
+                      s.uri.queryParameters['tab'] == 'stock' ? 1 : 0)),
           GoRoute(path: '/shop/:shopId/parametres/pin/delete',
               builder: (c, s) => PinDeletePage(
                   shopId: s.pathParameters['shopId']!)),

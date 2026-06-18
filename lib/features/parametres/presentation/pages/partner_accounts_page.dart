@@ -4,13 +4,25 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/partner_ledger_service.dart';
 import '../../../../core/storage/hive_boxes.dart';
+import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../inventaire/domain/entities/stock_location.dart';
-import 'partner_ledger_detail_page.dart';
+import 'partner_hub_detail_page.dart';
+
+/// Résout le nom d'un partenaire (StockLocation) depuis Hive, fallback id.
+String _partnerName(String id) {
+  try {
+    final raw = HiveBoxes.stockLocationsBox.get(id);
+    if (raw == null) return 'Partenaire $id';
+    return StockLocation.fromMap(Map<String, dynamic>.from(raw)).name;
+  } catch (_) {
+    return 'Partenaire $id';
+  }
+}
 
 /// Liste des comptes partenaires avec leur solde courant.
 /// Convention :
@@ -49,11 +61,31 @@ class _PartnerAccountsPageState extends ConsumerState<PartnerAccountsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final userId = LocalStorageService.getCurrentUser()?.id ?? '';
     final balances = PartnerLedgerService.balancesForShop(widget.shopId);
-    // Tri : dettes les plus grosses en haut (signe absolu décroissant), pour
-    // que l'opérateur voie immédiatement ce qu'il y a à régler.
-    final entries = balances.entries.toList()
-      ..sort((a, b) => b.value.abs().compareTo(a.value.abs()));
+    // On liste TOUS les partenaires : ceux qui détiennent du stock
+    // (StockLocation type=partner actifs) ET ceux qui ont un mouvement
+    // financier (même si leur dépôt a été archivé). Ainsi on accède à la
+    // fiche d'un partenaire pour son stock même sans dette en cours.
+    final partnerIds = <String>{
+      ...AppDatabase.getStockLocationsForOwner(userId)
+          .where((l) => l.type == StockLocationType.partner && l.isActive)
+          .map((l) => l.id),
+      ...balances.keys,
+    };
+    // Tri : dettes les plus grosses en haut (signe absolu décroissant) pour
+    // que l'opérateur voie d'abord ce qu'il y a à régler ; à solde égal,
+    // tri alphabétique.
+    final entries = partnerIds
+        .map((id) => MapEntry(id, balances[id] ?? 0.0))
+        .toList()
+      ..sort((a, b) {
+        final byBalance = b.value.abs().compareTo(a.value.abs());
+        if (byBalance != 0) return byBalance;
+        return _partnerName(a.key)
+            .toLowerCase()
+            .compareTo(_partnerName(b.key).toLowerCase());
+      });
 
     return AppScaffold(
       shopId: widget.shopId,
@@ -108,7 +140,7 @@ class _PartnerCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sem = Theme.of(context).semantic;
-    final partnerName = _resolveName(partnerId);
+    final partnerName = _partnerName(partnerId);
     final partnerOwesBoutique = balance > 0;
     final boutiqueOwesPartner = balance < 0;
     final color = partnerOwesBoutique
@@ -123,7 +155,7 @@ class _PartnerCard extends StatelessWidget {
     return InkWell(
       onTap: () {
         Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => PartnerLedgerDetailPage(
+          builder: (_) => PartnerHubDetailPage(
             shopId: shopId, partnerLocationId: partnerId),
         ));
       },
@@ -166,16 +198,5 @@ class _PartnerCard extends StatelessWidget {
         ]),
       ),
     );
-  }
-
-  String _resolveName(String id) {
-    try {
-      final raw = HiveBoxes.stockLocationsBox.get(id);
-      if (raw == null) return 'Partenaire $id';
-      final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
-      return loc.name;
-    } catch (_) {
-      return 'Partenaire $id';
-    }
   }
 }
