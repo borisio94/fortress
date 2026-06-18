@@ -235,15 +235,25 @@ class HiveBoxes {
   /// d'un compte survivaient à la déconnexion et fuyaient vers le suivant.
   /// L'accès non typé `Hive.box(name)` est volontaire (même mécanisme que
   /// `_safeClose`) — `.clear()` ne dépend pas du type de la box.
-  static Future<void> clearAllForLogout(Set<String> preserveSettingsKeys) async {
-    // 1. Snapshot des préférences device à conserver.
+  static Future<void> clearAllForLogout(
+    Set<String> preserveSettingsKeys, {
+    // Préfixes de clés settings à conserver aussi (clés dynamiques suffixées
+    // par uid/shopId qu'on ne peut pas lister en dur). Ex : `onboarding_done_`
+    // → le tour de bienvenue ne doit PAS réapparaître à chaque reconnexion.
+    Set<String> preserveSettingsKeyPrefixes = const {},
+  }) async {
+    // 1. Snapshot des préférences device à conserver (match exact OU préfixe).
     final keep = <String, dynamic>{};
     try {
       if (Hive.isBoxOpen(settings)) {
         final box = Hive.box(settings);
-        for (final k in preserveSettingsKeys) {
+        for (final k in box.keys) {
+          final key = k.toString();
+          final keepIt = preserveSettingsKeys.contains(key) ||
+              preserveSettingsKeyPrefixes.any((p) => key.startsWith(p));
+          if (!keepIt) continue;
           final v = box.get(k);
-          if (v != null) keep[k] = v;
+          if (v != null) keep[key] = v;
         }
       }
     } catch (e) {

@@ -42,6 +42,17 @@ class LocalStorageService {
   static Future<void> clearCurrentUser() =>
       HiveBoxes.settingsBox.delete('current_user_id');
 
+  /// Propriétaire des données locales actuellement en cache (anti-fuite
+  /// inter-comptes sur appareil partagé). Posé au login, EFFACÉ au logout
+  /// (volontairement absent de `_deviceSettingKeys`). Au login suivant, si ce
+  /// marqueur diffère du nouvel utilisateur, c'est qu'un logout n'a pas eu
+  /// lieu/fini → on purge avant de charger (cf. AuthSupabaseDataSource.login).
+  static String? getLocalDataOwnerId() =>
+      HiveBoxes.settingsBox.get('local_data_owner_id') as String?;
+
+  static Future<void> setLocalDataOwnerId(String id) =>
+      HiveBoxes.settingsBox.put('local_data_owner_id', id);
+
   /// Dernier email utilisé au login (pré-remplissage de l'écran de connexion).
   /// NON effacé au logout pour éviter de retaper à chaque reconnexion.
   static Future<void> saveLastLoginEmail(String email) =>
@@ -591,14 +602,15 @@ class LocalStorageService {
   static ProductVariant variantFromMap(Map<String, dynamic> m) => _variantFromMap(m);
   static Product productFromMap(Map<String, dynamic> m) => _productFromMap(m);
   // ── Réinitialisation complète des données locales ────────────────────────
-  static Future<void> clearAllLocalData() async {
-    await HiveBoxes.shopsBox.clear();
-    await HiveBoxes.productsBox.clear();
-    await HiveBoxes.membershipsBox.clear();
-    await HiveBoxes.usersBox.clear();
-    await HiveBoxes.settingsBox.clear();
-    await HiveBoxes.cartBox.clear();
-  }
+  /// Purge TOUTES les box métier (commandes, clients, ventes, stock, finances,
+  /// tickets, notifs, panier…) en conservant les préférences device (thème,
+  /// locale, dernier email). Anciennement PARTIELLE (ne vidait que shops/
+  /// products/memberships/users/settings/cart) → elle laissait fuiter
+  /// commandes et clients lors d'une invalidation de session zombie ou d'une
+  /// suppression de compte. Déléguée désormais à la purge complète anti-fuite.
+  static Future<void> clearAllLocalData() =>
+      HiveBoxes.clearAllForLogout(_deviceSettingKeys,
+          preserveSettingsKeyPrefixes: _deviceSettingKeyPrefixes);
 
   /// Clés de PRÉFÉRENCES liées à l'APPAREIL (pas au compte) — conservées au
   /// logout. Tout le reste (caches compte/boutique `*_$userId`/`*_$shopId`,
@@ -619,11 +631,19 @@ class LocalStorageService {
     'whatsapp_provider',
   };
 
+  /// Préfixes de clés settings conservés au purge (clés dynamiques par uid).
+  /// `onboarding_done_<uid>` : le tour de bienvenue est vu UNE FOIS par compte
+  /// sur l'appareil — il ne doit pas réapparaître à chaque reconnexion.
+  static const _deviceSettingKeyPrefixes = <String>{
+    'onboarding_done_',
+  };
+
   /// Purge anti-fuite inter-comptes (appareil partagé) : efface TOUTES les
   /// données locales liées au compte/boutique en conservant les préférences
   /// device ci-dessus. À appeler au logout (remplace `clearCurrentUser`, qui
   /// n'effaçait que `current_user_id` et laissait fuiter produits, prix
   /// d'achat, clients, panier…).
   static Future<void> purgeOnLogout() =>
-      HiveBoxes.clearAllForLogout(_deviceSettingKeys);
+      HiveBoxes.clearAllForLogout(_deviceSettingKeys,
+          preserveSettingsKeyPrefixes: _deviceSettingKeyPrefixes);
 }

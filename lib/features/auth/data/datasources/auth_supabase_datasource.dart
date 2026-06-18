@@ -129,9 +129,23 @@ class AuthSupabaseDataSource {
             profileData?['created_at'] ?? DateTime.now().toIso8601String()),
       );
 
+      // ISOLATION (anti-fuite inter-comptes, appareil partagé) — si des
+      // données locales d'un AUTRE compte subsistent (logout précédent non
+      // effectué/non terminé : crash, fermeture d'onglet, purge async
+      // interrompue), on PURGE tout avant de charger ce compte. Symétrique de
+      // purgeOnLogout : ferme la fenêtre où des commandes/clients/notifs d'un
+      // autre compte fuiteraient dans cette session.
+      final previousOwner = LocalStorageService.getLocalDataOwnerId();
+      if (previousOwner != null && previousOwner != userId) {
+        debugPrint('[Auth] données locales d\'un autre compte '
+            '($previousOwner ≠ $userId) → purge anti-fuite avant login');
+        await LocalStorageService.purgeOnLogout();
+      }
+
       // Cache local
       await LocalStorageService.saveUser(model.toEntity());
       await LocalStorageService.setCurrentUserId(userId);
+      await LocalStorageService.setLocalDataOwnerId(userId);
       await _cachePwdForOffline(email.trim().toLowerCase(), password);
 
       // Sync en arrière-plan — ne bloque PAS le login
