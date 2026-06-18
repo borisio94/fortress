@@ -18,6 +18,7 @@ import '../../../../core/services/external_launcher.dart';
 import '../../../parametres/domain/entities/whatsapp_template.dart';
 import '../../../parametres/presentation/providers/whatsapp_template_provider.dart';
 import '../../domain/entities/client.dart';
+import '../../../caisse/data/repositories/sale_local_datasource.dart';
 import '../../../inventaire/domain/stock_at_location.dart' as stock_loc;
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/form_sheet.dart';
@@ -33,6 +34,8 @@ class ClientDetailPage extends StatefulWidget {
 
 class _ClientDetailPageState extends State<ClientDetailPage> {
   Client? _client;
+  /// Créance du client (solde dû sur ses ventes à crédit complétées).
+  double _debt = 0;
   /// Lien court du catalogue pré-généré à l'ouverture de la fiche. L'URL
   /// catalogue est fixe (dépend du shop, pas du client) → on la raccourcit
   /// une seule fois ici pour que `_sendCatalogue` puisse l'utiliser
@@ -145,6 +148,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
     final clients = AppDatabase.getClientsForShop(widget.shopId);
     setState(() {
       _client = clients.where((c) => c.id == widget.clientId).firstOrNull;
+      _debt = SaleLocalDatasource().clientDebt(widget.shopId, widget.clientId);
     });
   }
 
@@ -213,6 +217,37 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
                     : '—',
               )),
             ]),
+            // Créance (vente à crédit non soldée) — bandeau warning.
+            if (_debt > 0) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.warning.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: AppColors.warning.withValues(alpha: 0.3)),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.account_balance_wallet_rounded,
+                      size: 16, color: AppColors.warning),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text('Créance en cours',
+                        style: AppTextStyles.bodySm.copyWith(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withValues(alpha: 0.8))),
+                  ),
+                  Text(CurrencyFormatter.format(_debt),
+                      style: AppTextStyles.bodyBold
+                          .copyWith(color: AppColors.warning)),
+                ]),
+              ),
+            ],
             const SizedBox(height: 16),
 
             // ── Coordonnées ──────────────────────────────────────────

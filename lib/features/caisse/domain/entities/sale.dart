@@ -51,6 +51,18 @@ extension PaymentStatusX on PaymentStatus {
     'refunded' => PaymentStatus.refunded,
     _          => PaymentStatus.unpaid,
   };
+
+  /// Dérive le statut de paiement à partir du montant encaissé et du total
+  /// facturé. Convention unique partagée par la création de commande,
+  /// l'enregistrement d'acompte et la clôture (vente à crédit) :
+  ///   • `amountPaid >= total`  → `paid`   (soldée — couvre aussi total = 0)
+  ///   • `amountPaid <= 0`      → `unpaid` (rien encaissé)
+  ///   • sinon                  → `partial` (acompte / créance partielle)
+  static PaymentStatus fromAmount(double amountPaid, double total) {
+    if (amountPaid >= total) return PaymentStatus.paid;
+    if (amountPaid <= 0) return PaymentStatus.unpaid;
+    return PaymentStatus.partial;
+  }
 }
 
 /// Mode de livraison d'une vente.

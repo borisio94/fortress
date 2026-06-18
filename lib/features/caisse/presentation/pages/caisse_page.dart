@@ -9,9 +9,9 @@ import '../bloc/caisse_bloc.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
 import '../widgets/product_grid_widget.dart';
 import '../widgets/cart_widget.dart';
-import '../widgets/add_order_expense_dialog.dart';
 import '../widgets/order_processing_sheet.dart';
 import '../widgets/order_completion_sheet.dart';
+import '../widgets/order_fees_sheet.dart';
 import '../widgets/record_acompte_dialog.dart';
 import '../widgets/delete_sale_dialog.dart';
 import '../../domain/usecases/delete_sale_usecase.dart';
@@ -981,6 +981,9 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               // (frais de livraison/emballage inclus dans le montant payé).
               // Date d'encaissement antidatable via le picker du sheet.
               DateTime? completedAt;
+              // VENTE À CRÉDIT — total réellement encaissé du client à la
+              // clôture (null = clôture « entièrement payé », historique).
+              double? amountPaidOnComplete;
               if (becomingCompleted) {
                 // Si on saute scheduled → completed direct (raccourci POS),
                 // collecter aussi paiement+mode AVANT les frais. Sinon
@@ -1047,8 +1050,12 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                   // encaissé" — impossible sémantiquement. Empêche un
                   // faux saleCollected (bug rapporté).
                   orderAlreadyFullyPaid: freshForSheet.isFullyPaid,
+                  // Récap encaissement + vente à crédit (boutique encaisseuse).
+                  orderTotal:       freshForSheet.total,
+                  amountPaidBefore: freshForSheet.amountPaid,
                 );
                 if (fres == null) return; // annulé
+                amountPaidOnComplete = fres.amountPaidTotal;
                 final fresh = _ds.getOrderById(order.id!) ?? order;
                 final updated = fresh.copyWith(fees: fres.fees
                     .map((f) => {
@@ -1058,6 +1065,23 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                         })
                     .toList());
                 await _ds.updateOrder(updated);
+                // Traçabilité (règle métier) : frais saisis à la complétion.
+                if (fres.fees.isNotEmpty) {
+                  ActivityLogService.log(
+                    action:      'order_fees_updated',
+                    targetType:  'order',
+                    targetId:    order.id,
+                    targetLabel: order.clientName ?? 'Commande',
+                    shopId:      order.shopId,
+                    details: {
+                      'context': 'completion',
+                      'fees': fres.fees.map((f) =>
+                          {'label': f.label, 'amount': f.amount}).toList(),
+                      'total_fees':
+                          fres.fees.fold<double>(0, (s, f) => s + f.amount),
+                    },
+                  );
+                }
                 // Génère les mouvements partenaires associés à la completion.
                 await _generatePartnerLedgerEntries(
                     order: updated, fees: fres.fees,
@@ -1077,7 +1101,8 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               }
 
               await _ds.updateOrderStatus(order.id!, status,
-                  completedAt: completedAt);
+                  completedAt: completedAt,
+                  amountPaidOnComplete: amountPaidOnComplete);
               // Audit du changement de statut (annulation/remboursement
               // tracés spécifiquement ; autres transitions = générique).
               ActivityLogService.log(
@@ -2007,22 +2032,10 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                             : () => _sendInvoiceWhatsApp(context),
                       ),
                       const SizedBox(width: 6),
-                      // Bouton "Ajouter dépense en dette" — visible
-                      // uniquement si livraison partenaire ET commande
-                      // déjà entièrement encaissée. Crée une entrée
-                      // deliveryOwed négative dans le partner_ledger.
-                      if (widget.order.deliveryMode == DeliveryMode.partner
-                          && (widget.order.deliveryLocationId ?? '').isNotEmpty
-                          && widget.order.isFullyPaid) ...[
-                        _ActionBtn(
-                          icon: Icons.attach_money_rounded,
-                          color: AppColors.warning,
-                          bgColor: const Color(0xFFFFF7ED),
-                          tooltip: 'Ajouter une dépense en dette partenaire',
-                          onTap: () => _addOrderExpense(context),
-                        ),
-                        const SizedBox(width: 6),
-                      ],
+                      // NB : l'ancien bouton « $ » (dépense en dette
+                      // partenaire) a été fusionné dans le sheet « Modifier
+                      // les frais » (icône fourgonnette) — un seul point
+                      // d'entrée pour tous les coûts d'une commande.
                     ],
                     // Bouton "Enregistrer un acompte" — visible si commande
                     // en attente de paiement (pas annulée/refusée/refunded)
@@ -2053,6 +2066,25 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         color: AppColors.whatsapp,
                         tooltip: context.l10n.orderRelaunchBtn,
                         onTap: () => _relaunchClient(context),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    // Bouton "Modifier les frais" — disponible même après
+                    // complétion (les frais de livraison sont souvent connus
+                    // APRÈS la livraison). Aucun verrouillage des frais ;
+                    // seuls les articles sont figés une fois la commande
+                    // complétée (cf. _onSaveOrder). Masqué sur annulée/
+                    // refusée/remboursée (frais sans objet).
+                    if (widget.canEdit
+                        && widget.order.status != SaleStatus.cancelled
+                        && widget.order.status != SaleStatus.refused
+                        && widget.order.status != SaleStatus.refunded) ...[
+                      _ActionBtn(
+                        icon: Icons.local_shipping_outlined,
+                        color: AppColors.primary,
+                        bgColor: AppColors.primarySurface,
+                        tooltip: 'Modifier les frais (livraison…)',
+                        onTap: () => _editFees(context),
                       ),
                       const SizedBox(width: 6),
                     ],
@@ -2184,27 +2216,6 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   /// envers le partenaire-livreur (entrée `deliveryOwed` négative dans le
   /// partner_ledger). Compensée automatiquement au prochain encaissement
   /// du partenaire via le solde signé du ledger.
-  Future<void> _addOrderExpense(BuildContext context) async {
-    final res = await AddOrderExpenseDialog.show(context, widget.order);
-    if (res == null || !mounted) return;
-    final partnerId = widget.order.deliveryLocationId;
-    if (partnerId == null || partnerId.isEmpty) return;
-    await PartnerLedgerService.addEntry(
-      shopId:            widget.order.shopId,
-      partnerLocationId: partnerId,
-      type:              PartnerLedgerEntryType.deliveryOwed,
-      amount:            -res.amount, // négatif = boutique doit au partenaire
-      orderId:           widget.order.id,
-      note:              res.label,
-    );
-    if (mounted) setState(() {});
-    if (mounted) {
-      AppSnack.success(context,
-          'Dépense de ${CurrencyFormatter.format(res.amount)} '
-          'enregistrée en dette — compensée au prochain versement');
-    }
-  }
-
   /// Ouvre RecordAcompteDialog. À la confirmation, persiste le nouveau
   /// `amountPaid` cumulé via SaleLocalDatasource.recordPayment (qui dérive
   /// `payment_status` automatiquement : partial si < total, paid si =>).
@@ -2224,6 +2235,113 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
           newAmount >= widget.order.total
               ? 'Commande totalement encaissée'
               : 'Acompte enregistré');
+    }
+  }
+
+  /// Ouvre l'éditeur de frais (livraison/emballage). Disponible à tout
+  /// moment, y compris après complétion (le coût de livraison est souvent
+  /// connu après coup). Persiste les nouveaux frais via `updateOrder` et
+  /// trace le changement dans `activity_logs` (qui/quoi/quand).
+  ///
+  /// Fusion de l'ancien bouton « $ » : pour une commande complétée, livrée
+  /// par un partenaire et déjà entièrement payée, le sheet propose en plus une
+  /// section « Dépense à régler au partenaire ». Si l'opérateur la renseigne,
+  /// on écrit une entrée `deliveryOwed` négative dans le partner_ledger
+  /// (compensée au prochain versement) — exactement comme le faisait l'ancien
+  /// `AddOrderExpenseDialog`, mais depuis un point d'entrée unique.
+  Future<void> _editFees(BuildContext context) async {
+    final order = widget.order;
+    final before = order.fees
+        .map((f) => OrderFee(
+              id: f['id']?.toString() ?? '',
+              label: f['label']?.toString() ?? '',
+              amount: (f['amount'] as num?)?.toDouble() ?? 0,
+            ))
+        .toList();
+
+    // Conditions de l'ancien bouton $ : commande complétée + partenaire +
+    // emplacement renseigné + entièrement payée (la dette de livraison a
+    // déjà été générée → on n'autorise QUE l'ajout d'une dépense en plus).
+    final allowPartnerExpense = order.status == SaleStatus.completed
+        && order.deliveryMode == DeliveryMode.partner
+        && (order.deliveryLocationId ?? '').isNotEmpty
+        && order.isFullyPaid;
+
+    // Nom du partenaire (dépôt) pour clarifier le libellé de la dépense.
+    // Lookup local : _OrderCardState n'a pas accès au helper de la page.
+    String? partnerName;
+    if (allowPartnerExpense) {
+      final locId = order.deliveryLocationId;
+      if (locId != null && locId.isNotEmpty) {
+        try {
+          final raw = HiveBoxes.stockLocationsBox.get(locId);
+          if (raw != null) {
+            partnerName =
+                StockLocation.fromMap(Map<String, dynamic>.from(raw)).name;
+          }
+        } catch (_) {/* nom optionnel */}
+      }
+    }
+
+    final result = await showOrderFeesSheet(
+      context,
+      initialFees: before,
+      allowPartnerExpense: allowPartnerExpense,
+      partnerName: partnerName,
+    );
+    if (result == null || !mounted) return; // annulé
+
+    final newFees = result.fees
+        .map((f) => {'id': f.id, 'label': f.label, 'amount': f.amount})
+        .toList();
+    final updated = order.copyWith(fees: newFees);
+    await SaleLocalDatasource().updateOrder(updated);
+
+    // Traçabilité (règle métier) : qui a modifié les frais, et le détail
+    // avant/après — consultable dans le journal d'activité.
+    ActivityLogService.log(
+      action:      'order_fees_updated',
+      targetType:  'order',
+      targetId:    order.id,
+      targetLabel: order.clientName ?? 'Commande',
+      shopId:      order.shopId,
+      details: {
+        'before': before.map((f) =>
+            {'label': f.label, 'amount': f.amount}).toList(),
+        'after': result.fees.map((f) =>
+            {'label': f.label, 'amount': f.amount}).toList(),
+        'total_fees_before':
+            before.fold<double>(0, (s, f) => s + f.amount),
+        'total_fees_after':
+            result.fees.fold<double>(0, (s, f) => s + f.amount),
+      },
+    );
+
+    // Dépense partenaire optionnelle saisie dans le sheet → entrée ledger.
+    if (result.hasPartnerExpense) {
+      final partnerId = order.deliveryLocationId;
+      if (partnerId != null && partnerId.isNotEmpty) {
+        await PartnerLedgerService.addEntry(
+          shopId:            order.shopId,
+          partnerLocationId: partnerId,
+          type:              PartnerLedgerEntryType.deliveryOwed,
+          amount:            -result.partnerExpenseAmount!, // négatif = boutique doit
+          orderId:           order.id,
+          note:              result.partnerExpenseLabel,
+        );
+      }
+    }
+
+    widget.onChanged?.call();
+    if (mounted) setState(() {});
+    if (mounted) {
+      AppSnack.success(
+          context,
+          result.hasPartnerExpense
+              ? 'Frais mis à jour — dépense de '
+                  '${CurrencyFormatter.format(result.partnerExpenseAmount!)} '
+                  'enregistrée en dette partenaire'
+              : 'Frais de la commande mis à jour');
     }
   }
 
@@ -3453,8 +3571,11 @@ class _OrderDetailsBlock extends StatelessWidget {
             value: _money(order.total),
             bold: true),
 
-        // ─── Détail des frais (si plusieurs lignes) ───────────────
-        if (order.fees.length > 1) ...[
+        // ─── Détail des frais (toujours, même un seul frais) ──────
+        // Affiche chaque frais (libellé + montant) pour que l'opérateur
+        // sache EXACTEMENT ce qui est déjà engagé sur la commande et évite
+        // de saisir deux fois (ex. livraison) — cf. règle métier frais.
+        if (order.fees.isNotEmpty) ...[
           const SizedBox(height: 6),
           for (final f in order.fees)
             Padding(

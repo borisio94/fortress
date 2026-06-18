@@ -9,6 +9,9 @@ import '../entities/sale_item.dart';
 ///
 /// VARIABLES SUPPORTÉES (cf. spec) :
 ///   {{caisse}} {{client_name}} {{client_phone}} {{lieu_livraison}}
+///   {{titre_livraison}} (« NOUVELLE LIVRAISON » ou « LIVRAISON RELANCÉE »
+///                        selon que la commande a été reprogrammée)
+///   {{reference}} (référence courte de la commande, 6 derniers car. UUID)
 ///   {{date}} {{heure}} {{prix_produit}}
 ///   {{frais_livraison}} {{total}} {{notes}}
 ///   {{ville_expedition}} (cf. hotfix_049 — ville du destinataire,
@@ -80,10 +83,16 @@ class DeliveryMessageBuilder {
     /// où aucun order context n'est dispo).
     String?                   productsLink,
     String? Function(SaleItem item)? resolveProductName,
+    /// Résout le SKU du produit/variante d'un SaleItem. Si fourni et non
+    /// vide, le SKU est affiché À LA PLACE du nom dans la liste texte
+    /// (`produits_text` / `produits` en mode texte) — identifiant précis
+    /// pour le livreur. Fallback sur le nom si le SKU est absent.
+    String? Function(SaleItem item)? resolveProductSku,
   }) {
     final values = _resolveVariables(
         sale, shopName, paidAmount, senderCity,
-        clientDistrict, partner, productsLink, resolveProductName);
+        clientDistrict, partner, productsLink, resolveProductName,
+        resolveProductSku);
     return _renderWithDropEmpty(template.body, values);
   }
 
@@ -195,9 +204,11 @@ class DeliveryMessageBuilder {
       Sale sale, String shopName, double? paidAmount, String? senderCity,
       String? clientDistrict, StockLocation? partner,
       String? productsLink,
-      String? Function(SaleItem)? resolveProductName) {
+      String? Function(SaleItem)? resolveProductName,
+      [String? Function(SaleItem)? resolveProductSku]) {
     final lieu = _formatLieuLivraison(sale, clientDistrict);
-    final productsText = _formatProducts(sale.items, resolveProductName);
+    final productsText =
+        _formatProducts(sale.items, resolveProductName, resolveProductSku);
     // {{produits}} : lien si fourni, sinon texte (compat copier-coller).
     final produitsValue = (productsLink != null && productsLink.isNotEmpty)
         ? productsLink
@@ -242,6 +253,15 @@ class DeliveryMessageBuilder {
     final scheduled = sale.scheduledAt;
     return {
       'caisse'         : shopName,
+      // Titre dynamique selon le statut de la livraison : « LIVRAISON
+      // RELANCÉE » si la commande a été reprogrammée (rescheduleReason
+      // non vide sert de marqueur, cf. Sale.rescheduleReason), sinon
+      // « NOUVELLE LIVRAISON ».
+      'titre_livraison': (sale.rescheduleReason ?? '').trim().isNotEmpty
+          ? 'LIVRAISON RELANCÉE'
+          : 'NOUVELLE LIVRAISON',
+      // Référence courte et lisible de la commande (alignée sur le reçu).
+      'reference'      : _formatReference(sale),
       'client_name'    : (sale.clientName  ?? '').trim(),
       'client_phone'   : (sale.clientPhone ?? '').trim(),
       'lieu_livraison' : lieu,
@@ -261,6 +281,19 @@ class DeliveryMessageBuilder {
       'partner_city'   : partnerCity(),
       'partner_notes'  : (partner?.notes ?? '').trim(),
     };
+  }
+
+  // ── Référence courte d'une commande pour le message livreur. ──
+  // Aligné avec le reçu (`OrderReceiptUseCase`) : 6 derniers caractères de
+  // l'UUID en majuscules. Fallback sur un hash de la date de création pour
+  // les ventes locales pas encore persistées (id null).
+  static String _formatReference(Sale sale) {
+    final id = (sale.id ?? '').trim();
+    if (id.length >= 6) return id.substring(id.length - 6).toUpperCase();
+    if (id.isNotEmpty) return id.toUpperCase();
+    return sale.createdAt.millisecondsSinceEpoch
+        .toRadixString(16)
+        .toUpperCase();
   }
 
   // ── Lieu de livraison : QUARTIER du client (cf. spec). ──
@@ -296,23 +329,29 @@ class DeliveryMessageBuilder {
 
   // ── Formatage produits ─────────────────────────────────────────────────
   static String _formatProducts(
-      List<SaleItem> items, String? Function(SaleItem)? resolveName) {
+      List<SaleItem> items, String? Function(SaleItem)? resolveName,
+      [String? Function(SaleItem)? resolveSku]) {
     if (items.isEmpty) return '—';
     if (items.length == 1) {
       final i = items.first;
-      return '• ${_itemLabel(i, resolveName)} — ${_formatItemLine(i)}';
+      return '• ${_itemLabel(i, resolveName, resolveSku)} — ${_formatItemLine(i)}';
     }
-    // Multi-ligne, chaque ligne `• Nom — calcul`.
+    // Multi-ligne, chaque ligne `• Label — calcul`.
     return items.map((i) =>
-        '• ${_itemLabel(i, resolveName)} — ${_formatItemLine(i)}').join('\n');
+        '• ${_itemLabel(i, resolveName, resolveSku)} — ${_formatItemLine(i)}')
+        .join('\n');
   }
 
-  /// Nom du produit affiché : `Product.name` (champ principal défini lors
-  /// de l'enregistrement) résolu via `resolveName`. Si null/vide, fallback
-  /// sur le `productName` stocké dans le SaleItem (le nom au moment de
-  /// la vente, peut différer si le produit a été renommé depuis).
+  /// Libellé du produit affiché. Priorité : SKU (identifiant précis pour le
+  /// livreur, via `resolveSku`), sinon `Product.name` (via `resolveName`),
+  /// sinon le `productName` figé dans le SaleItem.
   static String _itemLabel(
-      SaleItem i, String? Function(SaleItem)? resolveName) {
+      SaleItem i, String? Function(SaleItem)? resolveName,
+      [String? Function(SaleItem)? resolveSku]) {
+    if (resolveSku != null) {
+      final sku = resolveSku(i)?.trim();
+      if (sku != null && sku.isNotEmpty) return sku;
+    }
     if (resolveName != null) {
       final name = resolveName(i)?.trim();
       if (name != null && name.isNotEmpty) return name;

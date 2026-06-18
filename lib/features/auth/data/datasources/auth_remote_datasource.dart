@@ -104,6 +104,7 @@ class AuthRemoteDataSourceMock implements AuthRemoteDataSource {
 
     await SecureStorageService.saveAccessToken('offline_token_$normalEmail');
     await LocalStorageService.setCurrentUserId(user.id);
+    await LocalStorageService.setLocalDataOwnerId(user.id);
     return UserModel.fromEntity(user);
   }
 

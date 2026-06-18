@@ -257,6 +257,18 @@ class _DashBodyState extends ConsumerState<_DashBody> {
           errorIndicator: true,
           onTap: () => context.push('/shop/$shopId/finances'),
         ),
+      // Créances clients — solde dû sur les ventes à crédit complétées de la
+      // période. Tap → liste des commandes (pour encaisser le reste).
+      if (data.totalClientDebts > 0)
+        shared_kpi.KpiData(
+          label: 'Créances clients',
+          value: _fmtNum(data.totalClientDebts),
+          unit: CurrencyFormatter.currentSymbol,
+          icon: Icons.account_balance_wallet_rounded,
+          color: AppColors.warning,
+          errorIndicator: true,
+          onTap: () => context.push('/shop/$shopId/caisse/orders'),
+        ),
     ];
 
     return ListView(

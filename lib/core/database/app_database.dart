@@ -3861,6 +3861,13 @@ end \$\$;""",
             // le badge « À choisir » disparaissait après synchronisation.
             'is_approval_sale': row['is_approval_sale'] ?? false,
             'stock_reserved':   row['stock_reserved'] ?? false,
+            // GF-1 (hotfix_080) — cf. syncOrders : préserver la clé sur les
+            // events realtime, sinon un update distant l'efface en Hive.
+            'idempotency_key': row['idempotency_key'],
+            // Soft-delete (hotfix_084) — symétrie avec _mapToSaleWithStatus.
+            'deleted_at':    row['deleted_at'],
+            'deleted_by':    row['deleted_by'],
+            'delete_reason': row['delete_reason'],
           };
           await HiveBoxes.ordersBox.put(id, hiveMap);
           _emitOrderNotification(p, shopId, id, row);
@@ -4356,6 +4363,17 @@ end \$\$;""",
           // comptage stock (stock_reserved) était perdu.
           'is_approval_sale': row['is_approval_sale'] ?? false,
           'stock_reserved':   row['stock_reserved'] ?? false,
+          // GF-1 (hotfix_080). saveOrder écrit déjà idempotency_key en Hive,
+          // mais sans cette ligne le pull Supabase l'écrasait à null à chaque
+          // refresh → garde-fou anti-doublon perdu après synchronisation.
+          'idempotency_key': row['idempotency_key'],
+          // Soft-delete (hotfix_084) — symétrie avec _mapToSaleWithStatus.
+          // NB : une commande deleted_at != null est déjà retirée du Hive plus
+          // haut, donc ces 3 champs sont en pratique toujours null ici ;
+          // explicites pour aligner le format d'écriture sur celui de lecture.
+          'deleted_at':    row['deleted_at'],
+          'deleted_by':    row['deleted_by'],
+          'delete_reason': row['delete_reason'],
         };
         await HiveBoxes.ordersBox.put(id, hiveMap);
         // Notif de rattrapage si le statut a changé depuis le dernier état

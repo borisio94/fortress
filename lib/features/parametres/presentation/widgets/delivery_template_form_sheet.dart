@@ -291,7 +291,11 @@ class _VariablesHint extends StatelessWidget {
   const _VariablesHint({required this.l, required this.onInsert});
 
   static const _vars = [
-    'caisse', 'client_name', 'client_phone', 'lieu_livraison',
+    'caisse',
+    // Titre dynamique (NOUVELLE LIVRAISON / LIVRAISON RELANCÉE) + référence
+    // courte de la commande.
+    'titre_livraison', 'reference',
+    'client_name', 'client_phone', 'lieu_livraison',
     'ville_expedition',
     // {{produits}} : lien court vers la mini-vitrine catalogue de la
     // commande (images + quantités) en contexte envoi, sinon retombe sur

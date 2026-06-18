@@ -555,14 +555,20 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
   }
 
   void _onUpdatePrice(UpdateItemPrice event, Emitter<CaisseState> emit) {
-    final items = state.items
-        .map((i) => _matchesItem(i, event.productId, event.variantName)
-        ? i.copyWith(
-      customPrice: event.customPrice,
-      clearCustomPrice: event.customPrice == null,
-    )
-        : i)
-        .toList();
+    final items = state.items.map((i) {
+      if (!_matchesItem(i, event.productId, event.variantName)) return i;
+      // Si le prix saisi est identique au prix de base (à l'arrondi près),
+      // ce n'est PAS une modification : on réinitialise customPrice à null
+      // pour ne pas marquer l'article « prix modifié » ni déclencher
+      // l'alerte de marge. Epsilon car les prix sont des doubles.
+      final sameAsBase = event.customPrice != null
+          && (event.customPrice! - i.unitPrice).abs() < 0.001;
+      final reset = event.customPrice == null || sameAsBase;
+      return i.copyWith(
+        customPrice: reset ? null : event.customPrice,
+        clearCustomPrice: reset,
+      );
+    }).toList();
     emit(state.copyWith(items: items));
   }
 

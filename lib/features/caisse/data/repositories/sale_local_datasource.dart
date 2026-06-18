@@ -221,6 +221,38 @@ class SaleLocalDatasource {
     } catch (_) { return []; }
   }
 
+  /// Créances clients regroupées par `clientId`. Une CRÉANCE = commande
+  /// COMPLÉTÉE (livrée) dont le client n'a pas tout payé (`amountDue > 0`) —
+  /// c'est le résultat d'une vente à crédit. Les commandes encore ouvertes
+  /// (programmée/en cours) ne comptent pas : leur solde n'est pas encore une
+  /// dette, juste un acompte en attente.
+  Map<String, double> clientDebtsByClient(String shopId) {
+    final res = <String, double>{};
+    for (final o in getOrders(shopId)) {
+      if (o.status != SaleStatus.completed) continue;
+      final due = o.amountDue;
+      if (due <= 0) continue;
+      final cid = o.clientId;
+      if (cid == null || cid.isEmpty) continue;
+      res[cid] = (res[cid] ?? 0) + due;
+    }
+    return res;
+  }
+
+  /// Créance d'un client donné (0 s'il n'a aucune commande à crédit).
+  double clientDebt(String shopId, String clientId) =>
+      clientDebtsByClient(shopId)[clientId] ?? 0;
+
+  /// Total des créances clients de la boutique — inclut les ventes à crédit
+  /// SANS client rattaché (créance anonyme : argent dû quand même).
+  double totalClientDebts(String shopId) {
+    double t = 0;
+    for (final o in getOrders(shopId)) {
+      if (o.status == SaleStatus.completed) t += o.amountDue;
+    }
+    return t;
+  }
+
   /// Mettre à jour le statut d'une commande
   /// Mise à jour complète d'une commande (articles, client, notes, remise, TVA)
   Future<void> updateOrder(Sale order) async {
@@ -468,6 +500,12 @@ class SaleLocalDatasource {
     // ce drapeau, le passage à `refunded` recréditait EN PLUS la quantité
     // totale de la commande → double-crédit.
     bool skipStockCompensation = false,
+    // VENTE À CRÉDIT — montant TOTAL réellement encaissé du client à la
+    // clôture. Si fourni (non null) lors d'un passage à `completed`, on
+    // l'utilise tel quel au lieu de forcer « entièrement payé » : un montant
+    // < total laisse une créance client (payment_status partial/unpaid). Si
+    // null, comportement historique (force amount_paid = total, paid).
+    double? amountPaidOnComplete,
   }) async {
     final raw = _ordersBox.get(orderId);
     if (raw == null) return;
@@ -521,8 +559,19 @@ class SaleLocalDatasource {
       // Calculer le total à partir du map (les items contiennent
       // unit_price * quantity ; on respecte les arrondis Sale.total).
       final fresh = _mapToSaleWithStatus(map);
-      map['amount_paid']    = fresh.total;
-      map['payment_status'] = PaymentStatus.paid.key;
+      final total = fresh.total;
+      if (amountPaidOnComplete != null) {
+        // VENTE À CRÉDIT — on respecte le montant réellement encaissé. Un
+        // reste > 0 devient une créance client (partial/unpaid) au lieu
+        // d'être effacé. Capé à [0, total] par sécurité.
+        final paid = amountPaidOnComplete.clamp(0, total).toDouble();
+        map['amount_paid']    = paid;
+        map['payment_status'] = PaymentStatusX.fromAmount(paid, total).key;
+      } else {
+        // Comportement historique : clôture = encaissement total garanti.
+        map['amount_paid']    = total;
+        map['payment_status'] = PaymentStatus.paid.key;
+      }
     } else if (status == SaleStatus.refunded) {
       map['payment_status'] = PaymentStatus.refunded.key;
     } else if (oldStatus == SaleStatus.completed) {

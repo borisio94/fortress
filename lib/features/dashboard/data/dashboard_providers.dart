@@ -114,6 +114,9 @@ class DashData {
   final double operatingExpenses;
   // Répartition par catégorie de dépense (pour donut / breakdown)
   final Map<String, double> expensesByCategory;
+  // Créances clients = solde dû sur les commandes complétées non soldées
+  // (ventes à crédit). Même formule que Sale.amountDue (paid → 0).
+  final double totalClientDebts;
 
   /// Bénéfice net = bénéfice brut − rebuts − réparations − dépenses opérationnelles
   double get netProfit =>
@@ -141,6 +144,7 @@ class DashData {
     this.pendingIncidents = 0,
     this.operatingExpenses = 0,
     this.expensesByCategory = const {},
+    this.totalClientDebts = 0,
   });
 }
 
@@ -789,6 +793,9 @@ final dashDataProvider =
   double totalProfit = 0;
   double totalLoss = 0;
   int orderCount = 0;
+  // Créances clients sur la période : solde dû des commandes complétées non
+  // soldées (ventes à crédit). Même formule que Sale.amountDue.
+  double totalClientDebts = 0;
 
   // Dépenses opérationnelles — alimentées par (1) les frais des commandes
   // complétées dans la boucle orders ci-dessous et (2) les dépenses directes
@@ -901,6 +908,14 @@ final dashDataProvider =
       orderCount++;
       final clientId = o['client_id'] as String?;
       if (clientId != null && clientId.isNotEmpty) clientSet.add(clientId);
+      // Créance = solde dû (vente à crédit). Cohérent avec Sale.amountDue :
+      // payment_status 'paid' → 0, sinon (total − encaissé) borné à ≥ 0.
+      final paymentStatus = (o['payment_status'] as String?) ?? 'unpaid';
+      if (paymentStatus != 'paid') {
+        final amountPaid = (o['amount_paid'] as num?)?.toDouble() ?? 0;
+        totalClientDebts +=
+            (orderTotal - amountPaid).clamp(0, double.infinity).toDouble();
+      }
     }
 
     // Frais de commande → dépenses opérationnelles, ventilés par label.
@@ -1070,5 +1085,6 @@ final dashDataProvider =
     pendingIncidents: pendingIncidents,
     operatingExpenses: operatingExpenses,
     expensesByCategory: expensesByCategory,
+    totalClientDebts: totalClientDebts,
   );
 });
