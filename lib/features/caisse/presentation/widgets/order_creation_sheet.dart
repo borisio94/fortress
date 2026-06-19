@@ -762,7 +762,12 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
           child: Row(children: [
             Expanded(child: TextField(
               onChanged: (v) => setState(() => _query = v),
-              keyboardType: TextInputType.phone,
+              // Ouvre le clavier directement → −1 tap à chaque vente.
+              autofocus: true,
+              // Clavier texte (et non `phone`) : la recherche se fait par
+              // numéro OU par nom — un clavier numérique empêchait de taper
+              // le nom du client sur mobile.
+              keyboardType: TextInputType.text,
               style: AppTextStyles.body,
               decoration: InputDecoration(
                 hintText: 'Rechercher par numéro ou nom…',

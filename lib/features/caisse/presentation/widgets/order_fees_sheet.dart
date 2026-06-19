@@ -267,7 +267,8 @@ class _OrderFeesSheetState extends State<_OrderFeesSheet> {
                             flex: 2,
                             child: TextField(
                               controller: r.amount,
-                              keyboardType: TextInputType.text,
+                              keyboardType: const TextInputType
+                                  .numberWithOptions(decimal: true),
                               inputFormatters: [
                                 FilteringTextInputFormatter.allow(
                                     RegExp(r'[0-9.]')),

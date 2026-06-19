@@ -80,6 +80,7 @@ class CartWidget extends ConsumerWidget {
                           UpdateItemQuantity(item.productId,
                               item.quantity + 1,
                               variantName: item.variantName)),
+                      onEditQty: () => _showQtyEditor(ctx, item),
                       onEditPrice: () {
                         if (!canApplyDiscount) {
                           AppSnack.error(ctx,
@@ -120,6 +121,125 @@ class CartWidget extends ConsumerWidget {
         item:   item,
         bloc:   context.read<CaisseBloc>(),
         shopId: shopId,
+      ),
+    );
+  }
+
+  /// Éditeur de quantité — saisie numérique directe (au lieu de N taps sur +).
+  void _showQtyEditor(BuildContext context, SaleItem item) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => _QtyEditorSheet(
+        item: item,
+        bloc: context.read<CaisseBloc>(),
+      ),
+    );
+  }
+}
+
+/// Feuille de saisie directe de la quantité d'une ligne du panier.
+class _QtyEditorSheet extends StatefulWidget {
+  final SaleItem   item;
+  final CaisseBloc bloc;
+  const _QtyEditorSheet({required this.item, required this.bloc});
+  @override
+  State<_QtyEditorSheet> createState() => _QtyEditorSheetState();
+}
+
+class _QtyEditorSheetState extends State<_QtyEditorSheet> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: '${widget.item.quantity}');
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _confirm() {
+    final parsed = int.tryParse(_ctrl.text.trim());
+    // Clamp ≥ 1 : retirer une ligne se fait via le bouton supprimer, pas en
+    // mettant 0 ici.
+    final qty = (parsed == null || parsed < 1) ? 1 : parsed;
+    widget.bloc.add(UpdateItemQuantity(
+        widget.item.productId, qty, variantName: widget.item.variantName));
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: EdgeInsets.only(
+          left: 20, right: 20, top: 18,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('Quantité', style: AppTextStyles.label),
+          const SizedBox(height: 4),
+          Text(
+            widget.item.productName +
+                (widget.item.variantName != null
+                    ? ' — ${widget.item.variantName}'
+                    : ''),
+            maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.captionHint,
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _ctrl,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            textAlign: TextAlign.center,
+            style: AppTextStyles.title,
+            onSubmitted: (_) => _confirm(),
+            decoration: InputDecoration(
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(vertical: 14),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: theme.semantic.borderSubtle)),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(
+                      color: AppColors.primary, width: 1.5)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 46)),
+                child: const Text('Annuler'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ElevatedButton(
+                onPressed: _confirm,
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(0, 46)),
+                child: const Text('Valider'),
+              ),
+            ),
+          ]),
+        ],
       ),
     );
   }
@@ -244,11 +364,13 @@ class _CartItemRow extends StatelessWidget {
   final SaleItem     item;
   final VoidCallback onDecrement;
   final VoidCallback onIncrement;
+  final VoidCallback onEditQty;
   final VoidCallback onEditPrice;
   const _CartItemRow({
     required this.item,
     required this.onDecrement,
     required this.onIncrement,
+    required this.onEditQty,
     required this.onEditPrice,
   });
 
@@ -349,12 +471,19 @@ class _CartItemRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8)),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               _QtyBtn(icon: Icons.remove_rounded, onTap: onDecrement),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text('${item.quantity}',
-                    style: AppTextStyles.body.copyWith(
-                        fontSize: qtyFs,
-                        fontWeight: FontWeight.w700)),
+              // Quantité tappable → saisie directe (évite N taps pour les
+              // ventes en quantité / demi-gros).
+              InkWell(
+                onTap: onEditQty,
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  child: Text('${item.quantity}',
+                      style: AppTextStyles.body.copyWith(
+                          fontSize: qtyFs,
+                          fontWeight: FontWeight.w700)),
+                ),
               ),
               _QtyBtn(icon: Icons.add_rounded, onTap: onIncrement),
             ]),
