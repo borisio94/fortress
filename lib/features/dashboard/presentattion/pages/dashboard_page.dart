@@ -78,6 +78,10 @@ class _DashBodyState extends ConsumerState<_DashBody> {
         if (!mounted) return;
         final uid =
             Supabase.instance.client.auth.currentUser?.id ?? '';
+        // Le tour décrit l'Inventaire et la gestion produits (écrans réservés
+        // aux admins/owners). Un employé ne les voit pas → pas de tour pour
+        // lui (sinon il pointe vers une nav inexistante pour son rôle).
+        if (!ref.read(permissionsProvider(widget.shopId)).isShopAdmin) return;
         OnboardingTourService.showIfFirstLogin(context, uid, widget.shopId);
       });
     });
@@ -183,7 +187,9 @@ class _DashBodyState extends ConsumerState<_DashBody> {
         onTap: () => context.push('/shop/$shopId/caisse'),
       ),
       shared_kpi.KpiData(
-        label: l.dashCustomers,
+        // « Clients servis » (pas le total CRM) : c'est le nb de clients
+        // distincts sur la période sélectionnée → lever l'ambiguïté.
+        label: 'Clients servis',
         value: data.clientCount.toString(),
         icon: Icons.people_rounded,
         color: AppColors.warning,

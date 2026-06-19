@@ -7,6 +7,27 @@ import '../../inventaire/domain/entities/product.dart';
 import '../../inventaire/domain/entities/stock_location.dart';
 import '../../inventaire/domain/entities/stock_level.dart';
 
+/// Clés de catégorie de dépense CANONIQUES (mappées à un libellé/icône par
+/// ExpensesBreakdownWidget). Toute autre clé est un label libre (frais de
+/// commande, catégorie de dépense personnalisée).
+const _kCanonicalExpenseCats = <String>{
+  'shipping', 'marketing', 'rent', 'salary', 'utilities', 'taxes',
+  'supplies', 'other', 'scrapped', 'repair',
+};
+
+/// Normalise une catégorie de dépense pour éviter les doublons de casse/
+/// d'espaces (« frais livraison » vs « Frais  Livraison » vs « frais
+/// Livraison » apparaissaient comme 3 lignes distinctes). Les clés canoniques
+/// sont préservées telles quelles ; les labels libres sont rabattus sur une
+/// forme unique (trim + espaces compactés + 1ʳᵉ lettre majuscule).
+String _normalizeExpenseCat(String? raw) {
+  final t = (raw ?? '').trim();
+  if (t.isEmpty) return 'other';
+  if (_kCanonicalExpenseCats.contains(t)) return t;
+  final collapsed = t.replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+  return collapsed[0].toUpperCase() + collapsed.substring(1);
+}
+
 /// Période affichée par le dashboard.
 enum DashPeriod { today, yesterday, week, month, quarter, year, custom }
 
@@ -932,7 +953,8 @@ final dashDataProvider =
         final amount = (f['amount'] as num?)?.toDouble() ?? 0;
         if (amount <= 0) continue;
         final label = (f['label'] as String?)?.trim();
-        final cat = (label == null || label.isEmpty) ? 'shipping' : label;
+        final cat = _normalizeExpenseCat(
+            (label == null || label.isEmpty) ? 'shipping' : label);
         expensesByCategory[cat] = (expensesByCategory[cat] ?? 0) + amount;
       }
     }
@@ -1056,7 +1078,7 @@ final dashDataProvider =
           m['location_id'] as String?, viewFilter)) continue;
       final amount = (m['amount'] as num?)?.toDouble() ?? 0;
       operatingExpenses += amount;
-      final cat = (m['category'] as String?) ?? 'other';
+      final cat = _normalizeExpenseCat(m['category'] as String?);
       expensesByCategory[cat] = (expensesByCategory[cat] ?? 0) + amount;
       // Répartir dans le bucket correspondant pour le graphique
       expensesSeries[range.bucketOf(paidAt)] += amount;
