@@ -324,17 +324,17 @@ class _MobileShell extends StatelessWidget {
         foregroundColor: appBarFg,
         iconTheme: IconThemeData(color: appBarFg),
         actionsIconTheme: IconThemeData(color: appBarFg),
+        // Hamburger retiré : la navigation passe désormais par la bottom nav
+        // (manipulation à une main). Root → pas de leading ; sous-page →
+        // bouton retour. Le menu complet reste accessible via l'onglet
+        // « Plus » de la bottom nav (ouvre le drawer latéral).
         leading: isSubPage && _canSmartBack(context)
             ? IconButton(
                 icon: const Icon(Icons.arrow_back_rounded),
                 tooltip: l.cancel,
                 onPressed: () => _smartBack(context),
               )
-            : Builder(builder: (innerCtx) => IconButton(
-                icon: const Icon(Icons.menu_rounded, size: 26),
-                tooltip: l.navMore,
-                onPressed: () => Scaffold.of(innerCtx).openDrawer(),
-              )),
+            : null,
         title: Text(title, style: titleStyle),
         actions: [
           _CartBadgeBtn(shopId: shopId),
@@ -371,8 +371,149 @@ class _MobileShell extends StatelessWidget {
         Expanded(child: body),
       ]),
       floatingActionButton: fab,
-      // Bottom nav supprimée (spec round 9 prompt 5) — la nav passe
-      // entièrement par le drawer latéral.
+      // Bottom nav (manipulation à une main) : 4 modules principaux + onglet
+      // « Plus » qui ouvre le drawer latéral pour les modules secondaires
+      // (Finances, WhatsApp, Historique, Messagerie, Paramètres…). Le drawer
+      // `_MobileDrawer` reste défini ci-dessus et n'est plus ouvert que par
+      // « Plus ».
+      bottomNavigationBar: Builder(
+        builder: (navCtx) => _MobileBottomNav(
+          shopId:        shopId,
+          perms:         perms,
+          selectedIndex: selectedIndex,
+          onMore:        () => Scaffold.of(navCtx).openDrawer(),
+        ),
+      ),
+    );
+  }
+}
+
+/// Bottom navigation mobile (manipulation à une main). Affiche les items
+/// `primary` visibles (Accueil, Caisse, Stock, CRM…) + un onglet « Plus »
+/// qui ouvre le drawer latéral [_MobileDrawer] (modules secondaires).
+///
+/// L'onglet actif = item dont l'index dans [kShellNavItems] == [selectedIndex]
+/// (le parent est highlighté même sur une route enfant, cf. shellSelectedIndex).
+/// « Plus » est actif quand la route courante ne tombe dans aucun item primary.
+class _MobileBottomNav extends StatelessWidget {
+  final String         shopId;
+  final AppPermissions perms;
+  final int            selectedIndex;
+  final VoidCallback   onMore;
+  const _MobileBottomNav({
+    required this.shopId,
+    required this.perms,
+    required this.selectedIndex,
+    required this.onMore,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final l        = context.l10n;
+    final theme    = Theme.of(context);
+    final primaries = shellPrimaryItems(perms);
+    final primaryIndices =
+        primaries.map((it) => kShellNavItems.indexOf(it)).toSet();
+    final moreActive = !primaryIndices.contains(selectedIndex);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(
+            top: BorderSide(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.08))),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8, offset: const Offset(0, -2)),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 58,
+          child: Row(children: [
+            for (final item in primaries)
+              _BottomNavTab(
+                icon: kShellNavItems.indexOf(item) == selectedIndex
+                    ? item.iconSelected
+                    : item.icon,
+                label: (item.labelMobile ?? item.label)(l),
+                selected: kShellNavItems.indexOf(item) == selectedIndex,
+                badge: item.badge?.call(shopId) ?? 0,
+                onTap: () => context.go(item.route(shopId)),
+              ),
+            _BottomNavTab(
+              icon: Icons.menu_rounded,
+              label: l.navMore,
+              selected: moreActive,
+              badge: 0,
+              onTap: onMore,
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Un onglet de la bottom nav mobile : icône + libellé court, teinté primary
+/// quand actif, avec pastille de badge optionnelle (ex. incidents stock).
+class _BottomNavTab extends StatelessWidget {
+  final IconData     icon;
+  final String       label;
+  final bool         selected;
+  final int          badge;
+  final VoidCallback onTap;
+  const _BottomNavTab({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.badge,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = selected
+        ? theme.colorScheme.primary
+        : AppColors.textSecondary;
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Stack(clipBehavior: Clip.none, children: [
+              Icon(icon, size: 23, color: color),
+              if (badge > 0)
+                Positioned(
+                  right: -7, top: -4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.error,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    constraints: const BoxConstraints(minWidth: 16),
+                    child: Text('$badge',
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.micro.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: theme.colorScheme.onError)),
+                  ),
+                ),
+            ]),
+            const SizedBox(height: 3),
+            Text(label,
+                maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.caption.copyWith(
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: color)),
+          ],
+        ),
+      ),
     );
   }
 }

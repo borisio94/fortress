@@ -270,20 +270,10 @@ final List<ShellNavItem> kShellNavItems = [
   // Item « Commandes » supprimé du drawer (round 14) — les sous-pages
   // Fournisseurs / Réceptions / Retours restent accessibles via les
   // actions inline produits ou directement par leurs routes.
-  // Partenaires — comptes partenaires (soldes, versements, charges).
-  // Déplacé depuis Paramètres vers la nav principale (demande UX).
-  // local_shipping_rounded : `handshake` est ABSENTE de la police
-  // MaterialIcons bundlée (rendu carré vide). local_shipping est une
-  // icône core ancienne, prouvée présente (utilisée dans toute l'app,
-  // dont partner_ledger_detail_page) et sémantiquement juste
-  // (partenaires = partenaires de livraison).
-  ShellNavItem(
-    icon:         Icons.local_shipping_outlined,
-    iconSelected: Icons.local_shipping_rounded,
-    label:        (_) => 'Partenaires',
-    route:        (id) => '/shop/$id/parametres/partner-accounts',
-    visibleIf:    (p) => p.isShopAdmin,
-  ),
+  // (Item « Partenaires » retiré du drawer : les dépôts partenaires sont
+  //  déjà listés dans Inventaire › Emplacements › Dépôts partenaires, avec
+  //  leur solde affiché et un clic vers le hub partenaire unifié. La page
+  //  /parametres/partner-accounts reste accessible par deeplink.)
   ShellNavItem(
     icon:         Icons.history_outlined,
     iconSelected: Icons.history_rounded,
