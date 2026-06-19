@@ -136,8 +136,10 @@ class _InventairePageState extends ConsumerState<InventairePage>
   final Set<String> _selected = {};
   bool _creatingCatalogue = false;
 
-  // Filtre actif par chip
-  String _activeChip = 'stock'; // all | active | inactive | low_stock | no_price | stock
+  // Filtre actif par chip. Défaut « all » : ne JAMAIS masquer les produits en
+  // rupture à l'ouverture (sinon on croit le produit supprimé / introuvable
+  // quand on veut justement le réapprovisionner).
+  String _activeChip = 'all'; // all | active | inactive | low_stock | no_price | stock
 
   // Filtres catégorie / marque
   Set<String> _filterCategories  = {};
