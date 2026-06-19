@@ -827,6 +827,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/parametres',
               pageBuilder: (c, s) => _shellPage(s,
                   ParametresPage(shopId: s.pathParameters['shopId']!))),
+          // Page dédiée d'UNE section de Paramètres (sommaire désencombré) :
+          // /parametres/section/<boutique|compte|securite|preferences|
+          //  abonnement|integrations|administration|danger>
+          GoRoute(path: '/shop/:shopId/parametres/section/:key',
+              builder: (c, s) => ParametresSectionPage(
+                  shopId: s.pathParameters['shopId']!,
+                  sectionKey: s.pathParameters['key']!)),
           GoRoute(path: '/shop/:shopId/parametres/shop',
               builder: (c, s) {
                 final showOverview =

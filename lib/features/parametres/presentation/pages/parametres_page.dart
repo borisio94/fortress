@@ -9,6 +9,7 @@ import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/permisions/app_permissions.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/services/activity_log_service.dart';
+import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/app_switch.dart';
 import 'danger_action_page.dart';
@@ -41,191 +42,329 @@ class ParametresPage extends ConsumerWidget {
     final shop  = ref.watch(currentShopProvider);
     final user  = LocalStorageService.getCurrentUser();
     final perms = ref.watch(permissionsProvider(shopId));
+    final plan  = ref.watch(currentPlanProvider);
+    final isSuperAdmin =
+        ref.watch(subscriptionProvider).valueOrNull?.isSuperAdmin == true;
+
+    // Page Paramètres = simple SOMMAIRE de sections cliquables. Le contenu
+    // détaillé de chaque section vit dans une page dédiée
+    // (/parametres/section/<key>) → page d'accueil désencombrée.
+    void go(String key) =>
+        context.push('/shop/$shopId/parametres/section/$key');
 
     return ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: [
-
-          // ── Header profil ─────────────────────────────────────────
           _ProfileHeader(user: user, shop: shop, perms: perms),
           const SizedBox(height: 20),
 
-          // ── Boutique ──────────────────────────────────────────────
-          // Visibilité selon rôle (spec hotfix_024) :
-          //   - user  : section masquée
-          //   - admin : Membres + Paramètres boutique (lecture)
-          //   - owner : tout
-          if (perms.isShopAdmin) ...[
-            _Section(
-              label: l.paramBoutique,
+          if (perms.isShopAdmin)
+            _SectionNavTile(
               icon: Icons.storefront_rounded,
               color: AppColors.primary,
-              tiles: [
-                _Tile(
-                  icon: Icons.tune_rounded,
-                  label: l.paramBoutiqueSettings,
-                  subtitle: perms.canEditShopInfo
-                      ? l.paramBoutiqueSubtitle
-                      : l.paramReadOnly,
-                  color: AppColors.primary,
-                  locked: !perms.canEditShopInfo,
-                  onTap: () => context.push(
-                      '/shop/$shopId/parametres/shop?with_overview=1'),
-                ),
-                // Configuration caisse → owner uniquement (config sensible)
-                if (perms.isOwner)
-                  _Tile(
-                    icon: Icons.point_of_sale_rounded,
-                    label: l.paramCaisseConfig,
-                    subtitle: l.paramCaisseSubtitle,
-                    color: AppColors.primary,
-                    onTap: () =>
-                        context.push('/shop/$shopId/parametres/caisse'),
-                  ),
-                // Modèles WhatsApp + Campagnes marketing : déplacés dans
-                // l'item « WhatsApp » du drawer (accès direct).
-                // Membres : déplacé dans l'item « Employés & permissions »
-                // du drawer. Tuiles retirées d'ici pour éviter les doublons.
-                // Emplacements de stock : accessible depuis Inventaire.
-                // Exports CSV/PDF — visible aux profils habilités. La
-                // page filtre elle-même les types accessibles via les
-                // permissions canExport* par enabled de card.
-                if (perms.canExportProducts || perms.canExportFinances)
-                  _Tile(
-                    icon: Icons.file_download_outlined,
-                    label: 'Exports',
-                    subtitle: 'Télécharger vos données en CSV ou PDF',
-                    color: AppColors.primary,
-                    onTap: () =>
-                        context.push('/shop/$shopId/parametres/exports'),
-                  ),
-              ],
+              label: l.paramBoutique,
+              subtitle: 'Infos boutique, caisse, exports',
+              onTap: () => go('boutique'),
             ),
-            const SizedBox(height: 12),
-          ],
-
-          // ── Compte (personnel) ────────────────────────────────────
-          _Section(
-            label: l.paramCompte,
+          _SectionNavTile(
             icon: Icons.person_rounded,
             color: AppColors.primary,
-            tiles: [
-              _Tile(
-                icon: Icons.account_circle_outlined,
-                label: l.paramProfile,
-                subtitle: user?.email ?? l.paramProfileSubtitle,
-                color: AppColors.primary,
-                onTap: () => context.push('/shop/$shopId/parametres/profile'),
-              ),
-            ],
+            label: l.paramCompte,
+            subtitle: user?.email ?? l.paramProfileSubtitle,
+            onTap: () => go('compte'),
           ),
-          const SizedBox(height: 12),
-
-          // ── Sécurité (owner uniquement) ───────────────────────────
-          if (perms.isOwner) ...[
-            _SecuritySection(shopId: shopId),
-            const SizedBox(height: 12),
-          ],
-
-          // ── Préférences (personnel) ───────────────────────────────
-          _Section(
-            label: l.paramPreferences,
+          if (perms.isOwner)
+            _SectionNavTile(
+              icon: Icons.shield_outlined,
+              color: const Color(0xFFEC4899),
+              label: l.securitySectionTitle,
+              subtitle: 'Code PIN, sessions actives',
+              onTap: () => go('securite'),
+            ),
+          _SectionNavTile(
             icon: Icons.palette_outlined,
             color: AppColors.primary,
-            tiles: [
-              _Tile(
-                icon: Icons.language_rounded,
-                label: l.paramLanguage,
-                subtitle: l.paramLanguageSubtitle,
-                color: AppColors.primary,
-                onTap: () => context.push('/shop/$shopId/parametres/language'),
-              ),
-              _Tile(
-                icon: Icons.color_lens_rounded,
-                label: l.paramTheme,
-                subtitle: l.paramThemeSubtitle,
-                color: AppColors.primary,
-                onTap: () => context.push('/shop/$shopId/parametres/theme'),
-              ),
-              _Tile(
-                icon: Icons.format_size_rounded,
-                label: 'Taille du texte',
-                subtitle: 'Agrandir ou réduire le texte de l\'app',
-                color: AppColors.primary,
-                onTap: () =>
-                    context.push('/shop/$shopId/parametres/text-size'),
-              ),
-              // Mode démo — affiche un cercle visible à chaque appui.
-              // Utile pour les enregistrements promo sur mobile (iOS n'a
-              // pas d'option système équivalente). Désactivé par défaut.
-              _DemoModeTile(),
-              // Devise (monnaie & format) → réservé admin + owner.
-              if (perms.isShopAdmin)
-                _Tile(
-                  icon: Icons.payments_outlined,
-                  label: l.paramCurrency,
-                  subtitle: l.paramCurrencySubtitle,
-                  color: AppColors.primary,
-                  onTap: () => context.push('/shop/$shopId/parametres/currency'),
-                ),
-              // Notifications (préférences notif in-app + push) → réservé
-              // admin + owner.
-              if (perms.isShopAdmin)
-                _Tile(
-                  icon: Icons.notifications_outlined,
-                  label: l.paramNotifications,
-                  subtitle: l.paramNotifsSubtitle,
-                  color: AppColors.primary,
-                  onTap: () =>
-                      context.push('/shop/$shopId/parametres/notifications'),
-                ),
-            ],
+            label: l.paramPreferences,
+            subtitle: 'Langue, thème, taille du texte, mode démo…',
+            onTap: () => go('preferences'),
           ),
-          const SizedBox(height: 12),
-
-          // ── Abonnement (owner uniquement) ─────────────────────────
-          // Badge jours amber si <7j (spec round 9 prompt 4).
-          if (perms.isOwner) ...[
-            _SubscriptionSection(),
-            const SizedBox(height: 12),
-          ],
-
-          // ── Intégrations ── (admin + owner uniquement) ──────────────
-          if (perms.isShopAdmin) ...[
-            _Section(
-              label: l.paramIntegrations,
+          if (perms.isOwner)
+            _SectionNavTile(
+              icon: Icons.star_rounded,
+              color: AppColors.warning,
+              label: l.drawerSubscription,
+              subtitle: plan.planLabel,
+              onTap: () => go('abonnement'),
+            ),
+          if (perms.isShopAdmin)
+            _SectionNavTile(
               icon: Icons.extension_rounded,
               color: AppColors.primary,
-              tiles: [
-                _Tile(
-                  icon: Icons.payment_rounded,
-                  label: l.paramPayments,
-                  subtitle: l.paramPaymentsSubtitle,
-                  color: AppColors.primary,
-                  locked: !perms.canEditShopInfo,
-                  onTap: () => context.push('/shop/$shopId/parametres/payments'),
-                ),
-                // « Comptes partenaires » déplacé dans le drawer principal
-                // (entrée « Partenaires », icône poignée de main).
-                // Templates de livraison déplacés dans la page « Modèles
-                // WhatsApp » (regroupement des modèles de message).
-              ],
+              label: l.paramIntegrations,
+              subtitle: l.paramPayments,
+              onTap: () => go('integrations'),
             ),
-            const SizedBox(height: 12),
-          ],
-
-          // ── Super Admin ───────────────────────────────────────────
-          _SuperAdminSection(ref: ref),
-          const SizedBox(height: 12),
-
-          // ── Danger zone ── (admin + owner uniquement) ─────────────
-          // Masquée par défaut + réservée aux rôles privilégiés. Pour
-          // révéler la section, l'utilisateur doit saisir le PIN
-          // propriétaire.
+          if (isSuperAdmin)
+            _SectionNavTile(
+              icon: Icons.admin_panel_settings_rounded,
+              color: AppColors.primary,
+              label: 'Administration',
+              subtitle: 'Gérer les utilisateurs (Super Admin)',
+              onTap: () => go('administration'),
+            ),
           if (perms.isShopAdmin)
-            _DangerGate(shopId: shopId, l: l, perms: perms),
+            _SectionNavTile(
+              icon: Icons.warning_amber_rounded,
+              color: AppColors.error,
+              label: l.paramDangerZone,
+              subtitle: 'Réinitialisation, suppression de compte…',
+              onTap: () => go('danger'),
+            ),
         ],
       );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Page de section dédiée — affiche le contenu d'UNE section de Paramètres.
+// Réutilise les widgets de section existants (aucune logique dupliquée).
+// ═══════════════════════════════════════════════════════════════════════════
+
+class ParametresSectionPage extends ConsumerWidget {
+  final String shopId;
+  final String sectionKey;
+  const ParametresSectionPage({
+    super.key, required this.shopId, required this.sectionKey,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l     = context.l10n;
+    final perms = ref.watch(permissionsProvider(shopId));
+    final user  = LocalStorageService.getCurrentUser();
+
+    final (String title, Widget content) = switch (sectionKey) {
+      'boutique'       => (l.paramBoutique,
+          _boutiqueSection(context, shopId, perms, l)),
+      'compte'         => (l.paramCompte,
+          _compteSection(context, shopId, l, user)),
+      'securite'       => (l.securitySectionTitle,
+          _SecuritySection(shopId: shopId)),
+      'preferences'    => (l.paramPreferences,
+          _preferencesSection(context, shopId, perms, l)),
+      'abonnement'     => (l.drawerSubscription, _SubscriptionSection()),
+      'integrations'   => (l.paramIntegrations,
+          _integrationsSection(context, shopId, perms, l)),
+      'administration' => ('Administration', _SuperAdminSection(ref: ref)),
+      'danger'         => (l.paramDangerZone,
+          _DangerGate(shopId: shopId, l: l, perms: perms)),
+      _                => (l.navSettings, const SizedBox.shrink()),
+    };
+
+    return AppScaffold(
+      shopId: shopId,
+      title: title,
+      isRootPage: false,
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        children: [content],
+      ),
+    );
+  }
+}
+
+// ─── Builders des sections (contenu réutilisé par la page de section) ─────────
+
+Widget _boutiqueSection(BuildContext context, String shopId,
+    AppPermissions perms, AppLocalizations l) {
+  return _Section(
+    label: l.paramBoutique,
+    icon: Icons.storefront_rounded,
+    color: AppColors.primary,
+    tiles: [
+      _Tile(
+        icon: Icons.tune_rounded,
+        label: l.paramBoutiqueSettings,
+        subtitle: perms.canEditShopInfo
+            ? l.paramBoutiqueSubtitle
+            : l.paramReadOnly,
+        color: AppColors.primary,
+        locked: !perms.canEditShopInfo,
+        onTap: () => context.push(
+            '/shop/$shopId/parametres/shop?with_overview=1'),
+      ),
+      if (perms.isOwner)
+        _Tile(
+          icon: Icons.point_of_sale_rounded,
+          label: l.paramCaisseConfig,
+          subtitle: l.paramCaisseSubtitle,
+          color: AppColors.primary,
+          onTap: () => context.push('/shop/$shopId/parametres/caisse'),
+        ),
+      if (perms.canExportProducts || perms.canExportFinances)
+        _Tile(
+          icon: Icons.file_download_outlined,
+          label: 'Exports',
+          subtitle: 'Télécharger vos données en CSV ou PDF',
+          color: AppColors.primary,
+          onTap: () => context.push('/shop/$shopId/parametres/exports'),
+        ),
+    ],
+  );
+}
+
+Widget _compteSection(BuildContext context, String shopId,
+    AppLocalizations l, User? user) {
+  return _Section(
+    label: l.paramCompte,
+    icon: Icons.person_rounded,
+    color: AppColors.primary,
+    tiles: [
+      _Tile(
+        icon: Icons.account_circle_outlined,
+        label: l.paramProfile,
+        subtitle: user?.email ?? l.paramProfileSubtitle,
+        color: AppColors.primary,
+        onTap: () => context.push('/shop/$shopId/parametres/profile'),
+      ),
+    ],
+  );
+}
+
+Widget _preferencesSection(BuildContext context, String shopId,
+    AppPermissions perms, AppLocalizations l) {
+  return _Section(
+    label: l.paramPreferences,
+    icon: Icons.palette_outlined,
+    color: AppColors.primary,
+    tiles: [
+      _Tile(
+        icon: Icons.language_rounded,
+        label: l.paramLanguage,
+        subtitle: l.paramLanguageSubtitle,
+        color: AppColors.primary,
+        onTap: () => context.push('/shop/$shopId/parametres/language'),
+      ),
+      _Tile(
+        icon: Icons.color_lens_rounded,
+        label: l.paramTheme,
+        subtitle: l.paramThemeSubtitle,
+        color: AppColors.primary,
+        onTap: () => context.push('/shop/$shopId/parametres/theme'),
+      ),
+      _Tile(
+        icon: Icons.format_size_rounded,
+        label: 'Taille du texte',
+        subtitle: 'Agrandir ou réduire le texte de l\'app',
+        color: AppColors.primary,
+        onTap: () => context.push('/shop/$shopId/parametres/text-size'),
+      ),
+      _DemoModeTile(),
+      if (perms.isShopAdmin)
+        _Tile(
+          icon: Icons.payments_outlined,
+          label: l.paramCurrency,
+          subtitle: l.paramCurrencySubtitle,
+          color: AppColors.primary,
+          onTap: () => context.push('/shop/$shopId/parametres/currency'),
+        ),
+      if (perms.isShopAdmin)
+        _Tile(
+          icon: Icons.notifications_outlined,
+          label: l.paramNotifications,
+          subtitle: l.paramNotifsSubtitle,
+          color: AppColors.primary,
+          onTap: () => context.push('/shop/$shopId/parametres/notifications'),
+        ),
+    ],
+  );
+}
+
+Widget _integrationsSection(BuildContext context, String shopId,
+    AppPermissions perms, AppLocalizations l) {
+  return _Section(
+    label: l.paramIntegrations,
+    icon: Icons.extension_rounded,
+    color: AppColors.primary,
+    tiles: [
+      _Tile(
+        icon: Icons.payment_rounded,
+        label: l.paramPayments,
+        subtitle: l.paramPaymentsSubtitle,
+        color: AppColors.primary,
+        locked: !perms.canEditShopInfo,
+        onTap: () => context.push('/shop/$shopId/parametres/payments'),
+      ),
+    ],
+  );
+}
+
+// ─── Tuile de navigation vers une section (sommaire Paramètres) ───────────────
+
+class _SectionNavTile extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String label;
+  final String subtitle;
+  final VoidCallback onTap;
+  const _SectionNavTile({
+    required this.icon, required this.color,
+    required this.label, required this.subtitle, required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Theme.of(context).semantic.borderSubtle),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 8, offset: const Offset(0, 2)),
+          ],
+        ),
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            onTap();
+          },
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            child: Row(children: [
+              Container(
+                width: 38, height: 38,
+                decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(10)),
+                child: Icon(icon, size: 19, color: color),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(label,
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodyBold),
+                    if (subtitle.isNotEmpty)
+                      Text(subtitle,
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.captionHint),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, size: 18,
+                  color: AppColors.textHint.withValues(alpha: 0.6)),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 }
 
