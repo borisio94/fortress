@@ -330,11 +330,23 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
   // sans heure de livraison — celles que le radar d'alertes ne couvre plus
   // (fenêtre overdue de 6h) ou pas du tout (scheduledAt absent).
   bool _lateFilter = false;
+  // Filtre « Versement partenaire en attente » actif (toggle via la puce).
+  // Quand vrai, la liste n'affiche QUE les commandes livrées par un
+  // partenaire qui a encaissé pour le compte de la boutique et n'a pas
+  // encore reversé (cf. PartnerLedgerService.pendingRemittanceByOrder).
+  bool _remitFilter = false;
 
   /// Au-delà de cette ancienneté après l'heure prévue, une commande
   /// programmée sort du radar d'alertes sonores (cf. windowBackMs = 6h dans
   /// ScheduledOrderAlertService) → on la rapatrie dans la pastille persistante.
   static const _lateThreshold = Duration(hours: 6);
+
+  /// La détection « versement partenaire en attente » ne s'applique QU'AUX
+  /// commandes créées à partir de cette date (déploiement de la
+  /// fonctionnalité, 2026-06-21). Les commandes historiques étaient soldées
+  /// via les dettes partenaires GLOBALES — les inclure ferait apparaître de
+  /// fausses dettes « à verser » sur des commandes déjà réglées (correctif).
+  static final DateTime _remitTrackingSince = DateTime.utc(2026, 6, 21);
 
   static const _filters = [
     ('all',        'Toutes'),
@@ -578,6 +590,63 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     return list;
   }
 
+  /// Commandes « Versement partenaire en attente » : le partenaire a encaissé
+  /// pour le compte de la boutique et n'a pas encore reversé (clés de
+  /// [pending]). La recherche libre courante s'applique aussi. Triées du plus
+  /// récent au plus ancien.
+  List<Sale> _pendingRemitList(List<Sale> base, Map<String, double> pending) {
+    var list = base
+        .where((o) => o.id != null && pending.containsKey(o.id))
+        .toList();
+    if (_query.isNotEmpty) {
+      list = list.where((o) => _matches(o, _query)).toList();
+    }
+    list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return list;
+  }
+
+  /// Puce/bannière du filtre « Versement partenaire en attente ». Tap =
+  /// bascule `_remitFilter` (affiche uniquement ces commandes). Même style
+  /// que `_lateBanner` pour la cohérence visuelle.
+  Widget _remitBanner(int count, double total) {
+    final active = _remitFilter;
+    const color = AppColors.info;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: InkWell(
+        onTap: () => setState(() => _remitFilter = !_remitFilter),
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: active ? 0.16 : 0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: color.withValues(alpha: active ? 0.6 : 0.25)),
+          ),
+          child: Row(children: [
+            Icon(active
+                    ? Icons.filter_alt_rounded
+                    : Icons.account_balance_wallet_rounded,
+                size: 16, color: color),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Versement partenaire en attente : $count · '
+                '${CurrencyFormatter.format(total)}',
+                style: AppTextStyles.bodySmBold.copyWith(color: color),
+              ),
+            ),
+            Text(active ? 'Tout voir' : 'Filtrer',
+                style: AppTextStyles.captionBold.copyWith(color: color)),
+            Icon(active ? Icons.close_rounded : Icons.chevron_right_rounded,
+                size: 16, color: color),
+          ]),
+        ),
+      ),
+    );
+  }
+
   /// (en retard, à planifier) — pour le libellé de la pastille.
   (int, int) _lateCounts(List<Sale> base) {
     final cutoff = DateTime.now().subtract(_lateThreshold);
@@ -733,9 +802,24 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     final (lateCount, unplannedCount) = _lateCounts(base);
     final hasLate  = lateCount > 0 || unplannedCount > 0;
     final showLate = _lateFilter && hasLate;
-    final orders   = showLate
-        ? _lateUnplanned(base)
-        : _listForStatus(_filters[_filter.index].$1, base);
+    // Versement partenaire en attente, par commande (une passe ledger Hive).
+    // Garde-fou « nouvelles commandes » basé sur la date de l'ÉCRITURE
+    // (cf. `since`) : les commandes historiques (écritures anciennes) restent
+    // exclues, MAIS une ancienne commande repassée en programmée puis
+    // re-finalisée (écriture fraîche) participe bien à la logique « à verser ».
+    final pendingRemit = PartnerLedgerService.pendingRemittanceByOrder(
+        widget.shopId,
+        base.map((o) => o.id).whereType<String>(),
+        since: _remitTrackingSince);
+    final remitCount = pendingRemit.length;
+    final remitTotal = pendingRemit.values.fold<double>(0, (s, v) => s + v);
+    final hasRemit   = remitCount > 0;
+    final showRemit  = _remitFilter && hasRemit;
+    final orders   = showRemit
+        ? _pendingRemitList(base, pendingRemit)
+        : showLate
+            ? _lateUnplanned(base)
+            : _listForStatus(_filters[_filter.index].$1, base);
     final orderDebts = PartnerLedgerService.debtByOrder(
         widget.shopId, orders.map((o) => o.id).whereType<String>());
     // Synthèse de la sélection courante : total facturé + reste à encaisser.
@@ -770,6 +854,9 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 
       // ── Pastille « Livraisons à traiter » (en retard > 6h / à planifier) ──
       if (hasLate) _lateBanner(lateCount, unplannedCount),
+
+      // ── Puce « Versement partenaire en attente » (filtre séparé) ──────────
+      if (hasRemit) _remitBanner(remitCount, remitTotal),
 
       // ── Recherche + filtre plage de dates ────────────────────
       Container(
@@ -917,6 +1004,9 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
             return _OrderCard(
             order:    orders[i],
             debt:     orderDebts[orders[i].id],
+            // Versement partenaire encore attendu pour cette commande (null
+            // = rien à recevoir). Affiche un bandeau + un bouton de marquage.
+            pendingRemittance: pendingRemit[orders[i].id],
             canCancel: perms.canCancelSale,
             // Suppression : permission + statut éligible. La règle de statut
             // (scheduled/processing/refused/cancelled, non encaissée) est
@@ -942,6 +1032,59 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                   && wasScheduled;
               final becomingCompleted = status == SaleStatus.completed
                   && order.status != SaleStatus.completed;
+
+              // Repasser Complétée → Programmée (correction d'erreur /
+              // re-finalisation). Action sensible (réservée admin) : confirme,
+              // PURGE les écritures partenaire de la commande, puis laisse le
+              // datasource restituer le stock + remettre le paiement à zéro.
+              final revertingToScheduled = status == SaleStatus.scheduled
+                  && order.status == SaleStatus.completed;
+              if (revertingToScheduled) {
+                if (!perms.canCancelSale) {
+                  AppSnack.error(context,
+                      'Action réservée : repasser une commande complétée en '
+                      'programmée requiert la permission "sales.cancel".');
+                  return;
+                }
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (dc) => AlertDialog(
+                    backgroundColor: Theme.of(context).colorScheme.surface,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
+                    title: const Text('Repasser en programmée ?',
+                        style: AppTextStyles.subtitleBold),
+                    content: const Text(
+                        'La commande redeviendra « programmée » : le stock '
+                        'sera restitué, le paiement remis à zéro et les '
+                        'écritures partenaire liées (encaissement, frais) '
+                        'seront annulées. À utiliser pour corriger une erreur '
+                        'puis re-finaliser.',
+                        style: AppTextStyles.bodySecondary),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(dc).pop(false),
+                        child: const Text('Annuler',
+                            style: TextStyle(color: AppColors.textSecondary)),
+                      ),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.warning,
+                            foregroundColor: Colors.white,
+                            elevation: 0),
+                        onPressed: () => Navigator.of(dc).pop(true),
+                        child: const Text('Repasser en programmée'),
+                      ),
+                    ],
+                  ),
+                );
+                if (ok != true) return;
+                // Purge les mouvements partenaires de la commande (saleCollected
+                // /deliveryOwed/remittance/charge liés) — la commande repart
+                // d'un état neutre pour être re-finalisée proprement.
+                await PartnerLedgerService.removeForOrder(
+                    order.shopId, order.id!);
+              }
 
               // Transition scheduled → processing : sheet B (paiement + mode
               // de livraison). Le mode par défaut suit le lieu d'origine de
@@ -1050,6 +1193,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                   // encaissé" — impossible sémantiquement. Empêche un
                   // faux saleCollected (bug rapporté).
                   orderAlreadyFullyPaid: freshForSheet.isFullyPaid,
+                  // Option « Partenaire a encaissé » (+ bandeau bleu « à
+                  // verser ») UNIQUEMENT si la commande est livrée par un
+                  // partenaire. Livraison équipe boutique / retrait sur place
+                  // → encaissement forcément boutique.
+                  allowPartnerCollected: isPartnerNow,
                   // Récap encaissement + vente à crédit (boutique encaisseuse).
                   orderTotal:       freshForSheet.total,
                   amountPaidBefore: freshForSheet.amountPaid,
@@ -1210,6 +1358,32 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               );
               if (mounted) setState(() {});
             },
+            // Marquage manuel « versement partenaire reçu » : enregistre un
+            // `remittance` dans le livre partenaire qui solde le montant
+            // encore dû pour cette commande (source unique de vérité).
+            onRemitReceived: () async {
+              final o = orders[i];
+              final amount = pendingRemit[o.id] ?? 0;
+              final partnerId = o.deliveryLocationId;
+              if (amount <= 0 || partnerId == null || partnerId.isEmpty) return;
+              await PartnerLedgerService.markOrderRemittanceReceived(
+                shopId:            o.shopId,
+                partnerLocationId: partnerId,
+                orderId:           o.id!,
+                amount:            amount,
+              );
+              ActivityLogService.log(
+                action: 'partner_remittance_received',
+                targetType: 'order', targetId: o.id,
+                targetLabel: o.clientName ?? 'Commande',
+                shopId: o.shopId,
+                details: {'amount': amount, 'partner_location_id': partnerId},
+              );
+              if (mounted) {
+                AppSnack.success(context, 'Versement partenaire enregistré.');
+                setState(() {});
+              }
+            },
           );
           },
         ),
@@ -1302,32 +1476,44 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
         : collectedBy;
 
     // Cas A : encaissement par le partenaire — crédite le partenaire (le
-    // partenaire NOUS DOIT cet argent jusqu'au versement).
-    if (effectiveCollectedBy == CollectedBy.partnerNotRemitted && isPartnerLoc) {
-      // Si le partenaire a aussi assuré la livraison (mode partner), on
-      // déduit directement les frais du montant qu'il nous doit (il a déjà
-      // sa rémunération en main, on n'a plus qu'à recevoir le net).
+    // partenaire NOUS DOIT cet argent jusqu'au versement). Conditionné à une
+    // LIVRAISON PARTENAIRE : sans livraison partenaire (équipe boutique,
+    // retrait sur place…), aucun encaissement partenaire possible → pas de
+    // bandeau bleu « à verser ».
+    if (effectiveCollectedBy == CollectedBy.partnerNotRemitted
+        && isPartnerLoc
+        && order.deliveryMode == DeliveryMode.partner) {
       final livreurAussi = order.deliveryMode == DeliveryMode.partner;
       final soldeEncaisseParPartenaire =
-          (orderTotal - amountPaidBefore).clamp(0, double.infinity);
-      final netDu = livreurAussi
-          ? (soldeEncaisseParPartenaire - feesTotal)
-              .clamp(0, double.infinity)
-          : soldeEncaisseParPartenaire;
-      if (netDu > 0) {
+          (orderTotal - amountPaidBefore).clamp(0, double.infinity).toDouble();
+      // saleCollected = montant BRUT encaissé par le partenaire (sans déduire
+      // les frais). Les frais sont une écriture `deliveryOwed` SÉPARÉE — ainsi
+      // éditer les frais de la commande recalcule en direct le montant « à
+      // verser » (cf. PartnerLedgerService.syncOrderDeliveryFee), au lieu de
+      // les figer dans saleCollected.
+      if (soldeEncaisseParPartenaire > 0) {
         await PartnerLedgerService.addEntry(
           shopId:            order.shopId,
           partnerLocationId: partnerId,
           type:              PartnerLedgerEntryType.saleCollected,
-          amount:            netDu.toDouble(),
+          amount:            soldeEncaisseParPartenaire,
           orderId:           order.id,
           note: amountPaidBefore > 0
               ? 'Solde encaissé par le partenaire '
                 '(acompte de ${amountPaidBefore.toStringAsFixed(0)} '
                 'déjà versé à la boutique)'
-              : (livreurAussi
-                  ? 'Vente encaissée (frais livraison déjà retenus)'
-                  : 'Vente encaissée par le partenaire'),
+              : 'Vente encaissée par le partenaire',
+        );
+      }
+      // Frais de livraison retenus par le partenaire sur ce qu'il reverse.
+      if (livreurAussi && feesTotal > 0) {
+        await PartnerLedgerService.addEntry(
+          shopId:            order.shopId,
+          partnerLocationId: partnerId,
+          type:              PartnerLedgerEntryType.deliveryOwed,
+          amount:            -feesTotal,
+          orderId:           order.id,
+          note:              'Frais de livraison déduits du versement',
         );
       }
       return;
@@ -1464,6 +1650,11 @@ class _OrderCard extends ConsumerStatefulWidget {
   /// Dette partenaire de cette commande, calculée groupée par le parent
   /// (une passe Hive). Null = aucune entrée ledger pour la commande.
   final PartnerDebtInfo? debt;
+  /// Montant que le partenaire-livreur a encaissé pour le compte de la
+  /// boutique et n'a pas encore reversé (cf.
+  /// `PartnerLedgerService.pendingRemittanceByOrder`). Null/0 = rien en
+  /// attente. Déclenche l'indication + le bouton « Versement reçu ».
+  final double? pendingRemittance;
   final void Function(SaleStatus) onUpdate;
   /// Annule la commande avec une raison fournie par l'opérateur.
   final Future<void> Function(String reason) onCancelWithReason;
@@ -1496,8 +1687,12 @@ class _OrderCard extends ConsumerStatefulWidget {
   /// Annulation d'une tournée « à choisir sur place » : restaure tout le
   /// stock réservé (`cancelApprovalOrder`).
   final Future<void> Function() onCancelApproval;
+  /// Marque le versement partenaire reçu pour cette commande (cf.
+  /// `PartnerLedgerService.markOrderRemittanceReceived`).
+  final Future<void> Function()? onRemitReceived;
   const _OrderCard({required this.order,
     this.debt,
+    this.pendingRemittance,
     required this.onUpdate,
     required this.onCancelWithReason,
     required this.onReschedule,
@@ -1507,7 +1702,8 @@ class _OrderCard extends ConsumerStatefulWidget {
     required this.canDelete,
     required this.canEdit,
     required this.onCloseApproval,
-    required this.onCancelApproval});
+    required this.onCancelApproval,
+    this.onRemitReceived});
   @override
   ConsumerState<_OrderCard> createState() => _OrderCardState();
 }
@@ -1761,6 +1957,49 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
               ),
             ],
 
+            // ── Bandeau « Versement partenaire en attente » ───────
+            // Toujours visible (hors zone expansion) : la commande a été
+            // livrée par un partenaire qui a encaissé pour le compte de la
+            // boutique mais n'a pas encore reversé (dérivé du livre
+            // partenaire). Tap → confirme et enregistre le versement reçu.
+            if ((widget.pendingRemittance ?? 0) > 0) ...[
+              const SizedBox(height: 6),
+              InkWell(
+                onTap: () => _confirmRemitReceived(context),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppColors.info.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                        color: AppColors.info.withValues(alpha: 0.3),
+                        width: 0.5),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.account_balance_wallet_outlined,
+                        size: 12, color: AppColors.info),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                          'Versement partenaire en attente : '
+                          '${CurrencyFormatter.format(widget.pendingRemittance!)}',
+                          style: AppTextStyles.captionBold
+                              .copyWith(color: AppColors.info),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                    const SizedBox(width: 6),
+                    Text('Marquer reçu →',
+                        style: AppTextStyles.microBold.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.info.withValues(alpha: 0.85))),
+                  ]),
+                ),
+              ),
+            ],
+
             // ── Détails expandés ───────────────────────────────
             AnimatedCrossFade(
               duration: const Duration(milliseconds: 220),
@@ -1832,36 +2071,23 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   // Relance WhatsApp : visible pour les commandes non finalisées
                   // dont la date de livraison est atteinte (ou dépassée).
                   if (_canRemindClient()) ...[
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _sendingInvoice
-                            ? null
-                            : () => _remindClient(context),
-                        icon: _sendingInvoice
-                            ? const SizedBox(
-                                width: 14, height: 14,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: AppColors.whatsapp),
-                              )
-                            : const Icon(Icons.phonelink_ring_rounded,
-                                size: 15),
-                        label: Text(
-                            _sendingInvoice
-                                ? 'Préparation du rappel…'
-                                : 'Relancer via WhatsApp',
-                            style: AppTextStyles.bodySmBold
-                                .copyWith(color: AppColors.whatsapp)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.whatsapp,
-                          side: const BorderSide(color: AppColors.whatsapp),
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 8),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                      ),
+                    _WideActionButton(
+                      icon: Icons.phonelink_ring_rounded,
+                      label: _sendingInvoice
+                          ? 'Préparation du rappel…'
+                          : 'Relancer via WhatsApp',
+                      color: AppColors.whatsapp,
+                      onPressed: _sendingInvoice
+                          ? null
+                          : () => _remindClient(context),
+                      leading: _sendingInvoice
+                          ? const SizedBox(
+                              width: 14, height: 14,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.whatsapp),
+                            )
+                          : null,
                     ),
                     const SizedBox(height: 8),
                   ],
@@ -1873,26 +2099,11 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   // L'envoi proprement dit est manuel (paste dans le groupe).
                   if (widget.order.status == SaleStatus.scheduled
                       && _permsForOrder().canTransferDelivery) ...[
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () => _openCopyDeliveryMessage(context),
-                        icon: const Icon(Icons.content_copy_rounded,
-                            size: 14),
-                        label: const Text('Copier message livraison',
-                            style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.whatsapp)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.whatsapp,
-                          side: const BorderSide(
-                              color: AppColors.whatsapp, width: 1.2),
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                      ),
+                    _WideActionButton(
+                      icon: Icons.content_copy_rounded,
+                      label: 'Copier message livraison',
+                      color: AppColors.whatsapp,
+                      onPressed: () => _openCopyDeliveryMessage(context),
                     ),
                     const SizedBox(height: 8),
                   ],
@@ -1904,39 +2115,21 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   if (_canConfirmClient()) ...[
                     Row(children: [
                       Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => widget.onUpdate(SaleStatus.processing),
-                          icon: const Icon(Icons.check_circle_outline_rounded,
-                              size: 14),
-                          label: Text('Validée par client',
-                              style: AppTextStyles.captionBold
-                                  .copyWith(color: AppColors.secondary)),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.secondary,
-                            side: BorderSide(
-                                color: AppColors.secondary.withValues(alpha:0.6)),
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8)),
-                          ),
+                        child: _WideActionButton(
+                          icon: Icons.check_circle_outline_rounded,
+                          label: 'Validée par client',
+                          color: AppColors.secondary,
+                          onPressed: () =>
+                              widget.onUpdate(SaleStatus.processing),
                         ),
                       ),
                       const SizedBox(width: 6),
                       Expanded(
-                        child: OutlinedButton.icon(
+                        child: _WideActionButton(
+                          icon: Icons.cancel_outlined,
+                          label: 'Annulée par client',
+                          color: AppColors.error,
                           onPressed: () => _askCancelReason(context),
-                          icon: const Icon(Icons.cancel_outlined, size: 14),
-                          label: Text('Annulée par client',
-                              style: AppTextStyles.captionBold
-                                  .copyWith(color: AppColors.error)),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.error,
-                            side: BorderSide(
-                                color: AppColors.error.withValues(alpha:0.6)),
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8)),
-                          ),
                         ),
                       ),
                     ]),
@@ -1946,23 +2139,40 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   // Pour une commande "en cours" : reprogrammer si
                   // empêchement (boutique ou client).
                   if (_canReschedule()) ...[
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () => _askReschedule(context),
-                        icon: const Icon(Icons.event_repeat_rounded, size: 14),
-                        label: Text('Reprogrammer la commande',
-                            style: AppTextStyles.captionBold
-                                .copyWith(color: AppColors.warning)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.warning,
-                          side: BorderSide(
-                              color: AppColors.warning.withValues(alpha:0.6)),
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                      ),
+                    _WideActionButton(
+                      icon: Icons.event_repeat_rounded,
+                      label: 'Reprogrammer la commande',
+                      color: AppColors.warning,
+                      onPressed: () => _askReschedule(context),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  // Transférer la commande à un partenaire (réassigne
+                  // l'emplacement) — commande programmée + partenaires
+                  // configurés. Bloqué si le partenaire n'a pas le stock.
+                  if (widget.canEdit
+                      && widget.order.status == SaleStatus.scheduled
+                      && OrdersExportSource
+                          .partnerLocationsForShop(widget.order.shopId)
+                          .isNotEmpty) ...[
+                    _WideActionButton(
+                      icon: Icons.move_up_rounded,
+                      label: 'Transférer à un partenaire',
+                      color: AppColors.primary,
+                      onPressed: () => _transferToPartner(context),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  // Prévenir le client d'une rupture (WhatsApp). La suppression
+                  // reste l'action « Supprimer » séparée (icône corbeille).
+                  if ((widget.order.status == SaleStatus.scheduled
+                          || widget.order.status == SaleStatus.processing)
+                      && (widget.order.clientPhone ?? '').trim().isNotEmpty) ...[
+                    _WideActionButton(
+                      icon: Icons.error_outline_rounded,
+                      label: 'Article en rupture — prévenir le client',
+                      color: AppColors.error,
+                      onPressed: () => _notifyOutOfStock(context),
                     ),
                     const SizedBox(height: 8),
                   ],
@@ -2004,14 +2214,42 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       ),
                       const SizedBox(width: 6),
                     ] else ...[
-                      Expanded(
-                        child: _StatusMenu(
-                            current: s, onSelect: widget.onUpdate,
-                            canCancel: widget.canCancel),
-                      ),
+                      // Plus de menu déroulant de statut : un bouton
+                      // d'évènement contextuel (avancer la commande) +
+                      // une pastille lecture seule pour les états terminaux.
+                      Expanded(child: _buildStatusAction(s)),
+                      // Annuler / Refuser (évènements négatifs) — commandes
+                      // non finalisées, hors paire « Annulée par client »
+                      // déjà affichée à échéance.
+                      if (widget.canCancel
+                          && (s == SaleStatus.scheduled
+                              || s == SaleStatus.processing)
+                          && !_canConfirmClient()) ...[
+                        const SizedBox(width: 6),
+                        _ActionBtn(
+                          icon: Icons.do_not_disturb_on_outlined,
+                          color: AppColors.error,
+                          bgColor: const Color(0xFFFEF2F2),
+                          tooltip: 'Annuler ou refuser',
+                          onTap: () => _askCancelOrRefuse(context),
+                        ),
+                      ],
                       const SizedBox(width: 6),
                     ],
                     if (widget.order.status == SaleStatus.completed) ...[
+                      // Repasser en programmée (correction / re-finalisation) —
+                      // réservé admin. Restitue stock + paiement + écritures
+                      // partenaire via l'évènement onUpdate(scheduled).
+                      if (widget.canCancel) ...[
+                        _ActionBtn(
+                          icon: Icons.undo_rounded,
+                          color: AppColors.warning,
+                          bgColor: const Color(0xFFFFF7ED),
+                          tooltip: 'Repasser en programmée',
+                          onTap: () => widget.onUpdate(SaleStatus.scheduled),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
                       _ActionBtn(
                         icon: Icons.picture_as_pdf_rounded,
                         color: AppColors.primary,
@@ -2259,35 +2497,9 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
             ))
         .toList();
 
-    // Conditions de l'ancien bouton $ : commande complétée + partenaire +
-    // emplacement renseigné + entièrement payée (la dette de livraison a
-    // déjà été générée → on n'autorise QUE l'ajout d'une dépense en plus).
-    final allowPartnerExpense = order.status == SaleStatus.completed
-        && order.deliveryMode == DeliveryMode.partner
-        && (order.deliveryLocationId ?? '').isNotEmpty
-        && order.isFullyPaid;
-
-    // Nom du partenaire (dépôt) pour clarifier le libellé de la dépense.
-    // Lookup local : _OrderCardState n'a pas accès au helper de la page.
-    String? partnerName;
-    if (allowPartnerExpense) {
-      final locId = order.deliveryLocationId;
-      if (locId != null && locId.isNotEmpty) {
-        try {
-          final raw = HiveBoxes.stockLocationsBox.get(locId);
-          if (raw != null) {
-            partnerName =
-                StockLocation.fromMap(Map<String, dynamic>.from(raw)).name;
-          }
-        } catch (_) {/* nom optionnel */}
-      }
-    }
-
     final result = await showOrderFeesSheet(
       context,
       initialFees: before,
-      allowPartnerExpense: allowPartnerExpense,
-      partnerName: partnerName,
     );
     if (result == null || !mounted) return; // annulé
 
@@ -2317,17 +2529,29 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       },
     );
 
-    // Dépense partenaire optionnelle saisie dans le sheet → entrée ledger.
-    if (result.hasPartnerExpense) {
-      final partnerId = order.deliveryLocationId;
-      if (partnerId != null && partnerId.isNotEmpty) {
-        await PartnerLedgerService.addEntry(
+    // Commande livrée par un partenaire et pas encore reversée : répercuter les
+    // frais sur le livre partenaire (deliveryOwed resynchronisé). Couvre les
+    // DEUX cas, de façon cohérente avec la complétion (_generatePartnerLedgerEntries) :
+    //   • partenaire a encaissé (non reversé) → les frais sont déduits du
+    //     montant « à verser » (le bandeau bleu se recalcule en direct) ;
+    //   • boutique a encaissé → la boutique DOIT ces frais au partenaire, donc
+    //     ils sont déduits de ce qu'il doit verser sur ses autres commandes.
+    // C'est ce qui remplace l'ancien bouton « Dépense à régler au partenaire » :
+    // un seul point de saisie (les frais) sert les deux usages.
+    // (Pas touché si déjà reversé : un versement reçu fige la commande.)
+    final partnerLocId = order.deliveryLocationId;
+    if (order.status == SaleStatus.completed
+        && order.deliveryMode == DeliveryMode.partner
+        && partnerLocId != null && partnerLocId.isNotEmpty) {
+      final alreadyRemitted = PartnerLedgerService.entriesForShop(order.shopId)
+          .where((e) => e.orderId == order.id)
+          .any((e) => e.type == PartnerLedgerEntryType.remittance);
+      if (!alreadyRemitted) {
+        await PartnerLedgerService.syncOrderDeliveryFee(
           shopId:            order.shopId,
-          partnerLocationId: partnerId,
-          type:              PartnerLedgerEntryType.deliveryOwed,
-          amount:            -result.partnerExpenseAmount!, // négatif = boutique doit
-          orderId:           order.id,
-          note:              result.partnerExpenseLabel,
+          partnerLocationId: partnerLocId,
+          orderId:           order.id!,
+          feesTotal:         result.fees.fold<double>(0, (s, f) => s + f.amount),
         );
       }
     }
@@ -2335,14 +2559,108 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     widget.onChanged?.call();
     if (mounted) setState(() {});
     if (mounted) {
-      AppSnack.success(
-          context,
-          result.hasPartnerExpense
-              ? 'Frais mis à jour — dépense de '
-                  '${CurrencyFormatter.format(result.partnerExpenseAmount!)} '
-                  'enregistrée en dette partenaire'
-              : 'Frais de la commande mis à jour');
+      AppSnack.success(context, 'Frais de la commande mis à jour');
     }
+  }
+
+  /// Transfère la COMMANDE (pas le stock) à un dépôt partenaire : réassigne
+  /// son emplacement + mode = partner. La commande passe alors sous la vue
+  /// de ce partenaire et son stock sera décrémenté chez lui à la finalisation.
+  /// BLOQUÉ si le partenaire choisi n'a pas assez de stock (choix utilisateur).
+  Future<void> _transferToPartner(BuildContext context) async {
+    final shopId = widget.order.shopId;
+    final partners = OrdersExportSource.partnerLocationsForShop(shopId);
+    if (partners.isEmpty) {
+      AppSnack.info(context, 'Aucun dépôt partenaire configuré.');
+      return;
+    }
+    final picked = await showModalBottomSheet<StockLocation>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 12),
+          Container(width: 36, height: 4,
+              decoration: BoxDecoration(color: AppColors.divider,
+                  borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Transférer la commande à…',
+                  style: AppTextStyles.subtitleBold),
+            ),
+          ),
+          for (final p in partners)
+            ListTile(
+              leading: Icon(Icons.local_shipping_outlined,
+                  color: AppColors.primary),
+              title: Text(p.name, style: AppTextStyles.body),
+              onTap: () => Navigator.of(ctx).pop(p),
+            ),
+          const SizedBox(height: 12),
+        ]),
+      ),
+    );
+    if (picked == null || !context.mounted) return;
+    final ds = SaleLocalDatasource();
+    // Bloquer si le partenaire n'a pas le stock (choix utilisateur).
+    final check = ds.locationCanFulfill(widget.order, picked.id);
+    if (!check.ok) {
+      AppSnack.error(context,
+          'Stock insuffisant chez ${picked.name}'
+          '${check.missing != null ? ' — ${check.missing}' : ''}. '
+          'Transfert impossible.');
+      return;
+    }
+    await ds.reassignDelivery(widget.order.id!,
+        mode: DeliveryMode.partner, locationId: picked.id);
+    ActivityLogService.log(
+      action: 'order_transferred_partner',
+      targetType: 'order', targetId: widget.order.id,
+      targetLabel: widget.order.clientName ?? 'Commande',
+      shopId: widget.order.shopId,
+      details: {'partner_location_id': picked.id, 'partner_name': picked.name},
+    );
+    widget.onChanged?.call();
+    if (context.mounted) {
+      AppSnack.success(context, 'Commande transférée à ${picked.name}.');
+    }
+  }
+
+  /// Prévient le client par WhatsApp que sa commande est en rupture de stock.
+  /// Ouverture wa.me SYNCHRONE (pas d'await avant → user gesture web préservé).
+  /// La suppression de la commande reste l'action « Supprimer » séparée.
+  void _notifyOutOfStock(BuildContext context) {
+    final order = widget.order;
+    final phone = (order.clientPhone ?? '').trim();
+    if (phone.isEmpty) {
+      AppSnack.error(context, 'Numéro WhatsApp du client manquant.');
+      return;
+    }
+    final p = PhoneFormatter.toWame(phone).replaceAll(RegExp(r'[^\d]'), '');
+    if (p.isEmpty) {
+      AppSnack.error(context, 'Numéro WhatsApp invalide.');
+      return;
+    }
+    final clientName = order.clientName ?? 'Cher client';
+    final shop = LocalStorageService.getShop(order.shopId);
+    final shopName = shop?.name ?? 'notre boutique';
+    final msg = 'Bonjour $clientName,\n\n'
+        'Nous sommes désolés : le ou les articles de votre commande chez '
+        '$shopName sont actuellement en rupture de stock. Nous ne pourrons '
+        'malheureusement pas honorer cette commande. Merci de votre '
+        'compréhension — n\'hésitez pas à nous recontacter prochainement.';
+    final url = 'https://wa.me/$p?text=${Uri.encodeComponent(msg)}';
+    openExternal(url).then((ok) {
+      if (!ok && context.mounted) {
+        AppSnack.error(context,
+            'Impossible d\'ouvrir WhatsApp. Autorisez les pop-ups du navigateur.');
+      }
+    });
   }
 
   void _relaunchClient(BuildContext context) {
@@ -2638,6 +2956,136 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     );
     if (reason == null) return;
     await widget.onCancelWithReason(reason);
+  }
+
+  /// Bouton d'évènement contextuel qui remplace l'ancien menu déroulant de
+  /// statut. On ne « choisit » plus un statut : on déclenche l'évènement
+  /// métier adapté à l'état courant (qui ouvre les sheets de paiement /
+  /// livraison / clôture via `widget.onUpdate`).
+  ///   * Programmée  → « Démarrer la livraison » (→ en cours). Masqué quand
+  ///     la paire « Validée / Annulée par client » est déjà affichée (échéance).
+  ///   * En cours    → « Encaisser & finaliser » (→ complétée).
+  ///   * États terminaux → pastille de statut en lecture seule.
+  Widget _buildStatusAction(SaleStatus s) {
+    switch (s) {
+      case SaleStatus.scheduled:
+        if (_canConfirmClient()) return _StatusChip(status: s);
+        return _WideActionButton(
+          icon: Icons.local_shipping_outlined,
+          label: 'Démarrer la livraison',
+          color: AppColors.primary,
+          filled: true,
+          onPressed: () => widget.onUpdate(SaleStatus.processing),
+        );
+      case SaleStatus.processing:
+        return _WideActionButton(
+          icon: Icons.point_of_sale_rounded,
+          label: 'Encaisser & finaliser',
+          color: AppColors.secondary,
+          filled: true,
+          onPressed: () => widget.onUpdate(SaleStatus.completed),
+        );
+      case SaleStatus.completed:
+      case SaleStatus.cancelled:
+      case SaleStatus.refused:
+      case SaleStatus.refunded:
+        return _StatusChip(status: s);
+    }
+  }
+
+  /// Évènements négatifs (annuler / refuser) présentés comme un choix
+  /// explicite, jamais comme une sélection de statut. Chaque option déclenche
+  /// le flux métier dédié (motif d'annulation / frais de course refusée).
+  Future<void> _askCancelOrRefuse(BuildContext context) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 12),
+          Container(width: 36, height: 4,
+              decoration: BoxDecoration(color: AppColors.divider,
+                  borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 8),
+          ListTile(
+            leading: const Icon(Icons.cancel_outlined, color: AppColors.error),
+            title: const Text('Annuler la commande'),
+            subtitle: const Text('Le client a annulé — motif requis'),
+            onTap: () => Navigator.of(ctx).pop('cancel'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.do_not_disturb_on_outlined,
+                color: AppColors.error),
+            title: const Text('Marquer comme refusée'),
+            subtitle: const Text('Le client a refusé la livraison'),
+            onTap: () => Navigator.of(ctx).pop('refuse'),
+          ),
+          const SizedBox(height: 12),
+        ]),
+      ),
+    );
+    if (!context.mounted) return;
+    if (choice == 'cancel') {
+      await _askCancelReason(context);
+    } else if (choice == 'refuse') {
+      widget.onUpdate(SaleStatus.refused);
+    }
+  }
+
+  /// Confirme puis enregistre le versement partenaire reçu pour la commande
+  /// (marquage manuel, écrit dans le livre partenaire via `onRemitReceived`).
+  Future<void> _confirmRemitReceived(BuildContext context) async {
+    final amount = widget.pendingRemittance ?? 0;
+    if (amount <= 0 || widget.onRemitReceived == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dc) => AlertDialog(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
+        title: Row(children: [
+          Container(
+            width: 32, height: 32,
+            decoration: BoxDecoration(
+                color: AppColors.info.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(8)),
+            child: const Icon(Icons.account_balance_wallet_outlined,
+                size: 18, color: AppColors.info),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text('Versement reçu ?',
+                style: AppTextStyles.subtitleBold),
+          ),
+        ]),
+        content: Text(
+            'Confirmer la réception de '
+            '${CurrencyFormatter.format(amount)} versés par le partenaire '
+            'pour cette commande ? Le livre partenaire sera mis à jour.',
+            style: AppTextStyles.body.copyWith(height: 1.4)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dc).pop(false),
+            child: const Text('Annuler',
+                style: TextStyle(color: AppColors.textSecondary)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.info,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.of(dc).pop(true),
+            child: const Text('Confirmer le versement'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await widget.onRemitReceived!.call();
   }
 
   /// Demande une nouvelle date + raison puis reprogramme via le callback.
@@ -3271,6 +3719,97 @@ class _ClientAvatar extends StatelessWidget {
   }
 }
 
+/// Bouton d'action large pour la carte commande (pleine largeur). Style
+/// « tonal » : fond teinté doux + icône + libellé, coins bien arrondis —
+/// remplace les anciens `OutlinedButton` fil-de-fer jugés trop bruts.
+/// [filled] = fond plein coloré (action primaire, ex. « Encaisser »).
+class _WideActionButton extends StatelessWidget {
+  final IconData icon;
+  final String   label;
+  final Color    color;
+  final VoidCallback? onPressed;
+  final bool     filled;
+  /// Remplace l'icône (ex. spinner de chargement).
+  final Widget?  leading;
+  const _WideActionButton({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onPressed,
+    this.filled = false,
+    this.leading,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = onPressed == null;
+    final bg = filled
+        ? color.withValues(alpha: disabled ? 0.4 : 1)
+        : color.withValues(alpha: disabled ? 0.05 : 0.10);
+    final fg = filled
+        ? Colors.white
+        : color.withValues(alpha: disabled ? 0.5 : 1);
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: filled
+                ? null
+                : Border.all(color: color.withValues(alpha: 0.22)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              leading ?? Icon(icon, size: 16, color: fg),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.bodySmBold.copyWith(color: fg)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Pastille de statut en LECTURE SEULE (remplace l'ancien menu déroulant
+/// `_StatusMenu`). Le changement de statut passe désormais uniquement par
+/// des boutons d'évènement contextuels, jamais par une sélection directe.
+class _StatusChip extends StatelessWidget {
+  final SaleStatus status;
+  const _StatusChip({required this.status});
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: status.color.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: status.color.withValues(alpha: 0.3)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+              width: 7, height: 7,
+              decoration: BoxDecoration(
+                  color: status.color, shape: BoxShape.circle)),
+          const SizedBox(width: 6),
+          Text(status.label,
+              style: AppTextStyles.captionBold
+                  .copyWith(color: status.color)),
+        ]),
+      );
+}
+
 // ─── Bouton action icône ─────────────────────────────────────────────────────
 class _ActionBtn extends StatelessWidget {
   final IconData icon;
@@ -3308,99 +3847,6 @@ class _ActionBtn extends StatelessWidget {
       ),
     );
   }
-}
-
-// ─── Menu changement de statut ────────────────────────────────────────────────
-class _StatusMenu extends StatelessWidget {
-  final SaleStatus current;
-  final void Function(SaleStatus) onSelect;
-  /// Si false, les statuts `cancelled` et `refused` sont retirés du menu
-  /// (l'utilisateur n'a pas la permission `salesCancel`).
-  final bool canCancel;
-  const _StatusMenu({
-    required this.current,
-    required this.onSelect,
-    this.canCancel = false,
-  });
-
-  static const _allOptions = [
-    SaleStatus.scheduled,
-    SaleStatus.processing,
-    SaleStatus.completed,
-    SaleStatus.cancelled,
-    SaleStatus.refused,
-  ];
-
-  List<SaleStatus> get _options => canCancel
-      ? _allOptions
-      : _allOptions
-          .where((s) =>
-              s != SaleStatus.cancelled && s != SaleStatus.refused)
-          .toList();
-
-  @override
-  Widget build(BuildContext context) =>
-      PopupMenuButton<SaleStatus>(
-        onSelected: onSelect,
-        color: Theme.of(context).colorScheme.surface,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10)),
-        elevation: 3,
-        itemBuilder: (_) => _options
-            .map((s) => PopupMenuItem(
-          value: s,
-          padding: const EdgeInsets.symmetric(
-              horizontal: 14, vertical: 6),
-          child: Row(children: [
-            Container(
-                width: 8, height: 8,
-                decoration: BoxDecoration(
-                    color: s.color,
-                    shape: BoxShape.circle)),
-            const SizedBox(width: 8),
-            Text(s.label,
-                style: AppTextStyles.body.copyWith(
-                    fontWeight: s == current
-                        ? FontWeight.w700
-                        : FontWeight.normal,
-                    color: s == current
-                        ? s.color
-                        : AppColors.textSecondary)),
-            if (s == current) ...[
-              const Spacer(),
-              Icon(Icons.check_rounded,
-                  size: 14, color: s.color),
-            ],
-          ]),
-        ))
-            .toList(),
-        child: Container(
-          padding: const EdgeInsets.symmetric(
-              horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: current.color.withValues(alpha:0.1),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-                color: current.color.withValues(alpha:0.3)),
-          ),
-          child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                    width: 7, height: 7,
-                    decoration: BoxDecoration(
-                        color: current.color,
-                        shape: BoxShape.circle)),
-                const SizedBox(width: 6),
-                Text(current.label,
-                    style: AppTextStyles.captionBold
-                        .copyWith(color: current.color)),
-                const SizedBox(width: 4),
-                Icon(Icons.keyboard_arrow_down_rounded,
-                    size: 14, color: current.color),
-              ]),
-        ),
-      );
 }
 
 // ─── Détails complets d'une commande (paiement, livraison, finance) ─────────

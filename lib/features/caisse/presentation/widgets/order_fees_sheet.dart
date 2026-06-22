@@ -9,33 +9,18 @@ import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../bloc/caisse_bloc.dart' show OrderFee;
 
-/// Résultat de [showOrderFeesSheet] : les frais de la commande + une éventuelle
-/// dépense additionnelle à régler au partenaire-livreur.
+/// Résultat de [showOrderFeesSheet] : la liste des frais de la commande.
 ///
-/// La dépense partenaire est OPTIONNELLE et n'est proposée que lorsque la
-/// commande est livrée par un partenaire (cf. `allowPartnerExpense`). Elle est
-/// distincte des frais : alors que les frais sont des coûts ABSORBÉS par la
-/// boutique (ils n'alimentent aucun ledger), la dépense partenaire crée une
-/// entrée `deliveryOwed` négative dans le partner_ledger — compensée
-/// automatiquement au prochain versement du partenaire.
+/// Les frais sont les coûts engagés sur la commande (livraison, emballage…).
+/// Quand la commande est livrée par un partenaire, ces frais sont
+/// automatiquement répercutés sur le livre partenaire (écriture `deliveryOwed`)
+/// et déduits de son prochain versement — cette répercussion est gérée par
+/// l'appelant (cf. `caisse_page._editFees`), pas dans ce sheet. Un seul point
+/// de saisie pour tous les coûts d'une commande.
 class OrderFeesResult {
   final List<OrderFee> fees;
 
-  /// Montant de la dépense à régler au partenaire (> 0) ou null si l'opérateur
-  /// n'en a pas saisi.
-  final double? partnerExpenseAmount;
-
-  /// Motif de la dépense partenaire (traçabilité). null si pas de dépense.
-  final String? partnerExpenseLabel;
-
-  const OrderFeesResult({
-    required this.fees,
-    this.partnerExpenseAmount,
-    this.partnerExpenseLabel,
-  });
-
-  bool get hasPartnerExpense =>
-      partnerExpenseAmount != null && partnerExpenseAmount! > 0;
+  const OrderFeesResult({required this.fees});
 }
 
 /// Éditeur de frais d'une commande, indépendant du statut.
@@ -49,49 +34,25 @@ class OrderFeesResult {
 /// Garde-fou anti-doublon : si deux frais portent le même libellé (ex. deux
 /// « Livraison »), on AVERTIT avec confirmation explicite — sans bloquer
 /// (l'opérateur peut légitimement vouloir deux lignes).
-///
-/// Dépense partenaire (fusion de l'ancien bouton « $ ») : si
-/// [allowPartnerExpense] est vrai, une section dépliable « Dépense à régler au
-/// partenaire » apparaît en bas. Elle remplace l'ancien dialog dédié
-/// `AddOrderExpenseDialog` — un seul point d'entrée pour tous les coûts d'une
-/// commande, sans risquer d'oublier la mise à jour du ledger.
 Future<OrderFeesResult?> showOrderFeesSheet(
   BuildContext context, {
   List<OrderFee> initialFees = const [],
-  bool allowPartnerExpense = false,
-  String? partnerName,
 }) {
   return showFormSheet<OrderFeesResult>(
     context: context,
-    builder: (_) => _OrderFeesSheet(
-      initialFees: initialFees,
-      allowPartnerExpense: allowPartnerExpense,
-      partnerName: partnerName,
-    ),
+    builder: (_) => _OrderFeesSheet(initialFees: initialFees),
   );
 }
 
 class _OrderFeesSheet extends StatefulWidget {
   final List<OrderFee> initialFees;
-  final bool allowPartnerExpense;
-  final String? partnerName;
-  const _OrderFeesSheet({
-    required this.initialFees,
-    this.allowPartnerExpense = false,
-    this.partnerName,
-  });
+  const _OrderFeesSheet({required this.initialFees});
   @override
   State<_OrderFeesSheet> createState() => _OrderFeesSheetState();
 }
 
 class _OrderFeesSheetState extends State<_OrderFeesSheet> {
   late List<_FeeRow> _rows;
-
-  // Dépense partenaire (optionnelle) — repliée par défaut.
-  bool _expenseOpen = false;
-  final _expenseAmount = TextEditingController();
-  final _expenseLabel = TextEditingController(text: 'Frais supplémentaires');
-  String? _expenseError;
 
   @override
   void initState() {
@@ -111,8 +72,6 @@ class _OrderFeesSheetState extends State<_OrderFeesSheet> {
       r.label.dispose();
       r.amount.dispose();
     }
-    _expenseAmount.dispose();
-    _expenseLabel.dispose();
     super.dispose();
   }
 
@@ -189,35 +148,8 @@ class _OrderFeesSheetState extends State<_OrderFeesSheet> {
       if (keep != true) return; // l'opérateur revient corriger
     }
 
-    // Dépense partenaire : valider seulement si la section est ouverte ET
-    // qu'un montant a été saisi. Une section ouverte mais vide est ignorée.
-    double? expenseAmount;
-    String? expenseLabel;
-    if (widget.allowPartnerExpense && _expenseOpen) {
-      final raw = _expenseAmount.text.trim().replaceAll(',', '.');
-      final hasInput = raw.isNotEmpty || _expenseLabel.text.trim().isNotEmpty;
-      if (hasInput) {
-        final value = double.tryParse(raw);
-        if (value == null || value <= 0) {
-          setState(() => _expenseError = 'Montant de la dépense invalide');
-          return;
-        }
-        final lbl = _expenseLabel.text.trim();
-        if (lbl.isEmpty) {
-          setState(() => _expenseError = 'Motif de la dépense requis');
-          return;
-        }
-        expenseAmount = value;
-        expenseLabel = lbl;
-      }
-    }
-
     if (!mounted) return;
-    Navigator.of(context).pop(OrderFeesResult(
-      fees: fees,
-      partnerExpenseAmount: expenseAmount,
-      partnerExpenseLabel: expenseLabel,
-    ));
+    Navigator.of(context).pop(OrderFeesResult(fees: fees));
   }
 
   @override
@@ -315,7 +247,6 @@ class _OrderFeesSheetState extends State<_OrderFeesSheet> {
                             fontWeight: FontWeight.w800, color: sem.brand)),
                   ]),
                 ],
-                if (widget.allowPartnerExpense) _buildPartnerExpense(context),
               ],
             ),
           ),
@@ -345,122 +276,6 @@ class _OrderFeesSheetState extends State<_OrderFeesSheet> {
               ),
             ]),
           ),
-        ],
-      ),
-    );
-  }
-
-  /// Section « Dépense à régler au partenaire » — remplace l'ancien bouton $.
-  /// Repliée par défaut : un simple bouton « + Dépense partenaire » qui
-  /// déplie le formulaire (montant + motif) au tap.
-  Widget _buildPartnerExpense(BuildContext context) {
-    final theme = Theme.of(context);
-    final partner = (widget.partnerName ?? '').trim();
-    if (!_expenseOpen) {
-      return Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: () => setState(() => _expenseOpen = true),
-            icon: const Icon(Icons.attach_money_rounded, size: 16),
-            label: const Text('Dépense à régler au partenaire'),
-            style: TextButton.styleFrom(
-                foregroundColor: AppColors.warning, padding: EdgeInsets.zero),
-          ),
-        ),
-      );
-    }
-    return Container(
-      margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.warning.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.warning.withValues(alpha: 0.25)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(children: [
-            const Icon(Icons.attach_money_rounded,
-                size: 16, color: AppColors.warning),
-            const SizedBox(width: 6),
-            const Expanded(
-              child: Text('Dépense à régler au partenaire',
-                  style: AppTextStyles.bodyBold),
-            ),
-            IconButton(
-              icon: const Icon(Icons.close_rounded, size: 16),
-              tooltip: 'Annuler la dépense',
-              onPressed: () => setState(() {
-                _expenseOpen = false;
-                _expenseError = null;
-                _expenseAmount.clear();
-              }),
-              padding: EdgeInsets.zero,
-              constraints:
-                  const BoxConstraints(minWidth: 28, minHeight: 28),
-            ),
-          ]),
-          const SizedBox(height: 4),
-          Text(
-            partner.isEmpty
-                ? 'Enregistré comme dette envers le partenaire et déduit '
-                    'automatiquement de son prochain versement.'
-                : 'Enregistré comme dette envers « $partner » et déduit '
-                    'automatiquement de son prochain versement.',
-            style: AppTextStyles.captionHint.copyWith(
-                height: 1.4,
-                color:
-                    theme.colorScheme.onSurface.withValues(alpha: 0.75)),
-          ),
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(
-              flex: 3,
-              child: TextField(
-                controller: _expenseLabel,
-                style: AppTextStyles.body,
-                decoration: const InputDecoration(
-                  labelText: 'Motif',
-                  labelStyle: AppTextStyles.caption,
-                  isDense: true,
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              flex: 2,
-              child: TextField(
-                controller: _expenseAmount,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-                ],
-                style: AppTextStyles.body,
-                decoration: const InputDecoration(
-                  labelText: 'Montant',
-                  labelStyle: AppTextStyles.caption,
-                  isDense: true,
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ),
-          ]),
-          if (_expenseError != null) ...[
-            const SizedBox(height: 8),
-            Text(_expenseError!,
-                style: AppTextStyles.captionHint
-                    .copyWith(color: theme.colorScheme.error)),
-          ],
         ],
       ),
     );
