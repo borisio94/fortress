@@ -39,6 +39,13 @@ class ShopSummary extends Equatable {
   final String? whatsappPhone;
   final String? email;
 
+  /// ID du Pixel Meta (Facebook/Instagram) connecté par le commerçant.
+  /// Optionnel. Quand renseigné, la page publique `/catalogue/:shopId` injecte
+  /// le pixel et remonte les évènements de conversion vers Meta. Jamais utilisé
+  /// sur les pages internes Fortress. Identifiant de tracking public (non
+  /// sensible).
+  final String? facebookPixelId;
+
   /// Date de création (pour le DatePicker période personnalisée)
   final DateTime? createdAt;
 
@@ -76,6 +83,7 @@ class ShopSummary extends Equatable {
     this.phone,
     this.whatsappPhone,
     this.email,
+    this.facebookPixelId,
     this.createdAt,
     this.members = const [],
     this.kind = ShopKind.main,

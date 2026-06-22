@@ -337,6 +337,7 @@ class LocalStorageService {
     'is_active': s.isActive, 'today_sales': s.todaySales,
     'owner_id': s.ownerId, 'phone': s.phone,
     'whatsapp_phone': s.whatsappPhone, 'email': s.email,
+    'facebook_pixel_id': s.facebookPixelId,
     'created_at': s.createdAt?.toIso8601String(),
     'kind':           s.kind.key,
     'parent_shop_id': s.parentShopId,
@@ -365,6 +366,7 @@ class LocalStorageService {
     phone:        m['phone']?.toString(),
     whatsappPhone: m['whatsapp_phone']?.toString(),
     email:        m['email']?.toString(),
+    facebookPixelId: m['facebook_pixel_id']?.toString(),
     createdAt:    m['created_at'] is String
         ? DateTime.tryParse(m['created_at'] as String)
         : (m['created_at'] is DateTime

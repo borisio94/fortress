@@ -360,6 +360,11 @@ class AppDatabase {
     // Recharger les marqueurs anti-stale persistants (survivent au reload)
     // et purger ceux trop vieux pour rester pertinents.
     await _bootstrapAntiStaleMarkers();
+    // Correctif ponctuel 2026-06-21 : annule les versements partenaires créés
+    // par erreur via le bouton « Marquer reçu » sur des commandes historiques
+    // déjà soldées par les dettes partenaires (soldes corrompus). Idempotent
+    // + flag Hive → ne tourne qu'une fois.
+    await _revertErroneousRemittances();
     // Purge opportuniste des `sync_errors` au démarrage : si la queue
     // est vide et qu'aucune op critique n'est bloquée, les erreurs
     // journalisées sont par définition résolues — pas la peine de
@@ -375,6 +380,55 @@ class AppDatabase {
     // de l'upload Supabase. Au prochain boot, on retente automatiquement.
     unawaited(PendingImageUploadService.flush());
     debugPrint('[DB] Init — online: ${_i._isOnline}');
+  }
+
+  /// Correctif ponctuel (2026-06-21). La détection « versement partenaire en
+  /// attente » a fait apparaître les anciennes commandes (soldées via les
+  /// dettes partenaires globales) comme « à verser ». En cliquant « Marquer
+  /// reçu » dessus, des écritures `remittance` en double ont été créées →
+  /// soldes partenaires faussés. On annule (suppression douce) TOUTES ces
+  /// écritures, reconnaissables à leur note « Versement reçu du partenaire ».
+  ///
+  /// Réutilise la mécanique anti-résurrection de `PartnerLedgerService`
+  /// (tombstone + soft-delete + upsert) pour converger en offline-first /
+  /// multi-appareils. Idempotent ; flag Hive pour ne tourner qu'une fois.
+  static Future<void> _revertErroneousRemittances() async {
+    const flagKey = 'cleanup_remittance_20260621_done';
+    const targetNote = 'Versement reçu du partenaire';
+    try {
+      final settings = HiveBoxes.settingsBox;
+      if (settings.get(flagKey) == true) return;
+      if (!Hive.isBoxOpen(HiveBoxes.partnerLedger)) return;
+      final box = HiveBoxes.partnerLedgerBox;
+      final now = DateTime.now().toUtc().toIso8601String();
+      final targets = <Map<String, dynamic>>[];
+      for (final key in box.keys) {
+        final raw = box.get(key);
+        if (raw == null) continue;
+        final m = Map<String, dynamic>.from(raw);
+        if (m['deleted_at'] != null) continue;
+        if (m['type'] != 'remittance') continue;
+        if (m['note'] != targetNote) continue;
+        if (m['id'] == null) continue;
+        targets.add(m);
+      }
+      for (final m in targets) {
+        final id = m['id'].toString();
+        m['deleted_at'] = now;
+        await markLedgerDeletionPending(id);
+        try { await box.delete(id); } catch (_) {}
+        bgUpsert('partner_ledger_entries', m);
+        final shopId = m['shop_id']?.toString();
+        if (shopId != null) notifyListeners('partner_ledger_entries', shopId);
+      }
+      await settings.put(flagKey, true);
+      if (targets.isNotEmpty) {
+        debugPrint('[DB] _revertErroneousRemittances: '
+            '${targets.length} versement(s) erroné(s) annulé(s)');
+      }
+    } catch (e) {
+      debugPrint('[DB] _revertErroneousRemittances err: $e');
+    }
   }
 
   /// Charge les tombstones de produits supprimés et les échos
@@ -1733,6 +1787,7 @@ end \$\$;""",
     String? name, String? sector,
     String? currency, String? country,
     String? phone, String? whatsappPhone, String? email,
+    String? facebookPixelId,
   }) async {
     _assertNotFrozen();
     final userId = _userId;
@@ -1757,6 +1812,11 @@ end \$\$;""",
           whatsappPhone.trim().isEmpty ? null : whatsappPhone.trim();
     }
     if (email    != null) payload['email']    = email.trim().isEmpty ? null : email.trim();
+    // facebook_pixel_id : chaîne vide → null (déconnexion du pixel).
+    if (facebookPixelId != null) {
+      payload['facebook_pixel_id'] =
+          facebookPixelId.trim().isEmpty ? null : facebookPixelId.trim();
+    }
     if (payload.isEmpty) {
       final cached = LocalStorageService.getShop(shopId);
       if (cached != null) return cached;
@@ -5411,6 +5471,7 @@ end \$\$;""",
     phone: r['phone'] as String?,
     whatsappPhone: r['whatsapp_phone'] as String?,
     email: r['email'] as String?,
+    facebookPixelId: r['facebook_pixel_id'] as String?,
     createdAt: r['created_at'] != null
         ? DateTime.tryParse(r['created_at'] as String) : null,
     kind:         ShopKindX.fromKey(r['kind'] as String?),

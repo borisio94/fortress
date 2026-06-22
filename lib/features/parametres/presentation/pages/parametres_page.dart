@@ -154,7 +154,10 @@ class ParametresSectionPage extends ConsumerWidget {
           _preferencesSection(context, shopId, perms, l)),
       'abonnement'     => (l.drawerSubscription, _SubscriptionSection()),
       'integrations'   => (l.paramIntegrations,
-          _integrationsSection(context, shopId, perms, l)),
+          _integrationsSection(context, shopId, perms, l,
+              pixelConnected:
+                  (ref.watch(currentShopProvider)?.facebookPixelId ?? '')
+                      .trim().isNotEmpty)),
       'administration' => ('Administration', _SuperAdminSection(ref: ref)),
       'danger'         => (l.paramDangerZone,
           _DangerGate(shopId: shopId, l: l, perms: perms)),
@@ -281,7 +284,8 @@ Widget _preferencesSection(BuildContext context, String shopId,
 }
 
 Widget _integrationsSection(BuildContext context, String shopId,
-    AppPermissions perms, AppLocalizations l) {
+    AppPermissions perms, AppLocalizations l,
+    {bool pixelConnected = false}) {
   return _Section(
     label: l.paramIntegrations,
     icon: Icons.extension_rounded,
@@ -294,6 +298,15 @@ Widget _integrationsSection(BuildContext context, String shopId,
         color: AppColors.primary,
         locked: !perms.canEditShopInfo,
         onTap: () => context.push('/shop/$shopId/parametres/payments'),
+      ),
+      _Tile(
+        icon: Icons.facebook,
+        label: 'Facebook & Instagram',
+        subtitle: pixelConnected ? 'Pixel connecté' : 'Non configuré',
+        subtitleColor: pixelConnected ? AppColors.secondary : null,
+        color: const Color(0xFF1877F2), // bleu de marque Facebook
+        locked: !perms.canEditShopInfo,
+        onTap: () => context.push('/shop/$shopId/parametres/marketing'),
       ),
     ],
   );
@@ -637,9 +650,12 @@ class _Tile extends StatelessWidget {
   final Color color;
   final VoidCallback onTap;
   final bool locked;
+  /// Couleur optionnelle du sous-titre (ex. vert « connecté »). Null →
+  /// style captionHint par défaut.
+  final Color? subtitleColor;
   const _Tile({required this.icon, required this.label,
     required this.subtitle, required this.color, required this.onTap,
-    this.locked = false});
+    this.locked = false, this.subtitleColor});
 
   void _handleTap(BuildContext context) {
     HapticFeedback.selectionClick();
@@ -696,7 +712,10 @@ class _Tile extends StatelessWidget {
                 if (subtitle.isNotEmpty)
                   Text(subtitle,
                       maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.captionHint),
+                      style: subtitleColor != null
+                          ? AppTextStyles.captionHint.copyWith(
+                              color: subtitleColor, fontWeight: FontWeight.w600)
+                          : AppTextStyles.captionHint),
               ],
             ),
           ),

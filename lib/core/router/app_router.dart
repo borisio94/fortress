@@ -57,6 +57,7 @@ import '../../features/finances/presentation/pages/finances_page.dart';
 import '../../features/hub_central/presentation/pages/hub_dashboard_page.dart';
 import '../../features/hub_central/presentation/pages/shop_comparison_page.dart';
 import '../../features/parametres/presentation/pages/parametres_page.dart';
+import '../../features/parametres/presentation/pages/marketing_page.dart';
 import '../../features/parametres/presentation/pages/shop_settings_page.dart';
 import '../../features/parametres/presentation/pages/stock_locations_page.dart';
 import '../../features/parametres/presentation/pages/location_contents_page.dart';
@@ -596,6 +597,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             }
             final loc = qp['loc']?.trim();
             final deliveryMode = qp['mode']?.trim() == 'delivery';
+            // Deep-link pub Facebook : `?product=<id>` ouvre le catalogue
+            // COMPLET et met en avant (ouvre la fiche) du produit ciblé. Le
+            // client peut ensuite fermer la fiche et continuer à parcourir.
+            final highlight = qp['product']?.trim();
             return CataloguePage(
               shopId: s.pathParameters['shopId']!,
               initialCategory: qp['cat'],
@@ -603,6 +608,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               stockOverride: stockOverride,
               locationId: (loc != null && loc.isNotEmpty) ? loc : null,
               deliveryMode: deliveryMode,
+              highlightProductId:
+                  (highlight != null && highlight.isNotEmpty) ? highlight : null,
             );
           }),
       // Suivi de commande publique — lien envoyé par WhatsApp dans la
@@ -915,6 +922,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/payments',
               builder: (c, s) => PaymentsPage(
+                  shopId: s.pathParameters['shopId']!)),
+          GoRoute(path: '/shop/:shopId/parametres/marketing',
+              builder: (c, s) => MarketingPage(
                   shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/delivery-templates',
               builder: (c, s) => DeliveryTemplatesPage(
