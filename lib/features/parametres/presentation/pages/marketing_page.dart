@@ -47,6 +47,9 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
   bool _saving = false;
   bool _helpOpen = false;
   String? _error;
+  /// Orientation : null = pas encore répondu, true = a déjà un Pixel,
+  /// false = doit en créer un. Pilote l'aide affichée.
+  bool? _hasPixel;
 
   @override
   void initState() {
@@ -116,6 +119,13 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
   // navigateur, où la « version ordinateur » donne accès aux évènements de test.
   void _copyTestEventsLink(String pixelId) {
     Clipboard.setData(ClipboardData(text: _testEventsUrl(pixelId)));
+    AppSnack.success(context, 'Lien copié — collez-le dans Safari ou Chrome');
+  }
+
+  // Lien vers le Gestionnaire d'évènements (trouver / créer le Pixel). Même
+  // parade mobile : coller dans le navigateur pour éviter l'app Business Suite.
+  void _copyEventsManagerLink() {
+    Clipboard.setData(const ClipboardData(text: _kEventsManagerUrl));
     AppSnack.success(context, 'Lien copié — collez-le dans Safari ou Chrome');
   }
 
@@ -212,7 +222,7 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
     );
   }
 
-  // ─── Carte de connexion (guide 3 étapes) ──────────────────────────────────
+  // ─── Carte de connexion (orientée nouvel utilisateur) ─────────────────────
 
   Widget _connectCard() => _card(
         child: Column(
@@ -221,83 +231,79 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
             const Text('Connecter votre Pixel Facebook',
                 style: AppTextStyles.bodyBold),
             const SizedBox(height: 4),
-            const Text(
-                'Suivez les ventes générées par vos publicités. '
-                '3 étapes, moins de 2 minutes.',
+            const Text('Suivez les ventes générées par vos publicités.',
                 style: AppTextStyles.captionHint),
+            const SizedBox(height: 14),
+
+            // Recommandation : le plus simple, depuis un ordinateur.
+            _recoBanner(),
             const SizedBox(height: 18),
 
-            // Étape 1
-            _step(
-              1,
-              'Ouvrez Meta Ads Manager',
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _outlinedAction(
-                    icon: Icons.open_in_new_rounded,
-                    label: 'Ouvrir Meta Ads Manager',
-                    onTap: _openEventsManager,
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                      'Gestionnaire d\'évènements → cliquez sur votre '
-                      'ensemble de données → copiez l\'ID affiché sous le nom.',
-                      style: AppTextStyles.captionHint),
-                  _mobileHint(),
-                ],
+            // Orientation : a-t-il déjà un Pixel ?
+            const Text('Avez-vous déjà un Pixel Facebook ?',
+                style: AppTextStyles.bodyBold),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                child: _choiceChip('Oui, j\'en ai un', _hasPixel == true,
+                    () => setState(() => _hasPixel = true)),
               ),
-            ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _choiceChip('Non, pas encore', _hasPixel == false,
+                    () => setState(() => _hasPixel = false)),
+              ),
+            ]),
 
-            // Étape 2
-            _step(
-              2,
-              'Copiez votre ID Pixel',
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _idIllustration(),
-                  const SizedBox(height: 6),
-                  const Text('L\'ID est un nombre à 15-16 chiffres.',
-                      style: AppTextStyles.captionHint),
-                ],
+            if (_hasPixel == true)
+              _metaAccessBlock(
+                title: 'Trouvez l\'ID de votre Pixel',
+                body: 'Gestionnaire d\'évènements → ouvrez votre source de '
+                    'données → l\'ID (15-16 chiffres) s\'affiche juste sous le '
+                    'nom. Copiez-le et collez-le ci-dessous.',
               ),
-            ),
+            if (_hasPixel == false)
+              _metaAccessBlock(
+                title: 'Créez votre Pixel (gratuit)',
+                body: 'Gestionnaire d\'évènements → « Connecter des sources de '
+                    'données » → « Web ». Suivez les étapes, notez l\'ID du '
+                    'Pixel créé, puis revenez le coller ici.',
+              ),
 
-            // Étape 3
-            _step(
-              3,
-              'Collez-le ici',
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  AppField(
-                    controller: _pixelCtrl,
-                    hint: 'Ex: 123456789012345',
-                    prefixIcon: Icons.tag_rounded,
-                    numbersOnly: true,
-                    keyboardType: TextInputType.number,
-                    onChanged: (_) {
-                      if (_error != null) setState(() => _error = null);
-                    },
-                  ),
-                  if (_error != null) ...[
-                    const SizedBox(height: 6),
-                    Row(children: [
-                      const Icon(Icons.error_outline_rounded,
-                          size: 15, color: AppColors.warning),
-                      const SizedBox(width: 5),
-                      Expanded(
-                        child: Text(_error!,
-                            style: AppTextStyles.caption
-                                .copyWith(color: AppColors.warning)),
-                      ),
-                    ]),
-                  ],
-                ],
-              ),
-              isLast: true,
+            const SizedBox(height: 18),
+
+            // Saisie de l'ID — toujours disponible.
+            const Text('Collez votre ID Pixel ici',
+                style: AppTextStyles.bodyBold),
+            const SizedBox(height: 8),
+            AppField(
+              controller: _pixelCtrl,
+              hint: 'Ex: 123456789012345',
+              prefixIcon: Icons.tag_rounded,
+              numbersOnly: true,
+              keyboardType: TextInputType.number,
+              onChanged: (_) {
+                if (_error != null) setState(() => _error = null);
+              },
             ),
+            const SizedBox(height: 6),
+            const Text(
+                'C\'est l\'ID affiché dans le Gestionnaire d\'évènements — '
+                'pas l\'ID du portefeuille business.',
+                style: AppTextStyles.captionHint),
+            if (_error != null) ...[
+              const SizedBox(height: 6),
+              Row(children: [
+                const Icon(Icons.error_outline_rounded,
+                    size: 15, color: AppColors.warning),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(_error!,
+                      style: AppTextStyles.caption
+                          .copyWith(color: AppColors.warning)),
+                ),
+              ]),
+            ],
 
             const SizedBox(height: 18),
             AppPrimaryButton(
@@ -327,65 +333,101 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
         ),
       );
 
-  /// Étape numérotée : pastille + titre + contenu, avec un trait vertical de
-  /// liaison (sauf la dernière).
-  Widget _step(int n, String title, Widget child, {bool isLast = false}) {
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Column(children: [
-            Container(
-              width: 26,
-              height: 26,
-              alignment: Alignment.center,
-              decoration: const BoxDecoration(
-                  color: _kFacebookBlue, shape: BoxShape.circle),
-              child: Text('$n',
-                  style: AppTextStyles.caption.copyWith(
-                      color: Colors.white, fontWeight: FontWeight.w800)),
-            ),
-            if (!isLast)
-              Expanded(
-                child: Container(width: 2, color: AppColors.divider),
-              ),
-          ]),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(bottom: isLast ? 0 : 18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: AppTextStyles.bodyBold),
-                  const SizedBox(height: 8),
-                  child,
-                ],
+  /// Bandeau de recommandation : configurer depuis un ordinateur (Meta cache
+  /// le Gestionnaire d'évènements sur mobile).
+  Widget _recoBanner() => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: _kFacebookBlue.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _kFacebookBlue.withValues(alpha: 0.2)),
+        ),
+        child: const Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.computer, size: 18, color: _kFacebookBlue),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Le plus simple : faites cette configuration une fois depuis '
+                'un ordinateur. Sur téléphone, Meta cache le Gestionnaire '
+                'd\'évènements.',
+                style: AppTextStyles.captionHint,
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
+          ],
+        ),
+      );
 
-  Widget _idIllustration() => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+  /// Puce de choix (orientation Oui / Non).
+  Widget _choiceChip(String label, bool selected, VoidCallback onTap) =>
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          decoration: BoxDecoration(
+            color: selected
+                ? _kFacebookBlue.withValues(alpha: 0.08)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: selected ? _kFacebookBlue : AppColors.divider,
+                width: selected ? 1.5 : 1),
+          ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(
+                selected
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_off,
+                size: 16,
+                color: selected ? _kFacebookBlue : AppColors.textSecondary),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.caption.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color:
+                          selected ? _kFacebookBlue : AppColors.textPrimary)),
+            ),
+          ]),
+        ),
+      );
+
+  /// Bloc d'accès Meta (trouver OU créer le Pixel) : explication + ouverture +
+  /// copier le lien (parade mobile) + note « version ordinateur ».
+  Widget _metaAccessBlock({required String title, required String body}) =>
+      Container(
+        margin: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: AppColors.background,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(color: AppColors.divider),
         ),
-        child: Row(children: [
-          Text('ID ',
-              style: AppTextStyles.caption
-                  .copyWith(color: AppColors.textSecondary)),
-          Text('123456789012345',
-              style: AppTextStyles.body.copyWith(
-                fontWeight: FontWeight.w700,
-                decoration: TextDecoration.underline,
-              )),
-        ]),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: AppTextStyles.bodyBold),
+            const SizedBox(height: 4),
+            Text(body, style: AppTextStyles.captionHint),
+            const SizedBox(height: 10),
+            _outlinedAction(
+              icon: Icons.open_in_new_rounded,
+              label: 'Ouvrir le Gestionnaire d\'évènements',
+              onTap: _openEventsManager,
+            ),
+            const SizedBox(height: 8),
+            _outlinedAction(
+              icon: Icons.copy_rounded,
+              label: 'Copier le lien (pour Safari/Chrome)',
+              onTap: _copyEventsManagerLink,
+            ),
+            _mobileHint(),
+          ],
+        ),
       );
 
   Widget _helpBlock() => Container(
@@ -399,15 +441,21 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
         child: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Où trouver l\'ID dans Meta', style: AppTextStyles.bodyBold),
+            Text('Où trouver l\'ID de votre Pixel',
+                style: AppTextStyles.bodyBold),
             SizedBox(height: 8),
-            _HelpLine('1.', 'Connectez-vous à business.facebook.com.'),
-            _HelpLine('2.', 'Menu de gauche → « Gestionnaire d\'évènements ».'),
+            _HelpLine('1.',
+                'Le plus fiable : sur un ordinateur, allez sur '
+                'business.facebook.com/events_manager2.'),
+            _HelpLine('2.', 'Ouvrez votre source de données (votre Pixel).'),
             _HelpLine('3.',
-                'Sélectionnez votre ensemble de données (votre Pixel).'),
-            _HelpLine('4.',
-                'Le numéro affiché juste sous le nom est votre ID Pixel.'),
-            _HelpLine('5.', 'Copiez ce nombre et collez-le ci-dessus.'),
+                'Le numéro sous le nom est votre ID Pixel (15-16 chiffres).'),
+            _HelpLine('•',
+                'Sur téléphone : copiez le lien ci-dessus, collez-le dans '
+                'Safari/Chrome, puis activez « version pour ordinateur ».'),
+            _HelpLine('•',
+                'À ne pas confondre avec l\'ID du portefeuille business '
+                '(autre numéro, dans Paramètres de l\'entreprise).'),
           ],
         ),
       );
