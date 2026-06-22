@@ -111,6 +111,14 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
     AppSnack.success(context, 'Lien copié');
   }
 
+  // Contourne l'app Meta Business Suite (qui capte les liens facebook.com sur
+  // mobile) : l'utilisateur colle le lien dans Safari/Chrome → reste dans le
+  // navigateur, où la « version ordinateur » donne accès aux évènements de test.
+  void _copyTestEventsLink(String pixelId) {
+    Clipboard.setData(ClipboardData(text: _testEventsUrl(pixelId)));
+    AppSnack.success(context, 'Lien copié — collez-le dans Safari ou Chrome');
+  }
+
   // openExternal doit suivre le clic dans le même tick (cf. doc) → pas d'await
   // avant l'appel.
   Future<void> _shareWhatsapp() {
@@ -236,6 +244,7 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
                       'Gestionnaire d\'évènements → cliquez sur votre '
                       'ensemble de données → copiez l\'ID affiché sous le nom.',
                       style: AppTextStyles.captionHint),
+                  _mobileHint(),
                 ],
               ),
             ),
@@ -443,6 +452,13 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
               label: 'Voir les évènements de test',
               onTap: () => openExternal(_testEventsUrl(pixelId)),
             ),
+            const SizedBox(height: 8),
+            _outlinedAction(
+              icon: Icons.copy_rounded,
+              label: 'Copier le lien des évènements de test',
+              onTap: () => _copyTestEventsLink(pixelId),
+            ),
+            _mobileHint(),
             const Divider(height: 26),
 
             Align(
@@ -509,6 +525,29 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
       );
 
   // ─── Bouton secondaire générique ──────────────────────────────────────────
+
+  /// Note mobile : Meta redirige `business.facebook.com` vers Business Suite
+  /// mobile (sans Gestionnaire d'évènements). Le mode « version ordinateur »
+  /// du navigateur contourne cette redirection.
+  Widget _mobileHint() => const Padding(
+        padding: EdgeInsets.only(top: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.info_outline_rounded,
+                size: 14, color: AppColors.textSecondary),
+            SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Sur téléphone, activez « Voir version pour ordinateur » dans '
+                'le menu de votre navigateur si la page d\'évènements ne '
+                's\'ouvre pas.',
+                style: AppTextStyles.captionHint,
+              ),
+            ),
+          ],
+        ),
+      );
 
   Widget _outlinedAction({
     required IconData icon,
