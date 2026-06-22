@@ -447,15 +447,22 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
             _HelpLine('1.',
                 'Le plus fiable : sur un ordinateur, allez sur '
                 'business.facebook.com/events_manager2.'),
-            _HelpLine('2.', 'Ouvrez votre source de données (votre Pixel).'),
-            _HelpLine('3.',
-                'Le numéro sous le nom est votre ID Pixel (15-16 chiffres).'),
+            _HelpLine('2.',
+                'Ouvrez « Ensembles de données » (à gauche) → votre Pixel → '
+                'l\'ID (15-16 chiffres) s\'affiche juste sous le nom.'),
+            _HelpLine('!',
+                'Page vide « Connecter les données » ? Vous êtes sur le '
+                'MAUVAIS portefeuille : cliquez le nom du compte en haut à '
+                'gauche et changez-en (votre Pixel est dans un autre).'),
             _HelpLine('•',
-                'Sur téléphone : copiez le lien ci-dessus, collez-le dans '
-                'Safari/Chrome, puis activez « version pour ordinateur ».'),
+                'Toujours rien ? Vérifiez le compte Facebook connecté (photo '
+                'en haut à droite).'),
             _HelpLine('•',
                 'À ne pas confondre avec l\'ID du portefeuille business '
                 '(autre numéro, dans Paramètres de l\'entreprise).'),
+            _HelpLine('•',
+                'Sur téléphone : copiez le lien ci-dessus, collez-le dans '
+                'Safari/Chrome, puis activez « version pour ordinateur ».'),
           ],
         ),
       );
