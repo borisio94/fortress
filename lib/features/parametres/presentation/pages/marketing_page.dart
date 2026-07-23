@@ -186,7 +186,7 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
             child: const Icon(Icons.facebook, color: Colors.white, size: 26),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -231,7 +231,7 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
             const Text('Connecter votre Pixel Facebook',
                 style: AppTextStyles.bodyBold),
             const SizedBox(height: 4),
-            const Text('Suivez les ventes générées par vos publicités.',
+            Text('Suivez les ventes générées par vos publicités.',
                 style: AppTextStyles.captionHint),
             const SizedBox(height: 14),
 
@@ -287,7 +287,7 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
               },
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
                 'C\'est l\'ID affiché dans le Gestionnaire d\'évènements — '
                 'pas l\'ID du portefeuille business.',
                 style: AppTextStyles.captionHint),
@@ -342,7 +342,7 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: _kFacebookBlue.withValues(alpha: 0.2)),
         ),
-        child: const Row(
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(Icons.computer, size: 18, color: _kFacebookBlue),
@@ -490,7 +490,7 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
 
             const Text('Testez votre connexion', style: AppTextStyles.bodyBold),
             const SizedBox(height: 4),
-            const Text(
+            Text(
                 'Ouvrez votre catalogue, parcourez un produit, puis vérifiez '
                 'que votre Pixel reçoit des évènements dans Meta → '
                 'Évènements de test.',
@@ -539,7 +539,7 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
           children: [
             const Text('Votre lien catalogue', style: AppTextStyles.bodyBold),
             const SizedBox(height: 4),
-            const Text(
+            Text(
                 'Partagez ce lien dans vos pubs Facebook, sur votre page ou '
                 'sur WhatsApp.',
                 style: AppTextStyles.captionHint),
@@ -584,8 +584,8 @@ class _MarketingPageState extends ConsumerState<MarketingPage> {
   /// Note mobile : Meta redirige `business.facebook.com` vers Business Suite
   /// mobile (sans Gestionnaire d'évènements). Le mode « version ordinateur »
   /// du navigateur contourne cette redirection.
-  Widget _mobileHint() => const Padding(
-        padding: EdgeInsets.only(top: 8),
+  Widget _mobileHint() => Padding(
+        padding: const EdgeInsets.only(top: 8),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

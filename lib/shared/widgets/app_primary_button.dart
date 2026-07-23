@@ -20,6 +20,10 @@ class AppPrimaryButton extends StatefulWidget {
   final VoidCallback onTap;
   final double height;
   final Color? color;
+  /// `true` → pleine largeur + hauteur fixe [height] (ancien comportement,
+  /// ex. bouton de connexion). `false` (défaut) → dimensionné au contenu avec
+  /// padding compact H10/V3 (demande utilisateur : boutons proportionnels).
+  final bool fullWidth;
 
   const AppPrimaryButton({
     super.key,
@@ -30,6 +34,7 @@ class AppPrimaryButton extends StatefulWidget {
     required this.onTap,
     this.height = 43,
     this.color,
+    this.fullWidth = false,
   });
 
   @override
@@ -49,13 +54,43 @@ class _AppPrimaryButtonState extends State<AppPrimaryButton> {
         (AppColors.isDark ? AppColors.primary : const Color(0xFF0F172A));
     final hover  = widget.color ?? AppColors.primary;
 
+    final fw = widget.fullWidth;
+    final label = Text(
+      widget.label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.center,
+      style: AppTextStyles.label.copyWith(
+        color: active ? Colors.white : Colors.white.withValues(alpha: 0.6),
+        letterSpacing: 0.3,
+      ),
+    );
+    final content = widget.isLoading
+        ? const SizedBox(
+            width: 18, height: 18,
+            child: CircularProgressIndicator(
+                strokeWidth: 2, color: Colors.white))
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.icon != null) ...[
+                Icon(widget.icon, size: 16, color: Colors.white),
+                const SizedBox(width: 8),
+              ],
+              // En pleine largeur le label peut déborder → Flexible+ellipsis.
+              // En taille contenu, le bouton épouse le texte (pas de Flexible,
+              // sinon contrainte de largeur non bornée).
+              fw ? Flexible(child: label) : label,
+            ],
+          );
+
     return MouseRegion(
       onEnter: (_) { if (active) setState(() => _hovered = true); },
       onExit:  (_) => setState(() => _hovered = false),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        width: double.infinity,
-        height: widget.height,
+        width: fw ? double.infinity : null,
+        height: fw ? widget.height : null,
         decoration: BoxDecoration(
           color: !active
               ? (AppColors.isDark
@@ -69,36 +104,13 @@ class _AppPrimaryButtonState extends State<AppPrimaryButton> {
           child: InkWell(
             onTap: active ? widget.onTap : null,
             borderRadius: BorderRadius.circular(8),
-            child: Center(
-              child: widget.isLoading
-                  ? const SizedBox(
-                      width: 18, height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (widget.icon != null) ...[
-                          Icon(widget.icon, size: 16, color: Colors.white),
-                          const SizedBox(width: 8),
-                        ],
-                        Flexible(
-                          child: Text(
-                            widget.label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: AppTextStyles.label.copyWith(
-                              color: active
-                                  ? Colors.white
-                                  : Colors.white.withValues(alpha:0.6),
-                              letterSpacing: 0.3,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-            ),
+            child: fw
+                ? Center(child: content)
+                : Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 3),
+                    child: content,
+                  ),
           ),
         ),
       ),

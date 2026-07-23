@@ -20,7 +20,12 @@ import '../bloc/caisse_bloc.dart' show OrderFee;
 class OrderFeesResult {
   final List<OrderFee> fees;
 
-  const OrderFeesResult({required this.fees});
+  /// Prix de livraison FACTURÉ au client — entre dans le total à payer ET sur
+  /// la facture (via `Sale.deliveryPrice`). Distinct des [fees] qui sont des
+  /// coûts ABSORBÉS par la boutique (n'augmentent pas le total client).
+  final int deliveryPrice;
+
+  const OrderFeesResult({required this.fees, this.deliveryPrice = 0});
 }
 
 /// Éditeur de frais d'une commande, indépendant du statut.
@@ -37,27 +42,64 @@ class OrderFeesResult {
 Future<OrderFeesResult?> showOrderFeesSheet(
   BuildContext context, {
   List<OrderFee> initialFees = const [],
+  /// Prix de livraison actuellement FACTURÉ au client (`Sale.deliveryPrice`).
+  int initialDeliveryPrice = 0,
+  /// Affiche le champ « Frais de livraison facturés » (masqué pour un retrait
+  /// en boutique où il n'y a pas de livraison à facturer).
+  bool showDeliveryPrice = true,
 }) {
   return showFormSheet<OrderFeesResult>(
     context: context,
-    builder: (_) => _OrderFeesSheet(initialFees: initialFees),
+    builder: (_) => _OrderFeesSheet(
+      initialFees: initialFees,
+      initialDeliveryPrice: initialDeliveryPrice,
+      showDeliveryPrice: showDeliveryPrice,
+    ),
   );
 }
 
 class _OrderFeesSheet extends StatefulWidget {
   final List<OrderFee> initialFees;
-  const _OrderFeesSheet({required this.initialFees});
+  final int initialDeliveryPrice;
+  final bool showDeliveryPrice;
+  const _OrderFeesSheet({
+    required this.initialFees,
+    this.initialDeliveryPrice = 0,
+    this.showDeliveryPrice = true,
+  });
   @override
   State<_OrderFeesSheet> createState() => _OrderFeesSheetState();
 }
 
 class _OrderFeesSheetState extends State<_OrderFeesSheet> {
   late List<_FeeRow> _rows;
+  late final TextEditingController _deliveryCtrl;
+
+  static bool _isDeliveryLabel(String l) {
+    final s = l.toLowerCase();
+    return s.contains('livraison') || s.contains('delivery');
+  }
 
   @override
   void initState() {
     super.initState();
-    _rows = widget.initialFees
+    // Consolide TOUT ce qui concerne la livraison dans le champ FACTURÉ du
+    // haut : le prix de livraison existant + tout frais (même saisi en
+    // « absorbé ») étiqueté « livraison » — piège fréquent. Les autres frais
+    // restent en absorbés.
+    var deliveryFromFees = 0;
+    final absorbed = <OrderFee>[];
+    for (final f in widget.initialFees) {
+      if (widget.showDeliveryPrice && _isDeliveryLabel(f.label)) {
+        deliveryFromFees += f.amount.round();
+      } else {
+        absorbed.add(f);
+      }
+    }
+    final initDelivery = widget.initialDeliveryPrice + deliveryFromFees;
+    _deliveryCtrl = TextEditingController(
+        text: initDelivery > 0 ? initDelivery.toString() : '');
+    _rows = absorbed
         .map((f) => _FeeRow(
               id: f.id,
               label: TextEditingController(text: f.label),
@@ -68,6 +110,7 @@ class _OrderFeesSheetState extends State<_OrderFeesSheet> {
 
   @override
   void dispose() {
+    _deliveryCtrl.dispose();
     for (final r in _rows) {
       r.label.dispose();
       r.amount.dispose();
@@ -79,7 +122,7 @@ class _OrderFeesSheetState extends State<_OrderFeesSheet> {
     setState(() {
       _rows.add(_FeeRow(
         id: DateTime.now().microsecondsSinceEpoch.toString(),
-        label: TextEditingController(text: 'Livraison'),
+        label: TextEditingController(text: 'Emballage'),
         amount: TextEditingController(),
       ));
     });
@@ -109,10 +152,17 @@ class _OrderFeesSheetState extends State<_OrderFeesSheet> {
 
   Future<void> _confirm() async {
     final fees = <OrderFee>[];
+    var deliveryFromRows = 0;
     for (final r in _rows) {
       final amt = double.tryParse(r.amount.text.trim()) ?? 0;
       final lbl = r.label.text.trim();
       if (amt <= 0 && lbl.isEmpty) continue; // ligne vide → ignorée
+      // Filet : une ligne « livraison » saisie dans les frais absorbés est
+      // FACTURÉE (basculée dans le prix de livraison), jamais absorbée.
+      if (widget.showDeliveryPrice && _isDeliveryLabel(lbl)) {
+        deliveryFromRows += amt.round();
+        continue;
+      }
       fees.add(OrderFee(
         id: r.id,
         label: lbl.isEmpty ? 'Frais' : lbl,
@@ -149,7 +199,11 @@ class _OrderFeesSheetState extends State<_OrderFeesSheet> {
     }
 
     if (!mounted) return;
-    Navigator.of(context).pop(OrderFeesResult(fees: fees));
+    final dp = widget.showDeliveryPrice
+        ? ((double.tryParse(_deliveryCtrl.text.trim().replaceAll(',', '.'))
+                ?.round() ?? 0) + deliveryFromRows)
+        : widget.initialDeliveryPrice;
+    Navigator.of(context).pop(OrderFeesResult(fees: fees, deliveryPrice: dp));
   }
 
   @override
@@ -167,9 +221,45 @@ class _OrderFeesSheetState extends State<_OrderFeesSheet> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (widget.showDeliveryPrice) ...[
+                  Text('Frais de livraison — facturés au client',
+                      style: AppTextStyles.bodyBold),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Ce montant s\'AJOUTE au total à payer par le client et '
+                    'apparaît sur la facture.',
+                    style: AppTextStyles.caption.copyWith(
+                        color: Theme.of(context)
+                            .colorScheme.onSurface.withValues(alpha: 0.65)),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _deliveryCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    ],
+                    onChanged: (_) => setState(() {}),
+                    style: AppTextStyles.body,
+                    decoration: InputDecoration(
+                      labelText: 'Montant livraison',
+                      suffixText: 'FCFA',
+                      labelStyle: AppTextStyles.caption,
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 12),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const Divider(height: 26),
+                ],
                 Text(
-                  'Frais engagés sur la commande (livraison, emballage…). '
-                  'Modifiable à tout moment, même après encaissement.',
+                  widget.showDeliveryPrice
+                      ? 'Autres dépenses (emballage…) — AJOUTÉES au total à '
+                        'payer par le client.'
+                      : 'Dépenses de la commande (livraison, emballage…) — '
+                        'ajoutées au total à payer par le client.',
                   style: AppTextStyles.bodySm.copyWith(
                       color: Theme.of(context)
                           .colorScheme
@@ -185,7 +275,7 @@ class _OrderFeesSheetState extends State<_OrderFeesSheet> {
                             child: TextField(
                               controller: r.label,
                               style: AppTextStyles.body,
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 labelText: 'Libellé',
                                 labelStyle: AppTextStyles.caption,
                                 isDense: true,
@@ -207,7 +297,7 @@ class _OrderFeesSheetState extends State<_OrderFeesSheet> {
                               ],
                               onChanged: (_) => setState(() {}),
                               style: AppTextStyles.body,
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 labelText: 'Montant',
                                 labelStyle: AppTextStyles.caption,
                                 isDense: true,

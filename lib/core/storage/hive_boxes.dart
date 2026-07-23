@@ -60,6 +60,13 @@ class HiveBoxes {
   // partenaire de livraison sans pull réseau à chaque rendu.
   static const String deliveryTransfers = 'delivery_transfers_box';
 
+  // Frais de livraison par quartier (cf. système livraison-quartiers).
+  // - deliveryZones     : regroupements nommés (Centre-ville, Banlieue…)
+  // - deliveryQuartiers : quartier (ville + nom + prix), rattaché à une zone.
+  // Cache offline-first synchronisé via Realtime (passthrough par shop_id).
+  static const String deliveryZones     = 'delivery_zones_box';
+  static const String deliveryQuartiers = 'delivery_quartiers_box';
+
   // Messagerie hiérarchique (cf. hotfix_055, phase 4).
   // - shopTickets    : tickets ouverts par les membres de la shop
   // - ticketMessages : messages échangés sur les tickets
@@ -85,6 +92,16 @@ class HiveBoxes {
   // PNG jusqu'à confirmation d'upload Supabase. Cap à 50 entries (FIFO
   // drop) pour éviter une saturation IndexedDB sur web (~2 Mo × 50 = 100 Mo).
   static const String pendingImageUploads = 'pending_image_uploads_box';
+
+  // Module restaurant — plan de salle (une ligne = une table physique) et
+  // groupes de modificateurs de menu (cuisson, suppléments…). Passthrough :
+  // les lignes sont les Map Supabase brutes, clé = id TEXT généré client.
+  static const String restaurantTables = 'restaurant_tables_box';
+  static const String menuModifiers    = 'menu_modifiers_box';
+  /// Disponibilités du jour d'un restaurant : par (shopId, productId), un
+  /// enregistrement `{date, enabled, count}`. Réinitialisé chaque jour (une
+  /// entrée dont la `date` n'est pas aujourd'hui est ignorée → défaut dispo).
+  static const String dailyMenuAvailability = 'daily_menu_availability_box';
 
   static Future<void> init() async {
     debugPrint('[Hive] HBX-A init() entered, kIsWeb=$kIsWeb');
@@ -139,11 +156,16 @@ class HiveBoxes {
       await _safeOpenMap(whatsappTemplates);
       await _safeOpenMap(promoCampaigns);
       await _safeOpenMap(deliveryTransfers);
+      await _safeOpenMap(deliveryZones);
+      await _safeOpenMap(deliveryQuartiers);
       await _safeOpenMap(shopTickets);
       await _safeOpenMap(ticketMessages);
       await _safeOpen(acknowledgedAlerts);
       await _safeOpenMap(partnerLedger);
       await _safeOpenMap(pendingImageUploads);
+      await _safeOpenMap(restaurantTables);
+      await _safeOpenMap(menuModifiers);
+      await _safeOpenMap(dailyMenuAvailability);
       debugPrint('[Hive] HBX-D all boxes opened (some may have failed)');
     } catch (e, st) {
       debugPrint('[Hive] HBX-FATAL outer init error: $e');
@@ -214,10 +236,12 @@ class HiveBoxes {
     activityLogs, expenses, notifications,
     stockLocations, stockLevels, stockTransfers,
     deliveryTemplates, whatsappTemplates, promoCampaigns, deliveryTransfers,
+    deliveryZones, deliveryQuartiers,
     shopTickets, ticketMessages,
     acknowledgedAlerts,
     partnerLedger,
     pendingImageUploads,
+    restaurantTables, menuModifiers, dailyMenuAvailability,
   ];
 
   static Future<void> _safeClose(String boxName) async {
@@ -307,10 +331,16 @@ class HiveBoxes {
   static Box<Map>   get whatsappTemplatesBox => Hive.box<Map>(whatsappTemplates);
   static Box<Map>   get promoCampaignsBox    => Hive.box<Map>(promoCampaigns);
   static Box<Map>   get deliveryTransfersBox => Hive.box<Map>(deliveryTransfers);
+  static Box<Map>   get deliveryZonesBox     => Hive.box<Map>(deliveryZones);
+  static Box<Map>   get deliveryQuartiersBox => Hive.box<Map>(deliveryQuartiers);
   static Box<Map>   get shopTicketsBox    => Hive.box<Map>(shopTickets);
   static Box<Map>   get ticketMessagesBox => Hive.box<Map>(ticketMessages);
   static Box        get acknowledgedAlertsBox => Hive.box(acknowledgedAlerts);
   static Box<Map>   get partnerLedgerBox      => Hive.box<Map>(partnerLedger);
   static Box<Map>   get pendingImageUploadsBox =>
       Hive.box<Map>(pendingImageUploads);
+  static Box<Map>   get restaurantTablesBox => Hive.box<Map>(restaurantTables);
+  static Box<Map>   get menuModifiersBox    => Hive.box<Map>(menuModifiers);
+  static Box<Map>   get dailyMenuAvailabilityBox =>
+      Hive.box<Map>(dailyMenuAvailability);
 }

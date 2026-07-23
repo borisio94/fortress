@@ -130,7 +130,12 @@ class SaleStatusTransitions {
       SaleStatus.refused,
     },
     SaleStatus.completed:  {
-      SaleStatus.refunded, // retour client — UNIQUE sortie de completed
+      SaleStatus.refunded, // retour client
+      // Correction d'erreur / re-finalisation : repasser une commande
+      // complétée en « programmée ». Le datasource restitue alors le stock
+      // et remet le paiement à zéro ; l'appelant (caisse_page) purge les
+      // écritures partenaire de la commande. Action réservée admin.
+      SaleStatus.scheduled,
     },
     SaleStatus.cancelled:  {},
     SaleStatus.refused:    {},
@@ -233,6 +238,20 @@ class Sale extends Equatable {
   /// Adresse précise de livraison (rue, quartier, immeuble).
   final String? deliveryAddress;
 
+  /// Quartier de livraison sélectionné (système frais par quartier, PR-2).
+  /// Texte (nom du quartier), figé sur la commande.
+  final String? deliveryQuartier;
+
+  /// Zone de livraison (regroupement) du quartier choisi, si renseignée.
+  final String? deliveryZone;
+
+  /// Prix de livraison (FCFA) du quartier choisi. **AJOUTÉ au [total]**
+  /// facturé au client (contrairement aux [fees] absorbés par la boutique).
+  /// `null` = « frais à fixer » (commande web dont le quartier n'est pas
+  /// répertorié — le marchand fixera le prix). `0` = livraison gratuite.
+  /// `>0` = montant. Cf. système frais par quartier (PR-2/PR-3).
+  final double? deliveryPrice;
+
   /// Ville d'origine de l'expédition (où l'agence prend le colis).
   /// Utilisé uniquement quand `deliveryMode = shipment`.
   final String? shipmentCity;
@@ -304,6 +323,20 @@ class Sale extends Equatable {
   /// décrémentés (réservés). Évite de re-décrémenter à la complétion.
   final bool stockReserved;
 
+  // ── Module restaurant (hotfix_137) ────────────────────────────────────
+  /// Table du plan de salle rattachée à la commande. `null` pour toute
+  /// commande non servie en salle (e-commerce, à emporter, comptoir).
+  final String? tableId;
+  /// Nombre de couverts du service. `null` hors service en salle.
+  final int? covers;
+  /// Canal de service : `dine_in` (salle) · `takeaway` · `delivery`.
+  /// Non-nullable avec défaut, comme [source] — la colonne est NOT NULL.
+  final String orderType;
+  /// Bon envoyé en cuisine (alimente l'écran Cuisine).
+  final bool sentToKitchen;
+  /// Préparation terminée, prête à être servie.
+  final bool kitchenReady;
+
   const Sale({
     this.id,
     required this.shopId,
@@ -326,6 +359,9 @@ class Sale extends Equatable {
     this.createdByUserId,
     this.deliveryCity,
     this.deliveryAddress,
+    this.deliveryQuartier,
+    this.deliveryZone,
+    this.deliveryPrice,
     this.shipmentCity,
     this.shipmentAgency,
     this.shipmentHandler,
@@ -340,23 +376,36 @@ class Sale extends Equatable {
     this.deleteReason,
     this.isApprovalSale = false,
     this.stockReserved  = false,
+    this.tableId,
+    this.covers,
+    this.orderType      = 'takeaway',
+    this.sentToKitchen  = false,
+    this.kitchenReady   = false,
   });
 
   /// True si la commande est soft-deleted (cf. hotfix_084).
   bool get isDeleted => deletedAt != null;
 
   double get subtotal  => items.fold(0, (s, i) => s + i.subtotal);
-  /// Somme des frais de commande (livraison, emballage…). Ces frais sont
-  /// comptabilisés comme **dépenses absorbées par la boutique** : ils
-  /// réduisent la marge mais n'augmentent **pas** le prix de vente
-  /// facturé au client (voir [total]).
+  /// Somme des dépenses supplémentaires de la commande (emballage, etc.).
+  /// Elles s'AJOUTENT au total facturé au client (voir [total]) — elles ne
+  /// sont plus « absorbées » par la boutique.
   double get totalFees => fees.fold(0.0, (s, f) => s + ((f['amount'] as num?)?.toDouble() ?? 0));
   double get taxAmount => (subtotal - discountAmount) * taxRate / 100;
-  /// Total facturé au client = prix articles (après remise) + TVA.
-  /// Les frais sont absorbés et ne s'ajoutent PAS au prix de vente — ils
-  /// sont répartis proportionnellement comme dépenses sur le prix de revient
-  /// des articles côté dashboard/rapports.
-  double get total     => subtotal - discountAmount + taxAmount;
+  /// Total facturé au client = PRIX DE VENTE + TOUTES les dépenses
+  /// supplémentaires, qui s'ajustent PAR-DESSUS le prix de vente (sans s'y
+  /// intégrer) :
+  ///   • prix de vente = prix des articles (prix MODIFIÉ pris en compte)
+  ///     − remise + TVA ;
+  ///   • [deliveryPrice] = frais de livraison (quartier / saisis) ;
+  ///   • [totalFees]     = autres dépenses (emballage…).
+  /// Plus aucun frais absorbé : chaque dépense majore le total.
+  double get total =>
+      subtotal - discountAmount + taxAmount + (deliveryPrice ?? 0) + totalFees;
+
+  /// `true` si c'est une commande web dont les frais de livraison restent à
+  /// fixer par le marchand (quartier non répertorié → `deliveryPrice` null).
+  bool get deliveryFeeToFix => deliveryPrice == null && source == 'web';
 
   /// Reste à payer = total − amountPaid, jamais négatif. Pour les commandes
   /// dont `paymentStatus = paid`, retourne 0 (couvre les commandes legacy
@@ -384,6 +433,9 @@ class Sale extends Equatable {
     String? createdByUserId,
     String? deliveryCity,
     String? deliveryAddress,
+    String? deliveryQuartier,
+    String? deliveryZone,
+    double? deliveryPrice,
     String? shipmentCity,
     String? shipmentAgency,
     String? shipmentHandler,
@@ -399,6 +451,17 @@ class Sale extends Equatable {
     bool      clearDeleted = false,
     bool?     isApprovalSale,
     bool?     stockReserved,
+    String?   tableId,
+    int?      covers,
+    String?   orderType,
+    bool?     sentToKitchen,
+    bool?     kitchenReady,
+    /// Détache la commande de sa table (libération après encaissement).
+    /// Indispensable : ce `copyWith` résout les nullables par `??`, donc
+    /// `copyWith(tableId: null)` serait un no-op silencieux et la commande
+    /// resterait accrochée à une table déjà libérée. Même mécanisme que
+    /// [clearDeleted] ci-dessus.
+    bool      clearTable = false,
   }) => Sale(
     id:                 id             ?? this.id,
     shopId:             shopId         ?? this.shopId,
@@ -421,6 +484,9 @@ class Sale extends Equatable {
     createdByUserId:    createdByUserId    ?? this.createdByUserId,
     deliveryCity:       deliveryCity       ?? this.deliveryCity,
     deliveryAddress:    deliveryAddress    ?? this.deliveryAddress,
+    deliveryQuartier:   deliveryQuartier   ?? this.deliveryQuartier,
+    deliveryZone:       deliveryZone       ?? this.deliveryZone,
+    deliveryPrice:      deliveryPrice      ?? this.deliveryPrice,
     shipmentCity:       shipmentCity       ?? this.shipmentCity,
     shipmentAgency:     shipmentAgency     ?? this.shipmentAgency,
     shipmentHandler:    shipmentHandler    ?? this.shipmentHandler,
@@ -435,8 +501,25 @@ class Sale extends Equatable {
     deleteReason: clearDeleted ? null : (deleteReason ?? this.deleteReason),
     isApprovalSale: isApprovalSale ?? this.isApprovalSale,
     stockReserved:  stockReserved  ?? this.stockReserved,
+    tableId:        clearTable ? null : (tableId ?? this.tableId),
+    covers:         clearTable ? null : (covers  ?? this.covers),
+    orderType:      orderType      ?? this.orderType,
+    sentToKitchen:  sentToKitchen  ?? this.sentToKitchen,
+    kitchenReady:   kitchenReady   ?? this.kitchenReady,
   );
 
+  /// True si la commande est servie en salle (rattachée à une table).
+  bool get isDineIn => orderType == 'dine_in';
+
+  /// True si le bon est en cours de préparation en cuisine.
+  bool get isInKitchen => sentToKitchen && !kitchenReady;
+
   @override
-  List<Object?> get props => [id, shopId, items, total, status];
+  // `sentToKitchen`/`kitchenReady`/`tableId` sont dans props À DESSEIN :
+  // sans eux, un ticket qui passe « envoyé » → « prêt » ne changerait pas
+  // l'égalité Equatable et l'écran Cuisine resterait figé alors que la
+  // donnée a bougé.
+  List<Object?> get props =>
+      [id, shopId, items, total, status,
+       tableId, sentToKitchen, kitchenReady];
 }

@@ -637,14 +637,14 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
           if (has)
             InkWell(
               onTap: () => setState(() => _date = null),
-              child: const Padding(
-                padding: EdgeInsets.all(2),
+              child: Padding(
+                padding: const EdgeInsets.all(2),
                 child: Icon(Icons.close_rounded,
                     size: 14, color: AppColors.textHint),
               ),
             )
           else
-            const Icon(Icons.chevron_right_rounded,
+            Icon(Icons.chevron_right_rounded,
                 size: 16, color: AppColors.textHint),
         ]),
       ),

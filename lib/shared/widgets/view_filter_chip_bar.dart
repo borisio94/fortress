@@ -93,9 +93,14 @@ class _ViewFilterChipBarState extends ConsumerState<ViewFilterChipBar> {
     final sem      = theme.semantic;
     final selected = ref.watch(dashViewFilterProvider);
     final partners = _partners();
-    // Sécurité : sur les pages où « Globale » est masqué (ex. Vente),
-    // un état null laisserait aucun chip actif. On force '_base'.
-    if (!widget.showGlobal && selected == null) {
+    // « Globale » (boutique + partenaires agrégés) n'a de sens QUE s'il y a
+    // plus d'un emplacement à agréger : la boutique + au moins un partenaire.
+    // Avec la seule boutique (aucun partenaire), « Globale » est identique à
+    // l'onglet boutique → on le masque (demande utilisateur).
+    final effectiveShowGlobal = widget.showGlobal && partners.isNotEmpty;
+    // Sécurité : sur les pages/cas où « Globale » est masqué, un état null
+    // laisserait aucun chip actif. On force '_base'.
+    if (!effectiveShowGlobal && selected == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         if (ref.read(dashViewFilterProvider) == null) {
@@ -178,7 +183,7 @@ class _ViewFilterChipBarState extends ConsumerState<ViewFilterChipBar> {
     // Construit la liste des items dans un ordre stable :
     // [Globale (optionnel)] · Boutique · Partenaires…
     final builders = <Widget Function(bool useTabs)>[
-      if (widget.showGlobal)
+      if (effectiveShowGlobal)
         (useTabs) {
           final args = (
             label:  'Globale',

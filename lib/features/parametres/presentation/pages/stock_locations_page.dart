@@ -382,7 +382,7 @@ class _Section extends StatelessWidget {
                       ? 'Aucun $title pour le moment.'
                       : 'Aucun $title.',
                   style: AppTextStyles.bodySm.copyWith(
-                      color: const Color(0xFF9CA3AF))),
+                      color: AppColors.textHint)),
             )
           else
             ...locations.map((l) => _LocationTile(
@@ -461,7 +461,7 @@ class _LocationTile extends StatelessWidget {
     final sem = Theme.of(context).semantic;
     if (b > 0) return sem.success;
     if (b < 0) return sem.danger;
-    return const Color(0xFF9CA3AF);
+    return AppColors.textHint;
   }
 
   int _itemsCount() {
@@ -504,7 +504,7 @@ class _LocationTile extends StatelessWidget {
     final tile = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(children: [
@@ -525,7 +525,7 @@ class _LocationTile extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFEE2E2),
+                      color: AppColors.error.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text('Inactif',
@@ -540,7 +540,7 @@ class _LocationTile extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: AppTextStyles.caption.copyWith(
-                        color: const Color(0xFF9CA3AF))),
+                        color: AppColors.textHint)),
               ],
               if (balance != null) ...[
                 const SizedBox(height: 3),
@@ -568,14 +568,14 @@ class _LocationTile extends StatelessWidget {
                 style: AppTextStyles.label.copyWith(color: color)),
             Text('unités',
                 style: AppTextStyles.micro.copyWith(
-                    color: const Color(0xFF9CA3AF))),
+                    color: AppColors.textHint)),
           ],
         ),
         if (onEdit != null || onDelete != null) ...[
           const SizedBox(width: 6),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert_rounded,
-                size: 16, color: Color(0xFF9CA3AF)),
+            icon: Icon(Icons.more_vert_rounded,
+                size: 16, color: AppColors.textHint),
             padding: EdgeInsets.zero,
             onSelected: (v) {
               if (v == 'edit') onEdit?.call();

@@ -174,13 +174,13 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     decoration: BoxDecoration(
-                      color: isPositive ? AppColors.secondary.withValues(alpha:0.1) : const Color(0xFFF9FAFB),
+                      color: isPositive ? AppColors.secondary.withValues(alpha:0.1) : AppColors.surface,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: isPositive
                           ? AppColors.secondary : Theme.of(ctx).semantic.borderSubtle)),
                     child: Column(children: [
                       Icon(Icons.add_circle_rounded, size: 24,
-                          color: isPositive ? AppColors.secondary : const Color(0xFFD1D5DB)),
+                          color: isPositive ? AppColors.secondary : AppColors.textHint),
                       const SizedBox(height: 4),
                       Text('Entrée', style: AppTextStyles.bodySmBold.copyWith(
                           color: isPositive ? AppColors.secondary : AppColors.textHint)),
@@ -193,13 +193,13 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     decoration: BoxDecoration(
-                      color: !isPositive ? AppColors.error.withValues(alpha:0.1) : const Color(0xFFF9FAFB),
+                      color: !isPositive ? AppColors.error.withValues(alpha:0.1) : AppColors.surface,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: !isPositive
                           ? AppColors.error : Theme.of(ctx).semantic.borderSubtle)),
                     child: Column(children: [
                       Icon(Icons.remove_circle_rounded, size: 24,
-                          color: !isPositive ? AppColors.error : const Color(0xFFD1D5DB)),
+                          color: !isPositive ? AppColors.error : AppColors.textHint),
                       const SizedBox(height: 4),
                       Text('Sortie', style: AppTextStyles.bodySmBold.copyWith(
                           color: !isPositive ? AppColors.error : AppColors.textHint)),
@@ -215,7 +215,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                 style: AppTextStyles.title,
                 decoration: InputDecoration(
                   hintText: '0', labelText: 'Quantité',
-                  filled: true, fillColor: const Color(0xFFF9FAFB),
+                  filled: true, fillColor: AppColors.inputFill,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
                       borderSide: BorderSide(color: Theme.of(ctx).semantic.borderSubtle)),
                 ),
@@ -227,7 +227,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                 decoration: InputDecoration(
                   hintText: 'Raison de l\'ajustement...',
                   labelText: 'Notes',
-                  filled: true, fillColor: const Color(0xFFF9FAFB),
+                  filled: true, fillColor: AppColors.inputFill,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
                       borderSide: BorderSide(color: Theme.of(ctx).semantic.borderSubtle)),
                 ),
@@ -312,19 +312,19 @@ class _Summary extends StatelessWidget {
         Expanded(child: Column(children: [
           Text('$entries', style: AppTextStyles.subtitleBold.copyWith(
               fontWeight: FontWeight.w800, color: AppColors.secondary)),
-          const Text('Entrées', style: AppTextStyles.micro),
+          Text('Entrées', style: AppTextStyles.micro),
         ])),
         Container(width: 1, height: 28, color: Theme.of(context).semantic.borderSubtle),
         Expanded(child: Column(children: [
           Text('$exits', style: AppTextStyles.subtitleBold.copyWith(
               fontWeight: FontWeight.w800, color: AppColors.error)),
-          const Text('Sorties', style: AppTextStyles.micro),
+          Text('Sorties', style: AppTextStyles.micro),
         ])),
         Container(width: 1, height: 28, color: Theme.of(context).semantic.borderSubtle),
         Expanded(child: Column(children: [
           Text('${movements.length}', style: AppTextStyles.subtitleBold.copyWith(
               fontWeight: FontWeight.w800, color: AppColors.primary)),
-          const Text('Total mvts', style: AppTextStyles.micro),
+          Text('Total mvts', style: AppTextStyles.micro),
         ])),
       ]),
     );
@@ -387,7 +387,7 @@ class _MovementCard extends StatelessWidget {
           const SizedBox(height: 4),
           Row(children: [
             if (actor.isNotEmpty) ...[
-              const Icon(Icons.person_outline_rounded, size: 11,
+              Icon(Icons.person_outline_rounded, size: 11,
                   color: AppColors.textHint),
               const SizedBox(width: 3),
               Flexible(child: Text(actor,
@@ -395,7 +395,7 @@ class _MovementCard extends StatelessWidget {
                   style: AppTextStyles.micro)),
               const SizedBox(width: 8),
             ],
-            const Icon(Icons.access_time_rounded, size: 11,
+            Icon(Icons.access_time_rounded, size: 11,
                 color: AppColors.textHint),
             const SizedBox(width: 3),
             Text(_fmtDate(m.createdAt),

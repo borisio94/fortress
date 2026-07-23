@@ -3,15 +3,19 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/database/app_database.dart';
+import '../../../../core/services/delivery_zone_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/app_switch.dart';
+import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../crm/domain/entities/client.dart';
 import '../../../crm/presentation/pages/clients_page.dart' show ClientFormSheet;
+import '../../../parametres/domain/entities/delivery_quartier.dart';
+import '../../../parametres/domain/entities/delivery_zone.dart';
 import '../../domain/entities/sale.dart' show DeliveryMode;
 
 /// Résultat du sheet "Enregistrer commande" (sprint UX commande).
@@ -42,6 +46,11 @@ class OrderCreationResult {
   /// le client en garde certains, le reste revient. Si `true`, le stock est
   /// réservé à la création puis réconcilié à la clôture de la tournée.
   final bool      isApprovalSale;
+  /// Frais de livraison par quartier (PR-2). `deliveryPrice` MAJORE le total
+  /// facturé. `deliveryQuartier`/`deliveryZone` figés sur la commande.
+  final double    deliveryPrice;
+  final String?   deliveryQuartier;
+  final String?   deliveryZone;
   const OrderCreationResult({
     required this.client,
     required this.scheduledAt,
@@ -50,6 +59,9 @@ class OrderCreationResult {
     required this.createdAt,
     this.amountPaid = 0,
     this.isApprovalSale = false,
+    this.deliveryPrice = 0,
+    this.deliveryQuartier,
+    this.deliveryZone,
   });
 }
 
@@ -73,6 +85,10 @@ Future<OrderCreationResult?> showOrderCreationSheet(
   // exigés (retrait en boutique = pas d'adresse). `null` ou tout autre mode →
   // comportement historique (ville/quartier requis).
   DeliveryMode? deliveryMode,
+  // Livraison par quartier (PR-2) — pré-remplissage en édition.
+  double?   initialDeliveryPrice,
+  String?   initialQuartier,
+  String?   initialZone,
 }) {
   return showFormSheet<OrderCreationResult>(
     context: context,
@@ -87,6 +103,9 @@ Future<OrderCreationResult?> showOrderCreationSheet(
       initialIsApprovalSale: initialIsApprovalSale,
       lockApproval:          lockApproval,
       deliveryMode:          deliveryMode,
+      initialDeliveryPrice:  initialDeliveryPrice,
+      initialQuartier:       initialQuartier,
+      initialZone:           initialZone,
     ),
   );
 }
@@ -102,6 +121,9 @@ class _OrderCreationSheet extends StatefulWidget {
   final bool      initialIsApprovalSale;
   final bool      lockApproval;
   final DeliveryMode? deliveryMode;
+  final double?   initialDeliveryPrice;
+  final String?   initialQuartier;
+  final String?   initialZone;
   const _OrderCreationSheet({
     required this.shopId,
     this.initialClient,
@@ -113,6 +135,9 @@ class _OrderCreationSheet extends StatefulWidget {
     this.initialIsApprovalSale = false,
     this.lockApproval = false,
     this.deliveryMode,
+    this.initialDeliveryPrice,
+    this.initialQuartier,
+    this.initialZone,
   });
   @override
   State<_OrderCreationSheet> createState() => _OrderCreationSheetState();
@@ -139,6 +164,19 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
   bool _isApprovalSale = false;
   String? _error;
 
+  // ── Livraison par quartier (PR-2) ─────────────────────────────────────────
+  List<String>           _cities    = [];
+  List<DeliveryZone>     _zones     = [];
+  List<DeliveryQuartier> _quartiers = []; // pour la ville courante
+  String? _selectedQuartierId;
+  double  _deliveryPrice = 0;
+  String? _deliveryQuartierName;
+  String? _deliveryZoneName;
+  String? _zoneFilter;     // chip de zone sélectionné (filtre la liste)
+  bool    _showManual = false;
+  late final TextEditingController _manualNameCtrl;
+  late final TextEditingController _manualPriceCtrl;
+
   @override
   void initState() {
     super.initState();
@@ -151,6 +189,15 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
     _addressCtrl = TextEditingController(
         text: widget.initialAddress ?? widget.initialClient?.district ?? '');
     _amountPaidCtrl = TextEditingController();
+    _manualNameCtrl  = TextEditingController();
+    _manualPriceCtrl = TextEditingController();
+    // Livraison par quartier : charge le référentiel de la boutique.
+    _cities = DeliveryZoneService.citiesForShop(widget.shopId);
+    _zones  = DeliveryZoneService.zonesForShop(widget.shopId);
+    _deliveryPrice        = widget.initialDeliveryPrice ?? 0;
+    _deliveryQuartierName = widget.initialQuartier;
+    _deliveryZoneName     = widget.initialZone;
+    _reloadQuartiers();
   }
 
   @override
@@ -158,13 +205,76 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
     _cityCtrl.dispose();
     _addressCtrl.dispose();
     _amountPaidCtrl.dispose();
+    _manualNameCtrl.dispose();
+    _manualPriceCtrl.dispose();
     super.dispose();
   }
+
+  /// Recharge les quartiers configurés pour la ville saisie + restaure la
+  /// sélection si le quartier pré-rempli existe encore dans la liste.
+  void _reloadQuartiers() {
+    final city = _cityCtrl.text.trim();
+    _quartiers = city.isEmpty
+        ? <DeliveryQuartier>[]
+        : DeliveryZoneService.quartiersForShop(widget.shopId, city: city);
+    // Re-synchroniser la sélection avec le nom pré-rempli (édition).
+    if (_selectedQuartierId == null && _deliveryQuartierName != null) {
+      final match = _quartiers.where(
+          (q) => q.name.toLowerCase() == _deliveryQuartierName!.toLowerCase());
+      if (match.isNotEmpty) _selectedQuartierId = match.first.id;
+    }
+  }
+
+  String? _zoneNameOf(String? zoneId) {
+    if (zoneId == null) return null;
+    final z = _zones.where((e) => e.id == zoneId);
+    return z.isEmpty ? null : z.first.name;
+  }
+
+  void _selectQuartier(DeliveryQuartier q) {
+    setState(() {
+      _selectedQuartierId   = q.id;
+      _deliveryPrice        = q.price.toDouble();
+      _deliveryQuartierName = q.name;
+      _deliveryZoneName     = _zoneNameOf(q.zoneId);
+      _addressCtrl.text     = q.name; // l'adresse figée = le quartier
+      _showManual = false;
+      _error = null;
+    });
+  }
+
+  Future<void> _addManualQuartier() async {
+    final city  = _cityCtrl.text.trim();
+    final name  = _manualNameCtrl.text.trim();
+    final price = int.tryParse(_manualPriceCtrl.text.trim().replaceAll(' ', ''));
+    if (city.isEmpty) {
+      setState(() => _error = 'Renseigne d\'abord la ville.');
+      return;
+    }
+    if (name.isEmpty || price == null || price < 0) {
+      setState(() => _error = 'Nom du quartier + prix valides requis.');
+      return;
+    }
+    final q = await DeliveryZoneService.addQuartier(
+        shopId: widget.shopId, city: city, name: name, price: price);
+    if (!mounted) return;
+    setState(() {
+      _quartiers =
+          DeliveryZoneService.quartiersForShop(widget.shopId, city: city);
+      _manualNameCtrl.clear();
+      _manualPriceCtrl.clear();
+    });
+    _selectQuartier(q);
+    if (mounted) AppSnack.success(context, 'Quartier ajouté à votre liste');
+  }
+
+  /// Total facturé au client = articles + livraison choisie.
+  double get _effectiveTotal => (widget.orderTotal ?? 0) + _deliveryPrice;
 
   /// Calcule le montant déjà encaissé selon le choix utilisateur.
   /// Capé au total pour éviter une incohérence en cas de saisie > total.
   double _resolveAmountPaid() {
-    final total = widget.orderTotal ?? 0;
+    final total = _effectiveTotal;
     switch (_paymentChoice) {
       case _PaymentChoice.none:
         return 0;
@@ -290,6 +400,9 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
       createdAt:       _createdAt,
       amountPaid:      _resolveAmountPaid(),
       isApprovalSale:  _isApprovalSale,
+      deliveryPrice:    isPickup ? 0 : _deliveryPrice,
+      deliveryQuartier: isPickup ? null : _deliveryQuartierName,
+      deliveryZone:     isPickup ? null : _deliveryZoneName,
     ));
   }
 
@@ -302,6 +415,303 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
   bool _isToday(DateTime d) {
     final now = DateTime.now();
     return d.year == now.year && d.month == now.month && d.day == now.day;
+  }
+
+  void _onCityChanged() {
+    setState(() {
+      // Ville modifiée → la sélection quartier n'a plus de sens.
+      _selectedQuartierId   = null;
+      _deliveryPrice        = 0;
+      _deliveryQuartierName = null;
+      _deliveryZoneName     = null;
+      _zoneFilter           = null;
+      _showManual           = false;
+      _error                = null;
+      _reloadQuartiers();
+    });
+  }
+
+  /// Section livraison « par quartier » : ville (étape A) → quartier avec
+  /// prix (étape B) → ajout manuel (étape C) → récapitulatif.
+  List<Widget> _buildDeliveryByQuartier(BuildContext context) {
+    final sem  = Theme.of(context).semantic;
+    final city = _cityCtrl.text.trim();
+    final hasCity = city.isNotEmpty;
+    // Zones présentes parmi les quartiers de la ville (pour les chips).
+    final zoneIds = _quartiers
+        .map((q) => q.zoneId)
+        .whereType<String>()
+        .toSet()
+        .toList();
+    final visibleQuartiers = _zoneFilter == null
+        ? _quartiers
+        : _quartiers.where((q) => q.zoneId == _zoneFilter).toList();
+
+    return [
+      // ── Étape A : Ville ────────────────────────────────────────────────
+      TextField(
+        controller: _cityCtrl,
+        style: AppTextStyles.body.copyWith(color: AppColors.onSurface),
+        onChanged: (_) => _onCityChanged(),
+        decoration: InputDecoration(
+          labelText: 'Ville',
+          labelStyle:
+              AppTextStyles.bodySm.copyWith(color: AppColors.textSecondary),
+          hintText: 'Douala',
+          hintStyle: AppTextStyles.bodySm.copyWith(color: AppColors.textHint),
+          isDense: true,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: sem.borderSubtle)),
+          enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: sem.borderSubtle)),
+          focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
+        ),
+      ),
+      // Villes configurées (remplissage rapide).
+      if (_cities.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Wrap(spacing: 6, runSpacing: 6, children: [
+          for (final c in _cities)
+            ActionChip(
+              label: Text(c, style: AppTextStyles.caption),
+              onPressed: () {
+                _cityCtrl.text = c;
+                _onCityChanged();
+              },
+              backgroundColor: AppColors.primarySurface,
+              side: BorderSide(color: AppColors.primary.withValues(alpha: 0.3)),
+              visualDensity: VisualDensity.compact,
+            ),
+        ]),
+      ],
+
+      // ── Étape B : Quartier (visible seulement si ville saisie) ─────────
+      if (hasCity) ...[
+        const SizedBox(height: 14),
+        _SectionLabel('Quartier de livraison'),
+        // Chips de zone (si des zones existent pour cette ville).
+        if (zoneIds.length > 1) ...[
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            ChoiceChip(
+              label: const Text('Toutes'),
+              selected: _zoneFilter == null,
+              onSelected: (_) => setState(() => _zoneFilter = null),
+              labelStyle: AppTextStyles.caption,
+            ),
+            for (final zid in zoneIds)
+              ChoiceChip(
+                label: Text(_zoneNameOf(zid) ?? 'Zone'),
+                selected: _zoneFilter == zid,
+                onSelected: (_) => setState(() => _zoneFilter = zid),
+                labelStyle: AppTextStyles.caption,
+              ),
+          ]),
+          const SizedBox(height: 8),
+        ],
+        if (_quartiers.isEmpty)
+          // Aucun quartier configuré pour cette ville → saisie libre de
+          // l'adresse (fallback) + possibilité d'ajouter un quartier.
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _LabeledField(
+              label: 'Quartier / adresse',
+              controller: _addressCtrl,
+              hint: 'Bonapriso',
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Aucun tarif de livraison configuré pour « $city ». '
+              'Saisissez l\'adresse, ou ajoutez un quartier tarifé ci-dessous.',
+              style: AppTextStyles.captionHint
+                  .copyWith(color: AppColors.textSecondary),
+            ),
+          ])
+        else
+          // Menu déroulant (compact) — évite une longue liste verticale.
+          InputDecorator(
+            decoration: InputDecoration(
+              isDense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              filled: true,
+              fillColor: AppColors.inputFill,
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: sem.borderSubtle)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: sem.borderSubtle)),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: visibleQuartiers.any((q) => q.id == _selectedQuartierId)
+                    ? _selectedQuartierId
+                    : null,
+                isExpanded: true,
+                isDense: true,
+                hint: Text('Choisir le quartier',
+                    style:
+                        AppTextStyles.body.copyWith(color: AppColors.textHint)),
+                icon: const Icon(Icons.arrow_drop_down_rounded),
+                style: AppTextStyles.body.copyWith(color: AppColors.onSurface),
+                items: [
+                  for (final q in visibleQuartiers)
+                    DropdownMenuItem<String>(
+                      value: q.id,
+                      child: Row(children: [
+                        Expanded(
+                          child: Text(q.name,
+                              maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.body
+                                  .copyWith(color: AppColors.onSurface)),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(CurrencyFormatter.format(q.price.toDouble()),
+                            style: AppTextStyles.bodyBold
+                                .copyWith(color: AppColors.textSecondary)),
+                      ]),
+                    ),
+                ],
+                onChanged: (id) {
+                  if (id == null) return;
+                  final q = visibleQuartiers.firstWhere((e) => e.id == id);
+                  _selectQuartier(q);
+                },
+              ),
+            ),
+          ),
+        const SizedBox(height: 8),
+        // ── Étape C : Quartier non listé ──────────────────────────────
+        if (!_showManual)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => setState(() => _showManual = true),
+              icon: const Icon(Icons.add_location_alt_outlined, size: 16),
+              label: const Text('Quartier non listé ?'),
+              style: TextButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  padding: EdgeInsets.zero),
+            ),
+          )
+        else
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.inputFill,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: sem.borderSubtle),
+            ),
+            child: Column(children: [
+              _LabeledField(
+                label: 'Nom du quartier',
+                controller: _manualNameCtrl,
+                hint: 'Ex. Logbessou',
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _manualPriceCtrl,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                ],
+                style: AppTextStyles.body.copyWith(color: AppColors.onSurface),
+                decoration: InputDecoration(
+                  labelText: 'Prix livraison (FCFA)',
+                  labelStyle: AppTextStyles.bodySm
+                      .copyWith(color: AppColors.textSecondary),
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: sem.borderSubtle)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: sem.borderSubtle)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide:
+                          BorderSide(color: AppColors.primary, width: 1.5)),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => setState(() => _showManual = false),
+                    child: const Text('Annuler'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _addManualQuartier,
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        elevation: 0),
+                    child: const Text('Ajouter et sélectionner'),
+                  ),
+                ),
+              ]),
+            ]),
+          ),
+      ],
+
+      // ── Récapitulatif ──────────────────────────────────────────────────
+      if (widget.orderTotal != null) ...[
+        const SizedBox(height: 14),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.primarySurface,
+            borderRadius: BorderRadius.circular(10),
+            border:
+                Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+          ),
+          child: Column(children: [
+            _recapRow('Produits', _fmtMoney(widget.orderTotal!)),
+            if (_deliveryPrice > 0) ...[
+              const SizedBox(height: 4),
+              _recapRow(
+                  'Livraison'
+                  '${_deliveryQuartierName != null ? ' — $_deliveryQuartierName' : ''}',
+                  '+ ${_fmtMoney(_deliveryPrice)}'),
+            ],
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Divider(height: 1, color: sem.borderSubtle),
+            ),
+            _recapRow('Total client', _fmtMoney(_effectiveTotal), bold: true),
+          ]),
+        ),
+      ],
+    ];
+  }
+
+  Widget _recapRow(String label, String value, {bool bold = false}) {
+    return Row(children: [
+      Expanded(
+        child: Text(label,
+            style: bold
+                ? AppTextStyles.bodyBold
+                : AppTextStyles.bodySm
+                    .copyWith(color: AppColors.textSecondary)),
+      ),
+      Text(value,
+          style: bold
+              ? AppTextStyles.bodyBold.copyWith(color: AppColors.primary)
+              : AppTextStyles.bodySm),
+    ]);
   }
 
   @override
@@ -356,55 +766,14 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
                               minWidth: 28, minHeight: 28),
                         ),
                 ),
-                const SizedBox(height: 14),
-                // FIX 2 — retrait en boutique : pas d'adresse à saisir.
-                if (widget.deliveryMode == DeliveryMode.pickup) ...[
+                // Retrait en boutique → aucune section « Lieu de livraison »
+                // (pavé « aucune adresse requise » redondant, supprimé). La
+                // section n'apparaît que pour une vraie livraison, avec le
+                // choix du quartier (→ frais de livraison).
+                if (widget.deliveryMode != DeliveryMode.pickup) ...[
+                  const SizedBox(height: 14),
                   _SectionLabel('Lieu de livraison'),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: AppColors.inputFill,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: Theme.of(context).semantic.borderSubtle),
-                    ),
-                    child: Row(children: [
-                      const Icon(Icons.storefront_outlined,
-                          size: 16, color: AppColors.textSecondary),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Retrait en boutique — aucune adresse de livraison requise.',
-                          style: AppTextStyles.captionHint.copyWith(
-                              color: AppColors.textSecondary),
-                        ),
-                      ),
-                    ]),
-                  ),
-                ] else ...[
-                  _SectionLabel('Lieu de livraison'),
-                  _LabeledField(
-                    label: 'Ville',
-                    controller: _cityCtrl,
-                    hint: 'Douala',
-                  ),
-                  const SizedBox(height: 8),
-                  _LabeledField(
-                    label: 'Quartier / adresse',
-                    controller: _addressCtrl,
-                    hint: 'Bonapriso',
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Pré-rempli depuis la fiche client. Si modifié, la fiche '
-                    'sera mise à jour ; cette commande conservera l\'adresse '
-                    'exacte saisie ici.',
-                    style: AppTextStyles.captionHint.copyWith(
-                        color: Theme.of(context).colorScheme.onSurface
-                            .withValues(alpha: 0.55)),
-                  ),
+                  ..._buildDeliveryByQuartier(context),
                 ],
                 // ── Vente « à choisir sur place » ────────────────────
                 // Le livreur emporte plusieurs articles, le client en garde
@@ -424,7 +793,7 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
                 if ((widget.orderTotal ?? 0) > 0) ...[
                   const SizedBox(height: 16),
                   _SectionLabel(
-                      'Paiement reçu — Total ${_fmtMoney(widget.orderTotal!)}'),
+                      'Paiement reçu — Total ${_fmtMoney(_effectiveTotal)}'),
                   _PaymentChoiceRow(
                     selected: _paymentChoice,
                     onChanged: (v) => setState(() => _paymentChoice = v),
@@ -562,7 +931,7 @@ class _PickerTile extends StatelessWidget {
             ],
           ])),
           if (trailing != null) trailing!
-          else const Icon(Icons.chevron_right_rounded,
+          else Icon(Icons.chevron_right_rounded,
               size: 18, color: AppColors.textHint),
         ]),
       ),
@@ -684,6 +1053,7 @@ class _LabeledField extends StatelessWidget {
   }
 }
 
+
 // ─── Mini picker client (recherche + bouton créer) ─────────────────────────
 
 class _MiniClientPicker extends StatefulWidget {
@@ -773,7 +1143,7 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
                 hintText: 'Rechercher par numéro ou nom…',
                 hintStyle: AppTextStyles.bodySm
                     .copyWith(color: AppColors.textHint),
-                prefixIcon: const Icon(Icons.search_rounded,
+                prefixIcon: Icon(Icons.search_rounded,
                     size: 16, color: AppColors.textHint),
                 filled: true, fillColor: AppColors.inputFill,
                 isDense: true,

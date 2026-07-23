@@ -94,7 +94,7 @@ class _CurrencyPageState extends ConsumerState<CurrencyPage> {
                 decoration: BoxDecoration(
                   color: selected
                       ? AppColors.primary.withValues(alpha:0.1)
-                      : const Color(0xFFF3F4F6),
+                      : AppColors.inputFill,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Center(
@@ -104,7 +104,7 @@ class _CurrencyPageState extends ConsumerState<CurrencyPage> {
                           fontWeight: FontWeight.w800,
                           color: selected
                               ? AppColors.primary
-                              : const Color(0xFF6B7280))),
+                              : AppColors.textSecondary)),
                 ),
               ),
               title: Text(c.code,
@@ -115,13 +115,13 @@ class _CurrencyPageState extends ConsumerState<CurrencyPage> {
                           ? AppColors.primary
                           : Theme.of(context).colorScheme.onSurface)),
               subtitle: Text(c.name(isFr),
-                  style: const TextStyle(
-                      fontSize: 12, color: Color(0xFF6B7280))),
+                  style: TextStyle(
+                      fontSize: 12, color: AppColors.textSecondary)),
               trailing: selected
                   ? Icon(Icons.check_circle,
                       color: AppColors.primary, size: 22)
-                  : const Icon(Icons.circle_outlined,
-                      color: Color(0xFFD1D5DB), size: 22),
+                  : Icon(Icons.circle_outlined,
+                      color: AppColors.textHint, size: 22),
               onTap: () => _select(c.code),
             ),
           );

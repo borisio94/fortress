@@ -71,12 +71,18 @@ Future<OrderCompletionResult?> showOrderCompletionSheet(
   double orderTotal = 0,
   /// Acompte déjà encaissé par la boutique avant la clôture.
   double amountPaidBefore = 0,
+  /// `true` uniquement si la commande est LIVRÉE PAR UN PARTENAIRE
+  /// (deliveryMode == partner). Sinon (livraison équipe boutique, retrait sur
+  /// place…) l'option « Partenaire — pas encore versé » n'a aucun sens : on
+  /// masque la section « Qui a encaissé ? » et l'encaissement est forcément
+  /// boutique → aucun bandeau bleu « à verser ».
+  bool allowPartnerCollected = true,
 }) {
   return showFormSheet<OrderCompletionResult>(
     context: context,
     builder: (_) => _OrderCompletionSheet(
       initialFees:        initialFees,
-      defaultCollectedBy: orderAlreadyFullyPaid
+      defaultCollectedBy: (orderAlreadyFullyPaid || !allowPartnerCollected)
           ? CollectedBy.boutique
           : defaultCollectedBy,
       partnerName:        partnerName,
@@ -84,6 +90,7 @@ Future<OrderCompletionResult?> showOrderCompletionSheet(
       orderAlreadyFullyPaid: orderAlreadyFullyPaid,
       orderTotal:         orderTotal,
       amountPaidBefore:   amountPaidBefore,
+      allowPartnerCollected: allowPartnerCollected,
     ),
   );
 }
@@ -96,6 +103,7 @@ class _OrderCompletionSheet extends StatefulWidget {
   final bool           orderAlreadyFullyPaid;
   final double         orderTotal;
   final double         amountPaidBefore;
+  final bool           allowPartnerCollected;
   const _OrderCompletionSheet({
     required this.initialFees,
     required this.defaultCollectedBy,
@@ -104,6 +112,7 @@ class _OrderCompletionSheet extends StatefulWidget {
     this.orderAlreadyFullyPaid = false,
     this.orderTotal = 0,
     this.amountPaidBefore = 0,
+    this.allowPartnerCollected = true,
   });
   @override
   State<_OrderCompletionSheet> createState() => _OrderCompletionSheetState();
@@ -143,7 +152,10 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
   @override
   void initState() {
     super.initState();
-    _collectedBy = widget.defaultCollectedBy;
+    // Sans livraison partenaire, l'encaissement est forcément boutique.
+    _collectedBy = widget.allowPartnerCollected
+        ? widget.defaultCollectedBy
+        : CollectedBy.boutique;
     _completedAt = DateTime.now();
     if (_due > 0) _collectedNow.text = _due.toStringAsFixed(0);
     _rows = widget.initialFees.map((f) => _FeeRow(
@@ -425,6 +437,11 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Section « Qui a encaissé ? » UNIQUEMENT si la commande est
+                // livrée par un partenaire. Sinon (livraison équipe boutique,
+                // retrait sur place…) l'encaissement est forcément boutique →
+                // pas de choix à faire, pas de bandeau bleu « à verser ».
+                if (widget.allowPartnerCollected) ...[
                 Text(
                   'Qui a encaissé le client ?',
                   style: AppTextStyles.captionBold.copyWith(
@@ -446,7 +463,7 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFECFDF5),
+                      color: AppColors.secondary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
                           color: AppColors.secondary
@@ -482,6 +499,7 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                     balanceBefore: widget.partnerBalanceBefore!,
                   ),
                 ],
+                ], // fin section « Qui a encaissé ? » (partenaire uniquement)
                 // ── Encaissement du client (vente à crédit) ──────────
                 // Visible quand la boutique encaisse une commande pas encore
                 // soldée. L'opérateur saisit le montant réellement reçu ; le
@@ -545,7 +563,7 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                     Expanded(flex: 3, child: TextField(
                       controller: r.label,
                       style: AppTextStyles.body,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Libellé',
                         labelStyle: AppTextStyles.caption,
                         isDense: true,
@@ -565,7 +583,7 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                       ],
                       onChanged: (_) => setState(() {}),
                       style: AppTextStyles.body,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Montant',
                         labelStyle: AppTextStyles.caption,
                         isDense: true,
@@ -750,8 +768,8 @@ class _PartnerBalanceHint extends StatelessWidget {
         ? AppColors.error
         : AppColors.secondary;
     final bg    = isDebt
-        ? const Color(0xFFFEF2F2)
-        : const Color(0xFFECFDF5);
+        ? AppColors.error.withValues(alpha: 0.12)
+        : AppColors.secondary.withValues(alpha: 0.12);
     final label = isDebt
         ? 'Vous lui devez ${CurrencyFormatter.format(balanceBefore.abs())} '
           '— sera déduit du montant qu\'il vous reversera'

@@ -3,7 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../bloc/shop_selector_bloc.dart';
-import '../../../../core/config/app_modes.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
@@ -53,7 +53,7 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
   final _phoneCtrl   = TextEditingController();
   final _emailCtrl   = TextEditingController();
 
-  String _sector   = kEcommerceOnlyMode ? 'ecommerce' : 'retail';
+  String _sector   = kDefaultSector;
   late String _country;
   late String _currency;
 
@@ -186,9 +186,9 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
                     child: Container(
                       width: isDesktop ? 480 : double.infinity,
                       decoration: isDesktop ? BoxDecoration(
-                          color: Colors.white,
+                          color: AppColors.surface,
                           borderRadius: BorderRadius.circular(20)) : null,
-                      color: isDesktop ? null : Colors.white,
+                      color: isDesktop ? null : AppColors.surface,
                       padding: EdgeInsets.symmetric(
                           horizontal: isDesktop ? 36 : 20,
                           vertical: isDesktop ? 36 : 24),
@@ -207,11 +207,11 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
                               child: Container(
                                 padding: const EdgeInsets.all(7),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFF3F4F6),
+                                  color: AppColors.inputFill,
                                   borderRadius: BorderRadius.circular(8),
                                 ),
-                                child: const Icon(Icons.close,
-                                    size: 16, color: Color(0xFF6B7280)),
+                                child: Icon(Icons.close,
+                                    size: 16, color: AppColors.textSecondary),
                               ),
                             ),
                           ]),
@@ -233,12 +233,12 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
                           Center(child: Text(l.shopNew,
                               style: AppTextStyles.title.copyWith(
                                   fontWeight: FontWeight.w800,
-                                  color: const Color(0xFF0F172A)))),
+                                  color: AppColors.onSurface))),
                           const SizedBox(height: 4),
                           Center(child: Text(
                               'Configurez votre espace de vente',
                               style: AppTextStyles.bodySm.copyWith(
-                                  color: const Color(0xFF6B7280)))),
+                                  color: AppColors.textSecondary))),
                           const SizedBox(height: 28),
 
                           // ── Nom boutique ─────────────────────────
@@ -254,19 +254,26 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
                           if (_nameError != null) _ErrText(_nameError!),
                           const SizedBox(height: 14),
 
-                          // ── Secteur ──────────────────────────────
-                          // Masqué en mode e-commerce unique (réversible :
-                          // kEcommerceOnlyMode). Le code du sélecteur est
-                          // conservé pour réactivation future.
-                          if (!kEcommerceOnlyMode) ...[
-                            AppFieldLabel('Secteur d\'activité', required: true),
-                            const SizedBox(height: 8),
-                            _SectorPicker(
-                              value: _sector,
-                              onChanged: (v) => setState(() => _sector = v),
+                          // ── Type d'établissement ─────────────────
+                          // Choix DÉFINITIF, non modifiable ensuite : il
+                          // détermine l'ergonomie (caisse e-commerce ou
+                          // service en salle) et les modules disponibles.
+                          const AppFieldLabel('Type d\'établissement',
+                              required: true),
+                          const SizedBox(height: 8),
+                          _SectorPicker(
+                            value: _sector,
+                            onChanged: (v) => setState(() => _sector = v),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6, left: 2),
+                            child: Text(
+                              'Ce choix est définitif et ne pourra pas être '
+                              'modifié après la création.',
+                              style: AppTextStyles.micro,
                             ),
-                            const SizedBox(height: 14),
-                          ],
+                          ),
+                          const SizedBox(height: 14),
 
                           // ── Info pays/monnaie déduits automatiquement ─
                           _CountryInfo(country: _country, currency: _currency),
@@ -398,13 +405,14 @@ class _SectorPicker extends StatelessWidget {
   final ValueChanged<String> onChanged;
   const _SectorPicker({required this.value, required this.onChanged});
 
+  // Choix DÉFINITIF : le secteur détermine toute l'ergonomie de l'app et
+  // n'est plus modifiable après création (cf. kCreationSectors). Les
+  // secteurs legacy (retail, supermarche, pharmacie, autre) restent valides
+  // en base pour le parc existant mais ne sont plus proposés.
   static const _sectors = [
-    ('retail',      'Commerce',      Icons.storefront_rounded,           Color(0xFF6C3FC7)),
-    ('restaurant',  'Restaurant',    Icons.restaurant_rounded,           Color(0xFFEF4444)),
-    ('supermarche', 'Supermarché',   Icons.local_grocery_store_rounded,  Color(0xFF10B981)),
-    ('pharmacie',   'Pharmacie',     Icons.local_pharmacy_rounded,       Color(0xFF3B82F6)),
-    ('ecommerce',   'E-commerce',    Icons.shopping_bag_rounded,         Color(0xFFF59E0B)),
-    ('autre',       'Autre',         Icons.store_rounded,                Color(0xFF8B5CF6)),
+    ('ecommerce',   'E-commerce',    Icons.shopping_bag_rounded, Color(0xFFF59E0B)),
+    ('restaurant',  'Restaurant',    Icons.restaurant_rounded,   Color(0xFFEF4444)),
+    ('fastfood',    'Fast-food',     Icons.restaurant_rounded,   Color(0xFF10B981)),
   ];
 
   @override
@@ -421,21 +429,21 @@ class _SectorPicker extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color: selected
-                ? color.withValues(alpha:0.10) : const Color(0xFFF9FAFB),
+                ? color.withValues(alpha:0.10) : AppColors.surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: selected ? color : const Color(0xFFE5E7EB),
+              color: selected ? color : AppColors.divider,
               width: selected ? 1.5 : 1,
             ),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(icon, size: 15,
-                color: selected ? color : const Color(0xFF9CA3AF)),
+                color: selected ? color : AppColors.textHint),
             const SizedBox(width: 6),
             Text(label, style: AppTextStyles.bodySm.copyWith(
                 fontWeight:
                 selected ? FontWeight.w600 : FontWeight.normal,
-                color: selected ? color : const Color(0xFF6B7280))),
+                color: selected ? color : AppColors.textSecondary)),
           ]),
         ),
       );

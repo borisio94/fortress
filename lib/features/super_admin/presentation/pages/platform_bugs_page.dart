@@ -133,7 +133,7 @@ class _PlatformBugsSectionState extends State<PlatformBugsSection> {
           Icon(Icons.check_circle_outline_rounded,
               size: 40, color: Theme.of(context).semantic.borderSubtle),
           const SizedBox(height: 12),
-          const Text('Aucun bug signalé', style: AppTextStyles.bodySecondary),
+          Text('Aucun bug signalé', style: AppTextStyles.bodySecondary),
         ],
       ),
     );

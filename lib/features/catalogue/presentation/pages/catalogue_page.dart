@@ -334,6 +334,7 @@ class _CataloguePageState extends State<CataloguePage> {
                   ?? 0,
               imageUrl: (v['image_url'] as String?) ??
                   p['image_url'] as String?,
+              isMain: v['is_main'] as bool? ?? false,
               categoryId: p['category_id'] as String?,
               description: p['description'] as String?,
               createdAt:   DateTime.tryParse(
@@ -542,12 +543,12 @@ class _CataloguePageState extends State<CataloguePage> {
     final pid = widget.highlightProductId;
     if (pid == null || widget.deliveryMode) return;
     _highlightHandled = true;
-    _CatalogueItem? target;
-    for (final it in data.items) {
-      if (it.productId == pid) { target = it; break; }
-    }
-    if (target == null) return; // produit non visible/rupture → catalogue normal
-    final t = target;
+    // Ouvre sur la variante MISE EN AVANT du produit (comme la boutique),
+    // pas la première rencontrée dans la liste.
+    final matches =
+        data.items.where((it) => it.productId == pid).toList();
+    if (matches.isEmpty) return; // produit non visible/rupture → catalogue normal
+    final t = _featuredAmong(matches);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _openProductSheet(data, t);
     });
@@ -701,6 +702,10 @@ class _CatalogueItem {
   final double  price;
   final int     stock;
   final String? imageUrl;
+  /// Variante explicitement « mise en avant » par le marchand (`is_main`).
+  /// Sert de tie-breaker pour désigner la variante hero — identique à la
+  /// logique POS (`Product.featuredVariant`) — dans la fiche détail.
+  final bool    isMain;
   final String? categoryId;
   /// Description produit (si exposée par le RPC public). Affichée dans la
   /// fiche détail. Null = pas de description / RPC ne la renvoie pas.
@@ -720,6 +725,7 @@ class _CatalogueItem {
     required this.stock,
     required this.imageUrl,
     required this.categoryId,
+    this.isMain = false,
     this.description,
     this.createdAt,
   });
@@ -732,6 +738,20 @@ class _CatalogueItem {
   }
 
   String get key => variantId == null ? productId : '$productId|$variantId';
+}
+
+/// Variante « mise en avant » parmi [items] (variantes d'un même produit).
+/// Réplique la logique POS (`Product.featuredVariant`) pour que la vitrine
+/// web mette en avant exactement la même variante hero que la boutique :
+/// plus grand stock disponible, égalité tranchée par la variante marquée
+/// `isMain`, sinon la 1ʳᵉ stable (tri par id/nom). [items] est supposé non
+/// vide (toutes les variantes en rupture sont déjà masquées du catalogue).
+_CatalogueItem _featuredAmong(List<_CatalogueItem> items) {
+  final maxStock = items.fold<int>(0, (m, v) => v.stock > m ? v.stock : m);
+  final tied = items.where((v) => v.stock == maxStock).toList()
+    ..sort((a, b) => (a.variantId ?? a.variantName ?? a.productId)
+        .compareTo(b.variantId ?? b.variantName ?? b.productId));
+  return tied.firstWhere((v) => v.isMain, orElse: () => tied.first);
 }
 
 class _ShopHeaderData {
@@ -747,6 +767,21 @@ class _ShopHeaderData {
   final String? city;
   const _ShopHeaderData({
     required this.name, this.phone, this.logoUrl, this.city});
+}
+
+/// Quartier de livraison configuré, lu via la RPC publique
+/// `get_public_delivery_quartiers` (PR-3 frais de livraison par quartier).
+class _WebQuartier {
+  final String  city;
+  final String  name;
+  final int     price;
+  final String? zone;
+  const _WebQuartier({
+    required this.city,
+    required this.name,
+    required this.price,
+    this.zone,
+  });
 }
 
 /// Coordonnées client saisies à la commande — renvoyées par
@@ -928,12 +963,12 @@ class _SearchRow extends StatelessWidget {
                 hintText: 'Rechercher un produit...',
                 hintStyle: AppTextStyles.bodySm
                     .copyWith(color: AppColors.textHint),
-                prefixIcon: const Icon(Icons.search_rounded,
+                prefixIcon: Icon(Icons.search_rounded,
                     size: 18, color: AppColors.textHint),
                 suffixIcon: controller.text.isEmpty
                     ? null
                     : IconButton(
-                        icon: const Icon(Icons.close_rounded,
+                        icon: Icon(Icons.close_rounded,
                             size: 16, color: AppColors.textHint),
                         splashRadius: 18,
                         onPressed: () {
@@ -1118,6 +1153,88 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
   bool _submitting = false;
   String? _error;
 
+  // ── Frais de livraison par quartier (PR-3) ────────────────────────────────
+  List<_WebQuartier> _quartiers = const [];
+  int?    _deliveryPrice;   // null = à confirmer (ou ville vide)
+  String? _deliveryZone;
+  bool    _quartierKnown = false; // quartier saisi reconnu dans la liste
+
+  @override
+  void initState() {
+    super.initState();
+    _cityCtrl.addListener(_recomputeDelivery);
+    _districtCtrl.addListener(_recomputeDelivery);
+    _loadQuartiers();
+  }
+
+  Future<void> _loadQuartiers() async {
+    try {
+      final rows = await Supabase.instance.client.rpc(
+          'get_public_delivery_quartiers',
+          params: {'p_shop_id': widget.shopId});
+      if (!mounted || rows is! List) return;
+      setState(() {
+        _quartiers = rows.map((r) {
+          final m = Map<String, dynamic>.from(r as Map);
+          return _WebQuartier(
+            city:  (m['city'] ?? '') as String,
+            name:  (m['name'] ?? '') as String,
+            price: (m['price'] as num?)?.toInt() ?? 0,
+            zone:  m['zone_id'] as String?,
+          );
+        }).toList();
+      });
+      _recomputeDelivery();
+    } catch (e) {
+      debugPrint('[Catalogue] get_public_delivery_quartiers error: $e');
+    }
+  }
+
+  static String _norm(String s) => s.trim().toLowerCase();
+
+  /// Villes configurées (depuis les quartiers) — pour l'autocomplete ville.
+  List<String> get _configuredCities {
+    final set = <String>{};
+    for (final q in _quartiers) {
+      if (q.city.trim().isNotEmpty) set.add(q.city.trim());
+    }
+    return set.toList()..sort();
+  }
+
+  /// Quartiers configurés pour la ville actuellement saisie.
+  List<_WebQuartier> get _cityQuartiers {
+    final c = _norm(_cityCtrl.text);
+    if (c.isEmpty) return const [];
+    return _quartiers.where((q) => _norm(q.city) == c).toList();
+  }
+
+  /// Recalcule le prix de livraison selon la ville + le quartier saisis.
+  void _recomputeDelivery() {
+    final c = _norm(_cityCtrl.text);
+    final d = _norm(_districtCtrl.text);
+    _WebQuartier? match;
+    if (c.isNotEmpty && d.isNotEmpty) {
+      for (final q in _quartiers) {
+        if (_norm(q.city) == c && _norm(q.name) == d) { match = q; break; }
+      }
+    }
+    final newKnown = match != null;
+    final newPrice = match?.price;
+    final newZone  = match?.zone;
+    if (newKnown != _quartierKnown ||
+        newPrice != _deliveryPrice ||
+        newZone != _deliveryZone) {
+      setState(() {
+        _quartierKnown = newKnown;
+        _deliveryPrice = newPrice;
+        _deliveryZone  = newZone;
+      });
+    }
+  }
+
+  /// Total facturé = produits + livraison (si connue).
+  double get _grandTotal => _total + (_deliveryPrice ?? 0).toDouble();
+
   Future<void> _pickDeliveryDate() async {
     final now = DateTime.now();
     final picked = await showDatePicker(
@@ -1240,6 +1357,11 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
         'p_client_district': district.isEmpty ? null : district,
         'p_notes':           note.isEmpty ? null : note,
         'p_scheduled_at':    _deliveryDate?.toUtc().toIso8601String(),
+        // Livraison par quartier (PR-3). `p_delivery_price` null = quartier
+        // non répertorié → « frais à fixer » côté marchand (dashboard).
+        'p_delivery_price':    _deliveryPrice,
+        'p_delivery_quartier': district.isEmpty ? null : district,
+        'p_delivery_zone':     _deliveryZone,
       });
       debugPrint('[Catalogue] commande créée : $orderId');
       if (!mounted) return;
@@ -1249,7 +1371,7 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
         city:     city,
         district: district,
         orderId:  orderId?.toString(),
-        total:    _total,
+        total:    _grandTotal,
       ));
     } catch (e) {
       debugPrint('[Catalogue] place_public_order error: $e');
@@ -1397,7 +1519,7 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
                       ]),
                     ),
                   const SizedBox(height: 12),
-                  // ── Total à payer (fond primary light) ──
+                  // ── Récap : Produits + Livraison + Total ──
                   Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 12),
@@ -1405,14 +1527,48 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
                       color: AppColors.primarySurface,
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Row(children: [
-                      Text('Total à payer',
-                          style: AppTextStyles.label
-                              .copyWith(color: AppColors.onSurface)),
-                      const Spacer(),
-                      Text(CurrencyFormatter.format(_total),
-                          style: AppTextStyles.subtitleBold
-                              .copyWith(color: AppColors.primary)),
+                    child: Column(children: [
+                      Row(children: [
+                        Text('Produits',
+                            style: AppTextStyles.bodySm
+                                .copyWith(color: AppColors.textSecondary)),
+                        const Spacer(),
+                        Text(CurrencyFormatter.format(_total),
+                            style: AppTextStyles.bodySm),
+                      ]),
+                      if (_cityCtrl.text.trim().isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Row(children: [
+                          Text('Livraison',
+                              style: AppTextStyles.bodySm
+                                  .copyWith(color: AppColors.textSecondary)),
+                          const Spacer(),
+                          Text(
+                              _quartierKnown
+                                  ? '+ ${CurrencyFormatter.format(
+                                      _deliveryPrice!.toDouble())}'
+                                  : 'À confirmer',
+                              style: AppTextStyles.bodySm.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: _quartierKnown
+                                      ? AppColors.onSurface
+                                      : AppColors.warning)),
+                        ]),
+                      ],
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Divider(
+                            height: 1, color: theme.semantic.borderSubtle),
+                      ),
+                      Row(children: [
+                        Text('Total à payer',
+                            style: AppTextStyles.label
+                                .copyWith(color: AppColors.onSurface)),
+                        const Spacer(),
+                        Text(CurrencyFormatter.format(_grandTotal),
+                            style: AppTextStyles.subtitleBold
+                                .copyWith(color: AppColors.primary)),
+                      ]),
                     ]),
                   ),
                   const SizedBox(height: 18),
@@ -1456,23 +1612,79 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
                           hint: 'Ex : Yaoundé',
                           prefixIcon: Icons.location_city_outlined,
                           required: true,
-                          suggestions: const [
+                          // Villes configurées par la boutique en priorité,
+                          // puis repli sur les grandes villes du Cameroun.
+                          suggestions: <String>{
+                            ..._configuredCities,
                             'Douala', 'Yaoundé', 'Bafoussam', 'Bamenda',
                             'Garoua', 'Maroua', 'Ngaoundéré', 'Bertoua',
                             'Ebolowa', 'Kribi', 'Limbé', 'Buea',
-                          ],
+                          }.toList(),
                           validator: _validateCity,
+                          // Rafraîchit la visibilité + les suggestions du
+                          // champ quartier dès que la ville change.
+                          onChanged: (_) => setState(() {}),
                         ),
-                        const SizedBox(height: 10),
-                        AutocompleteTextField(
-                          controller: _districtCtrl,
-                          label: 'Quartier',
-                          hint: 'Ex : Bastos',
-                          prefixIcon: Icons.maps_home_work_outlined,
-                          required: true,
-                          suggestions: const [],
-                          validator: _validateDistrict,
-                        ),
+                        // Quartier : MASQUÉ tant que la ville n'est pas saisie.
+                        if (_cityCtrl.text.trim().isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          AutocompleteTextField(
+                            controller: _districtCtrl,
+                            label: 'Quartier',
+                            hint: 'Ex : Bastos',
+                            prefixIcon: Icons.maps_home_work_outlined,
+                            required: true,
+                            suggestions: _cityQuartiers
+                                .map((q) => q.name).toList(),
+                            validator: _validateDistrict,
+                            onChanged: (_) => setState(() {}),
+                          ),
+                          // Cas « quartier non répertorié » → forfait à confirmer.
+                          if (_districtCtrl.text.trim().isNotEmpty
+                              && !_quartierKnown) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: AppColors.warning.withValues(alpha: 0.10),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                    color: AppColors.warning
+                                        .withValues(alpha: 0.4)),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(Icons.info_outline_rounded,
+                                      size: 16, color: AppColors.warning),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text('Prix forfaitaire à confirmer',
+                                            style: AppTextStyles.captionBold
+                                                .copyWith(
+                                                    color: AppColors.warning)),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'Votre quartier n\'est pas encore '
+                                          'dans notre liste. Les frais de '
+                                          'livraison seront fixés à l\'amiable '
+                                          'entre vous et la boutique lors de la '
+                                          'confirmation de votre commande.',
+                                          style: AppTextStyles.caption.copyWith(
+                                              color: AppColors.textSecondary),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
                         const SizedBox(height: 14),
                         // Date de livraison souhaitée (OBLIGATOIRE).
                         const AppFieldLabel('Date de livraison souhaitée',
@@ -1500,7 +1712,7 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
                                   size: 16,
                                   color: _deliveryDate != null
                                       ? theme.colorScheme.primary
-                                      : const Color(0xFFAAAAAA)),
+                                      : AppColors.textHint),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
@@ -1513,8 +1725,8 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
                                           ? FontWeight.w600
                                           : FontWeight.w400,
                                       color: _deliveryDate != null
-                                          ? const Color(0xFF1A1D2E)
-                                          : const Color(0xFFBBBBBB)),
+                                          ? AppColors.onSurface
+                                          : AppColors.textHint),
                                 ),
                               ),
                               // Champ obligatoire : on remplace l'icône
@@ -1576,7 +1788,13 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
                             width: 18, height: 18,
                             child: CircularProgressIndicator(
                                 strokeWidth: 2, color: Colors.white))
-                        : Text('Confirmer ma commande',
+                        : Text(
+                            (_cityCtrl.text.trim().isNotEmpty
+                                    && _districtCtrl.text.trim().isNotEmpty
+                                    && !_quartierKnown)
+                                ? 'Commander — frais à confirmer'
+                                : 'Commander — '
+                                    '${CurrencyFormatter.format(_grandTotal)}',
                             style: AppTextStyles.label
                                 .copyWith(color: Colors.white)),
                   ),
@@ -1820,7 +2038,7 @@ class _OrderConfirmedSheet extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              const Icon(Icons.tag_rounded,
+              Icon(Icons.tag_rounded,
                   size: 14, color: AppColors.textHint),
               const SizedBox(width: 6),
               Text('Référence : ', style: AppTextStyles.caption),
@@ -2047,7 +2265,7 @@ class _CardImage extends StatelessWidget {
             ? const SizedBox(
                 width: 22, height: 22,
                 child: CircularProgressIndicator(strokeWidth: 2))
-            : const Icon(Icons.image_outlined,
+            : Icon(Icons.image_outlined,
                 size: 28, color: AppColors.textHint),
       );
 
@@ -2296,6 +2514,10 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
     final theme = Theme.of(context);
     final sem   = theme.semantic;
     final hasGallery = widget.siblings.length > 1;
+    // Variante hero = celle mise en avant dans la boutique (même règle POS).
+    final featuredKey = hasGallery
+        ? _featuredAmong(widget.siblings).key
+        : _active.key;
 
     return DraggableScrollableSheet(
       initialChildSize: 0.92,
@@ -2326,7 +2548,7 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
               ),
               IconButton(
                 onPressed: () => Navigator.of(context).pop(),
-                icon: const Icon(Icons.close_rounded,
+                icon: Icon(Icons.close_rounded,
                     size: 20, color: AppColors.textHint),
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(
@@ -2360,7 +2582,7 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
                 ),
                 const SizedBox(height: 8),
                 Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  const Icon(Icons.zoom_in_rounded,
+                  Icon(Icons.zoom_in_rounded,
                       size: 13, color: AppColors.textHint),
                   const SizedBox(width: 4),
                   Text('Pincez ou faites défiler pour zoomer',
@@ -2368,7 +2590,8 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
                           .copyWith(color: AppColors.textHint)),
                 ]),
 
-                // ── Variantes (chips : actif = primary, épuisé = barré) ──
+                // ── Variantes : vignettes image (active = anneau primary,
+                // hero boutique = badge « ★ », épuisée = voilée) ──────────
                 if (hasGallery) ...[
                   const SizedBox(height: 16),
                   Text('Choix',
@@ -2376,13 +2599,13 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
                           fontWeight: FontWeight.w700, letterSpacing: 0.4)),
                   const SizedBox(height: 8),
                   Wrap(
-                    spacing: 8, runSpacing: 8,
+                    spacing: 10, runSpacing: 12,
                     children: [
                       for (final s in widget.siblings)
-                        _VariantChip(
-                          label:    s.variantName ?? s.baseProductName,
+                        _VariantThumb(
+                          item:     s,
                           selected: s.key == _active.key,
-                          soldOut:  s.stock <= 0,
+                          featured: s.key == featuredKey,
                           onTap:    () => _select(s),
                         ),
                     ],
@@ -2507,41 +2730,122 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
 
 /// Chip de variante dans la fiche détail : actif = fond/bordure primary clair ;
 /// épuisé = grisé + texte barré (non cliquable). Cf. spec catalogue.
-class _VariantChip extends StatelessWidget {
-  final String label;
+/// Vignette image d'une variante dans la fiche détail (zone « Choix »).
+/// - Sélectionnée → anneau primary + pastille de coche.
+/// - Mise en avant boutique (`featured`) → badge étoile en haut à gauche
+///   (même variante hero que celle affichée dans la boutique / le POS).
+/// - Épuisée → image voilée + libellé « Épuisé », tap désactivé.
+class _VariantThumb extends StatelessWidget {
+  final _CatalogueItem item;
   final bool selected;
-  final bool soldOut;
+  final bool featured;
   final VoidCallback onTap;
-  const _VariantChip({
-    required this.label,
+  const _VariantThumb({
+    required this.item,
     required this.selected,
-    required this.soldOut,
+    required this.featured,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? AppColors.primary : AppColors.divider;
+    final soldOut = item.stock <= 0;
+    final label = item.variantName ?? item.baseProductName;
     return GestureDetector(
       onTap: soldOut ? null : onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.primarySurface
-              : (soldOut ? AppColors.inputFill : AppColors.surface),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-              color: color, width: selected ? 1.5 : 1),
-        ),
-        child: Text(label,
-            style: AppTextStyles.caption.copyWith(
+      child: SizedBox(
+        width: 78,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 78, height: 78,
+                  decoration: BoxDecoration(
+                    color: AppColors.inputFill,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: selected ? AppColors.primary : AppColors.divider,
+                      width: selected ? 2 : 1,
+                    ),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(11),
+                    child: Opacity(
+                      opacity: soldOut ? 0.4 : 1,
+                      child: ProductImageCard(
+                        imageUrl:   item.imageUrl,
+                        fillParent: true,
+                      ),
+                    ),
+                  ),
+                ),
+                // Badge « mis en avant » = variante hero de la boutique.
+                if (featured)
+                  Positioned(
+                    top: 4, left: 4,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.star_rounded,
+                          size: 12, color: Colors.white),
+                    ),
+                  ),
+                // Pastille de coche sur la variante sélectionnée.
+                if (selected)
+                  Positioned(
+                    bottom: 4, right: 4,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.check_rounded,
+                          size: 12, color: Colors.white),
+                    ),
+                  ),
+                // Voile « Épuisé ».
+                if (soldOut)
+                  Positioned.fill(
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text('Épuisé',
+                            style: AppTextStyles.micro
+                                .copyWith(color: Colors.white)),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: AppTextStyles.micro.copyWith(
                 color: soldOut
                     ? AppColors.textHint
-                    : (selected ? AppColors.primary : AppColors.onSurface),
+                    : (selected
+                        ? AppColors.primary
+                        : AppColors.textSecondary),
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                decoration:
-                    soldOut ? TextDecoration.lineThrough : null)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

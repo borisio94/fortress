@@ -24,6 +24,13 @@ class RouteNames {
   static const dashboard = '/shop/:shopId/dashboard';
   static const caisse = '/shop/:shopId/caisse';
   static const inventaire = '/shop/:shopId/inventaire';
+  static const restaurantTables = '/shop/:shopId/restaurant/tables';
+  static const restaurantKitchen = '/shop/:shopId/restaurant/cuisine';
+  static const restaurantBill = '/shop/:shopId/restaurant/addition/:tableId';
+  static const restaurantTakeaway = '/shop/:shopId/restaurant/takeaway';
+  static const menuModifiers = '/shop/:shopId/parametres/menu-modifiers';
+  static const restaurantTableOrder =
+      '/shop/:shopId/restaurant/table/:tableId';
   static const crm = '/shop/:shopId/crm';
   static const clientDetail = '/shop/:shopId/crm/client/:clientId';
   static const finances = '/shop/:shopId/finances';

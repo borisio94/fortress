@@ -126,19 +126,32 @@ class _CaissePageState extends ConsumerState<CaissePage> {
     // (pas de sens en vente), donc on doit avoir un onglet actif cohérent.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final dashFilter = ref.read(dashViewFilterProvider);
-      if (dashFilter == null) {
+      if (ref.read(dashViewFilterProvider) == null) {
         ref.read(dashViewFilterProvider.notifier).state = '_base';
-        return;
       }
-      if (dashFilter == '_base') return;
-      final bloc = context.read<CaisseBloc>();
-      if (bloc.state.items.isNotEmpty) return;
-      if (bloc.state.deliveryMode != null) return;
-      if ((bloc.state.deliveryLocationId ?? '').isNotEmpty) return;
+      _applyDefaultCartLocation();
+    });
+  }
+
+  /// Rattache le panier au lieu par défaut pour que le bouton « Enregistrer la
+  /// commande » ne soit JAMAIS grisé faute de lieu :
+  /// - vue Partenaire → lieu du partenaire sélectionné ;
+  /// - vue Boutique   → lieu de la boutique ACTIVE (`widget.shopId`).
+  /// Ré-appliqué au démarrage ET dès que le lieu redevient vide (après un
+  /// ClearCart : vente passée, panier vidé, retour sur la page). Sans ça,
+  /// `deliveryLocationId` restait null après coup → bouton grisé.
+  void _applyDefaultCartLocation() {
+    if (!mounted) return;
+    final bloc = context.read<CaisseBloc>();
+    if ((bloc.state.deliveryLocationId ?? '').isNotEmpty) return; // déjà rattaché
+    final dashFilter = ref.read(dashViewFilterProvider);
+    if (dashFilter != null && dashFilter != '_base') {
       bloc.add(SetDeliveryMode(
           mode: DeliveryMode.partner, locationId: dashFilter));
-    });
+    } else {
+      final shopLoc = AppDatabase.getShopLocation(widget.shopId);
+      if (shopLoc != null) bloc.add(SetCartLocation(shopLoc.id));
+    }
   }
 
   /// Détermine le secteur de façon DÉTERMINISTE depuis la boutique de CETTE
@@ -211,6 +224,18 @@ class _CaissePageState extends ConsumerState<CaissePage> {
             });
           }
         },
+        ),
+        // Le lieu vient de redevenir vide (ClearCart : vente passée, panier
+        // vidé, retour sur la page) → re-rattacher au lieu par défaut pour que
+        // le bouton « Enregistrer la commande » reste actif sans actualiser.
+        BlocListener<CaisseBloc, CaisseState>(
+          listenWhen: (prev, curr) =>
+              (prev.deliveryLocationId ?? '').isNotEmpty &&
+              (curr.deliveryLocationId ?? '').isEmpty,
+          listener: (context, _) {
+            WidgetsBinding.instance.addPostFrameCallback(
+                (_) => _applyDefaultCartLocation());
+          },
         ),
       ],
       child: _PrincipalTab(
@@ -769,8 +794,8 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
           ]),
         );
     return Container(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: AppColors.primary.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(10),
@@ -858,120 +883,113 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
       // ── Puce « Versement partenaire en attente » (filtre séparé) ──────────
       if (hasRemit) _remitBanner(remitCount, remitTotal),
 
-      // ── Recherche + filtre plage de dates ────────────────────
+      // ── Recherche + filtres sur UNE ligne (densité) ──────────
+      // Recherche extensible + filtre date + export en icônes compactes
+      // (au lieu de 2 lignes). La plage de dates active affiche son libellé.
       Container(
         color: Theme.of(context).colorScheme.surface,
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-        child: Column(children: [
-          // Barre de recherche
-          SizedBox(
-            height: 36,
-            child: TextField(
-              controller: _searchCtrl,
-              style: AppTextStyles.bodySm,
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: 'Rechercher (client, téléphone, ville, agence…)',
-                hintStyle: AppTextStyles.bodySm
-                    .copyWith(color: AppColors.textHint),
-                prefixIcon: const Icon(Icons.search_rounded,
-                    size: 16, color: AppColors.textHint),
-                suffixIcon: _query.isEmpty ? null : IconButton(
-                  icon: const Icon(Icons.close_rounded,
-                      size: 14, color: AppColors.textHint),
-                  splashRadius: 16,
-                  onPressed: () => _searchCtrl.clear(),
+        child: Row(children: [
+          // Barre de recherche (prend tout l'espace restant)
+          Expanded(
+            child: SizedBox(
+              height: 38,
+              child: TextField(
+                controller: _searchCtrl,
+                style: AppTextStyles.bodySm,
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'Rechercher (client, téléphone, ville…)',
+                  hintStyle: AppTextStyles.bodySm
+                      .copyWith(color: AppColors.textHint),
+                  prefixIcon: Icon(Icons.search_rounded,
+                      size: 16, color: AppColors.textHint),
+                  suffixIcon: _query.isEmpty ? null : IconButton(
+                    icon: Icon(Icons.close_rounded,
+                        size: 14, color: AppColors.textHint),
+                    splashRadius: 16,
+                    onPressed: () => _searchCtrl.clear(),
+                  ),
+                  contentPadding: EdgeInsets.zero,
+                  filled: true, fillColor: AppColors.inputFill,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                          color: Theme.of(context).semantic.borderSubtle)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: AppColors.primary)),
                 ),
-                contentPadding: EdgeInsets.zero,
-                filled: true, fillColor: AppColors.inputFill,
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(
-                        color: Theme.of(context).semantic.borderSubtle)),
-                focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: AppColors.primary)),
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          // Plage de dates
-          Row(children: [
-            InkWell(
+          const SizedBox(width: 8),
+          // Filtre date — icône seule (inactif) ou puce avec plage (actif).
+          Tooltip(
+            message: _dateRange == null
+                ? 'Filtrer par date' : _formatRange(_dateRange!),
+            child: InkWell(
               onTap: _pickDateRange,
               borderRadius: BorderRadius.circular(20),
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 5),
+                height: 38,
+                padding: EdgeInsets.symmetric(
+                    horizontal: _dateRange != null ? 10 : 9),
+                alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: _dateRange != null
-                      ? AppColors.primary.withValues(alpha:0.10)
+                      ? AppColors.primary.withValues(alpha: 0.10)
                       : AppColors.inputFill,
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
                       color: _dateRange != null
-                          ? AppColors.primary.withValues(alpha:0.4)
+                          ? AppColors.primary.withValues(alpha: 0.4)
                           : Theme.of(context).semantic.borderSubtle),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.event_rounded, size: 12,
+                  Icon(Icons.event_rounded, size: 16,
                       color: _dateRange != null
-                          ? AppColors.primary
-                          : AppColors.textSecondary),
-                  const SizedBox(width: 5),
-                  Text(
-                      _dateRange == null
-                          ? 'Filtrer par date'
-                          : _formatRange(_dateRange!),
-                      style: AppTextStyles.captionBold.copyWith(
-                          color: _dateRange != null
-                              ? AppColors.primary
-                              : AppColors.textSecondary)),
+                          ? AppColors.primary : AppColors.textSecondary),
+                  if (_dateRange != null) ...[
+                    const SizedBox(width: 5),
+                    Text(_formatRange(_dateRange!),
+                        style: AppTextStyles.captionBold
+                            .copyWith(color: AppColors.primary)),
+                    const SizedBox(width: 3),
+                    InkWell(
+                      onTap: () => setState(() => _dateRange = null),
+                      child: Icon(Icons.close_rounded,
+                          size: 14, color: AppColors.textHint),
+                    ),
+                  ],
                 ]),
               ),
             ),
-            if (_dateRange != null) ...[
-              const SizedBox(width: 6),
-              InkWell(
-                onTap: () => setState(() => _dateRange = null),
-                child: const Padding(
-                  padding: EdgeInsets.all(4),
-                  child: Icon(Icons.close_rounded,
-                      size: 14, color: AppColors.textHint),
-                ),
-              ),
-            ],
-            const Spacer(),
-            if (ref.watch(permissionsProvider(widget.shopId))
-                .canExportOrders) ...[
-              InkWell(
+          ),
+          // Export — icône seule.
+          if (ref.watch(permissionsProvider(widget.shopId))
+              .canExportOrders) ...[
+            const SizedBox(width: 6),
+            Tooltip(
+              message: 'Exporter',
+              child: InkWell(
                 onTap: _openExport,
                 borderRadius: BorderRadius.circular(20),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 5),
+                  height: 38, width: 40,
+                  alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: AppColors.primary.withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                         color: AppColors.primary.withValues(alpha: 0.4)),
                   ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.download_rounded, size: 12,
-                        color: AppColors.primary),
-                    const SizedBox(width: 5),
-                    Text('Exporter',
-                        style: AppTextStyles.captionBold.copyWith(
-                            color: AppColors.primary)),
-                  ]),
+                  child: Icon(Icons.download_rounded,
+                      size: 16, color: AppColors.primary),
                 ),
               ),
-              const SizedBox(width: 8),
-            ],
-            Text('${orders.length} résultat${orders.length > 1 ? 's' : ''}',
-                style: AppTextStyles.micro
-                    .copyWith(fontWeight: FontWeight.w600)),
-          ]),
+            ),
+          ],
         ]),
       ),
       Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
@@ -1054,7 +1072,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                         borderRadius: BorderRadius.circular(16)),
                     title: const Text('Repasser en programmée ?',
                         style: AppTextStyles.subtitleBold),
-                    content: const Text(
+                    content: Text(
                         'La commande redeviendra « programmée » : le stock '
                         'sera restitué, le paiement remis à zéro et les '
                         'écritures partenaire liées (encaissement, frais) '
@@ -1064,7 +1082,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.of(dc).pop(false),
-                        child: const Text('Annuler',
+                        child: Text('Annuler',
                             style: TextStyle(color: AppColors.textSecondary)),
                       ),
                       ElevatedButton(
@@ -1162,6 +1180,10 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                 final freshForSheet = _ds.getOrderById(order.id!) ?? order;
                 final isPartnerNow =
                     freshForSheet.deliveryMode == DeliveryMode.partner;
+                // Aucun dépôt partenaire → l'encaissement est forcément fait
+                // par la boutique : on NE demande PAS « Qui a encaissé ? ».
+                final hasPartners = OrdersExportSource
+                    .partnerLocationsForShop(freshForSheet.shopId).isNotEmpty;
                 final partnerName = isPartnerNow
                     ? _locationNameOf(freshForSheet)
                     : null;
@@ -1197,7 +1219,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                   // verser ») UNIQUEMENT si la commande est livrée par un
                   // partenaire. Livraison équipe boutique / retrait sur place
                   // → encaissement forcément boutique.
-                  allowPartnerCollected: isPartnerNow,
+                  allowPartnerCollected: isPartnerNow && hasPartners,
                   // Récap encaissement + vente à crédit (boutique encaisseuse).
                   orderTotal:       freshForSheet.total,
                   amountPaidBefore: freshForSheet.amountPaid,
@@ -1251,6 +1273,14 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               await _ds.updateOrderStatus(order.id!, status,
                   completedAt: completedAt,
                   amountPaidOnComplete: amountPaidOnComplete);
+              // R6 — à la finalisation, le stock a déjà été décrémenté dans
+              // updateOrderStatus (StockEngagement → StockService.sale). On
+              // force en plus une notification produit pour que TOUT écran
+              // affichant le stock (grille caisse, inventaire, catalogue) se
+              // rafraîchisse immédiatement, sans rechargement.
+              if (becomingCompleted) {
+                AppDatabase.notifyProductChange(order.shopId);
+              }
               // Audit du changement de statut (annulation/remboursement
               // tracés spécifiquement ; autres transitions = générique).
               ActivityLogService.log(
@@ -1451,8 +1481,14 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     final isPartnerLoc = loc?.type == StockLocationType.partner;
 
     // Idempotence : si la commande a déjà des mouvements (ex: re-completion
-    // après une annulation), on les efface pour repartir sur un état sain.
-    await PartnerLedgerService.removeForOrder(order.shopId, order.id!);
+    // après une annulation), on efface les écritures AUTO-générées
+    // (saleCollected/deliveryOwed) pour repartir sur un état sain — mais on
+    // PRÉSERVE les versements reçus (`remittance`) et charges manuelles
+    // (`partnerCharge`) : de l'argent réellement encaissé ne doit jamais être
+    // détruit par une re-complétion (sinon le bandeau « versement en attente »
+    // réapparaît à tort).
+    await PartnerLedgerService.removeForOrder(order.shopId, order.id!,
+        keepReceived: true);
 
     final feesTotal  = fees.fold<double>(0, (s, f) => s + f.amount);
     final orderTotal = order.total;
@@ -1912,50 +1948,9 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
               ),
             ],
 
-            // ── Bandeau « Reste à payer » (cf. hotfix_065) ─────
-            // Toujours visible (hors zone expansion) si la commande a un
-            // solde non encaissé et un statut pertinent. Tap → ouvre
-            // directement RecordAcompteDialog (raccourci sans déplier).
-            if (widget.order.amountDue > 0
-                && s != SaleStatus.cancelled
-                && s != SaleStatus.refused
-                && s != SaleStatus.refunded) ...[
-              const SizedBox(height: 6),
-              InkWell(
-                onTap: () => _recordAcompte(context),
-                borderRadius: BorderRadius.circular(6),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: AppColors.warning.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                        color: AppColors.warning.withValues(alpha: 0.25),
-                        width: 0.5),
-                  ),
-                  child: Row(children: [
-                    Icon(Icons.payments_outlined,
-                        size: 12, color: AppColors.warning),
-                    const SizedBox(width: 6),
-                    Text(
-                        widget.order.amountPaid > 0
-                            ? 'Reste ${CurrencyFormatter.format(
-                                widget.order.amountDue)} à encaisser'
-                            : 'Encaisser ${CurrencyFormatter.format(
-                                widget.order.amountDue)}',
-                        style: AppTextStyles.captionBold
-                            .copyWith(color: AppColors.warning)),
-                    const Spacer(),
-                    Text('Enregistrer →',
-                        style: AppTextStyles.microBold.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.warning
-                                .withValues(alpha: 0.85))),
-                  ]),
-                ),
-              ),
-            ],
+            // Bandeau « Encaisser / Reste à payer » RETIRÉ de la carte
+            // repliée (densité) — l'action reste accessible via l'icône
+            // « Enregistrer un acompte » dans le dépliage de la commande.
 
             // ── Bandeau « Versement partenaire en attente » ───────
             // Toujours visible (hors zone expansion) : la commande a été
@@ -1999,6 +1994,10 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                 ),
               ),
             ],
+
+            // Bandeau « Frais de livraison à fixer » RETIRÉ de la carte
+            // repliée (densité) — l'action est désormais dans la feuille
+            // « Actions » (« Fixer les frais de livraison »).
 
             // ── Détails expandés ───────────────────────────────
             AnimatedCrossFade(
@@ -2046,7 +2045,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   if (widget.order.notes != null) ...[
                     const SizedBox(height: 4),
                     Row(children: [
-                      const Icon(Icons.notes_rounded,
+                      Icon(Icons.notes_rounded,
                           size: 11, color: AppColors.textHint),
                       const SizedBox(width: 4),
                       Expanded(
@@ -2068,50 +2067,23 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   Divider(height: 1, color: AppColors.inputFill),
                   const SizedBox(height: 8),
 
-                  // Relance WhatsApp : visible pour les commandes non finalisées
-                  // dont la date de livraison est atteinte (ou dépassée).
-                  if (_canRemindClient()) ...[
+                  // ── Actions contextuelles regroupées (feuille « Actions ») ─
+                  // Allège la carte : les actions secondaires (Copier message,
+                  // Relancer, Transférer, Reprogrammer, Rupture…) passent dans
+                  // une feuille au lieu d'occuper plusieurs lignes (densité).
+                  if (_contextualActions(context).isNotEmpty) ...[
                     _WideActionButton(
-                      icon: Icons.phonelink_ring_rounded,
-                      label: _sendingInvoice
-                          ? 'Préparation du rappel…'
-                          : 'Relancer via WhatsApp',
-                      color: AppColors.whatsapp,
-                      onPressed: _sendingInvoice
-                          ? null
-                          : () => _remindClient(context),
-                      leading: _sendingInvoice
-                          ? const SizedBox(
-                              width: 14, height: 14,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppColors.whatsapp),
-                            )
-                          : null,
+                      icon: Icons.more_horiz_rounded,
+                      label: 'Actions',
+                      color: AppColors.primary,
+                      onPressed: () => _showActionsSheet(
+                          context, _contextualActions(context)),
                     ),
                     const SizedBox(height: 8),
                   ],
 
-                  // ── Copier message livraison ────────────────────────
-                  // Remplace l'ancien transfert in-app (qui ouvrait wa.me)
-                  // — l'utilisateur envoie en réalité dans un groupe
-                  // WhatsApp, donc on génère le message + copie clipboard.
-                  // L'envoi proprement dit est manuel (paste dans le groupe).
-                  if (widget.order.status == SaleStatus.scheduled
-                      && _permsForOrder().canTransferDelivery) ...[
-                    _WideActionButton(
-                      icon: Icons.content_copy_rounded,
-                      label: 'Copier message livraison',
-                      color: AppColors.whatsapp,
-                      onPressed: () => _openCopyDeliveryMessage(context),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-
-                  // ── Actions client ─────────────────────────────────
-                  // Pour une commande "programmée" arrivée à échéance
-                  // (date du jour ou passée) : raccourcis "validée" /
-                  // "annulée par client".
+                  // Actions client à échéance : Validée / Annulée — paire
+                  // pleine largeur (Expanded), volontairement hors du Wrap.
                   if (_canConfirmClient()) ...[
                     Row(children: [
                       Expanded(
@@ -2136,46 +2108,6 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     const SizedBox(height: 8),
                   ],
 
-                  // Pour une commande "en cours" : reprogrammer si
-                  // empêchement (boutique ou client).
-                  if (_canReschedule()) ...[
-                    _WideActionButton(
-                      icon: Icons.event_repeat_rounded,
-                      label: 'Reprogrammer la commande',
-                      color: AppColors.warning,
-                      onPressed: () => _askReschedule(context),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  // Transférer la commande à un partenaire (réassigne
-                  // l'emplacement) — commande programmée + partenaires
-                  // configurés. Bloqué si le partenaire n'a pas le stock.
-                  if (widget.canEdit
-                      && widget.order.status == SaleStatus.scheduled
-                      && OrdersExportSource
-                          .partnerLocationsForShop(widget.order.shopId)
-                          .isNotEmpty) ...[
-                    _WideActionButton(
-                      icon: Icons.move_up_rounded,
-                      label: 'Transférer à un partenaire',
-                      color: AppColors.primary,
-                      onPressed: () => _transferToPartner(context),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  // Prévenir le client d'une rupture (WhatsApp). La suppression
-                  // reste l'action « Supprimer » séparée (icône corbeille).
-                  if ((widget.order.status == SaleStatus.scheduled
-                          || widget.order.status == SaleStatus.processing)
-                      && (widget.order.clientPhone ?? '').trim().isNotEmpty) ...[
-                    _WideActionButton(
-                      icon: Icons.error_outline_rounded,
-                      label: 'Article en rupture — prévenir le client',
-                      color: AppColors.error,
-                      onPressed: () => _notifyOutOfStock(context),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
                   // Actions
                   Row(children: [
                     // Tournée « à choisir sur place » en cours : le stock est
@@ -2208,7 +2140,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       _ActionBtn(
                         icon: Icons.cancel_outlined,
                         color: AppColors.error,
-                        bgColor: const Color(0xFFFEF2F2),
+                        bgColor: AppColors.error.withValues(alpha: 0.12),
                         tooltip: 'Annuler la tournée',
                         onTap: () => _cancelApproval(context),
                       ),
@@ -2217,7 +2149,14 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       // Plus de menu déroulant de statut : un bouton
                       // d'évènement contextuel (avancer la commande) +
                       // une pastille lecture seule pour les états terminaux.
-                      Expanded(child: _buildStatusAction(s)),
+                      // Desktop : bouton dimensionné au CONTENU (pas étiré sur
+                      // toute la largeur) + Spacer pour garder les icônes à
+                      // droite. Mobile : pleine largeur (confort tactile).
+                      if (MediaQuery.of(context).size.width > 800) ...[
+                        _buildStatusAction(s),
+                        const Spacer(),
+                      ] else
+                        Expanded(child: _buildStatusAction(s)),
                       // Annuler / Refuser (évènements négatifs) — commandes
                       // non finalisées, hors paire « Annulée par client »
                       // déjà affichée à échéance.
@@ -2229,7 +2168,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         _ActionBtn(
                           icon: Icons.do_not_disturb_on_outlined,
                           color: AppColors.error,
-                          bgColor: const Color(0xFFFEF2F2),
+                          bgColor: AppColors.error.withValues(alpha: 0.12),
                           tooltip: 'Annuler ou refuser',
                           onTap: () => _askCancelOrRefuse(context),
                         ),
@@ -2244,7 +2183,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                         _ActionBtn(
                           icon: Icons.undo_rounded,
                           color: AppColors.warning,
-                          bgColor: const Color(0xFFFFF7ED),
+                          bgColor: AppColors.warning.withValues(alpha: 0.12),
                           tooltip: 'Repasser en programmée',
                           onTap: () => widget.onUpdate(SaleStatus.scheduled),
                         ),
@@ -2288,7 +2227,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       _ActionBtn(
                         icon: Icons.payments_outlined,
                         color: AppColors.warning,
-                        bgColor: const Color(0xFFFFF7ED),
+                        bgColor: AppColors.warning.withValues(alpha: 0.12),
                         tooltip: 'Enregistrer un acompte',
                         onTap: () => _recordAcompte(context),
                       ),
@@ -2296,9 +2235,12 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     ],
                     // Bouton "Relancer le client" — visible UNIQUEMENT pour
                     // les commandes en cours / programmées (pas après
-                    // completed/cancelled/refused/refunded).
-                    if (widget.order.status == SaleStatus.scheduled ||
-                        widget.order.status == SaleStatus.processing) ...[
+                    // completed/cancelled/refused/refunded). Exclu pour les
+                    // commandes web : elles ont déjà le bouton large dédié
+                    // « Relancer le client » plus haut.
+                    if ((widget.order.status == SaleStatus.scheduled ||
+                            widget.order.status == SaleStatus.processing)
+                        && widget.order.source != 'web') ...[
                       _ActionBtn(
                         icon: Icons.notifications_active_outlined,
                         color: AppColors.whatsapp,
@@ -2326,7 +2268,11 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       ),
                       const SizedBox(width: 6),
                     ],
-                    if (widget.canEdit) ...[
+                    // Édition des articles interdite sur une commande déjà
+                    // complétée (les articles sont figés). Les frais restent
+                    // modifiables via le bouton dédié ci-dessus.
+                    if (widget.canEdit
+                        && widget.order.status != SaleStatus.completed) ...[
                       _ActionBtn(
                         icon: Icons.edit_rounded,
                         color: AppColors.primary,
@@ -2348,7 +2294,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       _ActionBtn(
                         icon: Icons.delete_outline_rounded,
                         color: AppColors.error,
-                        bgColor: const Color(0xFFFEF2F2),
+                        bgColor: AppColors.error.withValues(alpha: 0.12),
                         tooltip: 'Supprimer',
                         onTap: () => _confirmDelete(context),
                       ),
@@ -2389,6 +2335,121 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     final diff = due.difference(DateTime.now());
     // Visible dès que la date est dans moins de 24h OU dépassée
     return diff.inHours <= 24;
+  }
+
+  /// Actions secondaires contextuelles d'une commande — regroupées dans la
+  /// feuille « Actions » pour alléger la carte (densité). La liste dépend du
+  /// statut/permissions ; vide → aucun bouton « Actions » affiché.
+  List<_OrderActionItem> _contextualActions(BuildContext context) {
+    final o = widget.order;
+    final s = o.status;
+    final hasPhone = (o.clientPhone ?? '').trim().isNotEmpty;
+    final list = <_OrderActionItem>[];
+    if (_canRemindClient()) {
+      list.add(_OrderActionItem(
+          icon: Icons.phonelink_ring_rounded,
+          label: 'Relancer via WhatsApp (lien de suivi)',
+          color: AppColors.whatsapp,
+          onTap: () => _remindClient(context)));
+    }
+    // Disponible tant que la commande est active (Programmée OU En cours) :
+    // le client peut confirmer via le lien web (→ En cours) et il faut alors
+    // pouvoir envoyer le message au livreur/partenaire.
+    if ((s == SaleStatus.scheduled || s == SaleStatus.processing)
+        && _permsForOrder().canTransferDelivery) {
+      list.add(_OrderActionItem(
+          icon: Icons.content_copy_rounded,
+          label: 'Copier message livraison',
+          color: AppColors.whatsapp,
+          onTap: () => _openCopyDeliveryMessage(context)));
+    }
+    if (o.source == 'web'
+        && (s == SaleStatus.scheduled || s == SaleStatus.processing)
+        && hasPhone) {
+      list.add(_OrderActionItem(
+          icon: Icons.notifications_active_outlined,
+          label: 'Relancer le client',
+          color: AppColors.whatsapp,
+          onTap: () => _relaunchClient(context)));
+    }
+    if (_canReschedule()) {
+      list.add(_OrderActionItem(
+          icon: Icons.event_repeat_rounded,
+          label: 'Reprogrammer la commande',
+          color: AppColors.warning,
+          onTap: () => _askReschedule(context)));
+    }
+    if (widget.canEdit
+        && s == SaleStatus.scheduled
+        && OrdersExportSource
+            .partnerLocationsForShop(o.shopId).isNotEmpty) {
+      list.add(_OrderActionItem(
+          icon: Icons.move_up_rounded,
+          label: 'Transférer à un partenaire',
+          color: AppColors.primary,
+          onTap: () => _transferToPartner(context)));
+    }
+    if ((s == SaleStatus.scheduled || s == SaleStatus.processing)
+        && hasPhone) {
+      list.add(_OrderActionItem(
+          icon: Icons.error_outline_rounded,
+          label: 'Article en rupture — prévenir le client',
+          color: AppColors.error,
+          onTap: () => _notifyOutOfStock(context)));
+    }
+    // Commande web dont le prix de livraison reste à fixer (quartier non
+    // répertorié) — remplace le bandeau retiré de la carte repliée.
+    if (o.deliveryFeeToFix) {
+      list.add(_OrderActionItem(
+          icon: Icons.local_shipping_outlined,
+          label: 'Fixer les frais de livraison',
+          color: AppColors.warning,
+          onTap: () => _fixDeliveryFee(context)));
+    }
+    return list;
+  }
+
+  /// Feuille listant les actions contextuelles. Tap → ferme + exécute.
+  void _showActionsSheet(
+      BuildContext context, List<_OrderActionItem> actions) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                margin: const EdgeInsets.symmetric(vertical: 10),
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textHint.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+              child: Text('Actions de la commande',
+                  style: AppTextStyles.subtitleBold),
+            ),
+            for (final a in actions)
+              ListTile(
+                leading: Icon(a.icon, color: a.color, size: 22),
+                title: Text(a.label,
+                    style: AppTextStyles.body
+                        .copyWith(color: AppColors.textPrimary)),
+                onTap: () { Navigator.of(ctx).pop(); a.onTap(); },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   /// Relance avec lien de suivi — ouvre WhatsApp **synchrone** dans le tick
@@ -2500,6 +2561,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     final result = await showOrderFeesSheet(
       context,
       initialFees: before,
+      initialDeliveryPrice: (order.deliveryPrice ?? 0).round(),
+      showDeliveryPrice: order.deliveryMode != DeliveryMode.pickup,
     );
     if (result == null || !mounted) return; // annulé
 
@@ -2508,6 +2571,12 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         .toList();
     final updated = order.copyWith(fees: newFees);
     await SaleLocalDatasource().updateOrder(updated);
+    // Prix de livraison FACTURÉ au client → entre dans le total à payer ET sur
+    // la facture (Sale.deliveryPrice). Écriture ciblée après l'upsert des frais.
+    if (order.deliveryMode != DeliveryMode.pickup && order.id != null) {
+      await SaleLocalDatasource().setDeliveryPrice(
+          order.id!, result.deliveryPrice);
+    }
 
     // Traçabilité (règle métier) : qui a modifié les frais, et le détail
     // avant/après — consultable dans le journal d'activité.
@@ -2913,6 +2982,104 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   /// "Reprogrammer" : disponible uniquement quand la commande est en cours.
   bool _canReschedule() => widget.order.status == SaleStatus.processing;
 
+  /// Suffixe « — Quartier, Ville » pour le bandeau « frais à fixer ».
+  String _deliveryDest() {
+    final parts = [widget.order.deliveryQuartier, widget.order.deliveryCity]
+        .where((s) => (s ?? '').trim().isNotEmpty)
+        .toList();
+    return parts.isEmpty ? '' : ' — ${parts.join(', ')}';
+  }
+
+  /// Saisie du prix de livraison pour une commande web « à fixer » (quartier
+  /// non répertorié). Persiste le prix (le total est recalculé) puis propose
+  /// d'en informer le client par WhatsApp si un numéro est disponible.
+  Future<void> _fixDeliveryFee(BuildContext context) async {
+    final order = widget.order;
+    if (order.id == null) return;
+    final ctrl = TextEditingController();
+    final amount = await showAdaptiveFormSheet<double>(
+      context: context,
+      builder: (ctx) => AdaptiveFormFrame(
+        title: 'Frais de livraison',
+        icon: Icons.local_shipping_outlined,
+        body: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                      'Quartier non répertorié${_deliveryDest()}. '
+                      'Saisissez les frais convenus avec le client.',
+                      style: AppTextStyles.body
+                          .copyWith(color: AppColors.textHint)),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: ctrl,
+                    autofocus: true,
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    ],
+                    decoration: InputDecoration(
+                      isDense: true,
+                      suffixText: 'FCFA',
+                      hintText: 'Montant',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: const Text('Annuler'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: () {
+                      final v = double.tryParse(
+                          ctrl.text.trim().replaceAll(',', '.'));
+                      Navigator.of(ctx).pop(v);
+                    },
+                    style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.primary),
+                    child: const Text('Enregistrer'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    ctrl.dispose();
+    if (amount == null || amount < 0) return;
+    await SaleLocalDatasource().setDeliveryPrice(order.id!, amount.round());
+    if (!mounted) return;
+    AppSnack.success(context,
+        'Frais de livraison fixés : ${CurrencyFormatter.format(amount)}');
+    // Notifier le client par WhatsApp si un numéro est disponible.
+    final phone = (order.clientPhone ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+    if (phone.isEmpty) return;
+    final newTotal =
+        order.subtotal - order.discountAmount + order.taxAmount + amount;
+    final msg = 'Bonjour, les frais de livraison pour votre commande '
+        's\'élèvent à ${CurrencyFormatter.format(amount)}. '
+        'Total à payer : ${CurrencyFormatter.format(newTotal)}.';
+    await openExternal('https://wa.me/$phone?text=${Uri.encodeComponent(msg)}');
+  }
+
   /// Permissions de l'utilisateur pour le shop de cette commande.
   AppPermissions _permsForOrder() =>
       ref.read(permissionsProvider(widget.order.shopId));
@@ -3068,7 +3235,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dc).pop(false),
-            child: const Text('Annuler',
+            child: Text('Annuler',
                 style: TextStyle(color: AppColors.textSecondary)),
           ),
           ElevatedButton(
@@ -3139,7 +3306,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
             Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                  color: const Color(0xFFFEF3C7),
+                  color: AppColors.warning.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8)),
               child: const Icon(Icons.warning_amber_rounded,
                   size: 18, color: AppColors.warning),
@@ -3148,7 +3315,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
             const Text('Commande complétée',
                 style: AppTextStyles.subtitleBold),
           ]),
-          content: const Text(
+          content: Text(
               'Cette commande a déjà été complétée. '
                   'La modifier peut affecter la comptabilité. '
                   'Continuer quand même ?',
@@ -3156,7 +3323,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
           actions: [
             TextButton(
                 onPressed: () => Navigator.of(dc).pop(),
-                child: const Text('Annuler',
+                child: Text('Annuler',
                     style: TextStyle(color: AppColors.textSecondary))),
             ElevatedButton(
               onPressed: () {
@@ -3324,9 +3491,9 @@ class _FormatPickerSheetState extends State<_FormatPickerSheet> {
   Widget build(BuildContext context) {
     final fmt = _formats[_selected];
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFFF8F7FF),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
 
@@ -3359,7 +3526,7 @@ class _FormatPickerSheetState extends State<_FormatPickerSheet> {
                   Text("Format d'impression",
                       style: AppTextStyles.subtitleBold
                           .copyWith(fontWeight: FontWeight.w800)),
-                  const Text('Choisissez le format de votre reçu',
+                  Text('Choisissez le format de votre reçu',
                       style: AppTextStyles.captionHint),
                 ],
               ),
@@ -3396,7 +3563,7 @@ class _FormatPickerSheetState extends State<_FormatPickerSheet> {
                           border: Border.all(
                             color: sel
                                 ? AppColors.primary.withValues(alpha:0.5)
-                                : const Color(0xFFE8E8EE),
+                                : AppColors.inputFill,
                             width: sel ? 1.5 : 1,
                           ),
                         ),
@@ -3719,25 +3886,36 @@ class _ClientAvatar extends StatelessWidget {
   }
 }
 
-/// Bouton d'action large pour la carte commande (pleine largeur). Style
-/// « tonal » : fond teinté doux + icône + libellé, coins bien arrondis —
-/// remplace les anciens `OutlinedButton` fil-de-fer jugés trop bruts.
-/// [filled] = fond plein coloré (action primaire, ex. « Encaisser »).
+/// Action secondaire d'une commande, présentée dans la feuille « Actions »
+/// (regroupement pour alléger la carte).
+class _OrderActionItem {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  const _OrderActionItem({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+}
+
+/// Bouton d'action « tonal » de la carte commande : fond teinté doux + icône
+/// + libellé, dimensionné au contenu. [filled] = fond plein coloré (action
+/// primaire, ex. « Encaisser »).
 class _WideActionButton extends StatelessWidget {
   final IconData icon;
   final String   label;
   final Color    color;
   final VoidCallback? onPressed;
   final bool     filled;
-  /// Remplace l'icône (ex. spinner de chargement).
-  final Widget?  leading;
   const _WideActionButton({
     required this.icon,
     required this.label,
     required this.color,
     required this.onPressed,
     this.filled = false,
-    this.leading,
   });
 
   @override
@@ -3749,6 +3927,11 @@ class _WideActionButton extends StatelessWidget {
     final fg = filled
         ? Colors.white
         : color.withValues(alpha: disabled ? 0.5 : 1);
+    // Dimensionné au CONTENU + padding compact H10/V3. Pas de wrapper qui
+    // remplit la largeur → en `Wrap` (contraintes lâches) le bouton épouse son
+    // contenu et s'enchaîne sur la ligne ; en `Expanded` (contraintes serrées)
+    // le Container remplit la cellule. Le `Flexible` borne le Text → ellipse
+    // au lieu de déborder quand l'espace manque.
     return Material(
       color: bg,
       borderRadius: BorderRadius.circular(12),
@@ -3756,8 +3939,7 @@ class _WideActionButton extends StatelessWidget {
         onTap: onPressed,
         borderRadius: BorderRadius.circular(12),
         child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 14),
+          padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: filled
@@ -3765,9 +3947,9 @@ class _WideActionButton extends StatelessWidget {
                 : Border.all(color: color.withValues(alpha: 0.22)),
           ),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              leading ?? Icon(icon, size: 16, color: fg),
+              Icon(icon, size: 16, color: fg),
               const SizedBox(width: 8),
               Flexible(
                 child: Text(label,
@@ -3888,25 +4070,31 @@ class _OrderDetailsBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasShipment = order.deliveryMode == DeliveryMode.shipment;
     final isPickup    = order.deliveryMode == DeliveryMode.pickup;
+    // Commande PROGRAMMÉE : le mode de paiement et le lieu de retrait/livraison
+    // ne sont pas encore fixés → on ne les affiche pas (cf. demande).
+    final isScheduled = order.status == SaleStatus.scheduled;
     final feesTotal = order.fees.fold<double>(
         0, (s, f) => s + ((f['amount'] as num?)?.toDouble() ?? 0));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ─── Paiement ─────────────────────────────────────────────
-        _DetailRow(
-          icon: _paymentIcon(order.paymentMethod),
-          label: 'Paiement',
-          value: _paymentLabel(order.paymentMethod),
-        ),
+        // ─── Paiement ─── (masqué si programmée : mode pas encore connu)
+        if (!isScheduled)
+          _DetailRow(
+            icon: _paymentIcon(order.paymentMethod),
+            label: 'Paiement',
+            value: _paymentLabel(order.paymentMethod),
+          ),
 
-        // ─── Livraison ────────────────────────────────────────────
-        const SizedBox(height: 6),
-        _DetailRow(
-          icon: _deliveryIcon(order.deliveryMode),
-          label: 'Livraison',
-          value: order.deliveryMode?.labelFr ?? 'Non renseigné',
-        ),
+        // ─── Livraison ─── (masqué si programmée : lieu pas encore fixé)
+        if (!isScheduled) ...[
+          const SizedBox(height: 6),
+          _DetailRow(
+            icon: _deliveryIcon(order.deliveryMode),
+            label: 'Livraison',
+            value: order.deliveryMode?.labelFr ?? 'Non renseigné',
+          ),
+        ],
         if (!isPickup) ...[
           if ((order.deliveryCity ?? '').isNotEmpty) ...[
             const SizedBox(height: 4),
@@ -4006,16 +4194,43 @@ class _OrderDetailsBlock extends StatelessWidget {
               label: 'TVA (${order.taxRate.toStringAsFixed(
                   order.taxRate % 1 == 0 ? 0 : 1)}%)',
               value: _money(order.taxAmount)),
+        if ((order.deliveryPrice ?? 0) > 0)
+          _MoneyLine(
+              label: 'Livraison'
+                  '${(order.deliveryQuartier ?? '').isNotEmpty
+                      ? ' — ${order.deliveryQuartier}' : ''}',
+              value: _money(order.deliveryPrice!)),
         if (feesTotal > 0)
           _MoneyLine(
-              label: 'Frais (absorbés)',
-              value: _money(feesTotal),
-              color: AppColors.textHint),
+              label: 'Frais supplémentaires',
+              value: _money(feesTotal)),
         const SizedBox(height: 4),
         _MoneyLine(
             label: 'Total facturé',
             value: _money(order.total),
             bold: true),
+        // Frais de livraison dûs au partenaire livreur (déduits de son
+        // versement) → rend la dette explicite directement sur la commande.
+        if (order.deliveryMode == DeliveryMode.partner
+            && (order.deliveryLocationId ?? '').isNotEmpty
+            && (order.deliveryPrice ?? 0) > 0) ...[
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Row(children: [
+              const Icon(Icons.local_shipping_outlined,
+                  size: 10, color: AppColors.info),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                    'Frais de livraison dûs au partenaire '
+                    '(déduits de son versement)',
+                    style: AppTextStyles.micro
+                        .copyWith(color: AppColors.info)),
+              ),
+            ]),
+          ),
+        ],
 
         // ─── Détail des frais (toujours, même un seul frais) ──────
         // Affiche chaque frais (libellé + montant) pour que l'opérateur
@@ -4027,7 +4242,7 @@ class _OrderDetailsBlock extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(left: 12, top: 2),
               child: Row(children: [
-                const Icon(Icons.subdirectory_arrow_right_rounded,
+                Icon(Icons.subdirectory_arrow_right_rounded,
                     size: 10, color: AppColors.textHint),
                 const SizedBox(width: 4),
                 Expanded(
@@ -4043,11 +4258,11 @@ class _OrderDetailsBlock extends StatelessWidget {
         // ─── Référence + numéro client ────────────────────────────
         const SizedBox(height: 8),
         Row(children: [
-          const Icon(Icons.tag_rounded, size: 10, color: AppColors.textHint),
+          Icon(Icons.tag_rounded, size: 10, color: AppColors.textHint),
           const SizedBox(width: 4),
           Expanded(
             child: Text(order.id ?? '',
-                style: const TextStyle(fontSize: 10,
+                style: TextStyle(fontSize: 10,
                     color: AppColors.textHint,
                     fontFamily: 'monospace'),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -4272,7 +4487,7 @@ class _ReasonDialogState extends State<_ReasonDialog> {
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   hintText: widget.hint,
-                  hintStyle: const TextStyle(
+                  hintStyle: TextStyle(
                       fontSize: 12, color: AppColors.textHint),
                   isDense: true,
                   filled: true,

@@ -16,6 +16,7 @@ import 'danger_action_page.dart';
 import '../../../../core/services/pin_service.dart';
 import '../../../../core/widgets/owner_pin_dialog.dart';
 import '../../../../core/widgets/owner_pin_setup_dialog.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
@@ -203,6 +204,24 @@ Widget _boutiqueSection(BuildContext context, String shopId,
           subtitle: l.paramCaisseSubtitle,
           color: AppColors.primary,
           onTap: () => context.push('/shop/$shopId/parametres/caisse'),
+        ),
+      _Tile(
+        icon: Icons.local_shipping_outlined,
+        label: 'Livraison',
+        subtitle: 'Zones et tarifs de livraison par quartier',
+        color: AppColors.primary,
+        onTap: () => context.push('/shop/$shopId/parametres/livraison'),
+      ),
+      // Module restaurant : tuile masquée hors restauration, pour ne pas
+      // encombrer les Paramètres d'une boutique e-commerce.
+      if (isRestaurantShop(shopId))
+        _Tile(
+          icon: Icons.tune_rounded,
+          label: 'Modificateurs de menu',
+          subtitle: 'Cuisson, options et suppléments par plat',
+          color: AppColors.secondary,
+          onTap: () =>
+              context.push('/shop/$shopId/parametres/menu-modifiers'),
         ),
       if (perms.canExportProducts || perms.canExportFinances)
         _Tile(
@@ -883,7 +902,7 @@ class _DangerGateState extends State<_DangerGate> {
                       size: 17, color: AppColors.error),
                 ),
                 const SizedBox(width: 12),
-                const Expanded(child: Column(
+                Expanded(child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                   Text('Accéder à la zone dangereuse',
@@ -1411,7 +1430,7 @@ class _SuperAdminSection extends ConsumerWidget {
                     ],
                   ),
                 ),
-                const Icon(Icons.chevron_right_rounded,
+                Icon(Icons.chevron_right_rounded,
                     size: 16, color: AppColors.textHint),
               ]),
             ),
@@ -1615,7 +1634,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10))),
-                  child: const Text('Retour',
+                  child: Text('Retour',
                       style: TextStyle(color: AppColors.textSecondary,
                           fontWeight: FontWeight.w600)),
                 )),
@@ -1665,7 +1684,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
       const Text('Pourquoi souhaitez-vous partir ?',
           style: AppTextStyles.label),
       const SizedBox(height: 4),
-      const Text('Votre réponse nous aide à améliorer le produit.',
+      Text('Votre réponse nous aide à améliorer le produit.',
           style: AppTextStyles.bodySmSecondary),
       const SizedBox(height: 12),
       for (final r in _kDeleteReasons) _ReasonTile(
@@ -1707,7 +1726,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
       const Text('Avant de continuer',
           style: AppTextStyles.label),
       const SizedBox(height: 4),
-      const Text(
+      Text(
           'Confirmez ces points pour passer à la dernière étape.',
           style: AppTextStyles.bodySmSecondary),
       const SizedBox(height: 16),
@@ -1761,7 +1780,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
       const SizedBox(height: 16),
       Text('Mot de passe actuel',
           style: AppTextStyles.bodySmBold.copyWith(
-              color: const Color(0xFF374151))),
+              color: AppColors.onSurface)),
       const SizedBox(height: 6),
       TextField(
         controller: _pwdCtrl,
@@ -1849,7 +1868,7 @@ class _ReasonTile extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
-                  color: selected ? AppColors.primary : const Color(0xFFD1D5DB),
+                  color: selected ? AppColors.primary : AppColors.textHint,
                   width: 2),
               color: selected ? AppColors.primary : Theme.of(context).colorScheme.surface,
             ),
@@ -1861,7 +1880,7 @@ class _ReasonTile extends StatelessWidget {
           Expanded(child: Text(label,
               style: AppTextStyles.body.copyWith(
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                  color: selected ? AppColors.primary : const Color(0xFF374151)))),
+                  color: selected ? AppColors.primary : AppColors.onSurface))),
         ]),
       ),
     ),

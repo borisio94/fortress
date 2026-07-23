@@ -25,11 +25,11 @@ class SettingsSectionCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title,
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.3,
-                    color: Color(0xFF6B7280))),
+                    color: AppColors.textSecondary)),
             const SizedBox(height: 10),
             ...children,
           ],
@@ -65,10 +65,10 @@ class SettingsField extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(label,
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF374151))),
+                    color: AppColors.onSurface)),
             const SizedBox(height: 6),
             TextField(
               controller: controller,
@@ -84,8 +84,8 @@ class SettingsField extends StatelessWidget {
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 filled: true,
                 fillColor: enabled
-                    ? const Color(0xFFF9FAFB)
-                    : const Color(0xFFF3F4F6),
+                    ? AppColors.inputFill
+                    : AppColors.inputFill,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle),
@@ -145,8 +145,8 @@ class SettingsSwitchTile extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(hint!,
-                        style: const TextStyle(
-                            fontSize: 11, color: Color(0xFF9CA3AF))),
+                        style: TextStyle(
+                            fontSize: 11, color: AppColors.textHint)),
                   ),
               ],
             ),
@@ -166,7 +166,7 @@ class ReadOnlyBanner extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFFEF3C7),
+        color: AppColors.warning.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: const Color(0xFFFDE68A)),
       ),

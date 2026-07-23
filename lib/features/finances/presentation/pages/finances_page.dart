@@ -524,7 +524,7 @@ class _SalesBarChart extends StatelessWidget {
               ? Center(child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.show_chart_rounded,
+                    Icon(Icons.show_chart_rounded,
                         size: 32, color: AppColors.textHint),
                     const SizedBox(height: 6),
                     Text(l.dashNoSalesYet,

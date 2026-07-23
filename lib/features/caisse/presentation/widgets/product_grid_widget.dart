@@ -30,6 +30,21 @@ int _stockForVariant(ProductVariant v, String? deliveryLocationId) {
   return lvl?.stockAvailable ?? 0;
 }
 
+/// Lieu à UTILISER pour lire le stock dans la caisse : `null` (→ stock
+/// variante de la boutique, source de vérité, jamais désynchronisé) si aucun
+/// lieu OU si le lieu est CELUI de la boutique active ; sinon le lieu
+/// PARTENAIRE (→ StockLevel). Sans ça, un produit tout neuf paraissait à 0
+/// (son StockLevel au lieu boutique pas encore synchronisé) → grille caisse
+/// vide + bouton d'enregistrement grisé jusqu'à F5.
+String? _effectiveStockLoc(String? shopId, String? deliveryLocationId) {
+  if (deliveryLocationId == null || deliveryLocationId.isEmpty) return null;
+  if (shopId != null) {
+    final shopLoc = AppDatabase.getShopLocation(shopId);
+    if (shopLoc != null && shopLoc.id == deliveryLocationId) return null;
+  }
+  return deliveryLocationId; // lieu partenaire
+}
+
 /// Stock à afficher pour un produit selon la source active.
 /// - Pas de source partenaire → `product.totalStock` (cumul historique).
 /// - Source = partenaire → somme des `stock_levels` des variantes à cette
@@ -143,6 +158,29 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
   String _query = '';
   String _filter = 'Tous'; // Tous | Stock faible | Actifs
 
+  // Rafraîchit la grille dès qu'un produit / stock de la boutique change
+  // (nouvel enregistrement, sync) → plus besoin d'actualiser (F5) pour voir
+  // les produits fraîchement créés.
+  void _onData(String table, String shopId) {
+    if (!mounted) return;
+    if (shopId == widget.shopId &&
+        (table == 'products' || table == 'stock_levels')) {
+      setState(() {});
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    AppDatabase.addListener(_onData);
+  }
+
+  @override
+  void dispose() {
+    AppDatabase.removeListener(_onData);
+    super.dispose();
+  }
+
   /// Liste filtrée. Quand [deliveryLocationId] est non null (vente livrée
   /// par un partenaire), on masque les produits absents chez ce partenaire
   /// pour rester cohérent avec la grille principale.
@@ -172,8 +210,12 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final deliveryLocId = context.select<CaisseBloc, String?>(
-        (b) => b.state.deliveryLocationId);
+    // La boutique ACTIVE utilise son stock variante (source de vérité). Seul un
+    // lieu PARTENAIRE filtre par StockLevel → évite grille vide / bouton grisé
+    // pour un produit neuf dont le StockLevel boutique n'est pas encore synchro.
+    final deliveryLocId = _effectiveStockLoc(
+        widget.shopId,
+        context.select<CaisseBloc, String?>((b) => b.state.deliveryLocationId));
     final products = _productsFor(deliveryLocId);
     final all      = AppDatabase.getProductsForShop(widget.shopId).where((p) => p.isActive).toList();
 
@@ -190,11 +232,11 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
           style: AppTextStyles.input,
           decoration: InputDecoration(
             hintText: 'Rechercher par nom, SKU, code-barres…',
-            prefixIcon: const Icon(Icons.search_rounded,
+            prefixIcon: Icon(Icons.search_rounded,
                 size: 18, color: AppColors.textHint),
             suffixIcon: _query.isNotEmpty
                 ? IconButton(
-              icon: const Icon(Icons.clear_rounded,
+              icon: Icon(Icons.clear_rounded,
                   size: 16, color: AppColors.textHint),
               onPressed: () => setState(() => _query = ''),
             )
@@ -1012,8 +1054,12 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
     // Lit la source active (boutique cumul vs partenaire) — la liste de
     // produits en dépend : on masque les produits absents chez le
     // partenaire pour éviter les ajouts panier impossibles.
-    final deliveryLocId = context.select<CaisseBloc, String?>(
-        (b) => b.state.deliveryLocationId);
+    // La boutique ACTIVE utilise son stock variante (source de vérité). Seul un
+    // lieu PARTENAIRE filtre par StockLevel → évite grille vide / bouton grisé
+    // pour un produit neuf dont le StockLevel boutique n'est pas encore synchro.
+    final deliveryLocId = _effectiveStockLoc(
+        widget.shopId,
+        context.select<CaisseBloc, String?>((b) => b.state.deliveryLocationId));
     final products = _productsFor(deliveryLocId);
     final isCompact = MediaQuery.of(context).size.width < 900;
     final searchField = SizedBox(
@@ -1025,11 +1071,11 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
           hintText: l.boutiqueSearchHint,
           hintStyle: AppTextStyles.body
               .copyWith(color: AppColors.textHint),
-          prefixIcon: const Icon(Icons.search_rounded,
+          prefixIcon: Icon(Icons.search_rounded,
               size: 18, color: AppColors.textHint),
           suffixIcon: _query.isNotEmpty
               ? IconButton(
-            icon: const Icon(Icons.clear_rounded,
+            icon: Icon(Icons.clear_rounded,
                 size: 16, color: AppColors.textHint),
             onPressed: () => setState(() => _query = ''),
             padding: EdgeInsets.zero,
@@ -1580,7 +1626,7 @@ class _PosProductListTileState extends State<_PosProductListTile> {
                     (sel?.sku ?? p.sku)!.isNotEmpty)
                   Text(sel?.sku ?? p.sku!,
                       maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 10,
+                      style: TextStyle(fontSize: 10,
                           fontFamily: 'monospace',
                           color: AppColors.textHint)),
                 if (hasVariants) ...[

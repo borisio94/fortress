@@ -154,7 +154,7 @@ class _RegisterSimplifiedPageState extends State<RegisterSimplifiedPage> {
                       IconButton(
                         onPressed: () =>
                             context.go(RouteNames.onboardingAuthChoice),
-                        icon: const Icon(Icons.arrow_back_rounded,
+                        icon: Icon(Icons.arrow_back_rounded,
                             color: AppColors.textSecondary),
                       ),
                       const Spacer(),
@@ -170,7 +170,7 @@ class _RegisterSimplifiedPageState extends State<RegisterSimplifiedPage> {
                       textAlign: TextAlign.center,
                       style: AppTextStyles.title),
                   const SizedBox(height: 6),
-                  const Text(
+                  Text(
                     '3 champs et c\'est parti. Vous configurerez votre '
                     'boutique juste après.',
                     textAlign: TextAlign.center,

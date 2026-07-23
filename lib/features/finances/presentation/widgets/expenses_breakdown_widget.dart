@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -74,8 +75,8 @@ class ExpensesBreakdownWidget extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          const Icon(Icons.pie_chart_rounded,
-              size: 16, color: Color(0xFF6B7280)),
+          Icon(Icons.pie_chart_rounded,
+              size: 16, color: AppColors.textSecondary),
           const SizedBox(width: 8),
           const Expanded(child: Text('Dépenses par catégorie',
               style: AppTextStyles.label)),
@@ -98,21 +99,21 @@ class ExpensesBreakdownWidget extends StatelessWidget {
                 Expanded(child: Text(meta.label,
                     maxLines: 1, overflow: TextOverflow.ellipsis,
                     style: AppTextStyles.bodySmBold.copyWith(
-                        color: const Color(0xFF374151)))),
+                        color: AppColors.onSurface))),
                 Text(CurrencyFormatter.format(e.value),
                     style: AppTextStyles.bodySmBold.copyWith(
                         color: meta.color)),
                 const SizedBox(width: 6),
                 Text('${(pct * 100).toStringAsFixed(0)}%',
                     style: AppTextStyles.micro.copyWith(
-                        color: const Color(0xFF9CA3AF))),
+                        color: AppColors.textHint)),
               ]),
               const SizedBox(height: 4),
               ClipRRect(
                 borderRadius: BorderRadius.circular(2),
                 child: LinearProgressIndicator(
                   value: pct, minHeight: 4,
-                  backgroundColor: const Color(0xFFF3F4F6),
+                  backgroundColor: AppColors.inputFill,
                   valueColor: AlwaysStoppedAnimation(meta.color),
                 ),
               ),

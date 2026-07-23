@@ -509,10 +509,10 @@ class _FeesSection extends StatelessWidget {
             color: Theme.of(context).semantic.borderSubtle))),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
-        const Icon(Icons.local_shipping_outlined,
+        Icon(Icons.local_shipping_outlined,
             size: 13, color: AppColors.textSecondary),
         const SizedBox(width: 6),
-        const Expanded(
+        Expanded(
           child: Text('Frais de commande',
               style: AppTextStyles.captionBold),
         ),
@@ -560,7 +560,7 @@ class _FeesSection extends StatelessWidget {
             GestureDetector(
               onTap: () => context.read<CaisseBloc>()
                   .add(RemoveOrderFee(fee.id)),
-              child: const Icon(Icons.close_rounded,
+              child: Icon(Icons.close_rounded,
                   size: 14, color: AppColors.textHint),
             ),
           ]),
@@ -607,7 +607,7 @@ class _FeesSection extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(onPressed: () => Navigator.of(dc).pop(),
-                      child: const Text('Annuler',
+                      child: Text('Annuler',
                           style: TextStyle(color: AppColors.textSecondary))),
                   const SizedBox(width: 8),
                   ElevatedButton(
@@ -676,7 +676,7 @@ class _FeesSection extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(onPressed: () => Navigator.of(dc).pop(),
-                      child: const Text('Annuler',
+                      child: Text('Annuler',
                           style: TextStyle(color: AppColors.textSecondary))),
                   const SizedBox(width: 8),
                   ElevatedButton(
@@ -832,7 +832,7 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
             hintText: 'Rechercher par nom ou téléphone…',
             hintStyle: AppTextStyles.bodySm
                 .copyWith(color: AppColors.textHint),
-            prefixIcon: const Icon(Icons.search_rounded,
+            prefixIcon: Icon(Icons.search_rounded,
                 size: 16, color: AppColors.textHint),
             filled: true, fillColor: AppColors.inputFill,
             isDense: true,
@@ -1078,12 +1078,19 @@ class _CartFooter extends StatelessWidget {
                     initialDate:    st.deliveryDate,
                     initialCity:    st.deliveryCity,
                     initialAddress: st.deliveryAddress,
-                    orderTotal:     st.total,
+                    // PRODUITS SEULS (hors livraison) : le sheet ajoute lui-même
+                    // les frais de livraison du quartier choisi. Soustraire
+                    // st.deliveryPrice évite le double-comptage en édition.
+                    orderTotal:     st.total - st.deliveryPrice,
                     initialIsApprovalSale: st.isApprovalSale,
                     lockApproval:          st.editingOrderId != null,
                     // FIX 2 — transmet le mode courant : en pickup le sheet
                     // masque/optionnalise ville/quartier.
                     deliveryMode:          st.deliveryMode,
+                    // Livraison par quartier (PR-2) — pré-remplissage édition.
+                    initialDeliveryPrice:  st.deliveryPrice,
+                    initialQuartier:       st.deliveryQuartier,
+                    initialZone:           st.deliveryZone,
                   );
                   if (res == null) return; // annulé
                   if (!context.mounted) return;
@@ -1092,8 +1099,11 @@ class _CartFooter extends StatelessWidget {
                     ..add(SetDeliveryDate(res.scheduledAt))
                     ..add(SetDeliveryDetails(
                       // mode / locationId conservés (chips actifs)
-                      deliveryCity:    res.deliveryCity,
-                      deliveryAddress: res.deliveryAddress,
+                      deliveryCity:     res.deliveryCity,
+                      deliveryAddress:  res.deliveryAddress,
+                      deliveryQuartier: res.deliveryQuartier,
+                      deliveryZone:     res.deliveryZone,
+                      deliveryPrice:    res.deliveryPrice,
                     ))
                     ..add(SaveOrder(shopId,
                         createdAt:      res.createdAt,
@@ -1210,7 +1220,7 @@ class _TvaLine extends StatelessWidget {
                     textAlign: TextAlign.center,
                     decoration: InputDecoration(
                       hintText: '0',
-                      hintStyle: const TextStyle(color: AppColors.textHint),
+                      hintStyle: TextStyle(color: AppColors.textHint),
                       suffixText: '%',
                       suffixStyle: AppTextStyles.label
                           .copyWith(color: AppColors.primary),
@@ -1235,7 +1245,7 @@ class _TvaLine extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  const Text('Laissez vide ou 0 pour aucune TVA',
+                  Text('Laissez vide ou 0 pour aucune TVA',
                       style: AppTextStyles.captionHint),
                 ],
               ),
@@ -1247,7 +1257,7 @@ class _TvaLine extends StatelessWidget {
                 children: [
                   TextButton(
                       onPressed: () => Navigator.of(dc).pop(),
-                      child: const Text('Annuler',
+                      child: Text('Annuler',
                           style: TextStyle(color: AppColors.textSecondary))),
                   const SizedBox(width: 8),
                   ElevatedButton(
@@ -1282,7 +1292,7 @@ class _TvaLine extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        const Text('TVA',
+        Text('TVA',
             style: AppTextStyles.bodySmSecondary),
         Row(mainAxisSize: MainAxisSize.min, children: [
           RichText(
@@ -1308,7 +1318,7 @@ class _TvaLine extends StatelessWidget {
                       .copyWith(fontWeight: FontWeight.w500),
                 ),
                 if (rate > 0)
-                  const TextSpan(
+                  TextSpan(
                     text: '  ',
                     style: AppTextStyles.micro,
                   ),
@@ -1378,6 +1388,9 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
   static const _minMarginPct = 30.0;
 
   late TextEditingController _ctrl;
+  // Section repliable des raccourcis de remise — fermée par défaut pour
+  // raccourcir le sheet (évite que le bouton « Appliquer » soit caché).
+  bool _shortcutsExpanded = false;
 
   @override
   void initState() {
@@ -1430,8 +1443,14 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
   };
 
   /// Dialog de confirmation quand 0 ≤ marge < 30%.
-  Future<bool> _confirmLowMargin(double price, double marginPct) async {
+  Future<bool> _confirmLowMargin(double price, double marginPct,
+      {bool belowCost = false}) async {
     final l = context.l10n;
+    // Vente à perte (sous le prix de revient) : accent rouge + textes dédiés ;
+    // marge basse (<30%) : accent orange.
+    final accent = belowCost ? AppColors.error : AppColors.warning;
+    final title  = belowCost ? l.priceEditBelowCostTitle : l.priceEditConfirmTitle;
+    final body   = belowCost ? l.priceEditBelowCostBody  : l.priceEditConfirmBody;
     return await showDialog<bool>(
       context: context,
       builder: (dc) => AlertDialog(
@@ -1440,17 +1459,17 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
         title: Row(children: [
           Container(width: 32, height: 32,
               decoration: BoxDecoration(
-                  color: AppColors.warning.withValues(alpha:0.14),
+                  color: accent.withValues(alpha:0.14),
                   borderRadius: BorderRadius.circular(8)),
-              child: const Icon(Icons.warning_amber_rounded,
-                  size: 17, color: AppColors.warning)),
+              child: Icon(Icons.warning_amber_rounded,
+                  size: 17, color: accent)),
           const SizedBox(width: 10),
-          Expanded(child: Text(l.priceEditConfirmTitle,
+          Expanded(child: Text(title,
               style: AppTextStyles.subtitleBold)),
         ]),
         content: Column(mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(l.priceEditConfirmBody,
+          Text(body,
               style: AppTextStyles.body.copyWith(height: 1.4)),
           const SizedBox(height: 10),
           _kvRow(l.priceEditCost,
@@ -1463,13 +1482,13 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
           const SizedBox(height: 3),
           _kvRow(l.priceEditMargin,
               '${marginPct.toStringAsFixed(0)}%',
-              AppColors.warning),
+              accent),
         ]),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dc).pop(false),
             child: Text(l.commonCancel,
-                style: const TextStyle(color: AppColors.textSecondary)),
+                style: TextStyle(color: AppColors.textSecondary)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -1500,8 +1519,6 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
     final v = double.tryParse(_ctrl.text);
     if (v == null || v <= 0) return;
     final s = _status(v);
-    // Bloqué : sous le prix de revient
-    if (s == _MarginStatus.below) return;
     // Garde défensive : re-vérifier la permission au moment du dispatch.
     // L'UX a déjà été gardée à l'ouverture du sheet (cart_widget), mais
     // on revérifie ici pour couvrir le cas où la permission a changé
@@ -1515,10 +1532,12 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
           'permission "sales.discount".');
       return;
     }
-    // Confirmation si marge basse (entre 0% et 30%)
-    if (s == _MarginStatus.low) {
-      final margin = _currentMargin(v)!;
-      final ok = await _confirmLowMargin(v, margin);
+    // Alerte + confirmation si marge basse (<30%) OU vente à perte (prix sous
+    // le prix de revient). On ALERTE mais on AUTORISE (déstockage possible).
+    if (s == _MarginStatus.low || s == _MarginStatus.below) {
+      final margin = _currentMargin(v) ?? 0;
+      final ok = await _confirmLowMargin(v, margin,
+          belowCost: s == _MarginStatus.below);
       if (!ok) return;
     }
     widget.bloc.add(UpdateItemPrice(widget.item.productId, v,
@@ -1548,7 +1567,11 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
     return Padding(
       padding: EdgeInsets.only(
           bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: Container(
+      // Scrollable : avec le clavier ouvert, le contenu peut dépasser la
+      // hauteur disponible. Sans scroll, le bouton « Appliquer » du bas
+      // restait caché → on enveloppe tout dans un SingleChildScrollView.
+      child: SingleChildScrollView(
+        child: Container(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           // Poignée
@@ -1611,23 +1634,57 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
             ),
           ),
           const SizedBox(height: 10),
-          // Raccourcis de remise : applique une valeur en 1 tap (édition
-          // rapide). Le statut marge se met à jour en temps réel et bloque
-          // toujours si on passe sous le prix de revient.
-          Wrap(
-            spacing: 8, runSpacing: 8, alignment: WrapAlignment.center,
-            children: [
-              _QuickPriceChip(
-                label: l.priceEditOriginal,
-                onTap: () => _setPrice(original),
-              ),
-              for (final pct in const [5, 10, 15])
-                _QuickPriceChip(
-                  label: '-$pct%',
-                  onTap: () => _setPrice(
-                      (original * (1 - pct / 100)).roundToDouble()),
+          // Raccourcis de remise repliables : applique une valeur en 1 tap
+          // (édition rapide). Fermés par défaut pour raccourcir le sheet ;
+          // le statut marge se met à jour en temps réel et bloque toujours
+          // si on passe sous le prix de revient.
+          InkWell(
+            onTap: () => setState(
+                () => _shortcutsExpanded = !_shortcutsExpanded),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(children: [
+                Icon(Icons.local_offer_outlined,
+                    size: 15, color: AppColors.primary),
+                const SizedBox(width: 6),
+                Text(l.priceEditQuickDiscounts,
+                    style: AppTextStyles.bodySmBold
+                        .copyWith(color: AppColors.primary)),
+                const Spacer(),
+                AnimatedRotation(
+                  turns: _shortcutsExpanded ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 180),
+                  child: Icon(Icons.keyboard_arrow_down_rounded,
+                      size: 20, color: AppColors.primary),
                 ),
-            ],
+              ]),
+            ),
+          ),
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 180),
+            crossFadeState: _shortcutsExpanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            firstChild: const SizedBox(width: double.infinity),
+            secondChild: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Wrap(
+                spacing: 8, runSpacing: 8, alignment: WrapAlignment.center,
+                children: [
+                  _QuickPriceChip(
+                    label: l.priceEditOriginal,
+                    onTap: () => _setPrice(original),
+                  ),
+                  for (final pct in const [5, 10, 15])
+                    _QuickPriceChip(
+                      label: '-$pct%',
+                      onTap: () => _setPrice(
+                          (original * (1 - pct / 100)).roundToDouble()),
+                    ),
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 10),
 
@@ -1683,11 +1740,9 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
               child: Row(crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                 Icon(
-                    status == _MarginStatus.below
-                        ? Icons.block_rounded
-                        : status == _MarginStatus.low
-                            ? Icons.warning_amber_rounded
-                            : Icons.check_circle_outline_rounded,
+                    status == _MarginStatus.below || status == _MarginStatus.low
+                        ? Icons.warning_amber_rounded
+                        : Icons.check_circle_outline_rounded,
                     size: 14, color: color),
                 const SizedBox(width: 6),
                 Expanded(child: Text(message,
@@ -1727,8 +1782,9 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
             Expanded(
               flex: 2,
               child: ElevatedButton(
-                // Bouton bloqué uniquement si prix < prix revient
-                onPressed: status == _MarginStatus.below ? null : _apply,
+                // Toujours actif : une vente à perte (prix sous le coût) est
+                // désormais AUTORISÉE après confirmation (déstockage).
+                onPressed: _apply,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
@@ -1747,6 +1803,7 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
             ),
           ]),
         ]),
+        ),
       ),
     );
   }
@@ -1935,14 +1992,14 @@ class _ScheduledDeliveryField extends StatelessWidget {
             InkWell(
               onTap: () =>
                   context.read<CaisseBloc>().add(SetDeliveryDate(null)),
-              child: const Padding(
-                padding: EdgeInsets.all(2),
+              child: Padding(
+                padding: const EdgeInsets.all(2),
                 child: Icon(Icons.close_rounded,
                     size: 14, color: AppColors.textHint),
               ),
             )
           else
-            const Icon(Icons.chevron_right_rounded,
+            Icon(Icons.chevron_right_rounded,
                 size: 16, color: AppColors.textHint),
         ]),
       ),

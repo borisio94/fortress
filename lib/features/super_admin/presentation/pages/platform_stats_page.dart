@@ -59,9 +59,9 @@ class _PlatformStatsPageState extends State<PlatformStatsPage> {
               );
             }
             if (snapshot.hasError) {
-              return const _CenteredScroll(
+              return _CenteredScroll(
                 child: Padding(
-                  padding: EdgeInsets.all(24),
+                  padding: const EdgeInsets.all(24),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -230,7 +230,7 @@ class _RevenueCard extends StatelessWidget {
                     color: AppColors.primary, size: 20),
               ),
               const SizedBox(width: 12),
-              const Text('CA total abonnements',
+              Text('CA total abonnements',
                   style: AppTextStyles.bodySecondary),
             ],
           ),
@@ -302,8 +302,8 @@ class _TopShopsCard extends StatelessWidget {
         border: Border.all(color: theme.semantic.borderSubtle),
       ),
       child: topShops.isEmpty
-          ? const Padding(
-              padding: EdgeInsets.symmetric(vertical: 28),
+          ? Padding(
+              padding: const EdgeInsets.symmetric(vertical: 28),
               child: Center(
                 child: Text('Aucune boutique',
                     style: AppTextStyles.bodySecondary),

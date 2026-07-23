@@ -7,6 +7,9 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/form_sheet.dart';
+import '../../../../core/database/app_database.dart';
+import '../../../../core/storage/local_storage_service.dart';
+import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../domain/entities/sale.dart';
 
 /// Résultat du sheet "Démarrer traitement" (passage scheduled → processing).
@@ -83,6 +86,10 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
   // versement (acompte ou solde) au passage scheduled → processing.
   _ProcessingPaymentChoice _paymentChoice = _ProcessingPaymentChoice.keepCurrent;
   late final TextEditingController _addedAmountCtrl;
+  /// Vrai si la boutique a au moins un dépôt PARTENAIRE actif. Sinon, la
+  /// livraison est gérée par la boutique (retrait / livreur interne /
+  /// expédition) et le mode « Livraison partenaire » est masqué.
+  late final bool _hasPartners;
 
   @override
   void initState() {
@@ -91,6 +98,9 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
     _mode       = widget.defaultMode;
     _personCtrl = TextEditingController(text: widget.initialPersonName ?? '');
     _addedAmountCtrl = TextEditingController();
+    final userId = LocalStorageService.getCurrentUser()?.id ?? '';
+    _hasPartners = AppDatabase.getStockLocationsForOwner(userId)
+        .any((l) => l.type == StockLocationType.partner && l.isActive);
   }
 
   @override
@@ -178,7 +188,7 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFECFDF5),
+                      color: AppColors.secondary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
                           color: AppColors.secondary
@@ -214,7 +224,7 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                         child: Text(
                           'Origine : ${widget.originLocationName}',
                           maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontSize: 11, color: AppColors.textSecondary),
                         ),
                       ),
@@ -222,10 +232,16 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                   ),
                 ],
                 _ChipsRow<DeliveryMode>(
-                  values: const [
+                  // « Livraison partenaire » n'apparaît que si la boutique a un
+                  // dépôt partenaire. Sinon : retrait / livreur interne /
+                  // expédition (livraison gérée par la boutique). On garde le
+                  // chip si la commande est DÉJÀ en mode partenaire, pour ne pas
+                  // perdre la sélection courante.
+                  values: [
                     DeliveryMode.pickup,
                     DeliveryMode.inHouse,
-                    DeliveryMode.partner,
+                    if (_hasPartners || widget.defaultMode == DeliveryMode.partner)
+                      DeliveryMode.partner,
                     DeliveryMode.shipment,
                   ],
                   selected: _mode,
@@ -247,7 +263,7 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                       hintText: _mode == DeliveryMode.inHouse
                           ? 'Nom du livreur'
                           : 'Contact chez le partenaire',
-                      hintStyle: const TextStyle(
+                      hintStyle: TextStyle(
                           color: AppColors.textHint, fontSize: 12),
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/permisions/subscription_provider.dart';
@@ -18,6 +19,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/services/storage_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/storage/hive_boxes.dart';
@@ -377,7 +379,15 @@ class _InventairePageState extends ConsumerState<InventairePage>
   /// variantes avec nom non vide) est stable car JSONB preserve
   /// l'ordre d'insertion ET on applique le même filtre côté
   /// `catalogue_page._load()`.
-  Map<String, int> _buildStockSnapshot(List<Product> products) {
+  Map<String, int> _buildStockSnapshot(List<Product> products) =>
+      _buildStockSnapshotForLocs(products, _locIds);
+
+  /// Variante explicite : construit le snapshot pour un périmètre
+  /// d'emplacements DONNÉ (au lieu de la vue active `_locIds`). Utilisé par
+  /// le partage « Par emplacement » qui cible un emplacement précis choisi
+  /// dans le dialogue, indépendamment du filtre de vue courant.
+  Map<String, int> _buildStockSnapshotForLocs(
+      List<Product> products, List<String>? locIds) {
     final m = <String, int>{};
     for (final p in products) {
       final pid = p.id;
@@ -386,11 +396,11 @@ class _InventairePageState extends ConsumerState<InventairePage>
           .where((v) => v.name.trim().isNotEmpty)
           .toList();
       if (realVariants.length <= 1) {
-        m[pid] = stock_loc.stockAtLocations(p, _locIds);
+        m[pid] = stock_loc.stockAtLocations(p, locIds);
       } else {
         for (int i = 0; i < realVariants.length; i++) {
           m['$pid|$i'] =
-              stock_loc.stockForVariantAtLocations(realVariants[i], _locIds);
+              stock_loc.stockForVariantAtLocations(realVariants[i], locIds);
         }
       }
     }
@@ -662,10 +672,26 @@ class _InventairePageState extends ConsumerState<InventairePage>
     final selectedIds = _selected.toList();
     final hasSelection = _selectMode && selectedIds.isNotEmpty;
     final categories = _availableCategories;
+    // Emplacements proposés : la boutique + ses partenaires actifs (même
+    // owner). Permet le partage « Par emplacement » (stock d'un dépôt précis).
+    final uid = LocalStorageService.getCurrentUser()?.id ?? '';
+    final shareLocations = <_ShareLoc>[];
+    final shopLoc = AppDatabase.getShopLocation(widget.shopId);
+    if (shopLoc != null) {
+      shareLocations.add(_ShareLoc(
+          id: shopLoc.id, name: shopLoc.name, isPartner: false));
+    }
+    for (final loc in AppDatabase.getStockLocationsForOwner(uid)) {
+      if (loc.type == StockLocationType.partner && loc.isActive) {
+        shareLocations.add(_ShareLoc(
+            id: loc.id, name: loc.name, isPartner: true));
+      }
+    }
     final choice = await showDialog<_CatalogueShareChoice>(
       context: context,
       builder: (ctx) => _CatalogueShareDialog(
-        categories:    categories,
+        categories:      categories,
+        locations:       shareLocations,
         canUseSelection: hasSelection,
         selectionCount:  selectedIds.length,
       ),
@@ -691,10 +717,15 @@ class _InventairePageState extends ConsumerState<InventairePage>
           .where((p) => p.isActive && p.isVisibleWeb)
           .toList();
     } else if (choice.kind == _CatalogueShareKind.selection) {
-      qp['ids'] = selectedIds.join(',');
+      // Sélection : on n'expose que les produits cochés ET en stock dans la
+      // vue active (pas de produit en rupture partagé).
       catalogueProducts = _products
-          .where((p) => p.id != null && _selected.contains(p.id))
+          .where((p) => p.id != null && _selected.contains(p.id) &&
+              stock_loc.stockAtLocations(p, _locIds) > 0)
           .toList();
+      final selIds =
+          catalogueProducts.map((p) => p.id).whereType<String>().toList();
+      if (selIds.isNotEmpty) qp['ids'] = selIds.join(',');
       // Le partage explicite = consentement à exposer publiquement.
       // Sans ça, la RLS `products_anon_read_visible_web` renvoie 0 row
       // et le destinataire voit « Les produits partagés ne sont plus
@@ -704,31 +735,64 @@ class _InventairePageState extends ConsumerState<InventairePage>
           debugPrint('[Catalogue] markProductsVisibleWeb error: $e');
         });
       }
+    } else if (choice.kind == _CatalogueShareKind.location &&
+        choice.locationId != null && choice.locationId!.isNotEmpty) {
+      // Par emplacement : seuls les produits effectivement EN STOCK dans
+      // cet emplacement précis (dépôt / partenaire) sont exposés. On passe
+      // leurs `ids` à la vitrine pour qu'elle n'affiche que ceux-là.
+      catalogueProducts = _products
+          .where((p) => p.isActive && p.isVisibleWeb &&
+              stock_loc.stockAtLocations(p, [choice.locationId!]) > 0)
+          .toList();
+      final locProductIds =
+          catalogueProducts.map((p) => p.id).whereType<String>().toList();
+      if (locProductIds.isNotEmpty) qp['ids'] = locProductIds.join(',');
     } else {
       catalogueProducts = _products
           .where((p) => p.isActive && p.isVisibleWeb)
           .toList();
     }
-    // Snapshot du stock filtré sur la vue active (Globale / Boutique seule
-    // / Partenaire X) — embarqué dans l'URL via `stock=`. Sans ça, la page
-    // catalogue retombe sur `stock_qty`/`stock_available` JSONB Supabase
-    // qui ne reflète que la boutique principale (bug rapporté).
-    final snapshot = _buildStockSnapshot(catalogueProducts);
+    // Garde-fou : pour un partage RESTREINT (sélection / emplacement), s'il
+    // n'y a aucun produit en stock dans le périmètre, on n'envoie RIEN —
+    // sinon, faute d'`ids=`, la vitrine retomberait sur le catalogue global
+    // complet (fuite de produits hors périmètre).
+    if ((choice.kind == _CatalogueShareKind.selection ||
+            choice.kind == _CatalogueShareKind.location) &&
+        catalogueProducts.isEmpty) {
+      if (mounted) {
+        AppSnack.info(context,
+            'Aucun produit en stock à partager dans ce périmètre.');
+      }
+      return;
+    }
+    // Périmètre d'emplacements pour le snapshot de stock (`stock=`) ET
+    // l'emplacement rattaché à la commande client (`loc=`). « Par
+    // emplacement » cible l'emplacement choisi ; sinon on retombe sur la
+    // vue active (Globale / Boutique seule / Partenaire X).
+    final List<String>? snapLocIds;
+    final String? shareLocId;
+    if (choice.kind == _CatalogueShareKind.location &&
+        choice.locationId != null && choice.locationId!.isNotEmpty) {
+      snapLocIds = [choice.locationId!];
+      shareLocId = choice.locationId;
+    } else {
+      snapLocIds = _locIds;
+      final vf = ref.read(dashViewFilterProvider);
+      if (vf == null || vf == '_base') {
+        shareLocId = AppDatabase.getShopLocation(widget.shopId)?.id;
+      } else if (HiveBoxes.stockLocationsBox.get(vf) != null) {
+        shareLocId = vf;
+      } else {
+        shareLocId = null;
+      }
+    }
+    // Snapshot embarqué dans l'URL via `stock=` — sans ça, la page catalogue
+    // retombe sur le JSONB Supabase (boutique principale uniquement).
+    final snapshot = _buildStockSnapshotForLocs(catalogueProducts, snapLocIds);
     if (snapshot.isNotEmpty) {
       qp['stock'] = snapshot.entries
           .map((e) => '${e.key}:${e.value}')
           .join(',');
-    }
-    // Emplacement du périmètre actif (= « emplacement utilisé pour
-    // envoyer ») : Boutique → StockLocation de la boutique ; Partenaire X
-    // → son id. Globale / non résolu → omis (commande rattachée à la
-    // boutique, comportement historique inchangé).
-    final vf = ref.read(dashViewFilterProvider);
-    String? shareLocId;
-    if (vf == null || vf == '_base') {
-      shareLocId = AppDatabase.getShopLocation(widget.shopId)?.id;
-    } else if (HiveBoxes.stockLocationsBox.get(vf) != null) {
-      shareLocId = vf;
     }
     if (shareLocId != null && shareLocId.isNotEmpty) {
       qp['loc'] = shareLocId;
@@ -779,7 +843,10 @@ class _InventairePageState extends ConsumerState<InventairePage>
         break;
       case _CatalogueShareKind.selection:
         catalogLine = 'Nos produits sélectionnés '
-            '(${selectedIds.length})';
+            '(${catalogueProducts.length})';
+        break;
+      case _CatalogueShareKind.location:
+        catalogLine = 'Notre catalogue — ${choice.locationName}';
         break;
       case _CatalogueShareKind.all:
         catalogLine = 'Notre catalogue';
@@ -1154,7 +1221,7 @@ class _InventairePageState extends ConsumerState<InventairePage>
                     hintText: l.inventaireSearch,
                     hintStyle: AppTextStyles.bodySm
                         .copyWith(color: AppColors.textHint),
-                    prefixIcon: const Icon(Icons.search_rounded,
+                    prefixIcon: Icon(Icons.search_rounded,
                         size: 18, color: AppColors.textHint),
                     filled: true, fillColor: Theme.of(context).colorScheme.surface, isDense: true,
                     contentPadding: EdgeInsets.zero,
@@ -1926,7 +1993,7 @@ class _DesktopRowState extends ConsumerState<_DesktopRow> {
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(context.l10n.invCategoryLabel, style: AppTextStyles.micro),
               Text(p.categoryId ?? '—', style: AppTextStyles.captionHint
-                  .copyWith(color: const Color(0xFF374151)),
+                  .copyWith(color: AppColors.onSurface),
                   maxLines: 1, overflow: TextOverflow.ellipsis),
             ])),
             Expanded(flex: 1, child: Column(
@@ -1944,7 +2011,7 @@ class _DesktopRowState extends ConsumerState<_DesktopRow> {
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(l.invVisibility, style: AppTextStyles.micro),
               if (isPartnerView)
-                const Text('—', style: AppTextStyles.captionHint)
+                Text('—', style: AppTextStyles.captionHint)
               else
                 Transform.scale(scale: 0.7, alignment: Alignment.centerLeft,
                     child: AppSwitch(value: p.isActive,
@@ -2128,7 +2195,7 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
                     AnimatedRotation(
                       turns: _expanded ? 0.5 : 0,
                       duration: const Duration(milliseconds: 200),
-                      child: const Icon(Icons.expand_more_rounded,
+                      child: Icon(Icons.expand_more_rounded,
                           size: 20, color: AppColors.textSecondary),
                     ),
                     const SizedBox(width: 4),
@@ -2767,7 +2834,7 @@ class _VariantRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 2),
             child: Align(alignment: Alignment.centerRight,
               child: margin == null
-                  ? const Text('—',
+                  ? Text('—',
                       style: AppTextStyles.micro)
                   : Container(
                       padding: const EdgeInsets.symmetric(
@@ -2865,8 +2932,10 @@ class _VariantSwatch extends StatelessWidget {
           // c'est un repère lisible qui évite un trou visuel.
           child: url.startsWith('http')
               ? CachedNetworkImage(
-                  imageUrl: url,
-                  cacheKey: url,
+                  // Swatch 24 px → vignette serveur ~96 px (rétina) au lieu de
+                  // l'image brute → net + léger. Repli initials si erreur.
+                  imageUrl: StorageService.thumbUrl(url, width: 96),
+                  cacheKey: StorageService.thumbUrl(url, width: 96),
                   fit: BoxFit.cover,
                   filterQuality: FilterQuality.high,
                   placeholder:  (_, __) => _initials(context),
@@ -3069,7 +3138,7 @@ class _NoResultState extends StatelessWidget {
         Container(width: 64, height: 64,
             decoration: BoxDecoration(
                 color: AppColors.inputFill, shape: BoxShape.circle),
-            child: const Icon(Icons.search_off_rounded, size: 28,
+            child: Icon(Icons.search_off_rounded, size: 28,
                 color: AppColors.textHint)),
         const SizedBox(height: 16),
         Text(l.invNoResult, style: AppTextStyles.subtitleBold,
@@ -3237,7 +3306,7 @@ class _PromoCountdownState extends State<_PromoCountdown> {
   @override
   Widget build(BuildContext context) {
     if (_remaining.inSeconds <= 0) {
-      return const Text('Promo terminée',
+      return Text('Promo terminée',
           style: AppTextStyles.micro);
     }
     final h = _remaining.inHours;
@@ -3324,6 +3393,18 @@ class _ProductActionsMenu extends ConsumerWidget {
         Text('Partager via WhatsApp', style: AppTextStyles.body),
       ]),
     ));
+    // Lien pub Facebook : ouvre le catalogue directement sur ce produit
+    // (deep-link `?product=`). À coller dans une carte de carrousel Meta.
+    if (product.id != null) {
+      items.add(PopupMenuItem<String>(
+        value: 'copy_ad_link',
+        child: Row(children: [
+          Icon(Icons.link_rounded, size: 16, color: AppColors.primary),
+          const SizedBox(width: 8),
+          const Text('Copier le lien du produit', style: AppTextStyles.body),
+        ]),
+      ));
+    }
     if (perms.canEditProduct && !isPartnerView) {
       final promoActive = product.variants
           .any((v) => v.promoEnabled && (v.promoPrice ?? 0) > 0);
@@ -3340,7 +3421,7 @@ class _ProductActionsMenu extends ConsumerWidget {
                   color: promoActive ? AppColors.secondary : null)),
         ]),
       ));
-      items.add(const PopupMenuItem<String>(
+      items.add(PopupMenuItem<String>(
         value: 'edit',
         child: Row(children: [
           Icon(Icons.edit_outlined, size: 16, color: AppColors.textSecondary),
@@ -3376,6 +3457,7 @@ class _ProductActionsMenu extends ConsumerWidget {
           case 'transfer':       onTransfer();       break;
           case 'share':          onShare();          break;
           case 'share_whatsapp': onShareWhatsApp();  break;
+          case 'copy_ad_link':   _copyAdLink(context); break;
           case 'promo':          onPromo();          break;
           case 'edit':           onEdit();           break;
           case 'delete':         onDelete();         break;
@@ -3383,6 +3465,19 @@ class _ProductActionsMenu extends ConsumerWidget {
       },
       itemBuilder: (_) => items,
     );
+  }
+
+  /// Copie le lien pub Facebook du produit : ouvre le catalogue public
+  /// directement sur ce produit (deep-link `?product=`). Origine via
+  /// `Uri.base.origin` (runtime web), repli sur l'hôte déployé — même
+  /// pattern que `client_detail_page` (zéro hardcode dur).
+  void _copyAdLink(BuildContext context) {
+    final origin = Uri.base.origin.startsWith('http')
+        ? Uri.base.origin
+        : 'https://fortress-pos.web.app';
+    final url = '$origin/catalogue/$shopId?product=${product.id}';
+    Clipboard.setData(ClipboardData(text: url));
+    AppSnack.success(context, 'Lien du produit copié');
   }
 }
 
@@ -3561,7 +3656,7 @@ class _QuickPromoDialogState extends State<_QuickPromoDialog> {
                   border: Border.all(color: AppColors.inputBorder),
                 ),
                 child: Row(children: [
-                  const Icon(Icons.event_outlined,
+                  Icon(Icons.event_outlined,
                       size: 16, color: AppColors.textSecondary),
                   const SizedBox(width: 8),
                   Expanded(
@@ -3578,7 +3673,7 @@ class _QuickPromoDialogState extends State<_QuickPromoDialog> {
                   if (_end != null)
                     InkWell(
                       onTap: () => setState(() => _end = null),
-                      child: const Icon(Icons.close_rounded,
+                      child: Icon(Icons.close_rounded,
                           size: 16, color: AppColors.textSecondary),
                     ),
                 ]),
@@ -3844,7 +3939,7 @@ class _ShareVariantsPickerDialogState
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(null),
-          child: const Text('Annuler',
+          child: Text('Annuler',
               style: TextStyle(color: AppColors.textSecondary)),
         ),
         ElevatedButton.icon(
@@ -3954,20 +4049,41 @@ class _PickOneVariantDialogState extends State<_PickOneVariantDialog> {
 
 // ─── Dialog "Que partager ?" ──────────────────────────────────────────────
 
-enum _CatalogueShareKind { all, category, selection }
+enum _CatalogueShareKind { all, category, location, selection }
+
+/// Emplacement proposé dans le partage « Par emplacement » (boutique ou
+/// partenaire actif de l'owner).
+class _ShareLoc {
+  final String id;
+  final String name;
+  final bool   isPartner;
+  const _ShareLoc({
+    required this.id,
+    required this.name,
+    required this.isPartner,
+  });
+}
 
 class _CatalogueShareChoice {
   final _CatalogueShareKind kind;
   final String?             category;
-  const _CatalogueShareChoice(this.kind, {this.category});
+  final String?             locationId;
+  final String?             locationName;
+  const _CatalogueShareChoice(this.kind, {
+    this.category,
+    this.locationId,
+    this.locationName,
+  });
 }
 
 class _CatalogueShareDialog extends StatefulWidget {
-  final List<String> categories;
-  final bool         canUseSelection;
-  final int          selectionCount;
+  final List<String>    categories;
+  final List<_ShareLoc> locations;
+  final bool            canUseSelection;
+  final int             selectionCount;
   const _CatalogueShareDialog({
     required this.categories,
+    required this.locations,
     required this.canUseSelection,
     required this.selectionCount,
   });
@@ -3979,6 +4095,7 @@ class _CatalogueShareDialog extends StatefulWidget {
 class _CatalogueShareDialogState extends State<_CatalogueShareDialog> {
   late _CatalogueShareKind _kind;
   String? _category;
+  String? _locationId;
 
   @override
   void initState() {
@@ -3987,110 +4104,294 @@ class _CatalogueShareDialogState extends State<_CatalogueShareDialog> {
         ? _CatalogueShareKind.selection
         : _CatalogueShareKind.all;
     if (widget.categories.isNotEmpty) _category = widget.categories.first;
+    if (widget.locations.isNotEmpty) _locationId = widget.locations.first.id;
+  }
+
+  bool get _canContinue {
+    if (_kind == _CatalogueShareKind.category) return _category != null;
+    if (_kind == _CatalogueShareKind.location) return _locationId != null;
+    return true;
+  }
+
+  void _onContinue() {
+    final loc = (_kind == _CatalogueShareKind.location && _locationId != null)
+        ? widget.locations.firstWhere((e) => e.id == _locationId)
+        : null;
+    Navigator.of(context).pop(_CatalogueShareChoice(
+      _kind,
+      category: _kind == _CatalogueShareKind.category ? _category : null,
+      locationId:   loc?.id,
+      locationName: loc?.name,
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return AlertDialog(
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14)),
-      titlePadding:   const EdgeInsets.fromLTRB(20, 20, 20, 4),
-      contentPadding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-      title: Text('Que partager ?',
-          style: AppTextStyles.subtitleBold
-              .copyWith(fontWeight: FontWeight.w800)),
-      content: SizedBox(
-        width: 360,
+    final cs = Theme.of(context).colorScheme;
+    return Dialog(
+      backgroundColor: cs.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            RadioListTile<_CatalogueShareKind>(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              value: _CatalogueShareKind.all,
-              groupValue: _kind,
-              onChanged: (v) => setState(() => _kind = v!),
-              title: const Text('Tout le catalogue'),
-              subtitle: const Text('Tous les produits visibles publiquement',
-                  style: AppTextStyles.caption),
-            ),
-            if (widget.categories.isNotEmpty) ...[
-              RadioListTile<_CatalogueShareKind>(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                value: _CatalogueShareKind.category,
-                groupValue: _kind,
-                onChanged: (v) => setState(() => _kind = v!),
-                title: const Text('Une catégorie'),
-                subtitle: const Text('Filtre par catégorie de produit',
-                    style: AppTextStyles.caption),
-              ),
-              if (_kind == _CatalogueShareKind.category)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(36, 4, 0, 8),
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _category,
-                    isDense: true,
-                    decoration: InputDecoration(
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 10),
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                    ),
-                    items: widget.categories
-                        .map((c) => DropdownMenuItem(
-                            value: c,
-                            child: Text(c,
-                                style: AppTextStyles.body)))
-                        .toList(),
-                    onChanged: (v) => setState(() => _category = v),
+            // ── Header ──────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 6),
+              child: Row(children: [
+                Container(
+                  width: 38, height: 38,
+                  decoration: BoxDecoration(
+                    color: AppColors.primarySurface,
+                    borderRadius: BorderRadius.circular(11),
                   ),
+                  child: Icon(Icons.ios_share_rounded,
+                      size: 19, color: AppColors.primary),
                 ),
-            ],
-            if (widget.canUseSelection)
-              RadioListTile<_CatalogueShareKind>(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                value: _CatalogueShareKind.selection,
-                groupValue: _kind,
-                onChanged: (v) => setState(() => _kind = v!),
-                title: Text(
-                    'Sélection actuelle (${widget.selectionCount} produit${widget.selectionCount > 1 ? 's' : ''})'),
-                subtitle: const Text('Uniquement les produits cochés',
-                    style: AppTextStyles.caption),
-              ),
+                const SizedBox(width: 12),
+                Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Que partager ?',
+                        style: AppTextStyles.subtitleBold
+                            .copyWith(fontWeight: FontWeight.w800)),
+                    Text('Choisissez le périmètre du catalogue',
+                        style: AppTextStyles.caption
+                            .copyWith(color: AppColors.textHint)),
+                  ],
+                )),
+              ]),
+            ),
+            // ── Options ─────────────────────────────────────────────────
+            Flexible(child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+              child: Column(children: [
+                _ShareOption(
+                  icon:     Icons.storefront_rounded,
+                  title:    'Tout le catalogue',
+                  subtitle: 'Tous les produits visibles publiquement',
+                  selected: _kind == _CatalogueShareKind.all,
+                  onTap: () => setState(() => _kind = _CatalogueShareKind.all),
+                ),
+                if (widget.categories.isNotEmpty)
+                  _ShareOption(
+                    icon:     Icons.category_rounded,
+                    title:    'Une catégorie',
+                    subtitle: 'Filtre par catégorie de produit',
+                    selected: _kind == _CatalogueShareKind.category,
+                    onTap: () =>
+                        setState(() => _kind = _CatalogueShareKind.category),
+                    expanded: _kind == _CatalogueShareKind.category
+                        ? _dropdown(
+                            value:   _category,
+                            items:   widget.categories,
+                            labelOf: (c) => c,
+                            hint:    'Catégorie',
+                            onChanged: (v) => setState(() => _category = v),
+                          )
+                        : null,
+                  ),
+                if (widget.locations.isNotEmpty)
+                  _ShareOption(
+                    icon:     Icons.warehouse_rounded,
+                    title:    'Par emplacement',
+                    subtitle: 'Stock d\'un dépôt / partenaire précis',
+                    selected: _kind == _CatalogueShareKind.location,
+                    onTap: () =>
+                        setState(() => _kind = _CatalogueShareKind.location),
+                    expanded: _kind == _CatalogueShareKind.location
+                        ? _dropdown(
+                            value:   _locationId,
+                            items:   widget.locations
+                                .map((e) => e.id).toList(),
+                            labelOf: (id) => widget.locations
+                                .firstWhere((e) => e.id == id).name,
+                            hint:    'Emplacement',
+                            onChanged: (v) => setState(() => _locationId = v),
+                          )
+                        : null,
+                  ),
+                if (widget.canUseSelection)
+                  _ShareOption(
+                    icon:     Icons.check_circle_outline_rounded,
+                    title:    'Sélection actuelle '
+                        '(${widget.selectionCount} produit'
+                        '${widget.selectionCount > 1 ? 's' : ''})',
+                    subtitle: 'Uniquement les produits cochés',
+                    selected: _kind == _CatalogueShareKind.selection,
+                    onTap: () =>
+                        setState(() => _kind = _CatalogueShareKind.selection),
+                  ),
+              ]),
+            )),
+            // ── Footer ──────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+              child: Row(children: [
+                Expanded(child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: TextButton.styleFrom(
+                      foregroundColor: AppColors.textSecondary,
+                      padding: const EdgeInsets.symmetric(vertical: 13)),
+                  child: const Text('Annuler'),
+                )),
+                const SizedBox(width: 10),
+                Expanded(flex: 2, child: ElevatedButton(
+                  onPressed: _canContinue ? _onContinue : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: AppColors.divider,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(11)),
+                  ),
+                  child: const Text('Continuer'),
+                )),
+              ]),
+            ),
           ],
         ),
       ),
-      actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Annuler'),
+    );
+  }
+
+  Widget _dropdown({
+    required String? value,
+    required List<String> items,
+    required String Function(String) labelOf,
+    required String hint,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      isDense: true,
+      isExpanded: true,
+      hint: Text(hint, style: AppTextStyles.body
+          .copyWith(color: AppColors.textHint)),
+      decoration: InputDecoration(
+        isDense: true,
+        filled: true,
+        fillColor: Theme.of(context).colorScheme.surface,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide:
+                BorderSide(color: AppColors.primary.withValues(alpha: 0.4))),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide:
+                BorderSide(color: AppColors.primary.withValues(alpha: 0.4))),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
+      ),
+      items: items
+          .map((c) => DropdownMenuItem(
+              value: c,
+              child: Text(labelOf(c),
+                  style: AppTextStyles.body,
+                  overflow: TextOverflow.ellipsis)))
+          .toList(),
+      onChanged: onChanged,
+    );
+  }
+}
+
+/// Carte d'option moderne pour le sélecteur de périmètre de partage.
+class _ShareOption extends StatelessWidget {
+  final IconData     icon;
+  final String       title;
+  final String       subtitle;
+  final bool         selected;
+  final VoidCallback onTap;
+  final Widget?      expanded;
+  const _ShareOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+    this.expanded,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = AppColors.primary;
+    final sem    = Theme.of(context).semantic;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: selected ? accent.withValues(alpha: 0.06) : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: selected ? accent : sem.borderSubtle,
+          width: selected ? 1.5 : 1,
         ),
-        ElevatedButton(
-          onPressed: () {
-            Navigator.of(context).pop(_CatalogueShareChoice(
-              _kind,
-              category: _kind == _CatalogueShareKind.category
-                  ? _category
-                  : null,
-            ));
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: theme.colorScheme.primary,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8)),
+      ),
+      child: Column(children: [
+        InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(children: [
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: selected
+                      ? accent.withValues(alpha: 0.14)
+                      : sem.elevatedSurface,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(icon, size: 18,
+                    color: selected ? accent : AppColors.textSecondary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(title, style: AppTextStyles.bodyBold,
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 1),
+                  Text(subtitle,
+                      style: AppTextStyles.caption
+                          .copyWith(color: AppColors.textHint),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                ],
+              )),
+              const SizedBox(width: 8),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 20, height: 20,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: selected ? accent : const Color(0xFFCBD5E1),
+                      width: 2),
+                  color: selected ? accent : Colors.transparent,
+                ),
+                child: selected
+                    ? const Icon(Icons.check_rounded,
+                        size: 13, color: Colors.white)
+                    : null,
+              ),
+            ]),
           ),
-          child: const Text('Continuer'),
         ),
-      ],
+        if (expanded != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: expanded!,
+          ),
+      ]),
     );
   }
 }
@@ -4342,7 +4643,7 @@ class _StockAuditReportDialogState extends State<_StockAuditReportDialog> {
                                     icon: const Icon(
                                         Icons.settings_backup_restore_rounded,
                                         size: 14),
-                                    label: const Text('Corriger',
+                                    label: Text('Corriger',
                                         style: AppTextStyles.captionBold),
                                     onPressed: () => _correct(d),
                                     style: OutlinedButton.styleFrom(

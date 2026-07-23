@@ -3,7 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/config/app_modes.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -39,13 +39,11 @@ String _countryFromPhone(String? phone) {
   return 'CM';
 }
 
+// Choix DÉFINITIF, non modifiable après création (cf. kCreationSectors).
 const _kSectors = <_Sector>[
-  _Sector('retail',      'Commerce'),
-  _Sector('restaurant',  'Restaurant'),
-  _Sector('supermarche', 'Supermarché'),
-  _Sector('pharmacie',   'Pharmacie'),
   _Sector('ecommerce',   'E-commerce'),
-  _Sector('autre',       'Autre'),
+  _Sector('restaurant',  'Restaurant / Café'),
+  _Sector('fastfood',    'Fast-food'),
 ];
 
 class _Sector {
@@ -90,7 +88,7 @@ class _ShopOnboardingWizardState
   final _districtCtrl = TextEditingController();
 
   int     _step    = 0;
-  String  _sector  = kEcommerceOnlyMode ? 'ecommerce' : 'retail';
+  String  _sector  = kDefaultSector;
   String? _palette;
   bool    _submitting = false;
 
@@ -320,7 +318,7 @@ class _Step1NameSector extends StatelessWidget {
           const Text('Identité de la boutique',
               style: AppTextStyles.subtitleBold),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             'Le nom apparaîtra sur vos reçus, votre catalogue web et '
             'les messages WhatsApp à vos clients.',
             style: AppTextStyles.bodySecondary,
@@ -335,11 +333,11 @@ class _Step1NameSector extends StatelessWidget {
             hint:  'Ex. Boutique Etoile',
             onChanged: (_) => onChange(),
           ),
-          // Type d'activité — masqué en mode e-commerce unique (réversible :
-          // kEcommerceOnlyMode). Code conservé pour réactivation future.
-          if (!kEcommerceOnlyMode) ...[
+          // Type d'établissement — choix DÉFINITIF, non modifiable après
+          // création (cf. kCreationSectors dans restaurant_mode.dart).
+          ...[
             const SizedBox(height: 20),
-            const Text('Type d\'activité', style: AppTextStyles.label),
+            const Text('Type d\'établissement', style: AppTextStyles.label),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -393,7 +391,7 @@ class _Step2CityDistrict extends StatelessWidget {
           const Text('Où êtes-vous situé ?',
               style: AppTextStyles.subtitleBold),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             'L\'adresse aide vos clients à vous trouver et sert pour '
             'la livraison à domicile.',
             style: AppTextStyles.bodySecondary,
@@ -445,7 +443,7 @@ class _Step3LogoPalette extends StatelessWidget {
           const Text('Identité visuelle',
               style: AppTextStyles.subtitleBold),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             'Choisissez le thème qui correspond à votre marque. Vous '
             'pourrez l\'ajuster dans les paramètres à tout moment.',
             style: AppTextStyles.bodySecondary,
@@ -472,13 +470,13 @@ class _Step3LogoPalette extends StatelessWidget {
                       color: AppColors.primary),
                 ),
                 const SizedBox(width: 12),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Logo (optionnel)',
+                      const Text('Logo (optionnel)',
                           style: AppTextStyles.bodyBold),
-                      SizedBox(height: 2),
+                      const SizedBox(height: 2),
                       Text(
                         'À ajouter depuis les paramètres après création.',
                         style: AppTextStyles.bodySmSecondary,

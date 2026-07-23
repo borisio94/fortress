@@ -200,9 +200,9 @@ class _LocationContentsViewState extends ConsumerState<LocationContentsView> {
                         hintText: 'Rechercher un produit, SKU…',
                         hintStyle: AppTextStyles.bodySm.copyWith(
                             color: const Color(0xFFBBBBBB)),
-                        prefixIcon: const Icon(Icons.search_rounded, size: 18,
-                            color: Color(0xFF9CA3AF)),
-                        filled: true, fillColor: const Color(0xFFF9FAFB),
+                        prefixIcon: Icon(Icons.search_rounded, size: 18,
+                            color: AppColors.textHint),
+                        filled: true, fillColor: AppColors.inputFill,
                         isDense: true,
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 11),
@@ -338,7 +338,7 @@ class _Header extends StatelessWidget {
               style: AppTextStyles.title.copyWith(color: _color)),
           Text('$items référence${items > 1 ? 's' : ''}',
               style: AppTextStyles.micro.copyWith(
-                  color: const Color(0xFF9CA3AF))),
+                  color: AppColors.textHint)),
         ],
       ),
     ]),
@@ -381,7 +381,7 @@ class _ItemTile extends StatelessWidget {
               ].join(' · '),
                   maxLines: 1, overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.caption.copyWith(
-                      color: const Color(0xFF9CA3AF))),
+                      color: AppColors.textHint)),
             ],
           ),
         ),
@@ -398,7 +398,7 @@ class _ItemTile extends StatelessWidget {
                             : const Color(0xFF10B981))),
             Text('dispo',
                 style: AppTextStyles.micro.copyWith(
-                    color: const Color(0xFF9CA3AF))),
+                    color: AppColors.textHint)),
           ],
         ),
         if (item.blocked > 0) ...[
@@ -408,7 +408,7 @@ class _ItemTile extends StatelessWidget {
                 style: AppTextStyles.bodySmBold.copyWith(
                     color: const Color(0xFFEF4444))),
             Text('bloq', style: AppTextStyles.micro.copyWith(
-                color: const Color(0xFF9CA3AF))),
+                color: AppColors.textHint)),
           ]),
         ],
       ]),

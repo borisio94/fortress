@@ -179,7 +179,7 @@ class _PersonNameFieldState extends State<_PersonNameField> {
         hintText: 'Nom du livreur (optionnel)',
         hintStyle: AppTextStyles.bodySm
             .copyWith(color: AppColors.textHint),
-        prefixIcon: const Icon(Icons.person_outline, size: 15,
+        prefixIcon: Icon(Icons.person_outline, size: 15,
             color: AppColors.textHint),
         filled: true, fillColor: AppColors.inputFill, isDense: true,
         contentPadding: const EdgeInsets.symmetric(

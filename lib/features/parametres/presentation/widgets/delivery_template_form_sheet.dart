@@ -201,7 +201,7 @@ class _DeliveryTemplateFormSheetState
                       hintStyle: const TextStyle(
                           fontSize: 11, color: Color(0xFFBBBBBB)),
                       filled: true,
-                      fillColor: const Color(0xFFF9FAFB),
+                      fillColor: AppColors.inputFill,
                       contentPadding: const EdgeInsets.all(12),
                       border: _outlineBorder(_bodyError != null),
                       enabledBorder: _outlineBorder(_bodyError != null),
@@ -219,7 +219,7 @@ class _DeliveryTemplateFormSheetState
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF9FAFB),
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: Theme.of(context).semantic.borderSubtle),
                     ),
@@ -278,7 +278,7 @@ class _DeliveryTemplateFormSheetState
   OutlineInputBorder _outlineBorder(bool hasError) => OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
       borderSide: BorderSide(
-          color: hasError ? AppColors.error : const Color(0xFFE5E7EB)));
+          color: hasError ? AppColors.error : AppColors.divider));
 }
 
 /// Encart d'aide listant les variables disponibles. Tap sur une chip
@@ -361,6 +361,16 @@ class _VariablesHint extends StatelessWidget {
           ),
           ],
         ),
+        // Légende des variables de MONTANT — évite la confusion qui fait
+        // envoyer au livreur un total sans les frais de livraison.
+        const SizedBox(height: 8),
+        Text(
+          '💰 {{total}} = produits + livraison   ·   '
+          '{{prix_produit}} = produits seuls   ·   '
+          '{{frais_livraison}} = livraison seule',
+          style: TextStyle(
+              fontSize: 9, height: 1.5, color: AppColors.textSecondary),
+        ),
       ]),
     );
   }
@@ -396,7 +406,7 @@ class _ScopePicker extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
@@ -406,15 +416,15 @@ class _ScopePicker extends StatelessWidget {
           value: selectedId == null
               ? null
               : (partners.any((p) => p.id == selectedId) ? selectedId : null),
-          icon: const Icon(Icons.keyboard_arrow_down_rounded,
-              size: 18, color: Color(0xFF9CA3AF)),
+          icon: Icon(Icons.keyboard_arrow_down_rounded,
+              size: 18, color: AppColors.textHint),
           items: <DropdownMenuItem<String?>>[
-            const DropdownMenuItem<String?>(
+            DropdownMenuItem<String?>(
               value: null,
               child: Row(children: [
-                Icon(Icons.store_outlined, size: 13, color: Color(0xFF6B7280)),
-                SizedBox(width: 6),
-                Text('Shop — tous partenaires',
+                Icon(Icons.store_outlined, size: 13, color: AppColors.textSecondary),
+                const SizedBox(width: 6),
+                const Text('Shop — tous partenaires',
                     style: AppTextStyles.bodySm),
               ]),
             ),

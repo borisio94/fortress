@@ -451,6 +451,10 @@ class OrderReceiptUseCase {
                               'TVA (${order.taxRate.toStringAsFixed(0)}%)',
                               '${fmt.format(order.taxAmount)} $currency',
                               isTicket: isTicket),
+                        if ((order.deliveryPrice ?? 0) > 0)
+                          _recapRow('Livraison',
+                              '${fmt.format(order.deliveryPrice!)} $currency',
+                              isTicket: isTicket),
                         pw.Container(
                             height: 0.5,
                             color: _violet,

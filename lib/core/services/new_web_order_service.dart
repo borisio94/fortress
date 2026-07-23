@@ -8,6 +8,8 @@ import '../../shared/widgets/alerts/_order_hydration.dart';
 import '../database/app_database.dart';
 import '../storage/hive_boxes.dart';
 import 'notification_service.dart';
+import 'scheduled_order_alert_service.dart' show AlertLevel;
+import '../../shared/widgets/alerts/alarm_sound_player.dart';
 
 /// Service singleton qui maintient la liste des **nouvelles commandes web
 /// non acquittées** (source='web' + status='scheduled' + non vue par
@@ -37,6 +39,11 @@ class NewWebOrderService {
 
   Set<String> _acked = <String>{};
   bool _started = false;
+  /// Ids déjà signalés par un son — anti-rejeu à chaque event Realtime.
+  /// Seedé au 1er passage SANS jouer (sinon l'ouverture de l'app sonnerait
+  /// pour les commandes déjà en attente).
+  final Set<String> _soundedIds = <String>{};
+  bool _seeded = false;
   void Function(String table, String shopId)? _onChanged;
 
   /// Démarre le service. Idempotent.
@@ -208,8 +215,46 @@ class NewWebOrderService {
   }
 
   void _evaluate() {
-    if (!_alertsCtl.isClosed) {
-      _alertsCtl.add(_computeAlerts());
+    if (_alertsCtl.isClosed) return;
+    final alerts = _computeAlerts();
+    _alertsCtl.add(alerts);
+    _maybePlayArrivalSound(alerts);
+  }
+
+  /// Joue un son court à l'ARRIVÉE d'une nouvelle commande web (ids non encore
+  /// signalés). Gated par les réglages d'alerte EXISTANTS (aucun nouveau
+  /// réglage créé). Anti-rejeu via [_soundedIds] — sinon chaque event Realtime
+  /// rejouerait le son pour la même commande.
+  void _maybePlayArrivalSound(List<Sale> alerts) {
+    final ids = alerts.map((s) => s.id).whereType<String>().toSet();
+    if (!_seeded) {
+      _seeded = true;
+      _soundedIds
+        ..clear()
+        ..addAll(ids);
+      return;
+    }
+    final fresh = ids.difference(_soundedIds);
+    _soundedIds
+      ..clear()
+      ..addAll(ids);
+    if (fresh.isEmpty || !_isSoundEnabled()) return;
+    try {
+      AlarmSoundPlayer.instance.playAlarm(AlertLevel.info);
+    } catch (e) {
+      debugPrint('[NewWebOrder] son arrivée err: $e');
+    }
+  }
+
+  /// Réutilise les réglages d'alerte génériques (master + son) — pas de
+  /// préférence dédiée.
+  bool _isSoundEnabled() {
+    try {
+      final box = HiveBoxes.settingsBox;
+      if (box.get('alert_enabled') == false) return false;
+      return box.get('alert_sound_enabled') != false; // défaut true
+    } catch (_) {
+      return false;
     }
   }
 }

@@ -4,7 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/config/app_modes.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/router/registration_flag.dart';
@@ -52,13 +52,12 @@ part '../widgets/register_step_recap.dart';
 // avec `_countryFromPhone` de CreateShopPage). Pas de champ explicite.
 // ═════════════════════════════════════════════════════════════════════════════
 
+// Choix DÉFINITIF, non modifiable après création (cf. kCreationSectors).
+// Les secteurs legacy restent valides en base mais ne sont plus proposés.
 const _kSectors = <_SectorOption>[
-  _SectorOption('retail',      'Commerce'),
-  _SectorOption('restaurant',  'Restaurant'),
-  _SectorOption('supermarche', 'Supermarché'),
-  _SectorOption('pharmacie',   'Pharmacie'),
   _SectorOption('ecommerce',   'E-commerce'),
-  _SectorOption('autre',       'Autre'),
+  _SectorOption('restaurant',  'Restaurant / Café'),
+  _SectorOption('fastfood',    'Fast-food'),
 ];
 
 const _countryCurrency = <String, String>{
@@ -102,7 +101,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   // ── Step 2 — Boutique ─────────────────────────────────────────────────
   final _shopNameCtrl    = TextEditingController();
-  String  _sector        = kEcommerceOnlyMode ? 'ecommerce' : 'retail';
+  String  _sector        = kDefaultSector;
   String? _shopNameError;
 
   bool   _isOnline = true;
@@ -401,19 +400,17 @@ class _BottomBar extends StatelessWidget {
               style: AppTextStyles.bodySecondary
                   .copyWith(fontWeight: FontWeight.w700)),
         ),
-        const SizedBox(width: 12),
-        // `Expanded` (au lieu d'une largeur fixe 200) : le bouton occupe la
-        // place restante et le label long « Démarrer mon essai 14 jours »
-        // n'est plus tronqué/comprimé.
-        Expanded(
-          child: AppPrimaryButton(
-            isLoading: state._submitting,
-            enabled: canForward && !state._submitting,
-            onTap: isLast ? state._submit : state._next,
-            label: isLast
-                ? 'Démarrer mon essai 14 jours'
-                : 'Continuer',
-          ),
+        const Spacer(),
+        // Bouton dimensionné au CONTENU, collé à l'angle droit, texte centré
+        // (demande utilisateur). `AppPrimaryButton` est content-sized par
+        // défaut (fullWidth:false) → la largeur épouse le label.
+        AppPrimaryButton(
+          isLoading: state._submitting,
+          enabled: canForward && !state._submitting,
+          onTap: isLast ? state._submit : state._next,
+          label: isLast
+              ? 'Démarrer mon essai 14 jours'
+              : 'Continuer',
         ),
       ]),
     );

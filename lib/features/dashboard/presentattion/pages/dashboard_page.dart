@@ -1743,7 +1743,7 @@ class _NewProductsEmpty extends StatelessWidget {
         alignment: Alignment.center,
         child: Column(
           children: [
-            const Icon(Icons.inventory_2_outlined,
+            Icon(Icons.inventory_2_outlined,
                 size: 28, color: AppColors.textHint),
             const SizedBox(height: 6),
             Text(message,
@@ -1790,7 +1790,7 @@ class _NewProductRow extends ConsumerWidget {
                 : null,
           ),
           child: (img == null || img.isEmpty)
-              ? const Icon(Icons.inventory_2_rounded,
+              ? Icon(Icons.inventory_2_rounded,
                   size: 16, color: AppColors.textHint)
               : null,
         ),
@@ -1815,7 +1815,7 @@ class _NewProductRow extends ConsumerWidget {
                           color: AppColors.primary.withValues(alpha:0.8))),
                   const SizedBox(width: 6),
                   Container(width: 2, height: 2,
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                           color: AppColors.textHint,
                           shape: BoxShape.circle)),
                   const SizedBox(width: 6),

@@ -6,6 +6,8 @@ import '../../../core/permisions/subscription_provider.dart';
 import '../../inventaire/domain/entities/product.dart';
 import '../../inventaire/domain/entities/stock_location.dart';
 import '../../inventaire/domain/entities/stock_level.dart';
+import '../../../core/services/partner_ledger_service.dart';
+import '../../parametres/domain/entities/partner_ledger_entry.dart';
 
 /// Clés de catégorie de dépense CANONIQUES (mappées à un libellé/icône par
 /// ExpensesBreakdownWidget). Toute autre clé est un label libre (frais de
@@ -268,9 +270,12 @@ final dashViewFilterProvider = StateProvider<String?>((ref) => null);
 ///   • viewFilter <id>    (Partenaire)→ strictement ce partenaire
 bool expenseMatchesView(String? locationId, String? viewFilter) {
   if (viewFilter == null) return true;
-  if (viewFilter == '_base') {
-    return locationId == null || locationId == '_base';
-  }
+  // Vue Boutique : on montre TOUTES les dépenses de la boutique — les siennes
+  // (null / '_base' / id réel boutique) ET celles liées à ses partenaires
+  // (livraison, stockage). Les dépenses sont déjà filtrées par `shop_id` en
+  // amont, donc « tout accepter » = toutes les dépenses de CETTE boutique. Le
+  // détail par partenaire reste accessible en sélectionnant ce partenaire.
+  if (viewFilter == '_base') return true;
   return locationId == viewFilter;
 }
 
@@ -958,6 +963,20 @@ final dashDataProvider =
         expensesByCategory[cat] = (expensesByCategory[cat] ?? 0) + amount;
       }
     }
+
+    // Frais de LIVRAISON (deliveryPrice) payés à un partenaire / une agence =
+    // dépense de livraison (nouveau modèle : la livraison n'est plus dans
+    // `fees` mais dans `deliveryPrice`). Retrait / équipe interne = pas de coût
+    // externe → non compté. Même règle « completed » que les frais.
+    final delivMode  = o['delivery_mode'] as String?;
+    final delivPrice = (o['delivery_price'] as num?)?.toDouble() ?? 0;
+    if (!feesBlocked && delivPrice > 0
+        && (delivMode == 'partner' || delivMode == 'shipment')) {
+      expensesSeries[bucket] += delivPrice;
+      operatingExpenses += delivPrice;
+      final cat = _normalizeExpenseCat('shipping');
+      expensesByCategory[cat] = (expensesByCategory[cat] ?? 0) + delivPrice;
+    }
   }
 
   final top = topMap.values.toList()
@@ -1083,6 +1102,24 @@ final dashDataProvider =
       // Répartir dans le bucket correspondant pour le graphique
       expensesSeries[range.bucketOf(paidAt)] += amount;
     } catch (_) {}
+  }
+
+  // ── Charges partenaire (stockage, commission…) ────────────────────────
+  // Le livre partenaire est un système séparé : ses CHARGES `partnerCharge`
+  // (ex. stockage) sont de vraies sorties d'argent → on les remonte en
+  // dépenses. Les `deliveryOwed` ne sont PAS repris ici : la livraison est
+  // déjà comptée via `order.deliveryPrice` (sinon double comptage).
+  for (final e in PartnerLedgerService.entriesForShop(shopId)) {
+    if (e.type != PartnerLedgerEntryType.partnerCharge) continue;
+    final at = e.createdAt.toLocal();
+    if (at.isBefore(range.from) || at.isAfter(range.to)) continue;
+    if (!expenseMatchesView(e.partnerLocationId, viewFilter)) continue;
+    final amount = e.amount.abs();
+    if (amount <= 0) continue;
+    operatingExpenses += amount;
+    final cat = _normalizeExpenseCat(e.category?.name ?? 'other');
+    expensesByCategory[cat] = (expensesByCategory[cat] ?? 0) + amount;
+    expensesSeries[range.bucketOf(at)] += amount;
   }
 
   return DashData(

@@ -167,6 +167,9 @@ class _ProductFormPageState extends State<ProductFormPage> {
   // Visibilité web activée par défaut à la CRÉATION (en édition, écrasée par
   // la valeur du produit dans _fillFromProduct, gardé après `if (p == null)`).
   bool  _isVisibleWeb = true;
+  // Suivi de stock activé par défaut (hotfix_138) : le comportement
+  // historique reste la norme, on ne le désactive que volontairement.
+  bool  _trackStock   = true;
   int   _rating       = 0;
 
   // ── Calculs ───────────────────────────────────────────────────────
@@ -247,6 +250,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
     _selectedSupplier = _matchSupplierByName(_supplierCtrl.text);
     _isActive         = p.isActive;
     _isVisibleWeb     = p.isVisibleWeb;
+    _trackStock       = p.trackStock;
     _rating           = p.rating;
 
     final cat = p.categoryId ?? 'Autre';
@@ -502,6 +506,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
       stockMinAlert: baseVariant?.stockMinAlert ?? 1,
       isActive:      _isActive,
       isVisibleWeb:  _isVisibleWeb,
+      trackStock:    _trackStock,
       imageUrl:      mainVariant?.imageUrl,
       rating:        _rating,
       variants:      variants,
@@ -705,7 +710,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
                       hintStyle: const TextStyle(
                           color: Color(0xFFBBBBBB), fontSize: 12),
                       filled: true,
-                      fillColor: const Color(0xFFF9FAFB),
+                      fillColor: AppColors.inputFill,
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 11),
@@ -815,6 +820,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
       AppSectionCard(title: l.prodGeneralInfo, icon: Icons.info_outline_rounded, children: [
         _LF(l.inventaireName, req: true,
             child: _TF(_nameCtrl, 'Ex: Coca-Cola 33cl', Icons.label_outline,
+                autofocus: true,
                 validator: (v) => (v ?? '').trim().isEmpty ? 'Requis' : null)),
         _gap(),
         _LF(l.prodBrand, req: true,
@@ -922,39 +928,46 @@ class _ProductFormPageState extends State<ProductFormPage> {
                 Icons.sticky_note_2_outlined, maxLines: 2)),
       ]),
       _gap(h: 14),
-      // Fournisseur (global au produit)
-      AppSectionCard(title: 'Fournisseur', icon: Icons.local_shipping_rounded, children: [
-        _LF('Nom du fournisseur',
-            child: _SupplierPickField(
-              controller: _supplierCtrl,
-              suppliers: _suppliers,
-              selected: _selectedSupplier,
-              onPicked: (s) => setState(() {
-                _selectedSupplier = s;
-                _supplierCtrl.text = s.name;
-              }),
-              onCleared: () => setState(() {
-                _selectedSupplier = null;
-                _supplierCtrl.clear();
-              }),
-              onManualChange: (text) {
-                // Si l'utilisateur retape, on tente de re-matcher ; sinon on
-                // considère que c'est une saisie libre (fournisseur hors liste).
-                final match = _matchSupplierByName(text);
-                if (match?.id != _selectedSupplier?.id) {
-                  setState(() => _selectedSupplier = match);
-                }
-              },
-            )),
-        if (_selectedSupplier != null) ...[
-          _gap(h: 8),
-          _SupplierInfoCard(supplier: _selectedSupplier!),
+      // Fournisseur (facultatif) — replié par défaut, dépliable au besoin.
+      // Auto-déplié en édition si un fournisseur/référence est déjà renseigné.
+      _ExpandSection(
+        icon: Icons.local_shipping_rounded,
+        label: 'Fournisseur (facultatif)',
+        forceOpen: _selectedSupplier != null
+            || _supplierRefCtrl.text.trim().isNotEmpty,
+        children: [
+          _LF('Nom du fournisseur',
+              child: _SupplierPickField(
+                controller: _supplierCtrl,
+                suppliers: _suppliers,
+                selected: _selectedSupplier,
+                onPicked: (s) => setState(() {
+                  _selectedSupplier = s;
+                  _supplierCtrl.text = s.name;
+                }),
+                onCleared: () => setState(() {
+                  _selectedSupplier = null;
+                  _supplierCtrl.clear();
+                }),
+                onManualChange: (text) {
+                  // Si l'utilisateur retape, on tente de re-matcher ; sinon on
+                  // considère que c'est une saisie libre (fournisseur hors liste).
+                  final match = _matchSupplierByName(text);
+                  if (match?.id != _selectedSupplier?.id) {
+                    setState(() => _selectedSupplier = match);
+                  }
+                },
+              )),
+          if (_selectedSupplier != null) ...[
+            _gap(h: 8),
+            _SupplierInfoCard(supplier: _selectedSupplier!),
+          ],
+          _gap(),
+          _LF('Référence fournisseur',
+              child: _TF(_supplierRefCtrl, 'Ex: REF-001',
+                  Icons.tag_rounded)),
         ],
-        _gap(),
-        _LF('Référence fournisseur',
-            child: _TF(_supplierRefCtrl, 'Ex: REF-001',
-                Icons.tag_rounded)),
-      ]),
+      ),
     ],
   );
 
@@ -1033,7 +1046,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: Theme.of(context).semantic.borderSubtle),
-              color: const Color(0xFFF9FAFB),
+              color: AppColors.surface,
             ),
             child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
               Icon(Icons.add_rounded, size: 16, color: AppColors.primary),
@@ -1121,6 +1134,8 @@ class _ProductFormPageState extends State<ProductFormPage> {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(9),
                       child: _buildVariantImage(
+                        context: context,
+                        displaySize: 80,
                         bytes: v.imageBytes,
                         url:   v.imageUrl,
                         placeholder: _ImgPlaceholderSmall(),
@@ -1167,6 +1182,13 @@ class _ProductFormPageState extends State<ProductFormPage> {
         _ToggleRow(l.prodIsVisibleWeb, l.webShopVisibleHint,
             _isVisibleWeb, AppColors.primary,
                 (v) => setState(() => _isVisibleWeb = v)),
+        Divider(height: 18, color: Theme.of(context).semantic.borderSubtle),
+        // Suivi de stock (hotfix_138). Décoché = plat cuisiné, service ou
+        // prestation : les ventes ne décrémentent rien et les annulations
+        // ne recréditent rien.
+        _ToggleRow(l.prodTrackStock, l.trackStockHint,
+            _trackStock, AppColors.secondary,
+                (v) => setState(() => _trackStock = v)),
         Divider(height: 18, color: Theme.of(context).semantic.borderSubtle),
         _LF(l.prodRating,
             child: _Stars(_rating, (v) => setState(() => _rating = v))),
@@ -1237,7 +1259,7 @@ class _VariantFullCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: isMain ? AppColors.primarySurface : const Color(0xFFF9FAFB),
+        color: isMain ? AppColors.primarySurface : AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
             color: isMain
@@ -1278,6 +1300,8 @@ class _VariantFullCard extends StatelessWidget {
                   child: SizedBox(
                     width: 32, height: 32,
                     child: _buildVariantImage(
+                      context: context,
+                      displaySize: 32,
                       bytes: variant.imageBytes,
                       url:   variant.imageUrl,
                       placeholder: const SizedBox(width: 32, height: 32),
@@ -1289,8 +1313,8 @@ class _VariantFullCard extends StatelessWidget {
               if (!isExpanded) ...[
                 Expanded(child: Text(
                   variant.name.text.isEmpty ? '—' : variant.name.text,
-                  style: const TextStyle(fontSize: 12,
-                      color: Color(0xFF374151), fontWeight: FontWeight.w500),
+                  style: TextStyle(fontSize: 12,
+                      color: AppColors.onSurface, fontWeight: FontWeight.w500),
                   overflow: TextOverflow.ellipsis,
                 )),
                 if (sell > 0)
@@ -1307,7 +1331,7 @@ class _VariantFullCard extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFAF5FF),
+                      color: AppColors.primarySurface,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: AppColors.primary.withValues(alpha:0.3)),
                     ),
@@ -1327,7 +1351,7 @@ class _VariantFullCard extends StatelessWidget {
                 const SizedBox(width: 4),
                 IconButton(
                     onPressed: onRemove,
-                    icon: const Icon(Icons.close_rounded, size: 16,
+                    icon: Icon(Icons.close_rounded, size: 16,
                         color: AppColors.textHint),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 24, minHeight: 24)),
@@ -1352,7 +1376,7 @@ class _VariantFullCard extends StatelessWidget {
               // image+nom+SKU, sur toute la largeur du panneau variante).
               Text(
                 l.imageUploadHint,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
                   color: AppColors.textHint,
                   fontStyle: FontStyle.italic,
@@ -1371,6 +1395,8 @@ class _VariantFullCard extends StatelessWidget {
                         width: 64, height: 64,
                         child: hasImg
                             ? _buildVariantImage(
+                                context: context,
+                                displaySize: 64,
                                 bytes: variant.imageBytes,
                                 url:   variant.imageUrl,
                                 placeholder: _ImgPlaceholderSmall(),
@@ -1383,12 +1409,12 @@ class _VariantFullCard extends StatelessWidget {
                                 child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      const Icon(Icons.add_photo_alternate_outlined,
-                                          size: 20, color: Color(0xFFD1D5DB)),
+                                      Icon(Icons.add_photo_alternate_outlined,
+                                          size: 20, color: AppColors.textHint),
                                       const SizedBox(height: 2),
                                       Text(l.prodChooseFile,
                                           textAlign: TextAlign.center,
-                                          style: const TextStyle(fontSize: 8,
+                                          style: TextStyle(fontSize: 8,
                                               color: AppColors.textHint)),
                                     ])),
                       ),
@@ -1718,7 +1744,7 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
           margin: const EdgeInsets.only(bottom: 4),
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: a.isAvailable ? const Color(0xFFF0FDF4) : const Color(0xFFFEF2F2),
+            color: a.isAvailable ? AppColors.secondary.withValues(alpha: 0.12) : AppColors.error.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(6),
             border: Border.all(color: a.isAvailable
                 ? const Color(0xFFA7F3D0) : const Color(0xFFFCA5A5))),
@@ -1731,9 +1757,9 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
               Text('+${a.quantity} · ${a.cause.label}',
                   style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
               Text('${a.statusLabel} · ${_fmtDate(a.createdAt)}',
-                  style: const TextStyle(fontSize: 9, color: AppColors.textHint)),
+                  style: TextStyle(fontSize: 9, color: AppColors.textHint)),
               if (a.note != null && a.note!.isNotEmpty)
-                Text(a.note!, style: const TextStyle(fontSize: 9,
+                Text(a.note!, style: TextStyle(fontSize: 9,
                     color: AppColors.textSecondary, fontStyle: FontStyle.italic),
                     maxLines: 1, overflow: TextOverflow.ellipsis),
             ])),
@@ -1753,8 +1779,8 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
           ]),
         ))),
       if (_expanded && _arrivals.isEmpty)
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
           child: Text('Aucune arrivée enregistrée',
               style: TextStyle(fontSize: 11, color: AppColors.textHint)),
         ),
@@ -1860,12 +1886,12 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
                   Text(isEdit ? 'Modifier l\'arrivée' : 'Enregistrer une arrivée',
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                   Text(widget.variantName.isEmpty ? 'Variante' : widget.variantName,
-                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                      style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
                 ])),
               ]),
               const SizedBox(height: 20),
               // Quantité
-              const Align(alignment: Alignment.centerLeft,
+              Align(alignment: Alignment.centerLeft,
                   child: Text('Quantité reçue', style: TextStyle(fontSize: 12,
                       fontWeight: FontWeight.w600, color: AppColors.textSecondary))),
               const SizedBox(height: 8),
@@ -1893,7 +1919,7 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
               ]),
               const SizedBox(height: 16),
               // Statut
-              const Align(alignment: Alignment.centerLeft,
+              Align(alignment: Alignment.centerLeft,
                   child: Text('Statut', style: TextStyle(fontSize: 12,
                       fontWeight: FontWeight.w600, color: AppColors.textSecondary))),
               const SizedBox(height: 8),
@@ -1909,14 +1935,14 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
               ]),
               const SizedBox(height: 16),
               // Cause
-              const Align(alignment: Alignment.centerLeft,
+              Align(alignment: Alignment.centerLeft,
                   child: Text('Cause', style: TextStyle(fontSize: 12,
                       fontWeight: FontWeight.w600, color: AppColors.textSecondary))),
               const SizedBox(height: 8),
               DropdownButtonFormField<ArrivalCause>(
                 value: cause,
                 decoration: InputDecoration(isDense: true, filled: true,
-                  fillColor: const Color(0xFFF9FAFB),
+                  fillColor: AppColors.inputFill,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: Theme.of(ctx).semantic.borderSubtle)),
@@ -1932,7 +1958,7 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
               TextField(controller: noteCtrl, style: const TextStyle(fontSize: 13),
                 decoration: InputDecoration(
                   hintText: 'Note (optionnel)', isDense: true,
-                  filled: true, fillColor: const Color(0xFFF9FAFB),
+                  filled: true, fillColor: AppColors.inputFill,
                   hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
@@ -2146,7 +2172,7 @@ class _StockIndicatorsState extends State<_StockIndicators> {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F7FC),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
@@ -2236,7 +2262,7 @@ class _StockIndicatorsState extends State<_StockIndicators> {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F7FC),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
@@ -2350,7 +2376,7 @@ class _LocationChip extends StatelessWidget {
                         color: selected ? _color : Theme.of(context).colorScheme.onSurface)),
               ),
               Text('${data.available} dispo',
-                  style: const TextStyle(fontSize: 9,
+                  style: TextStyle(fontSize: 9,
                       color: AppColors.textHint,
                       fontWeight: FontWeight.w500)),
             ],
@@ -2382,7 +2408,7 @@ class _StockCell extends StatelessWidget {
       const SizedBox(height: 3),
       Text('$value', style: TextStyle(fontSize: 14,
           fontWeight: FontWeight.w800, color: color)),
-      Text(label, style: const TextStyle(fontSize: 9,
+      Text(label, style: TextStyle(fontSize: 9,
           color: AppColors.textHint)),
     ]),
   );
@@ -2402,7 +2428,7 @@ class _StatusChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: active ? color.withValues(alpha:0.1) : const Color(0xFFF9FAFB),
+          color: active ? color.withValues(alpha:0.1) : AppColors.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: active ? color : Theme.of(context).semantic.borderSubtle,
               width: active ? 1.5 : 1)),
@@ -2443,7 +2469,7 @@ class _ExpandSectionState extends State<_ExpandSection> {
     final open = _open || widget.forceOpen;
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
@@ -2456,8 +2482,8 @@ class _ExpandSectionState extends State<_ExpandSection> {
               Icon(widget.icon, size: 14, color: AppColors.primary),
               const SizedBox(width: 8),
               Expanded(child: Text(widget.label,
-                  style: const TextStyle(fontSize: 12,
-                      fontWeight: FontWeight.w600, color: Color(0xFF374151)))),
+                  style: TextStyle(fontSize: 12,
+                      fontWeight: FontWeight.w600, color: AppColors.onSurface))),
               if (widget.trailing != null) widget.trailing!,
               Icon(open
                   ? Icons.keyboard_arrow_up_rounded
@@ -2498,7 +2524,7 @@ class _SecondaryImagesRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const brokenIcon = Icon(Icons.broken_image, color: Color(0xFFD1D5DB));
+    final brokenIcon = Icon(Icons.broken_image, color: AppColors.textHint);
     return SizedBox(
       height: 52,
       child: ListView(
@@ -2597,7 +2623,7 @@ class _ExpRow extends StatelessWidget {
             onChanged: (_) => onChanged(),
             validator: (v) => (v ?? '').trim().isEmpty ? 'Requis' : null)),
         IconButton(onPressed: onRemove,
-            icon: const Icon(Icons.close_rounded, size: 16,
+            icon: Icon(Icons.close_rounded, size: 16,
                 color: AppColors.textHint),
             padding: const EdgeInsets.only(left: 4),
             constraints: const BoxConstraints(minWidth: 28, minHeight: 28)),
@@ -2625,7 +2651,7 @@ class _StepBar extends StatelessWidget {
       final done   = i < current;
       final active = i == current;
       final col    = active ? AppColors.primary
-          : done ? AppColors.secondary : const Color(0xFFD1D5DB);
+          : done ? AppColors.secondary : AppColors.textHint;
       return Expanded(child: GestureDetector(
         onTap: () => onTap(i),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -2687,7 +2713,7 @@ class _BottomNav extends StatelessWidget {
             icon: const Icon(Icons.arrow_back_ios_rounded, size: 13),
             label: Text(l.prodPrev),
             style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF374151),
+              foregroundColor: AppColors.onSurface,
               side: BorderSide(color: Theme.of(context).semantic.borderSubtle),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               minimumSize: Size.zero,
@@ -2731,25 +2757,43 @@ class _BottomNav extends StatelessWidget {
 ///  - `url` http(s) (image distante uploadée vers Supabase)
 ///  - `url` chemin local (sur mobile uniquement, web tombe sur placeholder)
 Widget _buildVariantImage({
+  required BuildContext context,
   required Uint8List? bytes,
   required String?    url,
   required Widget     placeholder,
+  double              displaySize = 80,
   BoxFit              fit = BoxFit.cover,
 }) {
-  // FilterQuality.high : meilleur rendu lors du downscale (par défaut
-  // FilterQuality.low donne un aspect pixelisé sur les vignettes).
+  // Anti-grain : on charge l'image à une taille proche de la vignette au lieu
+  // de l'image brute ~2048 px. Décoder/afficher à fort ratio en une passe
+  // produit de l'aliasing sur web même en FilterQuality.high. Réseau →
+  // vignette redimensionnée côté serveur (StorageService.thumbUrl) ;
+  // mémoire/fichier → `cacheWidth`.
+  // Largeur cible DPR-AWARE : taille logique de la vignette × densité écran,
+  // bornée [120, 600]. Sur un écran rétina (DPR 2-3) une vignette 80 px a
+  // besoin de 160-240 px réels — une valeur fixe basse pixeliserait.
   const fq = FilterQuality.high;
+  final dpr = MediaQuery.of(context).devicePixelRatio;
+  final int thumbPx = (displaySize * dpr).clamp(120.0, 600.0).round();
   if (bytes != null) {
     return Image.memory(bytes, fit: fit, filterQuality: fq,
+        // cacheWidth omis sur web (décodage canvas peu fiable avec) ; l'aperçu
+        // mémoire est de toute façon transitoire (avant upload → bascule URL).
+        cacheWidth: kIsWeb ? null : thumbPx,
         errorBuilder: (_, __, ___) => placeholder);
   }
   if (url != null && url.isNotEmpty) {
     if (url.startsWith('http')) {
-      return Image.network(url, fit: fit, filterQuality: fq,
-          errorBuilder: (_, __, ___) => placeholder);
+      return Image.network(StorageService.thumbUrl(url, width: thumbPx),
+          fit: fit, filterQuality: fq,
+          // Repli sur l'image brute si la vignette transformée échoue.
+          errorBuilder: (_, __, ___) => Image.network(url,
+              fit: fit, filterQuality: fq,
+              errorBuilder: (_, __, ___) => placeholder));
     }
     if (!kIsWeb) {
       return Image.file(File(url), fit: fit, filterQuality: fq,
+          cacheWidth: thumbPx,
           errorBuilder: (_, __, ___) => placeholder);
     }
   }
@@ -2762,7 +2806,7 @@ class _ImgPlaceholderSmall extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     color: AppColors.inputFill,
-    child: const Icon(Icons.image_outlined, color: Color(0xFFD1D5DB)),
+    child: Icon(Icons.image_outlined, color: AppColors.textHint),
   );
 }
 
@@ -2773,14 +2817,20 @@ class _StepScroll extends StatelessWidget {
   final List<Widget> children;
   const _StepScroll({required this.formKey, required this.children});
   @override
-  Widget build(BuildContext context) => Form(
-    key: formKey,
-    autovalidateMode: AutovalidateMode.onUserInteraction,
-    child: ListView(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-      children: children,
-    ),
-  );
+  Widget build(BuildContext context) {
+    // AppScaffold utilise resizeToAvoidBottomInset:false → le clavier ne
+    // rétrécit PAS le body. On ajoute donc sa hauteur en marge basse pour que
+    // les derniers champs puissent défiler AU-DESSUS du clavier.
+    final keyboard = MediaQuery.of(context).viewInsets.bottom;
+    return Form(
+      key: formKey,
+      autovalidateMode: AutovalidateMode.onUserInteraction,
+      child: ListView(
+        padding: EdgeInsets.fromLTRB(16, 14, 16, 8 + keyboard),
+        children: children,
+      ),
+    );
+  }
 }
 
 Widget _gap({double h = 12}) => SizedBox(height: h);
@@ -2797,7 +2847,7 @@ class _LF extends StatelessWidget {
     children: [
       if (label.isNotEmpty) ...[
         RichText(text: TextSpan(
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500,
+          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500,
               color: AppColors.textSecondary),
           children: [
             TextSpan(text: label),
@@ -2840,7 +2890,7 @@ class _ToggleRow extends StatelessWidget {
     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label, style: TextStyle(fontSize: 13,
           fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
-      Text(sub, style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
+      Text(sub, style: TextStyle(fontSize: 11, color: AppColors.textHint)),
     ])),
     AppSwitch(value: value, onChanged: onChange),
   ]);
@@ -2876,7 +2926,7 @@ class _DateBtn extends StatelessWidget {
     },
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-      decoration: BoxDecoration(color: const Color(0xFFF9FAFB),
+      decoration: BoxDecoration(color: AppColors.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
       child: Row(children: [
@@ -2917,14 +2967,14 @@ class _InfoBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(10),
-    decoration: BoxDecoration(color: const Color(0xFFF0F9FF),
+    decoration: BoxDecoration(color: AppColors.info.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: const Color(0xFFBAE6FD))),
     child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Icon(Icons.info_outline, size: 14, color: AppColors.primary),
       const SizedBox(width: 8),
-      Expanded(child: Text(text, style: const TextStyle(fontSize: 11,
-          color: Color(0xFF374151), height: 1.4))),
+      Expanded(child: Text(text, style: TextStyle(fontSize: 11,
+          color: AppColors.onSurface, height: 1.4))),
     ]),
   );
 }
@@ -2942,7 +2992,7 @@ class _BenefitBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: pos ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2),
+        color: pos ? AppColors.secondary.withValues(alpha: 0.12) : AppColors.error.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
             color: pos ? const Color(0xFF6EE7B7) : const Color(0xFFFCA5A5)),
@@ -2952,10 +3002,10 @@ class _BenefitBanner extends StatelessWidget {
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(l.prodEffectiveCost,
-                    style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+                    style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
                 Text(CurrencyFormatter.format(effectiveCost),
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-                        color: Color(0xFF374151))),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
+                        color: AppColors.onSurface)),
               ])),
           Container(width: 1, height: 32,
               color: pos ? const Color(0xFF6EE7B7) : const Color(0xFFFCA5A5)),
@@ -2963,7 +3013,7 @@ class _BenefitBanner extends StatelessWidget {
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(l.prodBenefit,
-                    style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+                    style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
                 Text(CurrencyFormatter.format(benefit),
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
                         color: benefitColor)),
@@ -2974,7 +3024,7 @@ class _BenefitBanner extends StatelessWidget {
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(l.prodMarginPOS,
-                    style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+                    style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
                 Text('${margin.toStringAsFixed(1)}%',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
                         color: benefitColor)),
@@ -2984,7 +3034,7 @@ class _BenefitBanner extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
               '${l.prodExpensePerUnit}: +${CurrencyFormatter.format(expensePerUnit.ceilToDouble())}/u inclus dans le prix de revient',
-              style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+              style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
         ],
       ]),
     );
@@ -3012,7 +3062,7 @@ class _CalcBanner extends StatelessWidget {
             children: [
               Text(label, style: TextStyle(fontSize: 10, color: c,
                   fontWeight: FontWeight.w600)),
-              Text(sub, style: const TextStyle(fontSize: 10,
+              Text(sub, style: TextStyle(fontSize: 10,
                   color: AppColors.textSecondary)),
             ])),
         Text(value, style: TextStyle(fontSize: 12,
@@ -3022,7 +3072,7 @@ class _CalcBanner extends StatelessWidget {
   }
 }
 
-class _TF extends StatelessWidget {
+class _TF extends StatefulWidget {
   final TextEditingController ctrl;
   final String hint;
   final IconData icon;
@@ -3030,31 +3080,92 @@ class _TF extends StatelessWidget {
   final TextInputType? keyboardType;
   final String? Function(String?)? validator;
   final ValueChanged<String>? onChanged;
+  final bool autofocus;
   const _TF(this.ctrl, this.hint, this.icon, {this.maxLines = 1,
-    this.keyboardType, this.validator, this.onChanged});
+    this.keyboardType, this.validator, this.onChanged, this.autofocus = false});
+
   @override
-  Widget build(BuildContext context) => TextFormField(
-    controller: ctrl, maxLines: maxLines,
-    keyboardType: keyboardType, onChanged: onChanged, validator: validator,
-    style: const TextStyle(fontSize: 13, color: Color(0xFF1A1D2E)),
-    inputFormatters: keyboardType == TextInputType.number
-        ? [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))] : null,
-    decoration: InputDecoration(
-      hintText: hint,
-      hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 12),
-      prefixIcon: Icon(icon, size: 15, color: const Color(0xFFAAAAAA)),
-      filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
-      errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: AppColors.error)),
-    ),
-  );
+  State<_TF> createState() => _TFState();
+}
+
+class _TFState extends State<_TF> {
+  late final FocusNode _node;
+
+  @override
+  void initState() {
+    super.initState();
+    _node = FocusNode();
+    _node.addListener(_ensureVisibleOnFocus);
+  }
+
+  // Auto-scroll : dès qu'un champ prend le focus (tap OU navigation clavier),
+  // on le fait défiler dans la zone visible — jamais caché hors écran ni
+  // derrière le clavier mobile. alignment 0.15 = champ placé vers le haut du
+  // viewport restant (au-dessus du clavier).
+  void _ensureVisibleOnFocus() {
+    if (!_node.hasFocus || !mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || Scrollable.maybeOf(context) == null) return;
+      final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+      if (keyboardOpen) {
+        // Clavier ouvert (mobile) : place le champ vers le haut du viewport,
+        // garanti au-dessus du clavier.
+        Scrollable.ensureVisible(context,
+            alignment: 0.15,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic);
+      } else {
+        // Desktop / sans clavier : défilement MINIMAL, uniquement si le champ
+        // déborde de la zone visible — évite tout saut intempestif.
+        context.findRenderObject()?.showOnScreen(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _node.removeListener(_ensureVisibleOnFocus);
+    _node.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Pas de navigation auto vers le champ suivant : Entrée (desktop) ne
+    // déplace PLUS le focus ; sur mobile la touche vaut « OK » (ferme le
+    // clavier). Seul le 1er champ (Nom) reçoit un autofocus à l'ouverture.
+    // Multi-lignes → saut de ligne. (L'auto-scroll de confort au focus reste.)
+    final action = widget.maxLines > 1
+        ? TextInputAction.newline : TextInputAction.done;
+    return TextFormField(
+      controller: widget.ctrl, maxLines: widget.maxLines,
+      focusNode: _node,
+      autofocus: widget.autofocus,
+      textInputAction: action,
+      keyboardType: widget.keyboardType, onChanged: widget.onChanged,
+      validator: widget.validator,
+      style: const TextStyle(fontSize: 13, color: Color(0xFF1A1D2E)),
+      inputFormatters: widget.keyboardType == TextInputType.number
+          ? [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))] : null,
+      decoration: InputDecoration(
+        hintText: widget.hint,
+        hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 12),
+        prefixIcon: Icon(widget.icon, size: 15, color: const Color(0xFFAAAAAA)),
+        filled: true, fillColor: AppColors.inputFill, isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
+        errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: AppColors.error)),
+      ),
+    );
+  }
 }
 
 // ─── Sélecteur de fournisseur ──────────────────────────────────────────────
@@ -3112,7 +3223,7 @@ class _SupplierPickField extends StatelessWidget {
           children: [
             if (hasSelection)
               IconButton(
-                icon: const Icon(Icons.close_rounded,
+                icon: Icon(Icons.close_rounded,
                     size: 16, color: AppColors.textHint),
                 tooltip: 'Effacer le fournisseur',
                 onPressed: onCleared,
@@ -3125,7 +3236,7 @@ class _SupplierPickField extends StatelessWidget {
             ),
           ],
         ),
-        filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
+        filled: true, fillColor: AppColors.inputFill, isDense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
@@ -3193,9 +3304,9 @@ class _SupplierPickerSheetState extends State<_SupplierPickerSheet> {
                 decoration: InputDecoration(
                   hintText: 'Rechercher par nom, téléphone, email…',
                   hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
-                  prefixIcon: const Icon(Icons.search_rounded,
+                  prefixIcon: Icon(Icons.search_rounded,
                       size: 18, color: AppColors.textHint),
-                  filled: true, fillColor: const Color(0xFFF9FAFB),
+                  filled: true, fillColor: AppColors.inputFill,
                   isDense: true,
                   contentPadding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 11),
@@ -3207,8 +3318,8 @@ class _SupplierPickerSheetState extends State<_SupplierPickerSheet> {
               const SizedBox(height: 12),
               Flexible(
                 child: items.isEmpty
-                    ? const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 28),
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 28),
                         child: Center(
                           child: Text('Aucun fournisseur trouvé',
                               style: TextStyle(
@@ -3256,7 +3367,7 @@ class _SupplierPickerSheetState extends State<_SupplierPickerSheet> {
                                                 .where((e) =>
                                                     e != null && e.isNotEmpty)
                                                 .join(' · '),
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                                 fontSize: 11,
                                                 color: AppColors.textHint)),
                                     ],
@@ -3331,7 +3442,7 @@ class _SupplierInfoCard extends StatelessWidget {
                 )),
           ] else ...[
             const SizedBox(height: 4),
-            const Text(
+            Text(
                 'Aucun contact renseigné pour ce fournisseur.',
                 style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
           ],
@@ -3355,7 +3466,7 @@ class _SupplierInfoRow extends StatelessWidget {
       SizedBox(
         width: 72,
         child: Text(label,
-            style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
+            style: TextStyle(fontSize: 11, color: AppColors.textHint)),
       ),
       Expanded(
         child: Text(value,

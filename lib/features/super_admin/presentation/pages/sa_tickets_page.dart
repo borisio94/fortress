@@ -207,7 +207,7 @@ class _SaTicketsSectionState extends State<SaTicketsSection> {
     }
     return Row(
       children: [
-        const Icon(Icons.store_outlined,
+        Icon(Icons.store_outlined,
             size: 16, color: AppColors.textSecondary),
         const SizedBox(width: 8),
         Expanded(
@@ -215,7 +215,7 @@ class _SaTicketsSectionState extends State<SaTicketsSection> {
             isExpanded: true,
             value: _shopFilter,
             underline: const SizedBox.shrink(),
-            hint: const Text('Toutes les boutiques',
+            hint: Text('Toutes les boutiques',
                 style: AppTextStyles.bodySmSecondary),
             items: [
               const DropdownMenuItem<String?>(
@@ -247,7 +247,7 @@ class _SaTicketsSectionState extends State<SaTicketsSection> {
           Icon(Icons.forum_outlined,
               size: 40, color: Theme.of(context).semantic.borderSubtle),
           const SizedBox(height: 12),
-          const Text('Aucun ticket', style: AppTextStyles.bodySecondary),
+          Text('Aucun ticket', style: AppTextStyles.bodySecondary),
         ],
       ),
     );
@@ -305,7 +305,7 @@ class _TicketCard extends StatelessWidget {
                 const Spacer(),
                 if (count is int && count > 0)
                   Row(mainAxisSize: MainAxisSize.min, children: [
-                    const Icon(Icons.forum_outlined,
+                    Icon(Icons.forum_outlined,
                         size: 14, color: AppColors.textSecondary),
                     const SizedBox(width: 3),
                     Text('$count', style: AppTextStyles.bodySmSecondary),

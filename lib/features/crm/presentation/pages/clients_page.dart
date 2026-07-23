@@ -143,11 +143,11 @@ class _ClientsPageState extends State<ClientsPage> {
                 style: AppTextStyles.input,
                 decoration: InputDecoration(
                   hintText: l.crmSearch,
-                  prefixIcon: const Icon(Icons.search_rounded,
+                  prefixIcon: Icon(Icons.search_rounded,
                       size: 18, color: AppColors.textHint),
                   suffixIcon: _query.isNotEmpty
                       ? IconButton(
-                    icon: const Icon(Icons.clear_rounded,
+                    icon: Icon(Icons.clear_rounded,
                         size: 16, color: AppColors.textHint),
                     onPressed: () => setState(() => _query = ''),
                   )
@@ -739,7 +739,10 @@ class _EmptyState extends StatelessWidget {
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                // Bouton confortable : hauteur mini + padding généreux pour que
+                // le texte ne soit pas serré (le thème global met minimumSize 0).
+                minimumSize: const Size(0, 46),
+                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8)),
               ),
@@ -1090,7 +1093,7 @@ class ClientFormSheetState extends State<ClientFormSheet> {
                 keyboardType: TextInputType.emailAddress,
                 validator: (_) => _emailError,
                 suffixIcon: IconButton(
-                  icon: const Icon(Icons.close_rounded,
+                  icon: Icon(Icons.close_rounded,
                       size: 16, color: AppColors.textHint),
                   onPressed: () => setState(() {
                     _emailCtrl.clear();
@@ -1121,7 +1124,7 @@ class ClientFormSheetState extends State<ClientFormSheet> {
                 prefixIcon: Icons.notes_rounded,
                 maxLines: 2,
                 suffixIcon: IconButton(
-                  icon: const Icon(Icons.close_rounded,
+                  icon: Icon(Icons.close_rounded,
                       size: 16, color: AppColors.textHint),
                   onPressed: () => setState(() {
                     _notesCtrl.clear();
@@ -1172,8 +1175,8 @@ class ClientFormSheetState extends State<ClientFormSheet> {
                 ),
                 Divider(height: 1,
                     color: Theme.of(dc).semantic.borderSubtle),
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 14, 20, 0),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
                   child: Text('Cette action est irréversible.',
                       style: AppTextStyles.bodySecondary),
                 ),

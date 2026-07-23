@@ -11,6 +11,16 @@ class SaleItem extends Equatable {
   final int     quantity;
   final double  discount;
 
+  /// Options de menu choisies pour cette ligne (module restaurant).
+  ///
+  /// Chaque entrée : `{group: 'Cuisson', option: 'Saignant', price_impact: 0}`.
+  /// **Purement descriptif** : l'impact tarifaire est déjà matérialisé dans
+  /// [customPrice] au moment de la prise de commande, pour que les ~9
+  /// recalculs de total dispersés dans l'app (dashboard, exports, métriques
+  /// client, PDF, tracking web) restent justes sans connaître les modificateurs.
+  /// Vide (défaut) pour toute vente non-restaurant → zéro impact e-commerce.
+  final List<Map<String, dynamic>> modifiers;
+
   const SaleItem({
     required this.productId,
     required this.productName,
@@ -21,6 +31,7 @@ class SaleItem extends Equatable {
     this.priceBuy = 0,
     required this.quantity,
     this.discount = 0,
+    this.modifiers = const [],
   });
 
   /// Prix effectif pour cette vente (custom si défini, sinon unitaire)
@@ -48,6 +59,7 @@ class SaleItem extends Equatable {
     double? customPrice,
     String? imageUrl,
     bool clearCustomPrice = false,
+    List<Map<String, dynamic>>? modifiers,
   }) => SaleItem(
     productId:   productId,
     productName: productName,
@@ -58,9 +70,31 @@ class SaleItem extends Equatable {
     priceBuy:    priceBuy,
     quantity:    quantity    ?? this.quantity,
     discount:    discount    ?? this.discount,
+    // Recopié explicitement : ce corps réassigne chaque champ à la main,
+    // donc omettre `modifiers` ici l'effacerait silencieusement à chaque
+    // copyWith (changement de quantité, clôture de vente à choisir…).
+    modifiers:   modifiers   ?? this.modifiers,
   );
+
+  /// Signature stable des options, pour distinguer deux lignes du même
+  /// produit commandées avec des options différentes (ex. un steak saignant
+  /// et un steak bien cuit ne doivent pas fusionner en une ligne ×2).
+  String get modifiersKey {
+    if (modifiers.isEmpty) return '';
+    final parts = modifiers
+        .map((m) => '${m['group'] ?? ''}:${m['option'] ?? ''}')
+        .toList()
+      ..sort();
+    return parts.join('|');
+  }
+
+  /// Libellé lisible des options — « Saignant · Sans sauce ».
+  String get modifiersLabel => modifiers
+      .map((m) => (m['option'] ?? '').toString())
+      .where((s) => s.isNotEmpty)
+      .join(' · ');
 
   @override
   List<Object?> get props =>
-      [productId, quantity, discount, customPrice, imageUrl];
+      [productId, quantity, discount, customPrice, imageUrl, modifiersKey];
 }

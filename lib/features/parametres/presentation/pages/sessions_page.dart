@@ -254,7 +254,7 @@ class _SessionTile extends StatelessWidget {
             ]),
             const SizedBox(height: 2),
             Text(_formatLastSeen(),
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 11, color: AppColors.textHint)),
           ],
         )),
@@ -278,7 +278,7 @@ class _Empty extends StatelessWidget {
             Icon(Icons.devices_outlined,
                 size: 48, color: AppColors.textHint),
             const SizedBox(height: 12),
-            const Text('Aucune session enregistrée',
+            Text('Aucune session enregistrée',
                 style: TextStyle(
                     fontSize: 13, color: AppColors.textSecondary)),
             const SizedBox(height: 8),

@@ -144,7 +144,6 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
               child: Column(
                 children: [
                   const PinLockBanner(),
-                  const OfflineBanner(),
                   const SyncStatusBanner(),
                   const SubscriptionBanner(),
                   Expanded(child: widget.body),
@@ -167,7 +166,6 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
         child: Column(
           children: [
             const PinLockBanner(),
-            const OfflineBanner(),
             const SyncStatusBanner(),
             const SubscriptionBanner(),
             Expanded(child: widget.body),
@@ -192,6 +190,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
       ),
       centerTitle: isDesktop ? false : true,
       actions: [
+        const OfflineChip(),
         ...?widget.actions,
         // Badge panier
         _CartBadgeBtn(shopId: widget.shopId),
@@ -288,26 +287,26 @@ class _NotifBtn extends StatelessWidget {
     final l = context.l10n;
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => Padding(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(width: 36, height: 4,
-              decoration: BoxDecoration(color: const Color(0xFFE5E7EB),
+              decoration: BoxDecoration(color: AppColors.divider,
                   borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 16),
           Text(l.notificationsTitle,
               style: AppTextStyles.subtitleBold),
           const SizedBox(height: 32),
-          const Icon(Icons.notifications_off_outlined,
-              size: 40, color: Color(0xFFD1D5DB)),
+          Icon(Icons.notifications_off_outlined,
+              size: 40, color: AppColors.textHint),
           const SizedBox(height: 12),
           Text('Aucune notification',
               style: AppTextStyles.bodySecondary.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: const Color(0xFF6B7280))),
+                  color: AppColors.textSecondary)),
           const SizedBox(height: 4),
           Text(
             'Les alertes liées à vos ventes et à votre stock\n'

@@ -148,73 +148,34 @@ class _PartnerLedgerViewState
     }
   }
 
-  /// Solde le compte d'un coup : crée un versement `remittance` égal à
-  /// l'opposé du solde courant → solde ramené à 0. Pratique quand la dette
-  /// est intégralement réglée sans avoir à ressaisir le montant exact.
-  Future<void> _settleDebt(double balance) async {
-    if (balance == 0) return;
-    final partnerOwes = balance > 0;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Marquer la dette réglée ?'),
-        content: Text(
-          partnerOwes
-              ? 'Confirme que ${_partnerName} a versé '
-                '${CurrencyFormatter.format(balance.abs())} à la '
-                'boutique. Le solde sera remis à zéro.'
-              : 'Confirme que la boutique a versé '
-                '${CurrencyFormatter.format(balance.abs())} à '
-                '${_partnerName}. Le solde sera remis à zéro.',
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Annuler')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Confirmer')),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    // amount = -balance → SUM ramené à 0 quel que soit le sens.
-    await PartnerLedgerService.addEntry(
-      shopId:            widget.shopId,
-      partnerLocationId: widget.partnerLocationId,
-      type:              PartnerLedgerEntryType.remittance,
-      amount:            -balance,
-      note:              'Dette soldée (règlement intégral)',
-    );
-    if (mounted) AppSnack.success(context, 'Dette réglée — solde à zéro.');
-  }
-
-  Future<void> _registerRemittance() async {
+  /// Règlement de la boutique VERS le partenaire (paiement des charges /
+  /// livraisons / courses refusées qu'on lui doit). Le versement ENTRANT
+  /// (partenaire→boutique) a été retiré d'ici : il se fait désormais par
+  /// commande, via le bouton bleu « Versement reçu » sur la carte. Le sens
+  /// est donc figé à boutique→partenaire. Pré-rempli avec ce que la boutique
+  /// doit (solde négatif), ajustable.
+  Future<void> _settlePartner(double balance) async {
+    final owed = balance < 0 ? balance.abs() : 0.0;
     final res = await showFormSheet<_RemittanceResult>(
       context: context,
-      builder: (_) => _RemittanceSheet(partnerName: _partnerName),
+      builder: (_) => _RemittanceSheet(
+        partnerName: _partnerName,
+        lockedDirection: _RemittanceDirection.boutiqueToPartner,
+        initialAmount: owed > 0 ? owed : null,
+      ),
     );
     if (res == null || !mounted) return;
-    // Convention : direction = partnerToBoutique → +amount (réduit la dette
-    // que le partenaire avait envers nous) ; boutiqueToPartner → -amount.
-    final signed = res.direction == _RemittanceDirection.partnerToBoutique
-        ? -res.amount.abs()  // diminue le crédit (partenaire a payé)
-        : res.amount.abs();  // augmente la dette (boutique a payé)
-    // Petit raisonnement : si solde était +100 (partenaire nous doit 100)
-    // et que partenaire verse 100, on doit ajouter -100 → solde = 0.
-    // À l'inverse, si solde était -50 (on lui doit 50) et qu'on lui verse
-    // 50, on ajoute +50 → solde = 0.
+    // Boutique → partenaire = +amount : la boutique paie, le solde (négatif
+    // = dette boutique) remonte vers 0.
     await PartnerLedgerService.addEntry(
       shopId:            widget.shopId,
       partnerLocationId: widget.partnerLocationId,
       type:              PartnerLedgerEntryType.remittance,
-      amount:            signed,
+      amount:            res.amount.abs(),
       note:              res.note?.isEmpty == true ? null : res.note,
       createdAt:         res.createdAt,
     );
-    if (mounted) {
-      AppSnack.success(context, 'Versement enregistré.');
-    }
+    if (mounted) AppSnack.success(context, 'Règlement enregistré.');
   }
 
   /// Enregistre une charge que la boutique doit au partenaire (hors
@@ -285,11 +246,14 @@ class _PartnerLedgerViewState
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: Column(children: [
             Row(children: [
+              // « Régler le partenaire » = paiement boutique→partenaire (solde
+              // des charges/livraisons dues). Le versement entrant
+              // (partenaire→boutique) se fait désormais par commande.
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: _registerRemittance,
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('Versement'),
+                  onPressed: () => _settlePartner(balance),
+                  icon: const Icon(Icons.south_west_rounded, size: 18),
+                  label: const Text('Régler le partenaire'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
@@ -312,23 +276,6 @@ class _PartnerLedgerViewState
                 ),
               ),
             ]),
-            if (balance != 0) ...[
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _settleDebt(balance),
-                  icon: const Icon(Icons.check_circle_rounded, size: 18),
-                  label: const Text('Marquer réglée'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.primary,
-                    side: BorderSide(
-                        color: AppColors.primary.withValues(alpha: 0.5)),
-                    minimumSize: const Size(0, 44),
-                  ),
-                ),
-              ),
-            ],
           ]),
         ),
         const SizedBox(height: 4),
@@ -498,19 +445,37 @@ class _RemittanceResult {
 
 class _RemittanceSheet extends StatefulWidget {
   final String partnerName;
-  const _RemittanceSheet({required this.partnerName});
+  /// Si fourni, le sens du versement est figé (sélecteur masqué). Utilisé
+  /// pour « Régler le partenaire » (boutique→partenaire uniquement) — le
+  /// versement entrant (partenaire→boutique) se fait désormais par commande.
+  final _RemittanceDirection? lockedDirection;
+  /// Montant pré-rempli (ex. ce que la boutique doit au partenaire).
+  final double? initialAmount;
+  const _RemittanceSheet({
+    required this.partnerName,
+    this.lockedDirection,
+    this.initialAmount,
+  });
   @override
   State<_RemittanceSheet> createState() => _RemittanceSheetState();
 }
 
 class _RemittanceSheetState extends State<_RemittanceSheet> {
-  _RemittanceDirection _direction = _RemittanceDirection.partnerToBoutique;
+  late _RemittanceDirection _direction =
+      widget.lockedDirection ?? _RemittanceDirection.partnerToBoutique;
   final _amountCtrl = TextEditingController();
   final _noteCtrl   = TextEditingController();
   String? _error;
   /// Date du versement (antidatable). Défaut = now(). Modifiable via picker
   /// pour numériser un versement passé.
   DateTime _date = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    final amt = widget.initialAmount;
+    if (amt != null && amt > 0) _amountCtrl.text = amt.toStringAsFixed(0);
+  }
 
   @override
   void dispose() {
@@ -544,8 +509,9 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final locked = widget.lockedDirection != null;
     return AdaptiveFormFrame(
-      title: 'Enregistrer un versement',
+      title: locked ? 'Régler le partenaire' : 'Enregistrer un versement',
       icon:  Icons.payments_outlined,
       body: Column(
         mainAxisSize: MainAxisSize.min,
@@ -556,22 +522,50 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                _SectionLabel('Sens du versement'),
-                _DirRow(
-                  selected: _direction == _RemittanceDirection.partnerToBoutique,
-                  label: '${widget.partnerName} → Boutique',
-                  hint:  'Le partenaire vous remet de l\'argent',
-                  onTap: () => setState(() =>
-                      _direction = _RemittanceDirection.partnerToBoutique),
-                ),
-                _DirRow(
-                  selected: _direction == _RemittanceDirection.boutiqueToPartner,
-                  label: 'Boutique → ${widget.partnerName}',
-                  hint:  'Vous payez le partenaire (frais de livraison…)',
-                  onTap: () => setState(() =>
-                      _direction = _RemittanceDirection.boutiqueToPartner),
-                ),
-                const SizedBox(height: 14),
+                // Sélecteur de sens masqué quand le sens est figé (« Régler
+                // le partenaire » = boutique→partenaire uniquement).
+                if (!locked) ...[
+                  _SectionLabel('Sens du versement'),
+                  _DirRow(
+                    selected:
+                        _direction == _RemittanceDirection.partnerToBoutique,
+                    label: '${widget.partnerName} → Boutique',
+                    hint:  'Le partenaire vous remet de l\'argent',
+                    onTap: () => setState(() =>
+                        _direction = _RemittanceDirection.partnerToBoutique),
+                  ),
+                  _DirRow(
+                    selected:
+                        _direction == _RemittanceDirection.boutiqueToPartner,
+                    label: 'Boutique → ${widget.partnerName}',
+                    hint:  'Vous payez le partenaire (frais de livraison…)',
+                    onTap: () => setState(() =>
+                        _direction = _RemittanceDirection.boutiqueToPartner),
+                  ),
+                  const SizedBox(height: 14),
+                ] else ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(children: [
+                      Icon(Icons.south_west_rounded,
+                          size: 15, color: AppColors.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                            'Boutique → ${widget.partnerName} '
+                            '(règlement de ce que vous lui devez)',
+                            style: AppTextStyles.bodySm),
+                      ),
+                    ]),
+                  ),
+                  const SizedBox(height: 14),
+                ],
                 _SectionLabel('Montant (FCFA)'),
                 TextField(
                   controller: _amountCtrl,
@@ -604,7 +598,7 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF9FAFB),
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.fromBorderSide(
                           BorderSide(color: Theme.of(context).semantic.borderSubtle)),
@@ -782,7 +776,7 @@ class _ChargeSheetState extends State<_ChargeSheet> {
                           decoration: BoxDecoration(
                             color: _category == c
                                 ? sem.brandSurface
-                                : const Color(0xFFF9FAFB),
+                                : AppColors.surface,
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
                                 color: _category == c
@@ -835,7 +829,7 @@ class _ChargeSheetState extends State<_ChargeSheet> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF9FAFB),
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.fromBorderSide(
                           BorderSide(color: Theme.of(context).semantic.borderSubtle)),
@@ -954,7 +948,7 @@ class _DirRow extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 6),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? sem.brandSurface : const Color(0xFFF9FAFB),
+          color: selected ? sem.brandSurface : AppColors.surface,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
               color: selected ? sem.brand.withValues(alpha: 0.4)
@@ -965,7 +959,7 @@ class _DirRow extends StatelessWidget {
                   ? Icons.radio_button_checked
                   : Icons.radio_button_unchecked,
               size: 18,
-              color: selected ? sem.brand : const Color(0xFF9CA3AF)),
+              color: selected ? sem.brand : AppColors.textHint),
           const SizedBox(width: 10),
           Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1092,7 +1086,7 @@ class _EditEntrySheetState extends State<_EditEntrySheet> {
                             decoration: BoxDecoration(
                               color: _category == c
                                   ? sem.brandSurface
-                                  : const Color(0xFFF9FAFB),
+                                  : AppColors.surface,
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
                                   color: _category == c
@@ -1145,7 +1139,7 @@ class _EditEntrySheetState extends State<_EditEntrySheet> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF9FAFB),
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.fromBorderSide(
                           BorderSide(color: Theme.of(context).semantic.borderSubtle)),

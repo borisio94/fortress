@@ -245,6 +245,10 @@ class DocumentService {
                       if (order.taxRate > 0)
                         _recapRow('TVA (${order.taxRate.toStringAsFixed(0)}%)',
                             '${fmt.format(order.taxAmount)} $cur', isTicket: isTicket),
+                      if ((order.deliveryPrice ?? 0) > 0)
+                        _recapRow('Livraison',
+                            '${fmt.format(order.deliveryPrice!)} $cur',
+                            isTicket: isTicket),
                       pw.Container(height: 0.5, color: _violet,
                           margin: const pw.EdgeInsets.symmetric(vertical: 6)),
                       _recapRow('TOTAL', '${fmt.format(order.total)} $cur',

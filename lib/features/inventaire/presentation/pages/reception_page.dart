@@ -81,11 +81,11 @@ class _ReceptionPageState extends State<ReceptionPage> {
       ],
       body: _receptions.isEmpty
           ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Icon(Icons.inbox_outlined, size: 48, color: Color(0xFFD1D5DB)),
+              Icon(Icons.inbox_outlined, size: 48, color: AppColors.textHint),
               const SizedBox(height: 12),
               Text('Aucun bon de réception',
                   style: AppTextStyles.labelRegular
-                      .copyWith(color: const Color(0xFF9CA3AF))),
+                      .copyWith(color: AppColors.textHint)),
               const SizedBox(height: 16),
               Center(
                 child: TextButton.icon(
@@ -185,7 +185,7 @@ class _ReceptionPageState extends State<ReceptionPage> {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF9FAFB),
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: Theme.of(ctx).semantic.borderSubtle),
                   ),
@@ -222,7 +222,7 @@ class _ReceptionPageState extends State<ReceptionPage> {
                   margin: const EdgeInsets.only(bottom: 6),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: qty > 0 ? AppColors.primarySurface : const Color(0xFFF9FAFB),
+                    color: qty > 0 ? AppColors.primarySurface : AppColors.surface,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: qty > 0
                         ? AppColors.primary.withValues(alpha:0.3) : Theme.of(ctx).semantic.borderSubtle)),
@@ -233,7 +233,7 @@ class _ReceptionPageState extends State<ReceptionPage> {
                           overflow: TextOverflow.ellipsis),
                       Text('Stock actuel : ${p.totalStock}',
                           style: AppTextStyles.micro
-                              .copyWith(color: const Color(0xFF9CA3AF))),
+                              .copyWith(color: AppColors.textHint)),
                     ])),
                     // Contrôles quantité
                     Row(mainAxisSize: MainAxisSize.min, children: [
@@ -292,7 +292,7 @@ class _ReceptionPageState extends State<ReceptionPage> {
                   label: Text('Créer (${selected.length} produit${selected.length > 1 ? 's' : ''})'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary, foregroundColor: Colors.white,
-                    elevation: 0, disabledBackgroundColor: const Color(0xFFE5E7EB),
+                    elevation: 0, disabledBackgroundColor: AppColors.divider,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                 ),
               ),
@@ -405,7 +405,7 @@ class _ValidateSheetState extends State<_ValidateSheet> {
                 Text(s.item.productName, style: AppTextStyles.bodyBold),
                 Text('Attendu : ${s.item.expectedQty}',
                     style: AppTextStyles.captionHint
-                        .copyWith(color: const Color(0xFF9CA3AF))),
+                        .copyWith(color: AppColors.textHint)),
                 const SizedBox(height: 8),
                 _QtyField(label: 'Quantité reçue', ctrl: s.receivedCtrl,
                     color: const Color(0xFF10B981)),
@@ -413,7 +413,7 @@ class _ValidateSheetState extends State<_ValidateSheet> {
                 Text(
                     'Les défauts se déclarent après en incident sur le produit.',
                     style: AppTextStyles.micro
-                        .copyWith(color: const Color(0xFF9CA3AF))),
+                        .copyWith(color: AppColors.textHint)),
               ]),
             );
           },
@@ -646,7 +646,7 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
     child: Text(text, style: AppTextStyles.bodySmBold.copyWith(
-        letterSpacing: 0.3, color: const Color(0xFF6B7280))),
+        letterSpacing: 0.3, color: AppColors.textSecondary)),
   );
 }
 
@@ -685,10 +685,10 @@ class _ReceptionCard extends StatelessWidget {
           Expanded(child: Text(
               '${reception.items.length} produit${reception.items.length > 1 ? 's' : ''}',
               style: AppTextStyles.bodySm
-                  .copyWith(color: const Color(0xFF6B7280)))),
+                  .copyWith(color: AppColors.textSecondary))),
           Text(_fmtDate(reception.createdAt),
               style: AppTextStyles.micro
-                  .copyWith(color: const Color(0xFF9CA3AF))),
+                  .copyWith(color: AppColors.textHint)),
         ]),
         if (reception.status == ReceptionStatus.validated) ...[
           const SizedBox(height: 6),

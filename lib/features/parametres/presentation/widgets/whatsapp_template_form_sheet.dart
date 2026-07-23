@@ -141,7 +141,7 @@ class _WhatsappTemplateFormSheetState
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF9FAFB),
+                  color: AppColors.surface,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Theme.of(context).semantic.borderSubtle),
                 ),
@@ -203,7 +203,7 @@ class _WhatsappTemplateFormSheetState
                   hintStyle: AppTextStyles.caption.copyWith(
                       color: const Color(0xFFBBBBBB)),
                   filled: true,
-                  fillColor: const Color(0xFFF9FAFB),
+                  fillColor: AppColors.inputFill,
                   contentPadding: const EdgeInsets.all(12),
                   border: _outlineBorder(_bodyError != null),
                   enabledBorder: _outlineBorder(_bodyError != null),
@@ -220,7 +220,7 @@ class _WhatsappTemplateFormSheetState
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF9FAFB),
+                  color: AppColors.surface,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Theme.of(context).semantic.borderSubtle),
                 ),
@@ -274,7 +274,7 @@ class _WhatsappTemplateFormSheetState
   OutlineInputBorder _outlineBorder(bool hasError) => OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
       borderSide: BorderSide(
-          color: hasError ? AppColors.error : const Color(0xFFE5E7EB)));
+          color: hasError ? AppColors.error : AppColors.divider));
 }
 
 class _VariablesHint extends StatelessWidget {

@@ -43,6 +43,14 @@ import '../../features/caisse/presentation/pages/caisse_page.dart';
 import '../../features/caisse/presentation/pages/orders_page.dart';
 import '../../features/caisse/presentation/pages/payment_page.dart';
 import '../../features/inventaire/presentation/pages/inventaire_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_tables_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_order_page.dart';
+import '../../features/restaurant/presentation/pages/kitchen_page.dart';
+import '../../features/restaurant/presentation/pages/bill_page.dart';
+import '../../features/restaurant/presentation/pages/takeaway_page.dart';
+import '../../features/restaurant/presentation/pages/menu_modifiers_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_dashboard_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_menu_page.dart';
 import '../../features/inventaire/presentation/pages/product_form_page.dart';
 import '../../features/inventaire/presentation/pages/reception_page.dart';
 import '../../features/inventaire/presentation/pages/incidents_page.dart';
@@ -79,11 +87,13 @@ import '../../features/parametres/presentation/pages/notifications_page.dart';
 import '../../features/parametres/presentation/pages/exports_page.dart';
 import '../../features/parametres/presentation/pages/payments_page.dart';
 import '../../features/parametres/presentation/pages/delivery_templates_page.dart';
+import '../../features/parametres/presentation/pages/livraison_page.dart';
 import '../../features/parametres/presentation/pages/partner_accounts_page.dart';
 import '../../features/parametres/presentation/pages/partner_hub_detail_page.dart';
 import '../../features/parametres/presentation/pages/pin_delete_page.dart';
 import '../../features/parametres/presentation/pages/sessions_page.dart';
 import '../permisions/admin_panel_page.dart';
+import '../config/restaurant_mode.dart';
 import '../permisions/subscription_provider.dart';
 import '../database/app_database.dart';
 import '../services/presence_service.dart';
@@ -322,7 +332,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         final shops = LocalStorageService.getShopsForUser(uid);
         if (shops.length == 1) {
           LocalStorageService.saveActiveShopId(uid, shops.first.id);
-          return '/shop/${shops.first.id}/dashboard';
+          // Restaurant → Menu ; sinon Tableau de bord (cf. shopLandingRoute).
+          return shopLandingRoute(shops.first.id);
         }
         return RouteNames.shopSelector;
       }
@@ -424,7 +435,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         if (loc.startsWith('${RouteNames.suspended}/')) {
           final parts = loc.split('/');
           final sid = parts.length >= 3 ? parts[2] : '';
-          return suspendedFor(sid) ? null : '/shop/$sid/dashboard';
+          return suspendedFor(sid) ? null : shopLandingRoute(sid);
         }
         if (loc.startsWith('/shop/')) {
           final parts = loc.split('/');
@@ -750,9 +761,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           return ShopShell(key: ValueKey(shopId), child: child, shopId: shopId);
         },
         routes: [
+          // Tableau de bord : deux écrans distincts selon le secteur. Le
+          // restaurant a ses propres indicateurs (canaux de service, tables
+          // occupées, bons en cuisine) qui n'ont aucun sens en e-commerce,
+          // et réciproquement. Route unique pour que la redirection après
+          // login et le lien « Accueil » restent inchangés.
           GoRoute(path: '/shop/:shopId/dashboard',
-              pageBuilder: (c, s) => _shellPage(s,
-                  DashboardPage(shopId: s.pathParameters['shopId']!))),
+              pageBuilder: (c, s) {
+                final id = s.pathParameters['shopId']!;
+                return _shellPage(s, isRestaurantShop(id)
+                    ? RestaurantDashboardPage(shopId: id)
+                    : DashboardPage(shopId: id));
+              }),
           GoRoute(path: '/shop/:shopId/caisse',
               pageBuilder: (c, s) => _shellPage(s, CaissePage(
                 shopId: s.pathParameters['shopId']!,
@@ -764,9 +784,49 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/caisse/orders',
               pageBuilder: (c, s) => _shellPage(s,
                   OrdersPage(shopId: s.pathParameters['shopId']!))),
-          GoRoute(path: '/shop/:shopId/inventaire',
+          // Module restaurant — plan de salle. L'onglet de nav n'apparaît que
+          // pour les secteurs de restauration, mais la route reste atteignable
+          // par deeplink : la page se contente d'afficher un plan vide si la
+          // boutique n'est pas un établissement de restauration (aucune donnée
+          // sensible exposée).
+          GoRoute(path: '/shop/:shopId/restaurant/tables',
               pageBuilder: (c, s) => _shellPage(s,
-                  InventairePage(shopId: s.pathParameters['shopId']!))),
+                  RestaurantTablesPage(shopId: s.pathParameters['shopId']!))),
+          GoRoute(path: '/shop/:shopId/restaurant/cuisine',
+              pageBuilder: (c, s) => _shellPage(s,
+                  KitchenPage(shopId: s.pathParameters['shopId']!))),
+          GoRoute(path: '/shop/:shopId/restaurant/takeaway',
+              pageBuilder: (c, s) => _shellPage(s,
+                  TakeawayPage(shopId: s.pathParameters['shopId']!))),
+          GoRoute(path: '/shop/:shopId/parametres/menu-modifiers',
+              builder: (c, s) => MenuModifiersPage(
+                    shopId: s.pathParameters['shopId']!,
+                  )),
+          // Prise de commande d'une table — sous-page (Scaffold propre, hors
+          // shell) : le serveur y entre depuis le plan de salle et en ressort
+          // par le bouton retour.
+          GoRoute(path: '/shop/:shopId/restaurant/table/:tableId',
+              builder: (c, s) => RestaurantOrderPage(
+                    shopId:  s.pathParameters['shopId']!,
+                    tableId: s.pathParameters['tableId']!,
+                  )),
+          GoRoute(path: '/shop/:shopId/restaurant/addition/:tableId',
+              builder: (c, s) => BillPage(
+                    shopId:  s.pathParameters['shopId']!,
+                    tableId: s.pathParameters['tableId']!,
+                  )),
+          // Carte / inventaire : deux écrans selon le secteur. En
+          // restauration c'est « Menu » — grille de plats avec photo, note
+          // et ajout au panier à emporter. Route unique pour que les liens
+          // internes (« Voir la carte », tuiles du tableau de bord) marchent
+          // dans les deux cas.
+          GoRoute(path: '/shop/:shopId/inventaire',
+              pageBuilder: (c, s) {
+                final id = s.pathParameters['shopId']!;
+                return _shellPage(s, isRestaurantShop(id)
+                    ? RestaurantMenuPage(shopId: id)
+                    : InventairePage(shopId: id));
+              }),
           GoRoute(path: '/shop/:shopId/employees',
               pageBuilder: (c, s) => _shellPage(s, EmployeesPage(
                   shopId: s.pathParameters['shopId']!))),
@@ -928,6 +988,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/delivery-templates',
               builder: (c, s) => DeliveryTemplatesPage(
+                  shopId: s.pathParameters['shopId']!)),
+          GoRoute(path: '/shop/:shopId/parametres/livraison',
+              builder: (c, s) => LivraisonPage(
                   shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/partner-accounts',
               builder: (c, s) => PartnerAccountsPage(

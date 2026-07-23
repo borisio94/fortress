@@ -216,10 +216,10 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
               hintText: 'Rechercher (nom, téléphone, ville…)',
               hintStyle: AppTextStyles.bodySm
                   .copyWith(color: AppColors.textHint),
-              prefixIcon: const Icon(Icons.search_rounded,
+              prefixIcon: Icon(Icons.search_rounded,
                   size: 16, color: AppColors.textHint),
               suffixIcon: _query.isEmpty ? null : IconButton(
-                icon: const Icon(Icons.close_rounded,
+                icon: Icon(Icons.close_rounded,
                     size: 14, color: AppColors.textHint),
                 splashRadius: 16,
                 onPressed: () => _searchCtrl.clear(),
@@ -294,7 +294,7 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
             ],
           ),
         ),
-        const Icon(Icons.chevron_right_rounded,
+        Icon(Icons.chevron_right_rounded,
             size: 18, color: AppColors.textHint),
       ]),
     ),
@@ -325,7 +325,7 @@ class _RecipientPickerSheetState extends State<_RecipientPickerSheet>
               hintText: '+237 6XX XX XX XX',
               hintStyle: AppTextStyles.body
                   .copyWith(color: AppColors.textHint),
-              prefixIcon: const Icon(Icons.phone_outlined,
+              prefixIcon: Icon(Icons.phone_outlined,
                   size: 18, color: AppColors.textSecondary),
               filled: true, fillColor: AppColors.inputFill,
               isDense: true,

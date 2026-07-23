@@ -29,11 +29,14 @@ import 'order_source_badge.dart';
 import 'pin_lock_banner.dart';
 import 'shop_logo_avatar.dart';
 import '../../core/config/app_modes.dart';
+import '../../core/config/restaurant_mode.dart';
+import '../../features/restaurant/presentation/widgets/resto_topbar.dart';
 import '../../core/storage/local_storage_service.dart';
 import 'stock_nav_chips.dart';
 import 'alerts/new_web_order_banner.dart';
 import 'alerts/scheduled_alerts_banner_host.dart';
 import '../providers/scheduled_alerts_provider.dart';
+import '../providers/new_web_orders_provider.dart';
 import '../navigation/page_titles.dart';
 
 /// Largeur minimale en logical pixels pour activer le layout desktop
@@ -173,7 +176,7 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
     final loc          = goState.matchedLocation;
     final tabQuery     = goState.uri.queryParameters['tab'];
     final selectedIdx  = shellSelectedIndex(loc, widget.shopId,
-        tabQuery: tabQuery);
+        tabQuery: tabQuery, sector: shopSector(widget.shopId));
     // Layout desktop ssi OS desktop + fenêtre ≥ 900px de large. Sur fenêtre
     // étroite (utilisateur qui split-screen, ou OS mobile), on bascule
     // automatiquement sur le layout mobile.
@@ -228,7 +231,9 @@ class _MobileShell extends StatelessWidget {
     // sur une sub-page « enfant ». Le titre devient alors un breadcrumb
     // « ParentLabel › ChildLabel » et un back button apparaît.
     String? breadcrumbChild;
-    if (selectedIndex >= 0 && kShellNavItems[selectedIndex].hasChildren) {
+    final navSector = shopSector(shopId);
+    if (selectedIndex >= 0 &&
+        kShellNavItems[selectedIndex].hasChildrenIn(navSector)) {
       final parent = kShellNavItems[selectedIndex];
       final childIdx = activeChildIndex(parent, loc, shopId,
           tabQuery: GoRouterState.of(context).uri.queryParameters['tab']);
@@ -337,6 +342,7 @@ class _MobileShell extends StatelessWidget {
             : null,
         title: Text(title, style: titleStyle),
         actions: [
+          const OfflineChip(),
           _CartBadgeBtn(shopId: shopId),
           // Cloche notifications réservée admin + owner (les employés
           // n'ont pas accès aux notifs in-app de la boutique).
@@ -350,7 +356,6 @@ class _MobileShell extends StatelessWidget {
       ),
       body: Column(children: [
         const PinLockBanner(),
-        const OfflineBanner(),
         const SyncStatusBanner(),
         // Owner-only — auto-hide si plan actif, fond warning/danger selon
         // l'état (cf. permission_guard.dart). Restauré ici pour reproduire
@@ -395,7 +400,7 @@ class _MobileShell extends StatelessWidget {
 /// L'onglet actif = item dont l'index dans [kShellNavItems] == [selectedIndex]
 /// (le parent est highlighté même sur une route enfant, cf. shellSelectedIndex).
 /// « Plus » est actif quand la route courante ne tombe dans aucun item primary.
-class _MobileBottomNav extends StatelessWidget {
+class _MobileBottomNav extends ConsumerWidget {
   final String         shopId;
   final AppPermissions perms;
   final int            selectedIndex;
@@ -408,29 +413,31 @@ class _MobileBottomNav extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l        = context.l10n;
     final theme    = Theme.of(context);
-    final primaries = shellPrimaryItems(perms);
+    // Secteur lu DÉTERMINISTE par shopId (Hive), pas via currentShopProvider :
+    // ce dernier peut être null pendant une transition de route, ce qui ferait
+    // disparaître/réapparaître l'onglet restaurant à chaque navigation.
+    final primaries = shellPrimaryItems(perms, sector: shopSector(shopId));
     final primaryIndices =
         primaries.map((it) => kShellNavItems.indexOf(it)).toSet();
     final moreActive = !primaryIndices.contains(selectedIndex);
+    // Badge Caisse = commandes web non acquittées (provider existant, pas de
+    // logique recréée).
+    final webOrders =
+        ref.watch(newWebOrdersProvider).valueOrNull?.length ?? 0;
 
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         border: Border(
-            top: BorderSide(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.08))),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 8, offset: const Offset(0, -2)),
-        ],
+            top: BorderSide(color: theme.semantic.borderSubtle, width: 0.5)),
       ),
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 58,
+          height: 56,
           child: Row(children: [
             for (final item in primaries)
               _BottomNavTab(
@@ -439,7 +446,9 @@ class _MobileBottomNav extends StatelessWidget {
                     : item.icon,
                 label: (item.labelMobile ?? item.label)(l),
                 selected: kShellNavItems.indexOf(item) == selectedIndex,
-                badge: item.badge?.call(shopId) ?? 0,
+                badge: item.route(shopId).endsWith('/caisse')
+                    ? webOrders
+                    : (item.badge?.call(shopId) ?? 0),
                 onTap: () => context.go(item.route(shopId)),
               ),
             _BottomNavTab(
@@ -505,12 +514,16 @@ class _BottomNavTab extends StatelessWidget {
                   ),
                 ),
             ]),
-            const SizedBox(height: 3),
-            Text(label,
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.caption.copyWith(
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: color)),
+            // Label visible UNIQUEMENT sur l'onglet actif (inactif = icône
+            // seule) — style demandé dans la spec.
+            if (selected) ...[
+              const SizedBox(height: 3),
+              Text(label,
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.caption.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: color)),
+            ],
           ],
         ),
       ),
@@ -566,7 +579,9 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
   void _ensureActiveExpanded() {
     if (widget.selectedIndex < 0) return;
     final item = kShellNavItems[widget.selectedIndex];
-    if (item.hasChildren) _expanded.add(widget.selectedIndex);
+    if (item.hasChildrenIn(shopSector(widget.shopId))) {
+      _expanded.add(widget.selectedIndex);
+    }
   }
 
   @override
@@ -575,12 +590,63 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
     final theme   = Theme.of(context);
     final palette = ref.watch(themePaletteProvider);
     final shop    = ref.watch(currentShopProvider);
-    final items   = shellMobileDrawerItems(widget.perms);
+    final items   = shellMobileDrawerItems(widget.perms,
+        sector: shopSector(widget.shopId));
     final width   = (MediaQuery.of(context).size.width * 0.8).clamp(240.0, 320.0);
+    // Fond adaptatif : clair = surface ; sombre = teinte profonde derivee du
+    // primary (coherent avec la sidebar desktop). Dividers teintes en sombre.
+    final isDark     = theme.brightness == Brightness.dark;
+    // Fond identique au contenu (scaffold) plutôt qu'une teinte dérivée
+    // de la palette : le menu ne se détache plus en une bande sombre.
+    final navBg      = isDark
+        ? theme.scaffoldBackgroundColor
+        : theme.colorScheme.surface;
+    final navDivider = isDark
+        ? palette.primaryLight.withValues(alpha: 0.15)
+        : theme.colorScheme.onSurface.withValues(alpha: 0.08);
+    // Items en groupes (séparés par dividers) + items de footer (Paramètres).
+    final groups      = navGroups(items);
+    final footerItems = navFooterItems(items);
+
+    Widget buildNavItem(ShellNavItem item) {
+      if (item.hasChildrenIn(shopSector(widget.shopId))) {
+        return _MobileDrawerGroup(
+          parent:           item,
+          parentIndex:      kShellNavItems.indexOf(item),
+          shopId:           widget.shopId,
+          palette:          palette,
+          currentLocation:  widget.currentLocation,
+          active:           _isActive(item),
+          expanded:         _expanded.contains(kShellNavItems.indexOf(item)),
+          onToggle: () => setState(() {
+            final idx = kShellNavItems.indexOf(item);
+            if (_expanded.contains(idx)) {
+              _expanded.remove(idx);
+            } else {
+              _expanded.add(idx);
+            }
+          }),
+          onNavigate: (route) {
+            Navigator.of(context).pop();
+            context.go(route);
+          },
+        );
+      }
+      return _MobileDrawerLeaf(
+        item:     item,
+        shopId:   widget.shopId,
+        palette:  palette,
+        selected: _isActive(item),
+        onTap: () {
+          Navigator.of(context).pop();
+          context.go(item.route(widget.shopId));
+        },
+      );
+    }
 
     return Drawer(
       width: width,
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor: navBg,
       child: SafeArea(
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           // ── Header : logo boutique (fallback Fortress) + nom + actions
@@ -625,51 +691,25 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
               ],
             ),
           ),
-          Divider(height: 1,
-              color: theme.colorScheme.onSurface.withValues(alpha:0.08)),
-          // ── Items ───────────────────────────────────────────────────
+          Divider(height: 1, color: navDivider),
+          // ── Items groupés (G1 · G2 · G3, séparés par dividers) ───────
           Expanded(child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 6),
             children: [
-              for (final item in items)
-                if (item.hasChildren)
-                  _MobileDrawerGroup(
-                    parent:           item,
-                    parentIndex:      kShellNavItems.indexOf(item),
-                    shopId:           widget.shopId,
-                    palette:          palette,
-                    currentLocation:  widget.currentLocation,
-                    active:           _isActive(item),
-                    expanded:         _expanded.contains(kShellNavItems.indexOf(item)),
-                    onToggle: () => setState(() {
-                      final idx = kShellNavItems.indexOf(item);
-                      if (_expanded.contains(idx)) {
-                        _expanded.remove(idx);
-                      } else {
-                        _expanded.add(idx);
-                      }
-                    }),
-                    onNavigate: (route) {
-                      Navigator.of(context).pop();
-                      context.go(route);
-                    },
-                  )
-                else
-                  _MobileDrawerLeaf(
-                    item:     item,
-                    shopId:   widget.shopId,
-                    palette:  palette,
-                    selected: _isActive(item),
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      context.go(item.route(widget.shopId));
-                    },
+              for (var gi = 0; gi < groups.length; gi++) ...[
+                for (final item in groups[gi]) buildNavItem(item),
+                if (gi < groups.length - 1)
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    child: Divider(height: 0.5, color: navDivider),
                   ),
+              ],
             ],
           )),
-          // ── Footer : abonnement (owner) + déconnexion ──────────────
-          Divider(height: 1,
-              color: theme.colorScheme.onSurface.withValues(alpha:0.08)),
+          // ── Footer : Paramètres · Abonnement (owner) · Déconnexion ───
+          Divider(height: 1, color: navDivider),
+          for (final item in footerItems) buildNavItem(item),
           if (widget.perms.isOwner)
             const _SubscriptionTile(asListTile: true),
           ListTile(
@@ -904,56 +944,64 @@ class _MobileDrawerRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    // Cf. _SidebarRow : accent palette adaptatif, inactif lisible en sombre.
+    final accent = isDark ? palette.primaryLight : palette.primary;
     final fg = selected
-        ? theme.colorScheme.primary
-        : AppColors.textSecondary;
-    final bg = selected
-        ? palette.primarySurface
-        : Colors.transparent;
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: bg,
-          border: Border(
-              left: BorderSide(
-                  color: selected
-                      ? theme.colorScheme.primary
-                      : Colors.transparent,
-                  width: 3)),
+        ? accent
+        : (isDark
+            ? theme.colorScheme.onSurface.withValues(alpha: 0.62)
+            : AppColors.textSecondary);
+    // Plus de fond teinté sur l'item actif : la sélection se lit désormais à
+    // la couleur d'accent + gras du texte/icône (cf. `fg`). Le fond reste
+    // transparent dans tous les états.
+    const bg = Colors.transparent;
+    // Pill : container arrondi (radius 8) + padding 8×10, gap 8, icône 16,
+    // label bodySm. Actif = bg accent 12 % ; hover = accent 5 %.
+    return Padding(
+      padding: EdgeInsets.fromLTRB(8 + indent, 1, 8, 1),
+      child: Material(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          hoverColor: isDark
+              ? Colors.white.withValues(alpha: 0.05)
+              : accent.withValues(alpha: 0.05),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Row(children: [
+              Icon(icon, size: 16, color: fg),
+              const SizedBox(width: 8),
+              Expanded(child: Text(label,
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.bodySm.copyWith(
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                      color: fg))),
+              if (badge > 0)
+                Container(
+                  margin: const EdgeInsets.only(left: 4),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.error,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  constraints: const BoxConstraints(minWidth: 18),
+                  child: Text('$badge',
+                      textAlign: TextAlign.center,
+                      style: AppTextStyles.micro.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.onError)),
+                ),
+              if (trailing != null) ...[
+                const SizedBox(width: 4),
+                trailing!,
+              ],
+            ]),
+          ),
         ),
-        // Spec mobile : padding 12 vertical / 14 horizontal (vs 9/12
-        // desktop). Indent 28 sur les enfants.
-        padding: EdgeInsets.fromLTRB(14 + indent, 12, 14, 12),
-        child: Row(children: [
-          Icon(icon, size: 16, color: fg),
-          const SizedBox(width: 12),
-          Expanded(child: Text(label,
-              maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.body.copyWith(
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                  color: fg))),
-          if (badge > 0)
-            Container(
-              margin: const EdgeInsets.only(left: 4),
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.error,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              constraints: const BoxConstraints(minWidth: 18),
-              child: Text('$badge',
-                  textAlign: TextAlign.center,
-                  style: AppTextStyles.micro.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: theme.colorScheme.onError)),
-            ),
-          if (trailing != null) ...[
-            const SizedBox(width: 4),
-            trailing!,
-          ],
-        ]),
       ),
     );
   }
@@ -970,13 +1018,16 @@ class _LogoutTile extends StatelessWidget {
     final theme = Theme.of(context);
     return InkWell(
       onTap: () => _confirmLogout(context),
+      // Métriques calquées sur `_SidebarRow` (icône 16, gap 8, bodySm,
+      // padding gauche 18 = 8 externe + 10 interne) : sans ça le footer
+      // paraissait d'un cran plus gros que les items de navigation.
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
         child: Row(children: [
-          Icon(Icons.logout_rounded, size: 18, color: theme.colorScheme.error),
-          const SizedBox(width: 10),
+          Icon(Icons.logout_rounded, size: 16, color: theme.colorScheme.error),
+          const SizedBox(width: 8),
           Expanded(child: Text(l.navLogout,
-              style: AppTextStyles.body.copyWith(
+              style: AppTextStyles.bodySm.copyWith(
                   fontWeight: FontWeight.w500,
                   color: theme.colorScheme.error),
               overflow: TextOverflow.ellipsis)),
@@ -1063,7 +1114,6 @@ class _DesktopShell extends StatelessWidget {
             perms:         perms,
           ),
           const PinLockBanner(),
-          const OfflineBanner(),
           const SyncStatusBanner(),
           const SubscriptionBanner(),
           // Banner alertes commandes programmées (sprint 2B) — cf. mobile.
@@ -1123,7 +1173,9 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
   void _ensureActiveExpanded() {
     if (widget.selectedIndex < 0) return;
     final item = kShellNavItems[widget.selectedIndex];
-    if (item.hasChildren) _expanded.add(widget.selectedIndex);
+    if (item.hasChildrenIn(shopSector(widget.shopId))) {
+      _expanded.add(widget.selectedIndex);
+    }
   }
 
   @override
@@ -1132,19 +1184,59 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
     final theme   = Theme.of(context);
     final palette = ref.watch(themePaletteProvider);
     final shop    = ref.watch(currentShopProvider);
-    final items   = shellAllItems(widget.perms);
+    final items   = shellAllItems(widget.perms,
+        sector: shopSector(widget.shopId));
     final loc     = GoRouterState.of(context).matchedLocation;
+    // Fond adaptatif : clair = surface blanc cassé ; sombre = teinte profonde
+    // dérivée du primary de la palette active. Dividers teintés primary en
+    // sombre. Réactif : `palette` + `theme.brightness` sont watchés.
+    final isDark     = theme.brightness == Brightness.dark;
+    // Fond identique au contenu (scaffold) plutôt qu'une teinte dérivée
+    // de la palette : le menu ne se détache plus en une bande sombre.
+    final navBg      = isDark
+        ? theme.scaffoldBackgroundColor
+        : theme.colorScheme.surface;
+    final navDivider = isDark
+        ? palette.primaryLight.withValues(alpha: 0.15)
+        : theme.colorScheme.onSurface.withValues(alpha: 0.08);
+    // Items en groupes (séparés par dividers) + items de footer (Paramètres).
+    final groups      = navGroups(items);
+    final footerItems = navFooterItems(items);
+
+    Widget buildNavItem(ShellNavItem item) {
+      if (item.hasChildrenIn(shopSector(widget.shopId))) {
+        return _SidebarGroup(
+          parent:   item,
+          parentIndex: kShellNavItems.indexOf(item),
+          shopId:   widget.shopId,
+          active:   _isActive(item),
+          expanded: _expanded.contains(kShellNavItems.indexOf(item)),
+          currentLocation: loc,
+          palette:  palette,
+          onToggle: () => setState(() {
+            final idx = kShellNavItems.indexOf(item);
+            _expanded.contains(idx)
+                ? _expanded.remove(idx)
+                : _expanded.add(idx);
+          }),
+        );
+      }
+      return _SidebarLeafTile(
+        item:     item,
+        shopId:   widget.shopId,
+        selected: _isActive(item),
+        palette:  palette,
+      );
+    }
 
     return Container(
       // Largeur sidebar desktop : 190 → 247 (+30%) pour libellés longs
       // (« Bénéfice net », « Campagnes marketing »…) sans troncature.
       width: 247,
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: navBg,
         border: Border(
-            right: BorderSide(
-                color: theme.colorScheme.onSurface.withValues(alpha:0.08),
-                width: 0.5)),
+            right: BorderSide(color: navDivider, width: 0.5)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         // ── Header : avatar boutique (logo, fallback Fortress) + nom
@@ -1181,41 +1273,25 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
             ],
           ),
         ),
-        Divider(height: 1,
-            color: theme.colorScheme.onSurface.withValues(alpha:0.08)),
-        // ── Items ──────────────────────────────────────────────────
+        Divider(height: 1, color: navDivider),
+        // ── Items groupés (G1 · G2 · G3, séparés par dividers) ───────
         Expanded(child: ListView(
           padding: const EdgeInsets.symmetric(vertical: 6),
           children: [
-            for (final item in items)
-              if (item.hasChildren)
-                _SidebarGroup(
-                  parent:   item,
-                  parentIndex: kShellNavItems.indexOf(item),
-                  shopId:   widget.shopId,
-                  active:   _isActive(item),
-                  expanded: _expanded.contains(kShellNavItems.indexOf(item)),
-                  currentLocation: loc,
-                  palette:  palette,
-                  onToggle: () => setState(() {
-                    final idx = kShellNavItems.indexOf(item);
-                    _expanded.contains(idx)
-                        ? _expanded.remove(idx)
-                        : _expanded.add(idx);
-                  }),
-                )
-              else
-                _SidebarLeafTile(
-                  item:     item,
-                  shopId:   widget.shopId,
-                  selected: _isActive(item),
-                  palette:  palette,
+            for (var gi = 0; gi < groups.length; gi++) ...[
+              for (final item in groups[gi]) buildNavItem(item),
+              if (gi < groups.length - 1)
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Divider(height: 0.5, color: navDivider),
                 ),
+            ],
           ],
         )),
-        // ── Footer : abonnement (owner) + déconnexion ──────────────
-        Divider(height: 1,
-            color: theme.colorScheme.onSurface.withValues(alpha:0.08)),
+        // ── Footer : Paramètres · Abonnement (owner) · Déconnexion ────
+        Divider(height: 1, color: navDivider),
+        for (final item in footerItems) buildNavItem(item),
         if (widget.perms.isOwner) const _SubscriptionTile(),
         const _LogoutTile(),
       ]),
@@ -1284,7 +1360,8 @@ class _SidebarGroup extends StatelessWidget {
     final l = context.l10n;
     final activeChild = activeChildIndex(parent, currentLocation, shopId,
         tabQuery: GoRouterState.of(context).uri.queryParameters['tab']);
-    final visibleChildren = parent.children!;
+    // Filtrés par secteur : « Menu » n'a pas de sous-items en restauration.
+    final visibleChildren = parent.childrenFor(shopSector(shopId));
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       _SidebarRow(
         icon:        active ? parent.iconSelected : parent.icon,
@@ -1349,56 +1426,70 @@ class _SidebarRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    // Accent = primary de la palette active (variante claire en sombre pour
+    // rester lisible sur le fond teinté profond). Inactif : gris secondaire
+    // en clair, onSurface atténué en sombre (lisible sur toutes les palettes).
+    final accent = isDark ? palette.primaryLight : palette.primary;
     final fg = selected
-        ? theme.colorScheme.primary
-        : AppColors.textSecondary;
-    final bg = selected
-        ? palette.primarySurface
-        : Colors.transparent;
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: bg,
-          border: Border(
-              left: BorderSide(
-                  color: selected
-                      ? theme.colorScheme.primary
-                      : Colors.transparent,
-                  width: 2)),
+        ? accent
+        : (isDark
+            ? theme.colorScheme.onSurface.withValues(alpha: 0.62)
+            : AppColors.textSecondary);
+    // Plus de fond teinté sur l'item actif : la sélection se lit désormais à
+    // la couleur d'accent + gras du texte/icône (cf. `fg`). Le fond reste
+    // transparent dans tous les états.
+    const bg = Colors.transparent;
+    // Pill : container arrondi (radius 8) + padding 8×10, gap 8, icône 16,
+    // label bodySm. Actif = bg accent 12 % ; hover = accent 5 %. Identique
+    // au drawer mobile (cohérence sidebar/drawer).
+    return Padding(
+      padding: EdgeInsets.fromLTRB(8 + indent, 1, 8, 1),
+      child: Material(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          hoverColor: isDark
+              ? Colors.white.withValues(alpha: 0.05)
+              : accent.withValues(alpha: 0.05),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Row(children: [
+              Icon(icon, size: 16, color: fg),
+              const SizedBox(width: 8),
+              Expanded(child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.bodySm.copyWith(
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    color: fg),
+              )),
+              if (badgeCount > 0)
+                Container(
+                  margin: const EdgeInsets.only(left: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.error,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  constraints: const BoxConstraints(minWidth: 18),
+                  child: Text('$badgeCount',
+                      textAlign: TextAlign.center,
+                      style: AppTextStyles.micro.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.onError)),
+                ),
+              if (trailing != null) ...[
+                const SizedBox(width: 4),
+                trailing!,
+              ],
+            ]),
+          ),
         ),
-        padding: EdgeInsets.fromLTRB(12 + indent, 9, 12, 9),
-        child: Row(children: [
-          Icon(icon, size: 18, color: fg),
-          const SizedBox(width: 10),
-          Expanded(child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: AppTextStyles.body.copyWith(
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                color: fg),
-          )),
-          if (badgeCount > 0)
-            Container(
-              margin: const EdgeInsets.only(left: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.error,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              constraints: const BoxConstraints(minWidth: 18),
-              child: Text('$badgeCount',
-                  textAlign: TextAlign.center,
-                  style: AppTextStyles.micro.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: theme.colorScheme.onError)),
-            ),
-          if (trailing != null) ...[
-            const SizedBox(width: 4),
-            trailing!,
-          ],
-        ]),
       ),
     );
   }
@@ -1446,29 +1537,54 @@ class _DesktopTopbar extends StatelessWidget {
           )
         else
           const SizedBox(width: 12),
-        // Breadcrumb FORTRESS › <module>
-        Text(l.hubBrand,
-            style: AppTextStyles.bodySm.copyWith(
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.2,
-                color: theme.colorScheme.onSurface.withValues(alpha:0.6))),
-        if (!isSubPage) ...[
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: Icon(Icons.chevron_right_rounded,
-                size: 16,
-                color: theme.colorScheme.onSurface.withValues(alpha:0.4)),
+        // ── Variante RESTAURANT sur page racine ────────────────────────
+        // Salutation + recherche, comme une console de restaurant. Limitée
+        // aux pages racine : sur une sous-page, le fil d'ariane et le retour
+        // priment sur l'accueil. L'e-commerce garde le fil d'ariane partout.
+        if (isRestaurantShop(shopId) && !isSubPage) ...[
+          const Flexible(child: RestoGreeting()),
+          const SizedBox(width: 20),
+          Flexible(
+            flex: 2,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: RestoSearchField(shopId: shopId),
+            ),
           ),
-          Text(activeLabel,
-              style: AppTextStyles.body.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: theme.colorScheme.onSurface)),
+          const SizedBox(width: 12),
+        ] else ...[
+          // Breadcrumb FORTRESS › <module>
+          Text(l.hubBrand,
+              style: AppTextStyles.bodySm.copyWith(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
+                  color: theme.colorScheme.onSurface.withValues(alpha:0.6))),
+          if (!isSubPage) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Icon(Icons.chevron_right_rounded,
+                  size: 16,
+                  color: theme.colorScheme.onSurface.withValues(alpha:0.4)),
+            ),
+            Text(activeLabel,
+                style: AppTextStyles.body.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.onSurface)),
+          ],
         ],
         const Spacer(),
+        const OfflineChip(),
         _CartBadgeBtn(shopId: shopId),
         // Cloche notifications réservée admin + owner.
         if (perms.isShopAdmin) const _NotifBtnWithAlertHalo(),
         if (extraActions != null) ...extraActions!,
+        // Bloc identité (avatar + nom + rôle) — restaurant uniquement, comme
+        // dans la maquette. L'e-commerce s'appuie sur le menu 3 points.
+        if (isRestaurantShop(shopId)) ...[
+          const SizedBox(width: 6),
+          RestoUserChip(isAdmin: perms.isShopAdmin),
+          const SizedBox(width: 8),
+        ],
         // Menu « 3 points » global (Compte / Aide / À propos) — extrême
         // droite, présent sur toutes les pages shell.
         AppOverflowMenu(shopId: shopId),
@@ -1952,16 +2068,18 @@ class _SubscriptionTile extends ConsumerWidget {
 
     return InkWell(
       onTap: open,
+      // Mêmes métriques que `_SidebarRow` / `_LogoutTile` — cf. commentaire
+      // dans _LogoutTile : le footer doit peser exactement comme un item nav.
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
         child: Row(children: [
           Icon(Icons.workspace_premium_rounded,
-              size: 18,
+              size: 16,
               color: theme.colorScheme.onSurface.withValues(alpha:0.75)),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
           Expanded(child: Text(l.drawerSubscription,
               overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.body.copyWith(
+              style: AppTextStyles.bodySm.copyWith(
                   fontWeight: FontWeight.w500,
                   color: theme.colorScheme.onSurface.withValues(alpha:0.85)))),
           const SizedBox(width: 6),

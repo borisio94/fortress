@@ -272,6 +272,19 @@ class Product extends Equatable {
   final ProductStatus status;
   final bool   isActive;
   final bool   isVisibleWeb;
+
+  /// Suivi de stock actif pour cet article (hotfix_138).
+  ///
+  /// `false` = article produit à la demande — plat cuisiné, service,
+  /// prestation : les ventes ne décrémentent rien et les annulations ne
+  /// recréditent rien. Sans ce drapeau, vendre un plat dégradait un stock
+  /// dénué de sens ou écrivait une ligne `stock_decrement_failed` dans le
+  /// journal d'activité à chaque service.
+  ///
+  /// Défaut `true` : comportement historique préservé pour tout le parc
+  /// existant tant que l'utilisateur n'a pas décoché l'option.
+  final bool   trackStock;
+
   final String? imageUrl;
   final int    rating;         // 0–5
 
@@ -320,6 +333,7 @@ class Product extends Equatable {
     this.status        = ProductStatus.available,
     this.isActive      = true,
     this.isVisibleWeb  = false,
+    this.trackStock    = true,
     this.imageUrl,
     this.rating        = 0,
     this.variants      = const [],
@@ -441,7 +455,7 @@ class Product extends Equatable {
     double? priceSellPos, double? priceSellWeb, double? taxRate,
     int? stockQty, int? stockMinAlert,
     ProductStatus? status,
-    bool? isActive, bool? isVisibleWeb,
+    bool? isActive, bool? isVisibleWeb, bool? trackStock,
     String? imageUrl, int? rating,
     List<ProductVariant>? variants,
     List<Map<String, dynamic>>? expenses,
@@ -470,6 +484,7 @@ class Product extends Equatable {
     status:       status       ?? this.status,
     isActive:     isActive     ?? this.isActive,
     isVisibleWeb: isVisibleWeb ?? this.isVisibleWeb,
+    trackStock:   trackStock   ?? this.trackStock,
     imageUrl:     imageUrl     ?? this.imageUrl,
     rating:       rating       ?? this.rating,
     variants:     variants     ?? this.variants,
@@ -488,7 +503,7 @@ class Product extends Equatable {
     id, storeId, name, barcode, sku,
     priceBuy, customsFee, priceSellPos, priceSellWeb, taxRate,
     stockQty, stockMinAlert, status,
-    isActive, isVisibleWeb, rating,
+    isActive, isVisibleWeb, trackStock, rating,
     variants, expenses,
   ];
 }

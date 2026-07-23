@@ -214,9 +214,17 @@ class DeliveryMessageBuilder {
         ? productsLink
         : productsText;
     final feesAmount    = _deliveryFeeAmount(sale.fees);
-    final feesText      = feesAmount <= 0
-        ? 'inclus dans le prix'
-        : _formatAmount(feesAmount);
+    // Frais de livraison affichés = prix du quartier (`deliveryPrice`, PR-2/3)
+    // + éventuels frais legacy étiquetés « livraison ». « à confirmer » pour
+    // une commande web dont le quartier n'est pas répertorié (deliveryPrice
+    // null). Le TOTAL ci-dessous n'est PAS double-compté : `sale.total` inclut
+    // déjà `deliveryPrice`, on n'ajoute donc que `feesAmount` (legacy).
+    final deliveryTotal = (sale.deliveryPrice ?? 0) + feesAmount;
+    final feesText      = sale.deliveryFeeToFix
+        ? 'à confirmer'
+        : (deliveryTotal <= 0
+            ? 'inclus dans le prix'
+            : _formatAmount(deliveryTotal));
     // {{prix_produit}} et {{total}} doivent EXACTEMENT matcher la facture
     // (cf. ticket 2026-05-28). On utilise donc `sale.subtotal` et
     // `sale.total` qui prennent en compte :
@@ -228,13 +236,13 @@ class DeliveryMessageBuilder {
     // discount → le message livreur affichait le prix CATALOGUE alors que
     // la facture affichait le prix négocié. Discrepancy ≠ 0.
     //
-    // `grandTotal` ajoute `feesAmount` (frais de livraison) au total
-    // facture pour que le livreur sache combien encaisser au total.
-    // Si le marchand veut afficher le total facture pur (sans fees), il
-    // peut composer son template avec uniquement `{{prix_produit}}` +
-    // `{{frais_livraison}}` séparés.
+    // `sale.total` inclut DÉSORMAIS toutes les dépenses (livraison
+    // [deliveryPrice] + autres frais [totalFees]) qui s'ajoutent au prix de
+    // vente. On NE rajoute donc plus `feesAmount` (sinon double comptage des
+    // frais de livraison saisis en `fees`). `{{total}}` = ce que le livreur
+    // encaisse au total.
     final productsTotal = sale.subtotal;
-    final grandTotal    = sale.total + feesAmount;
+    final grandTotal    = sale.total;
     final totalText     = _formatTotalWithAcompte(grandTotal, paidAmount);
 
     // Ville du partenaire : combine district + city si les deux sont

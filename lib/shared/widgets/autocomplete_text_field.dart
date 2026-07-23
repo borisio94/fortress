@@ -161,8 +161,10 @@ class _AutocompleteTextFieldState extends State<AutocompleteTextField> {
               padding: EdgeInsets.zero,
               shrinkWrap: true,
               itemCount: _filtered.length,
-              separatorBuilder: (_, __) => const Divider(
-                  height: 1, color: Color(0xFFF3F4F6)),
+              // Pas `const` : `AppColors.divider` est un getter résolu au
+              // runtime selon le brightness actif.
+              separatorBuilder: (_, __) => Divider(
+                  height: 1, color: AppColors.divider),
               itemBuilder: (_, i) {
                 final v = _filtered[i];
                 // GestureDetector + onTapDown : se déclenche AVANT la perte
@@ -174,8 +176,8 @@ class _AutocompleteTextFieldState extends State<AutocompleteTextField> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 14, vertical: 10),
                     child: Row(children: [
-                      const Icon(Icons.history_rounded,
-                          size: 14, color: Color(0xFF9CA3AF)),
+                      Icon(Icons.history_rounded,
+                          size: 14, color: AppColors.textHint),
                       const SizedBox(width: 8),
                       Expanded(child: Text(v,
                           maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -215,7 +217,7 @@ class _AutocompleteTextFieldState extends State<AutocompleteTextField> {
           isDense: true,
           prefixIcon: widget.prefixIcon != null
               ? Icon(widget.prefixIcon, size: 16,
-                  color: const Color(0xFF9CA3AF))
+                  color: AppColors.textHint)
               : null,
           labelStyle: AppTextStyles.caption,
           hintStyle: AppTextStyles.inputHint,

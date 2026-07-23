@@ -104,6 +104,8 @@ class InvoiceService {
           pw.SizedBox(height: 14),
           _notesBlock(sale.notes!.trim(), theme),
         ],
+        pw.SizedBox(height: 14),
+        _warrantyBlock(theme),
       ],
     );
   }
@@ -350,6 +352,25 @@ class InvoiceService {
                 _totalLine('TVA (${sale.taxRate.toStringAsFixed(1)} %)',
                     _money(sale.taxAmount, shop),
                     size: 10, color: InvoiceTheme.textSecondary),
+              // Frais de livraison par quartier (PR-2/3). Le TOTAL TTC inclut
+              // déjà ce montant ; ligne dédiée pour le détail client.
+              if (sale.deliveryFeeToFix)
+                _totalLine('Livraison', 'À confirmer',
+                    size: 10, color: InvoiceTheme.textSecondary)
+              else if ((sale.deliveryPrice ?? 0) > 0)
+                _totalLine('Livraison', _money(sale.deliveryPrice!, shop),
+                    size: 10, color: InvoiceTheme.textSecondary),
+              // Autres dépenses supplémentaires (emballage…) — chacune
+              // s'ajoute au total facturé au client.
+              ...sale.fees
+                  .where((f) => ((f['amount'] as num?)?.toDouble() ?? 0) > 0)
+                  .map((f) {
+                    final lbl = (f['label'] as String?)?.trim();
+                    return _totalLine(
+                        (lbl == null || lbl.isEmpty) ? 'Frais' : lbl,
+                        _money((f['amount'] as num?)?.toDouble() ?? 0, shop),
+                        size: 10, color: InvoiceTheme.textSecondary);
+                  }),
               pw.SizedBox(height: 4),
               pw.Container(height: 1, color: InvoiceTheme.divider),
               pw.SizedBox(height: 4),
@@ -423,6 +444,38 @@ class InvoiceService {
           pw.Text(notes,
               style: const pw.TextStyle(
                   fontSize: 10, color: InvoiceTheme.textPrimary)),
+        ],
+      ),
+    );
+  }
+
+  // ── Garantie ──────────────────────────────────────────────────
+  // Mention de garantie 1 an apposée sur chaque facture (preuve d'achat).
+
+  static pw.Widget _warrantyBlock(InvoiceTheme theme) {
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.all(8),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: theme.primary, width: 0.6),
+        borderRadius: pw.BorderRadius.circular(4),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text('GARANTIE 1 AN',
+              style: pw.TextStyle(
+                  fontSize: 8,
+                  letterSpacing: 1.0,
+                  color: theme.primary,
+                  fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 3),
+          pw.Text(
+              'Vos articles sont garantis 1 an à compter de la date d\'achat '
+              '(défauts de fabrication). Conservez cette facture comme preuve '
+              'd\'achat pour bénéficier de la garantie.',
+              style: const pw.TextStyle(
+                  fontSize: 9, color: InvoiceTheme.textSecondary)),
         ],
       ),
     );

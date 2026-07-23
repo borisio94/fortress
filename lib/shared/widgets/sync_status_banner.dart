@@ -154,7 +154,7 @@ class _SyncErrorsSheetState extends ConsumerState<_SyncErrorsSheet> {
             Text('$pend op(s) en attente · $stuck bloquée(s) · '
                 '${errors.length} erreur(s)',
                 style: AppTextStyles.bodySmSecondary.copyWith(
-                    color: const Color(0xFF6B7280))),
+                    color: AppColors.textSecondary)),
             const SizedBox(height: 12),
             if (errors.isEmpty && stuck == 0)
               Padding(
@@ -162,7 +162,7 @@ class _SyncErrorsSheetState extends ConsumerState<_SyncErrorsSheet> {
                 child: Center(child: Text(
                   'Aucune erreur récente. La queue se vide automatiquement.',
                   style: AppTextStyles.bodySmSecondary.copyWith(
-                      color: const Color(0xFF6B7280)),
+                      color: AppColors.textSecondary),
                   textAlign: TextAlign.center)),
               )
             else
@@ -186,12 +186,12 @@ class _SyncErrorsSheetState extends ConsumerState<_SyncErrorsSheet> {
                       Text(e['error']?.toString() ?? '',
                           maxLines: 3, overflow: TextOverflow.ellipsis,
                           style: AppTextStyles.caption.copyWith(
-                              color: const Color(0xFF6B7280))),
+                              color: AppColors.textSecondary)),
                       if (t != null) ...[
                         const SizedBox(height: 2),
                         Text(t.substring(0, 19).replaceAll('T', ' '),
                             style: AppTextStyles.micro.copyWith(
-                                color: const Color(0xFF9CA3AF))),
+                                color: AppColors.textHint)),
                       ],
                     ]),
                   );

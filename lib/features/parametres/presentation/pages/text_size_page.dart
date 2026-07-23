@@ -70,7 +70,7 @@ class TextSizePage extends ConsumerWidget {
 
           // ── Curseur A− / A+ ───────────────────────────────────────────
           Row(children: [
-            const Text('A', style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
+            Text('A', style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
             Expanded(
               child: SliderTheme(
                 data: SliderTheme.of(context).copyWith(
@@ -91,7 +91,7 @@ class TextSizePage extends ConsumerWidget {
                 ),
               ),
             ),
-            const Text('A', style: TextStyle(fontSize: 26, color: AppColors.textSecondary)),
+            Text('A', style: TextStyle(fontSize: 26, color: AppColors.textSecondary)),
           ]),
           const SizedBox(height: 4),
           Center(
@@ -103,7 +103,8 @@ class TextSizePage extends ConsumerWidget {
             child: TextButton.icon(
               onPressed: () => notifier.reset(),
               icon: const Icon(Icons.restart_alt_rounded, size: 18),
-              label: const Text('Réinitialiser (80 %)'),
+              label: const Text(
+                  'Réinitialiser (${TextScaleNotifier.defaultPercent} %)'),
               style: TextButton.styleFrom(foregroundColor: AppColors.primary),
             ),
           ),

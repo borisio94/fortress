@@ -153,7 +153,7 @@ class _DeleteProductDialogState extends State<DeleteProductDialog> {
                 ),
               ),
               const SizedBox(height: 10),
-              const Text(
+              Text(
                 'Ce produit sera retiré du catalogue (POS + web). '
                 'Son historique de ventes reste conservé pour audit. '
                 'Un super-admin pourra le restaurer en cas d\'erreur.',
@@ -329,7 +329,7 @@ class _PlaceholderImg extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         color: Theme.of(context).semantic.borderSubtle,
-        child: const Icon(Icons.image_outlined,
+        child: Icon(Icons.image_outlined,
             color: AppColors.textHint, size: 22),
       );
 }

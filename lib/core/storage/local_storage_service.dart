@@ -422,6 +422,7 @@ class LocalStorageService {
     'stock_qty': p.stockQty, 'stock_min_alert': p.stockMinAlert,
     'status': p.status.key,
     'is_active': p.isActive, 'is_visible_web': p.isVisibleWeb,
+    'track_stock': p.trackStock,
     'image_url': p.imageUrl, 'rating': p.rating,
     'variants': p.variants.map(_variantToMap).toList(),
     'expenses': p.expenses,
@@ -488,6 +489,9 @@ class LocalStorageService {
       status:       ProductStatusX.fromString(m['status'] as String?),
       isActive:     m['is_active'] as bool? ?? true,
       isVisibleWeb: m['is_visible_web'] as bool? ?? false,
+      // Défaut true : les produits antérieurs à hotfix_138 n'ont pas la clé
+      // et doivent conserver le suivi de stock historique.
+      trackStock:   m['track_stock'] as bool? ?? true,
       imageUrl:     m['image_url'],
       rating:       m['rating'] as int? ?? 0,
       variants:     variants,

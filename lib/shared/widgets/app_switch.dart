@@ -39,7 +39,7 @@ class AppSwitch extends StatelessWidget {
         if (states.contains(WidgetState.selected)) {
           return color.withValues(alpha:0.25);
         }
-        return const Color(0xFFE5E7EB);
+        return AppColors.inputBorder;
       }),
       // Bordure du track
       trackOutlineColor: WidgetStateProperty.resolveWith<Color>((states) {

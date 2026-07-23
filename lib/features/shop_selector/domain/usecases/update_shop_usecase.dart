@@ -11,10 +11,13 @@ class UpdateShopUseCase {
 
 class UpdateShopParams extends Equatable {
   final String shopId;
-  final String? name, sector, currency, country, phone, whatsappPhone, email;
+  // `sector` VOLONTAIREMENT ABSENT : le type d'établissement est figé à la
+  // création. Le retirer du DTO — et pas seulement de l'UI — garantit qu'aucun
+  // futur appelant ne pourra le remodifier par inadvertance.
+  final String? name, currency, country, phone, whatsappPhone, email;
   const UpdateShopParams({
     required this.shopId,
-    this.name, this.sector, this.currency, this.country,
+    this.name, this.currency, this.country,
     this.phone, this.whatsappPhone, this.email,
   });
 
@@ -22,7 +25,6 @@ class UpdateShopParams extends Equatable {
   Map<String, dynamic> toMap() {
     final m = <String, dynamic>{};
     if (name     != null) m['name']     = name;
-    if (sector   != null) m['sector']   = sector;
     if (currency != null) m['currency'] = currency;
     if (country  != null) m['country']  = country;
     if (phone    != null) m['phone']    = phone;
@@ -33,5 +35,5 @@ class UpdateShopParams extends Equatable {
 
   @override
   List<Object?> get props =>
-      [shopId, name, sector, currency, country, phone, whatsappPhone, email];
+      [shopId, name, currency, country, phone, whatsappPhone, email];
 }

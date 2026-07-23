@@ -819,7 +819,18 @@ class StockService {
   /// par l'utilisateur, sa valeur prime sur tout transfert/écho récent).
   static Future<void> _saveVariant(
       Product product, int vIdx, ProductVariant updated, String shopId,
-      {bool forceStockLevelSync = false}) async {
+      // FIX perte d'affichage stock : `_saveVariant` n'est appelé QUE par des
+      // mouvements LOCAUX autoritatifs (vente, retour, arrivée, incident,
+      // transfert, recalcul…). Le StockLevel de la boutique DOIT donc toujours
+      // suivre la variante fraîchement modifiée. Sans forçage, la garde
+      // anti-écho de `_syncShopStockLevelsFromProduct` (TTL 1 h) bloquait cette
+      // propagation quand un StockLevel avait été écrit récemment (ex. vente
+      // dans l'heure suivant la création du produit) → l'inventaire/la grille
+      // (qui lisent le StockLevel) restaient sur l'ancienne valeur alors que
+      // `variant.stockAvailable` était correct. Forcer la synchro repose la
+      // garde (via saveStockLevel) → la protection contre les PULLS DISTANTS
+      // périmés (syncProducts, force=false) reste intacte.
+      {bool forceStockLevelSync = true}) async {
     final variants = List<ProductVariant>.from(product.variants);
     variants[vIdx] = updated;
     await AppDatabase.saveProduct(product.copyWith(variants: variants),
@@ -862,10 +873,14 @@ class StockService {
       'reference_id': referenceId,
       'created_by': user?.name,
       'created_at': now.toIso8601String(),
-      // GF-7 : pour les mouvements `adjustment`, on duplique notes dans
-      // `reason` — c'est la colonne contrainte par le CHECK Supabase
-      // (hotfix_082). Pour les autres types, reason reste null.
-      if (type == 'adjustment') 'reason': notes,
+      // GF-7 : pour les mouvements `adjustment`, `reason` est OBLIGATOIRE
+      // (CHECK non vide, hotfix_082). On le remplit avec notes, sinon cause,
+      // sinon un défaut explicite — JAMAIS vide (sinon upsert rejeté 23514
+      // puis droppé silencieusement). Pour les autres types, reason reste null.
+      if (type == 'adjustment')
+        'reason': (notes ?? '').trim().isNotEmpty
+            ? notes
+            : ((cause ?? '').trim().isNotEmpty ? cause : 'Ajustement de stock'),
     };
     HiveBoxes.stockMovementsBox.put(map['id'], map);
   }
