@@ -17,6 +17,8 @@ import '../../../../features/inventaire/domain/entities/product.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
+import '../../../../shared/widgets/app_confirm_dialog.dart';
+import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/product_image_card.dart';
 import '../../domain/entities/menu_modifier.dart';
 
@@ -287,6 +289,39 @@ class _DishFormSheetState extends State<DishFormSheet> {
     }
   }
 
+  /// Supprime le plat (édition uniquement). Soft-delete réversible depuis
+  /// l'historique. Un motif par défaut satisfait le garde-fou serveur
+  /// (raison ≥ 10 caractères) sans imposer de saisie à l'opérateur.
+  Future<void> _deleteDish() async {
+    final existing = widget.existing;
+    final pid = existing?.id;
+    if (pid == null || pid.isEmpty) return;
+    final confirmed = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.delete_outline_rounded,
+      iconColor: Theme.of(context).semantic.danger,
+      title: 'Supprimer ce plat ?',
+      body: Text('« ${existing!.name} » sera retiré de la carte. '
+          'Action réversible depuis l\'historique.'),
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Supprimer',
+      onConfirm: () {},
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await AppDatabase.deleteProduct(
+        pid,
+        reason: 'Plat retiré de la carte',
+        userId: LocalStorageService.getCurrentUser()?.id ?? '',
+      );
+      // Ferme le formulaire en signalant un changement → la carte se rafraîchit
+      // et le plat (soft-deleted) disparaît (getProductsForShop filtre isDeleted).
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) AppSnack.error(context, 'Suppression impossible : $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -505,6 +540,20 @@ class _DishFormSheetState extends State<DishFormSheet> {
               isLoading: _saving,
               onTap: _submit,
             ),
+            // Suppression — édition uniquement. Discret, sous le bouton
+            // principal, en rouge pour signaler l'action destructive.
+            if (_isEdit) ...[
+              const SizedBox(height: 6),
+              Center(
+                child: TextButton.icon(
+                  onPressed: _saving ? null : _deleteDish,
+                  icon: Icon(Icons.delete_outline_rounded,
+                      size: 18, color: sem.danger),
+                  label: Text('Supprimer le plat',
+                      style: AppTextStyles.label.copyWith(color: sem.danger)),
+                ),
+              ),
+            ],
           ],
         ),
       ),

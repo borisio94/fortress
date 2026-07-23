@@ -1,5 +1,3 @@
-import 'dart:ui' show ImageFilter;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -641,15 +639,15 @@ const _kTextShadow = [
   Shadow(color: Colors.black87, blurRadius: 4, offset: Offset(0, 1)),
 ];
 
-/// Bandeau de verre dépoli : floute la photo derrière lui et pose un voile
-/// sombre par-dessus, pour que le contenu reste lisible quelle que soit la
-/// photo du plat.
+/// Bandeau semi-opaque posé sur la photo pour rendre le texte lisible quelle
+/// que soit l'image du plat.
 ///
-/// `BackdropFilter` coûte cher — un seul par zone de texte (haut / prix /
-/// bas), jamais sur toute la carte : flouter la photo entière la rendrait
-/// méconnaissable. Sigma volontairement modéré (4) : au-delà l'effet devient
-/// trop marqué et mange la photo ; le voile + l'ombre portée font le reste
-/// du travail de contraste.
+/// IMPORTANT — plus de `BackdropFilter` (flou) ici : sur Flutter web
+/// (CanvasKit), EMPILER plusieurs `BackdropFilter` par-dessus une image
+/// (`CachedNetworkImage`) casse le compositing et fait DISPARAÎTRE la photo
+/// (carte grise). On utilise donc un simple voile noir translucide (alpha
+/// relevé pour compenser l'absence de flou) + l'ombre portée du texte, qui
+/// suffisent au contraste et sont robustes sur toutes les plateformes.
 class _GlassPanel extends StatelessWidget {
   final Widget child;
   final EdgeInsets padding;
@@ -663,16 +661,12 @@ class _GlassPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: borderRadius ?? BorderRadius.zero,
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
-        child: Container(
-          color: Colors.black.withValues(alpha: 0.35),
-          padding: padding,
-          child: child,
-        ),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.45),
+        borderRadius: borderRadius,
       ),
+      child: Padding(padding: padding, child: child),
     );
   }
 }
