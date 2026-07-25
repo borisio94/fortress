@@ -12,6 +12,7 @@ import '../../../inventaire/domain/entities/product.dart';
 import '../../../../core/services/stock_service.dart';
 import '../../../../core/services/delivery_reminder_service.dart';
 import '../../../../core/services/daily_menu_service.dart';
+import '../../../../core/services/recipe_service.dart';
 import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/utils/uuid.dart';
 
@@ -735,9 +736,12 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
       try {
         if (isRestaurantShop(event.shopId)) {
           await DailyMenuService.consumeForOrder(event.shopId, sale.items);
+          // Finances : décrémente le stock des ingrédients des recettes vendues
+          // + alerte si un ingrédient passe sous son seuil.
+          await RecipeService.consumeForOrder(event.shopId, sale.items);
         }
       } catch (e) {
-        debugPrint('[DailyMenu] décrément vente err: $e');
+        debugPrint('[Restaurant] décrément vente err: $e');
       }
 
       // Mise à jour silencieuse de la fiche client si l'opérateur a saisi
@@ -1341,13 +1345,15 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
         } else {
           await ds.saveOrder(order);
         }
-        // Restaurant : décrémente le stock du jour (jamais bloquant).
+        // Restaurant : décrémente le stock du jour + les ingrédients des
+        // recettes vendues (jamais bloquant).
         try {
           if (isRestaurantShop(event.shopId)) {
             await DailyMenuService.consumeForOrder(event.shopId, order.items);
+            await RecipeService.consumeForOrder(event.shopId, order.items);
           }
         } catch (e) {
-          debugPrint('[DailyMenu] décrément commande err: $e');
+          debugPrint('[Restaurant] décrément commande err: $e');
         }
         // Programmer la notification de rappel à la date de livraison
         await DeliveryReminderService.scheduleFor(order);

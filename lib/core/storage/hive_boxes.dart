@@ -102,6 +102,15 @@ class HiveBoxes {
   /// enregistrement `{date, enabled, count}`. Réinitialisé chaque jour (une
   /// entrée dont la `date` n'est pas aujourd'hui est ignorée → défaut dispo).
   static const String dailyMenuAvailability = 'daily_menu_availability_box';
+  // ── Module finances restaurant (hotfix_140) ────────────────────────────
+  /// Catalogue d'ingrédients (spécialisés / partagés) — PR-A finances resto.
+  static const String ingredients        = 'ingredients_box';
+  /// Lignes de fiche recette (produit ↔ ingrédient, quantité) — PR-A.
+  static const String recipeIngredients  = 'recipe_ingredients_box';
+  /// Activités connexes du restaurant (Chawarma, Bar…) — PR-B.
+  static const String restaurantActivities = 'restaurant_activities_box';
+  /// Articles sans transformation (boissons, emballages…) — PR-B.
+  static const String stockItems           = 'stock_items_box';
 
   static Future<void> init() async {
     debugPrint('[Hive] HBX-A init() entered, kIsWeb=$kIsWeb');
@@ -166,6 +175,10 @@ class HiveBoxes {
       await _safeOpenMap(restaurantTables);
       await _safeOpenMap(menuModifiers);
       await _safeOpenMap(dailyMenuAvailability);
+      await _safeOpenMap(ingredients);
+      await _safeOpenMap(recipeIngredients);
+      await _safeOpenMap(restaurantActivities);
+      await _safeOpenMap(stockItems);
       debugPrint('[Hive] HBX-D all boxes opened (some may have failed)');
     } catch (e, st) {
       debugPrint('[Hive] HBX-FATAL outer init error: $e');
@@ -242,6 +255,7 @@ class HiveBoxes {
     partnerLedger,
     pendingImageUploads,
     restaurantTables, menuModifiers, dailyMenuAvailability,
+    ingredients, recipeIngredients, restaurantActivities, stockItems,
   ];
 
   static Future<void> _safeClose(String boxName) async {
@@ -343,4 +357,10 @@ class HiveBoxes {
   static Box<Map>   get menuModifiersBox    => Hive.box<Map>(menuModifiers);
   static Box<Map>   get dailyMenuAvailabilityBox =>
       Hive.box<Map>(dailyMenuAvailability);
+  static Box<Map>   get ingredientsBox       => Hive.box<Map>(ingredients);
+  static Box<Map>   get recipeIngredientsBox  =>
+      Hive.box<Map>(recipeIngredients);
+  static Box<Map>   get restaurantActivitiesBox =>
+      Hive.box<Map>(restaurantActivities);
+  static Box<Map>   get stockItemsBox         => Hive.box<Map>(stockItems);
 }

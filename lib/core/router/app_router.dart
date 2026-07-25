@@ -51,6 +51,7 @@ import '../../features/restaurant/presentation/pages/takeaway_page.dart';
 import '../../features/restaurant/presentation/pages/menu_modifiers_page.dart';
 import '../../features/restaurant/presentation/pages/restaurant_dashboard_page.dart';
 import '../../features/restaurant/presentation/pages/restaurant_menu_page.dart';
+import '../../features/restaurant/presentation/pages/finances_hub_page.dart';
 import '../../features/inventaire/presentation/pages/product_form_page.dart';
 import '../../features/inventaire/presentation/pages/reception_page.dart';
 import '../../features/inventaire/presentation/pages/incidents_page.dart';
@@ -798,6 +799,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/restaurant/takeaway',
               pageBuilder: (c, s) => _shellPage(s,
                   TakeawayPage(shopId: s.pathParameters['shopId']!))),
+          // Finances restaurant (PR-B) — hub Ingrédients / Activités / Stock.
+          GoRoute(path: '/shop/:shopId/restaurant/finances',
+              pageBuilder: (c, s) => _shellPage(s,
+                  FinancesHubPage(shopId: s.pathParameters['shopId']!))),
           GoRoute(path: '/shop/:shopId/parametres/menu-modifiers',
               builder: (c, s) => MenuModifiersPage(
                     shopId: s.pathParameters['shopId']!,

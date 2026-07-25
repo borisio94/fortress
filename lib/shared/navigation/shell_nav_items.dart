@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../core/config/restaurant_mode.dart';
 import '../../core/i18n/app_localizations.dart';
 import '../../core/permisions/app_permissions.dart';
+import '../../core/services/ingredient_service.dart';
+import '../../core/services/stock_item_service.dart';
 import '../../core/storage/hive_boxes.dart';
 
 /// Description d'un item de navigation shell.
@@ -140,6 +142,18 @@ int _webOrdersBadge(String shopId) {
   }).length;
 }
 
+/// Alertes stock des finances restaurant (ingrédients + articles « stock »
+/// sous leur seuil) — pastille sur l'item « Finances ».
+int _restaurantFinanceBadge(String shopId) {
+  if (shopId.isEmpty) return 0;
+  var n = 0;
+  for (final ing in IngredientService.forShop(shopId)) {
+    if (ing.isLowStock) n++;
+  }
+  n += StockItemService.lowStock(shopId).length;
+  return n;
+}
+
 /// Tous les items de navigation, dans l'ordre d'affichage.
 ///
 /// Les 4 premiers (`primary: true`) alimentent le bottom nav mobile en plus
@@ -173,6 +187,18 @@ final List<ShellNavItem> kShellNavItems = [
     route:        (id) => '/shop/$id/inventaire',
     visibleIf:    (p) => p.isShopAdmin && p.canViewProducts,
     sectorIn:     kRestaurantSectors,
+    primary:      true,
+  ),
+  // ── Finances restaurant (PR-B) — hub Ingrédients / Activités / Stock ────
+  // Réservé admin/owner. Pastille = alertes stock (ingrédients + articles).
+  ShellNavItem(
+    icon:         Icons.account_balance_wallet_outlined,
+    iconSelected: Icons.account_balance_wallet_rounded,
+    label:        (_) => 'Finances',
+    route:        (id) => '/shop/$id/restaurant/finances',
+    visibleIf:    (p) => p.isShopAdmin,
+    sectorIn:     kRestaurantSectors,
+    badge:        _restaurantFinanceBadge,
     primary:      true,
   ),
   ShellNavItem(

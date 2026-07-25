@@ -12,8 +12,8 @@ import '../../../../core/theme/app_theme.dart';
 /// raison pour laquelle elles sont fixes ici : le fond de page, lui, suit
 /// bien le thème de l'application.
 ///
-/// Pastels volontairement clairs : le texte posé dessus est sombre, ce qui
-/// garantit le contraste quel que soit le thème actif.
+/// Pastels clairs : ils teintent désormais la PASTILLE d'icône (icône sombre
+/// par-dessus), plus le fond de la tuile — qui suit la surface du thème.
 class RestoTileColors {
   RestoTileColors._();
 
@@ -25,7 +25,13 @@ class RestoTileColors {
   static const List<Color> all = [revenue, orders, expense, average];
 }
 
-/// Tuile d'indicateur à fond coloré plein, avec badge d'icône foncé.
+/// Tuile d'indicateur NEUTRE (surface du thème + bordure douce), avec une
+/// petite pastille d'icône colorée qui porte l'identité de l'indicateur.
+///
+/// Les aplats de couleur pleine « cassaient l'ambiance » : ils juraient avec
+/// les autres cartes neutres du tableau de bord. On garde l'identité couleur
+/// (via la pastille d'icône) mais la carte s'harmonise avec le reste et suit
+/// le thème clair/sombre.
 class RestoKpiTile extends StatelessWidget {
   final String value;
   final String label;
@@ -44,61 +50,67 @@ class RestoKpiTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Badge dérivé de la teinte plutôt que codé en dur : une tuile reste
-    // cohérente si sa couleur change, et l'icône garde son contraste.
-    final badge = Color.lerp(color, Colors.black, 0.78)!;
-    // Texte sombre : les 4 teintes sont des pastels clairs, un texte blanc
-    // y serait illisible.
-    const onTile = Color(0xFF111827);
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final sem = theme.semantic;
+    // Pastille : la teinte pastel de l'indicateur, icône sombre (les pastels
+    // sont clairs → un icône foncé contraste dans les deux modes).
+    const onBadge = Color(0xFF1F2937);
 
     return Material(
-      color: color,
+      color: cs.surface,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: badge,
-                  borderRadius: BorderRadius.circular(11),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: sem.borderSubtle),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(icon, size: 21, color: onBadge),
                 ),
-                child: Icon(icon, size: 21, color: color),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        value,
-                        maxLines: 1,
-                        style: AppTextStyles.title.copyWith(
-                            color: onTile, fontWeight: FontWeight.w800),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          value,
+                          maxLines: 1,
+                          style: AppTextStyles.title.copyWith(
+                              color: cs.onSurface, fontWeight: FontWeight.w800),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.bodySm.copyWith(
-                          color: onTile.withValues(alpha: 0.75)),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySm.copyWith(
+                            color: cs.onSurface.withValues(alpha: 0.6)),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

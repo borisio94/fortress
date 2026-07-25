@@ -2,10 +2,13 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/menu_modifier_service.dart';
+import '../../../../core/services/ingredient_service.dart';
+import '../../../../core/services/recipe_service.dart';
 import '../../../../core/services/pending_image_upload_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -21,6 +24,7 @@ import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/product_image_card.dart';
 import '../../domain/entities/menu_modifier.dart';
+import '../../domain/entities/ingredient.dart';
 
 /// Ouvre la feuille de saisie d'un plat. Retourne `true` si un plat a été
 /// créé ou modifié.
@@ -68,6 +72,10 @@ class _DishFormSheetState extends State<DishFormSheet> {
   /// Noms des groupes de modificateurs cochés pour ce plat.
   final Set<String> _groups = {};
 
+  /// Brouillon de fiche recette (persisté en base seulement au save, avec le
+  /// productId — définitif après la création du plat).
+  final List<_RecipeDraft> _recipe = [];
+
   int _rating = 0;
   // Décoché par défaut, à l'inverse du défaut global : un plat est produit à
   // la commande. L'activer d'office ramènerait les stocks négatifs et le
@@ -102,12 +110,26 @@ class _DishFormSheetState extends State<DishFormSheet> {
         for (final m in MenuModifierService.forShop(widget.shopId)) {
           if (m.productId == pid) _groups.add(m.name);
         }
+        // Charge la fiche recette existante (lignes + infos ingrédient).
+        for (final line in RecipeService.forProduct(widget.shopId, pid)) {
+          final ing = IngredientService.byId(widget.shopId, line.ingredientId);
+          _recipe.add(_RecipeDraft(
+            ingredientId: line.ingredientId,
+            name: ing?.name ?? '(ingrédient supprimé)',
+            unit: line.unit,
+            quantity: line.quantity,
+            costPerUnit: ing?.costPerUnit ?? 0,
+            isShared: ing?.isShared ?? false,
+          ));
+        }
       }
     }
+    _priceCtrl.addListener(_onMarginInputsChanged);
   }
 
   @override
   void dispose() {
+    _priceCtrl.removeListener(_onMarginInputsChanged);
     _nameCtrl.dispose();
     _priceCtrl.dispose();
     _descCtrl.dispose();
@@ -251,6 +273,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
       }
 
       await _syncModifierLinks(productId);
+      await _syncRecipeLines(productId);
 
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
@@ -287,6 +310,67 @@ class _DishFormSheetState extends State<DishFormSheet> {
       if (_groups.contains(entry.key)) continue;
       await MenuModifierService.delete(entry.value.id, widget.shopId);
     }
+  }
+
+  // ── Fiche recette ──────────────────────────────────────────────────────
+
+  /// Aligne les lignes de recette persistées sur le brouillon `_recipe` :
+  /// (ré)ajoute les présentes (upsert par couple plat/ingrédient), supprime
+  /// celles retirées de la liste.
+  Future<void> _syncRecipeLines(String productId) async {
+    final currentIds = _recipe.map((d) => d.ingredientId).toSet();
+    for (final line in RecipeService.forProduct(widget.shopId, productId)) {
+      if (!currentIds.contains(line.ingredientId)) {
+        await RecipeService.removeLine(line);
+      }
+    }
+    for (final d in _recipe) {
+      await RecipeService.addLine(
+        shopId: widget.shopId,
+        productId: productId,
+        ingredientId: d.ingredientId,
+        quantity: d.quantity,
+        unit: d.unit,
+      );
+    }
+  }
+
+  /// Coût matières d'une ligne (prorata partagé compris) — estimation live.
+  double _draftCost(_RecipeDraft d) {
+    final full = d.quantity * d.costPerUnit;
+    if (!d.isShared) return full;
+    final n =
+        RecipeService.dishCountForIngredient(widget.shopId, d.ingredientId);
+    return n <= 1 ? full : full / n;
+  }
+
+  double get _recipeCost => _recipe.fold(0.0, (s, d) => s + _draftCost(d));
+
+  /// Feuille d'ajout : choisir un ingrédient existant OU en créer un inline,
+  /// + la quantité utilisée par plat.
+  Future<void> _addRecipeIngredient() async {
+    final result = await showAdaptiveFormSheet<_RecipeLineResult>(
+      context: context,
+      builder: (_) => _AddRecipeIngredientSheet(shopId: widget.shopId),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      final ing = result.ingredient;
+      _recipe.removeWhere((d) => d.ingredientId == ing.id);
+      _recipe.add(_RecipeDraft(
+        ingredientId: ing.id,
+        name: ing.name,
+        unit: result.unit,
+        quantity: result.quantity,
+        costPerUnit: ing.costPerUnit,
+        isShared: ing.isShared,
+      ));
+    });
+  }
+
+  /// Le champ prix pilote la marge affichée → rebuild live quand il change.
+  void _onMarginInputsChanged() {
+    if (mounted && _recipe.isNotEmpty) setState(() {});
   }
 
   /// Supprime le plat (édition uniquement). Soft-delete réversible depuis
@@ -526,6 +610,47 @@ class _DishFormSheetState extends State<DishFormSheet> {
               ),
             ],
 
+            // ── Fiche recette ────────────────────────────────────────────
+            const SizedBox(height: 20),
+            Row(children: [
+              Icon(Icons.receipt_long_outlined,
+                  size: 18, color: AppColors.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Fiche recette',
+                    style: AppTextStyles.subtitle
+                        .copyWith(color: cs.onSurface)),
+              ),
+              TextButton.icon(
+                onPressed: _addRecipeIngredient,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Ingrédient'),
+              ),
+            ]),
+            if (_recipe.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                    'Ajoutez les ingrédients pour calculer le coût '
+                    'matières et la marge.',
+                    style: AppTextStyles.caption),
+              )
+            else ...[
+              for (final d in _recipe)
+                _RecipeRow(
+                  draft: d,
+                  cost: _draftCost(d),
+                  onRemove: () => setState(() => _recipe.remove(d)),
+                ),
+              const SizedBox(height: 10),
+              _RecipeSummary(
+                cost: _recipeCost,
+                price: double.tryParse(
+                        _priceCtrl.text.trim().replaceAll(',', '.')) ??
+                    0,
+              ),
+            ],
+
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(_error!,
@@ -641,6 +766,308 @@ class _Toggle extends StatelessWidget {
           ),
           Switch(value: value, onChanged: onChanged),
         ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  FICHE RECETTE (module finances — PR-A)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Ligne de recette en cours d'édition (non encore persistée).
+class _RecipeDraft {
+  final String ingredientId;
+  final String name;
+  final String unit;
+  final double quantity;
+  final int costPerUnit;
+  final bool isShared;
+  const _RecipeDraft({
+    required this.ingredientId,
+    required this.name,
+    required this.unit,
+    required this.quantity,
+    required this.costPerUnit,
+    required this.isShared,
+  });
+}
+
+/// Résultat de la feuille d'ajout d'ingrédient à la recette.
+class _RecipeLineResult {
+  final Ingredient ingredient;
+  final double quantity;
+  final String unit;
+  const _RecipeLineResult(this.ingredient, this.quantity, this.unit);
+}
+
+/// Une ligne de la fiche recette : nom · quantité · coût · retrait.
+class _RecipeRow extends StatelessWidget {
+  final _RecipeDraft draft;
+  final double cost;
+  final VoidCallback onRemove;
+  const _RecipeRow(
+      {required this.draft, required this.cost, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final sem = Theme.of(context).semantic;
+    final q = draft.quantity == draft.quantity.truncateToDouble()
+        ? draft.quantity.toInt().toString()
+        : draft.quantity.toStringAsFixed(1);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(draft.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
+              Text('$q ${draft.unit}${draft.isShared ? ' · partagé' : ''}',
+                  style: AppTextStyles.caption),
+            ],
+          ),
+        ),
+        Text(CurrencyFormatter.format(cost),
+            style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
+        IconButton(
+          onPressed: onRemove,
+          visualDensity: VisualDensity.compact,
+          icon: Icon(Icons.close_rounded, size: 18, color: sem.danger),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Bloc récapitulatif : coût matières · prix de vente · marge (FCFA + %).
+class _RecipeSummary extends StatelessWidget {
+  final double cost;
+  final double price;
+  const _RecipeSummary({required this.cost, required this.price});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final sem = Theme.of(context).semantic;
+    final margin = price - cost;
+    final pct = price <= 0 ? 0.0 : (margin / price) * 100;
+    final good = margin >= 0;
+    final accent = good ? sem.success : sem.danger;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: sem.borderSubtle),
+      ),
+      child: Column(children: [
+        _line(context, 'Coût matières', CurrencyFormatter.format(cost)),
+        _line(context, 'Prix de vente', CurrencyFormatter.format(price)),
+        Divider(height: 16, color: sem.borderSubtle),
+        _line(context, 'Marge', CurrencyFormatter.format(margin),
+            color: accent, bold: true),
+        _line(context, 'Marge %', '${pct.toStringAsFixed(0)} %', color: accent),
+      ]),
+    );
+  }
+
+  Widget _line(BuildContext c, String label, String value,
+      {Color? color, bool bold = false}) {
+    final cs = Theme.of(c).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(children: [
+        Expanded(
+          child: Text(label,
+              style: AppTextStyles.bodySm
+                  .copyWith(color: cs.onSurface.withValues(alpha: 0.7))),
+        ),
+        Text(value,
+            style: (bold ? AppTextStyles.bodyBold : AppTextStyles.bodySm)
+                .copyWith(color: color ?? cs.onSurface)),
+      ]),
+    );
+  }
+}
+
+/// Feuille : choisir un ingrédient existant OU en créer un inline, + quantité.
+class _AddRecipeIngredientSheet extends StatefulWidget {
+  final String shopId;
+  const _AddRecipeIngredientSheet({required this.shopId});
+  @override
+  State<_AddRecipeIngredientSheet> createState() =>
+      _AddRecipeIngredientSheetState();
+}
+
+class _AddRecipeIngredientSheetState
+    extends State<_AddRecipeIngredientSheet> {
+  late final List<Ingredient> _existing =
+      IngredientService.forShop(widget.shopId);
+  Ingredient? _selected;
+  bool _new = false;
+  final _nameCtrl = TextEditingController();
+  final _unitCtrl = TextEditingController(text: 'g');
+  final _costCtrl = TextEditingController();
+  final _qtyCtrl = TextEditingController();
+  String? _err;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _unitCtrl.dispose();
+    _costCtrl.dispose();
+    _qtyCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final qty = double.tryParse(_qtyCtrl.text.trim().replaceAll(',', '.'));
+    if (qty == null || qty <= 0) {
+      setState(() => _err = 'Quantité invalide');
+      return;
+    }
+    Ingredient ing;
+    String unit;
+    if (_new || _existing.isEmpty) {
+      final name = _nameCtrl.text.trim();
+      if (name.isEmpty) {
+        setState(() => _err = 'Nom de l\'ingrédient requis');
+        return;
+      }
+      unit = _unitCtrl.text.trim().isEmpty ? 'pièce' : _unitCtrl.text.trim();
+      ing = await IngredientService.create(
+        shopId: widget.shopId,
+        name: name,
+        unit: unit,
+        costPerUnit: int.tryParse(_costCtrl.text.trim()) ?? 0,
+      );
+    } else {
+      if (_selected == null) {
+        setState(() => _err = 'Choisissez un ingrédient');
+        return;
+      }
+      ing = _selected!;
+      unit = ing.unit;
+    }
+    if (mounted) {
+      Navigator.of(context).pop(_RecipeLineResult(ing, qty, unit));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    final creating = _new || _existing.isEmpty;
+    final suffix = creating
+        ? (_unitCtrl.text.trim().isEmpty ? null : _unitCtrl.text.trim())
+        : _selected?.unit;
+    return AdaptiveFormFrame(
+      title: 'Ajouter un ingrédient',
+      icon: Icons.eco_outlined,
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (!creating) ...[
+              Text('Ingrédient', style: AppTextStyles.caption),
+              const SizedBox(height: 8),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final ing in _existing)
+                  ChoiceChip(
+                    label: Text('${ing.name} · ${ing.costPerUnit} F/${ing.unit}'),
+                    selected: _selected?.id == ing.id,
+                    onSelected: (_) => setState(() {
+                      _selected = ing;
+                      _err = null;
+                    }),
+                  ),
+              ]),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: () => setState(() {
+                    _new = true;
+                    _selected = null;
+                    _err = null;
+                  }),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Nouvel ingrédient'),
+                ),
+              ),
+            ],
+            if (creating) ...[
+              TextField(
+                controller: _nameCtrl,
+                autofocus: true,
+                textCapitalization: TextCapitalization.sentences,
+                decoration:
+                    const InputDecoration(labelText: 'Nom de l\'ingrédient'),
+              ),
+              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: _unitCtrl,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                        labelText: 'Unité', hintText: 'g, kg, L, pièce'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: TextField(
+                    controller: _costCtrl,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration:
+                        const InputDecoration(labelText: 'Coût / unité (F)'),
+                  ),
+                ),
+              ]),
+              if (_existing.isNotEmpty)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: () => setState(() {
+                      _new = false;
+                      _err = null;
+                    }),
+                    child: const Text('← Choisir un ingrédient existant'),
+                  ),
+                ),
+            ],
+            const SizedBox(height: 12),
+            TextField(
+              controller: _qtyCtrl,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(
+                labelText: 'Quantité utilisée par plat',
+                suffixText: suffix,
+              ),
+            ),
+            if (_err != null) ...[
+              const SizedBox(height: 8),
+              Text(_err!,
+                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+            ],
+            const SizedBox(height: 18),
+            AppPrimaryButton(
+              label: 'Ajouter',
+              icon: Icons.check_rounded,
+              fullWidth: true,
+              onTap: _submit,
+            ),
+          ],
+        ),
       ),
     );
   }

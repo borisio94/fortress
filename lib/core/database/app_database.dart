@@ -597,6 +597,10 @@ class AppDatabase {
         await syncDeliveryQuartiers(shopId);
         await syncRestaurantTables(shopId);
         await syncMenuModifiers(shopId);
+        await syncIngredients(shopId);
+        await syncRecipeIngredients(shopId);
+        await syncRestaurantActivities(shopId);
+        await syncStockItems(shopId);
         await syncPartnerLedger(shopId);
         await syncStockLocations();
         await syncStockLevels(shopId);
@@ -827,6 +831,41 @@ class AppDatabase {
             column: 'shop_id', value: shopId),
         callback: (p) => _i._onTablePassthroughChange(
             p, HiveBoxes.menuModifiersBox, 'menu_modifiers', shopId))
+        // ── Finances restaurant (PR-A) : ingrédients + lignes de recette ──
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'ingredients',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.ingredientsBox, 'ingredients', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'recipe_ingredients',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.recipeIngredientsBox, 'recipe_ingredients', shopId))
+        // ── Finances restaurant (PR-B) : activités + articles stock ──────
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'restaurant_activities',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.restaurantActivitiesBox, 'restaurant_activities',
+            shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'stock_items',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.stockItemsBox, 'stock_items', shopId))
         // ── Tickets de messagerie (phase 4 + notifs cloche) ────────────
         .onPostgresChanges(
         event: PostgresChangeEvent.all,
@@ -970,6 +1009,10 @@ class AppDatabase {
       task('syncDeliveryQuartiers', () => syncDeliveryQuartiers(shopId)),
       task('syncRestaurantTables', () => syncRestaurantTables(shopId)),
       task('syncMenuModifiers', () => syncMenuModifiers(shopId)),
+      task('syncIngredients', () => syncIngredients(shopId)),
+      task('syncRecipeIngredients', () => syncRecipeIngredients(shopId)),
+      task('syncRestaurantActivities', () => syncRestaurantActivities(shopId)),
+      task('syncStockItems', () => syncStockItems(shopId)),
       task('syncActivityLogs', () async {
         await syncActivityLogs(shopId);
         _notify('activity_logs', shopId);
@@ -3906,6 +3949,24 @@ end \$\$;""",
   static Future<void> syncMenuModifiers(String shopId) =>
       _syncTablePassthrough(tableName: 'menu_modifiers',
           shopId: shopId, box: HiveBoxes.menuModifiersBox);
+
+  // ── Module finances restaurant (PR-A) ──────────────────────────────────
+  static Future<void> syncIngredients(String shopId) =>
+      _syncTablePassthrough(tableName: 'ingredients',
+          shopId: shopId, box: HiveBoxes.ingredientsBox);
+
+  static Future<void> syncRecipeIngredients(String shopId) =>
+      _syncTablePassthrough(tableName: 'recipe_ingredients',
+          shopId: shopId, box: HiveBoxes.recipeIngredientsBox);
+
+  // ── Finances restaurant (PR-B) ─────────────────────────────────────────
+  static Future<void> syncRestaurantActivities(String shopId) =>
+      _syncTablePassthrough(tableName: 'restaurant_activities',
+          shopId: shopId, box: HiveBoxes.restaurantActivitiesBox);
+
+  static Future<void> syncStockItems(String shopId) =>
+      _syncTablePassthrough(tableName: 'stock_items',
+          shopId: shopId, box: HiveBoxes.stockItemsBox);
   /// Sync des transferts de commandes vers livreurs/partenaires (hotfix_049).
   /// Utilisé par le filtre dashboard / commandes / finances pour scoper aux
   /// commandes assignées à un partenaire spécifique.
