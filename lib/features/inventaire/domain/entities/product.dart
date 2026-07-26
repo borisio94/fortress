@@ -285,6 +285,15 @@ class Product extends Equatable {
   /// existant tant que l'utilisateur n'a pas décoché l'option.
   final bool   trackStock;
 
+  /// Activité connexe de rattachement — le « secteur » restaurant
+  /// (`restaurant_activities.id`, hotfix_141) : Chawarma · Glace · Bar…
+  ///
+  /// `null` = plat non rattaché, ou boutique non restaurant : l'e-commerce
+  /// n'écrit jamais ce champ. Référence logique, sans FK (offline-first) —
+  /// une activité supprimée laisse un id orphelin, traité comme « aucun
+  /// secteur » à la lecture.
+  final String? activityId;
+
   final String? imageUrl;
   final int    rating;         // 0–5
 
@@ -334,6 +343,7 @@ class Product extends Equatable {
     this.isActive      = true,
     this.isVisibleWeb  = false,
     this.trackStock    = true,
+    this.activityId,
     this.imageUrl,
     this.rating        = 0,
     this.variants      = const [],
@@ -456,6 +466,7 @@ class Product extends Equatable {
     int? stockQty, int? stockMinAlert,
     ProductStatus? status,
     bool? isActive, bool? isVisibleWeb, bool? trackStock,
+    String? activityId,
     String? imageUrl, int? rating,
     List<ProductVariant>? variants,
     List<Map<String, dynamic>>? expenses,
@@ -465,6 +476,9 @@ class Product extends Equatable {
     String?                deleteReason,
     Map<String, dynamic>?  archivedSnapshot,
     bool                   clearDeleted = false,
+    /// Détache le plat de son secteur (`activityId` ne peut pas être remis
+    /// à null par le passage d'un `null`, interprété comme « inchangé »).
+    bool                   clearActivity = false,
   }) => Product(
     id:           id           ?? this.id,
     storeId:      storeId      ?? this.storeId,
@@ -485,6 +499,7 @@ class Product extends Equatable {
     isActive:     isActive     ?? this.isActive,
     isVisibleWeb: isVisibleWeb ?? this.isVisibleWeb,
     trackStock:   trackStock   ?? this.trackStock,
+    activityId:   clearActivity ? null : (activityId ?? this.activityId),
     imageUrl:     imageUrl     ?? this.imageUrl,
     rating:       rating       ?? this.rating,
     variants:     variants     ?? this.variants,
@@ -503,7 +518,7 @@ class Product extends Equatable {
     id, storeId, name, barcode, sku,
     priceBuy, customsFee, priceSellPos, priceSellWeb, taxRate,
     stockQty, stockMinAlert, status,
-    isActive, isVisibleWeb, trackStock, rating,
+    isActive, isVisibleWeb, trackStock, activityId, rating,
     variants, expenses,
   ];
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -1421,6 +1422,13 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
   double get _priceBuy => widget.item.priceBuy;
   double get _minPrice => _priceBuy * (1 + _minMarginPct / 100);
 
+  /// Suivi de marge par prix d'achat : pertinent en e-commerce uniquement.
+  /// En restaurant, la rentabilité gastronomique se pilote par la fiche
+  /// recette (module Finances restaurant), pas par le prix d'achat de la
+  /// ligne → on désactive toute l'alerte de marge (statut, avertissement
+  /// « sous le coût », aperçu). L'édition de prix elle-même reste possible.
+  bool get _marginTracked => !isRestaurantShop(widget.shopId);
+
   /// Calcule la marge (%) à partir du prix saisi.
   double? _currentMargin(double price) {
     if (_priceBuy <= 0 || price <= 0) return null;
@@ -1428,6 +1436,7 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
   }
 
   _MarginStatus _status(double? price) {
+    if (!_marginTracked) return _MarginStatus.unknown;
     if (price == null || price <= 0) return _MarginStatus.unknown;
     if (_priceBuy <= 0) return _MarginStatus.unknown;
     if (price < _priceBuy) return _MarginStatus.below;
@@ -1553,7 +1562,7 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
     final status   = _status(typed);
     final color    = _colorFor(status);
     final margin   = typed != null ? _currentMargin(typed) : null;
-    final costKnown = _priceBuy > 0;
+    final costKnown = _priceBuy > 0 && _marginTracked;
 
     final message = switch (status) {
       _MarginStatus.ok      => margin != null
@@ -1700,28 +1709,32 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
               _kvRow(l.priceEditOriginal,
                   CurrencyFormatter.format(original),
                   AppColors.textPrimary),
-              const SizedBox(height: 4),
-              _kvRow(
-                l.priceEditCost,
-                costKnown
-                    ? CurrencyFormatter.format(_priceBuy)
-                    : l.priceEditCostUnknown,
-                AppColors.textSecondary,
-              ),
-              if (costKnown) ...[
+              // Coût / marge : e-commerce uniquement. En restaurant, tout le
+              // bloc est masqué (la rentabilité passe par la fiche recette).
+              if (_marginTracked) ...[
                 const SizedBox(height: 4),
                 _kvRow(
-                  l.priceEditMinPrice,
-                  CurrencyFormatter.format(_minPrice),
-                  AppColors.warning,
+                  l.priceEditCost,
+                  costKnown
+                      ? CurrencyFormatter.format(_priceBuy)
+                      : l.priceEditCostUnknown,
+                  AppColors.textSecondary,
                 ),
-                if (margin != null) ...[
+                if (costKnown) ...[
                   const SizedBox(height: 4),
                   _kvRow(
-                    l.priceEditMargin,
-                    '${margin.toStringAsFixed(0)}%',
-                    color,
+                    l.priceEditMinPrice,
+                    CurrencyFormatter.format(_minPrice),
+                    AppColors.warning,
                   ),
+                  if (margin != null) ...[
+                    const SizedBox(height: 4),
+                    _kvRow(
+                      l.priceEditMargin,
+                      '${margin.toStringAsFixed(0)}%',
+                      color,
+                    ),
+                  ],
                 ],
               ],
             ]),

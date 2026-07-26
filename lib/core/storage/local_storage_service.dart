@@ -423,6 +423,7 @@ class LocalStorageService {
     'status': p.status.key,
     'is_active': p.isActive, 'is_visible_web': p.isVisibleWeb,
     'track_stock': p.trackStock,
+    'activity_id': p.activityId,
     'image_url': p.imageUrl, 'rating': p.rating,
     'variants': p.variants.map(_variantToMap).toList(),
     'expenses': p.expenses,
@@ -492,6 +493,9 @@ class LocalStorageService {
       // Défaut true : les produits antérieurs à hotfix_138 n'ont pas la clé
       // et doivent conserver le suivi de stock historique.
       trackStock:   m['track_stock'] as bool? ?? true,
+      // Secteur restaurant (hotfix_141) — absent des produits legacy et de
+      // tout l'e-commerce : null, aucun rattachement.
+      activityId:   m['activity_id'] as String?,
       imageUrl:     m['image_url'],
       rating:       m['rating'] as int? ?? 0,
       variants:     variants,

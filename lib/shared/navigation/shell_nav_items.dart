@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/config/restaurant_mode.dart';
 import '../../core/i18n/app_localizations.dart';
 import '../../core/permisions/app_permissions.dart';
+import '../../core/services/fixed_charge_service.dart';
 import '../../core/services/ingredient_service.dart';
 import '../../core/services/stock_item_service.dart';
 import '../../core/storage/hive_boxes.dart';
@@ -142,8 +143,9 @@ int _webOrdersBadge(String shopId) {
   }).length;
 }
 
-/// Alertes stock des finances restaurant (ingrédients + articles « stock »
-/// sous leur seuil) — pastille sur l'item « Finances ».
+/// Alertes des finances restaurant — pastille sur l'item « Finances » :
+/// ingrédients + articles « stock » sous leur seuil, plus les charges fixes
+/// à régler bientôt ou en retard.
 int _restaurantFinanceBadge(String shopId) {
   if (shopId.isEmpty) return 0;
   var n = 0;
@@ -151,6 +153,7 @@ int _restaurantFinanceBadge(String shopId) {
     if (ing.isLowStock) n++;
   }
   n += StockItemService.lowStock(shopId).length;
+  n += FixedChargeService.dueSoon(shopId).length;
   return n;
 }
 

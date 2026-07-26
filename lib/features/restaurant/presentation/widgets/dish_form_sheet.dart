@@ -6,6 +6,7 @@ import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/database/app_database.dart';
+import '../../../../core/services/activity_service.dart';
 import '../../../../core/services/menu_modifier_service.dart';
 import '../../../../core/services/ingredient_service.dart';
 import '../../../../core/services/recipe_service.dart';
@@ -25,6 +26,7 @@ import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/product_image_card.dart';
 import '../../domain/entities/menu_modifier.dart';
 import '../../domain/entities/ingredient.dart';
+import '../../domain/entities/restaurant_activity.dart';
 
 /// Ouvre la feuille de saisie d'un plat. Retourne `true` si un plat a été
 /// créé ou modifié.
@@ -69,6 +71,14 @@ class _DishFormSheetState extends State<DishFormSheet> {
   Uint8List? _imageBytes;
   String? _existingImageUrl;
 
+  /// Activités connexes de la boutique — le « secteur » du plat (hotfix_141).
+  /// Liste vide (aucune activité créée) → la section n'apparaît pas.
+  late final List<RestaurantActivity> _activities =
+      ActivityService.forShop(widget.shopId);
+
+  /// Secteur sélectionné (`restaurant_activities.id`), null = aucun.
+  String? _activityId;
+
   /// Noms des groupes de modificateurs cochés pour ce plat.
   final Set<String> _groups = {};
 
@@ -101,6 +111,11 @@ class _DishFormSheetState extends State<DishFormSheet> {
       _descCtrl.text = p.description ?? '';
       _costCtrl.text = p.priceBuy == 0 ? '' : p.priceBuy.toStringAsFixed(0);
       _category = p.categoryId;
+      // Secteur : ignoré si l'activité a été supprimée entre-temps — sans ce
+      // filtre, le formulaire réenregistrerait en silence un id orphelin.
+      _activityId = _activities.any((a) => a.id == p.activityId)
+          ? p.activityId
+          : null;
       _existingImageUrl = p.mainImageUrl;
       _rating = p.rating;
       _trackStock = p.trackStock;
@@ -248,6 +263,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
         isActive: _isActive,
         isVisibleWeb: _isActive,
         trackStock: _trackStock,
+        activityId: _activityId,
         rating: _rating,
         imageUrl: existing?.imageUrl,
         variants: [variant],
@@ -493,6 +509,33 @@ class _DishFormSheetState extends State<DishFormSheet> {
               ],
             ),
             const SizedBox(height: 16),
+
+            // ── Secteur (activité connexe) ───────────────────────────
+            // Masqué tant qu'aucune activité n'existe : une carte simple
+            // n'a pas à porter une notion de secteur inutilisée. Se crée
+            // depuis Finances › Activités.
+            if (_activities.isNotEmpty) ...[
+              const AppFieldLabel('Secteur'),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _Chip(
+                    label: 'Aucun',
+                    selected: _activityId == null,
+                    onTap: () => setState(() => _activityId = null),
+                  ),
+                  for (final a in _activities)
+                    _Chip(
+                      label: a.name,
+                      selected: _activityId == a.id,
+                      onTap: () => setState(() => _activityId = a.id),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
 
             // ── Prix ─────────────────────────────────────────────────
             const AppFieldLabel('Prix', required: true),

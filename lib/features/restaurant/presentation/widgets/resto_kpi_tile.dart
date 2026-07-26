@@ -25,6 +25,22 @@ class RestoTileColors {
   static const List<Color> all = [revenue, orders, expense, average];
 }
 
+/// Teintes des COURBES du graphique finances (module finances — Lot 3).
+///
+/// Distinctes des pastels de [RestoTileColors] : une courbe d'1,5 px doit
+/// rester lisible sur fond clair ET sur fond sombre, ce que ne permettent pas
+/// des pastels. Ce sont aussi des couleurs de données — elles portent le sens
+/// (vert = ventes, violet = bénéfice, rouge = dépenses, orange = pertes) et ne
+/// suivent donc pas le thème.
+class RestoSeriesColors {
+  RestoSeriesColors._();
+
+  static const sales   = Color(0xFF16A34A); // vert
+  static const profit  = Color(0xFF7C3AED); // violet
+  static const expense = Color(0xFFDC2626); // rouge
+  static const loss    = Color(0xFFF97316); // orange
+}
+
 /// Tuile d'indicateur NEUTRE (surface du thème + bordure douce), avec une
 /// petite pastille d'icône colorée qui porte l'identité de l'indicateur.
 ///

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/services/restaurant_reporting_service.dart';
 import '../../../core/storage/hive_boxes.dart';
 import '../../dashboard/data/dashboard_providers.dart';
 
@@ -52,6 +53,24 @@ const List<String> kWeekdayLabels = [
 const Set<String> _kClosedStatuses = {
   'completed', 'cancelled', 'refused', 'refunded',
 };
+
+/// Bilan financier restaurant (module finances — Lot 3) : ventes, coût
+/// matières, charges, pertes, bénéfice, séries du graphique et résumé par
+/// secteur, sur la période courante.
+///
+/// Même dépendances que [restaurantDashProvider] : un seul sélecteur de
+/// période pilote toute la page, et toute mutation Hive (vente encaissée,
+/// perte déclarée, charge réglée) rafraîchit le bilan.
+final restaurantFinanceProvider =
+    Provider.autoDispose.family<RestaurantFinanceReport, String>((ref, shopId) {
+  ref.watch(dashSignalProvider);
+  final period = ref.watch(dashPeriodProvider);
+  final custom = ref.watch(dashCustomRangeProvider);
+  final range = period == DashPeriod.custom && custom != null
+      ? custom
+      : rangeFor(period);
+  return RestaurantReportingService.build(shopId, range);
+});
 
 /// Agrégats restaurant pour la boutique [shopId], sur la période courante.
 ///

@@ -601,6 +601,8 @@ class AppDatabase {
         await syncRecipeIngredients(shopId);
         await syncRestaurantActivities(shopId);
         await syncStockItems(shopId);
+        await syncFixedCharges(shopId);
+        await syncLosses(shopId);
         await syncPartnerLedger(shopId);
         await syncStockLocations();
         await syncStockLevels(shopId);
@@ -866,6 +868,23 @@ class AppDatabase {
             column: 'shop_id', value: shopId),
         callback: (p) => _i._onTablePassthroughChange(
             p, HiveBoxes.stockItemsBox, 'stock_items', shopId))
+        // ── Finances restaurant (PR-C) : charges fixes + pertes ──────────
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'fixed_charges',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.fixedChargesBox, 'fixed_charges', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'losses',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.lossesBox, 'losses', shopId))
         // ── Tickets de messagerie (phase 4 + notifs cloche) ────────────
         .onPostgresChanges(
         event: PostgresChangeEvent.all,
@@ -1013,6 +1032,8 @@ class AppDatabase {
       task('syncRecipeIngredients', () => syncRecipeIngredients(shopId)),
       task('syncRestaurantActivities', () => syncRestaurantActivities(shopId)),
       task('syncStockItems', () => syncStockItems(shopId)),
+      task('syncFixedCharges', () => syncFixedCharges(shopId)),
+      task('syncLosses', () => syncLosses(shopId)),
       task('syncActivityLogs', () async {
         await syncActivityLogs(shopId);
         _notify('activity_logs', shopId);
@@ -3967,6 +3988,15 @@ end \$\$;""",
   static Future<void> syncStockItems(String shopId) =>
       _syncTablePassthrough(tableName: 'stock_items',
           shopId: shopId, box: HiveBoxes.stockItemsBox);
+
+  // ── Finances restaurant (PR-C) ─────────────────────────────────────────
+  static Future<void> syncFixedCharges(String shopId) =>
+      _syncTablePassthrough(tableName: 'fixed_charges',
+          shopId: shopId, box: HiveBoxes.fixedChargesBox);
+
+  static Future<void> syncLosses(String shopId) =>
+      _syncTablePassthrough(tableName: 'losses',
+          shopId: shopId, box: HiveBoxes.lossesBox);
   /// Sync des transferts de commandes vers livreurs/partenaires (hotfix_049).
   /// Utilisé par le filtre dashboard / commandes / finances pour scoper aux
   /// commandes assignées à un partenaire spécifique.
@@ -5723,6 +5753,7 @@ end \$\$;""",
     'status': p.status.key,
     'is_active': p.isActive, 'is_visible_web': p.isVisibleWeb,
     'track_stock': p.trackStock,
+    'activity_id': p.activityId,
     'image_url': p.imageUrl, 'rating': p.rating,
     'variants': p.variants.map(LocalStorageService.variantToMap).toList(),
     // expenses est List<Map> en local — Supabase stocke la somme en double
@@ -5753,6 +5784,9 @@ end \$\$;""",
       // Défaut true : colonne absente sur une base pas encore migrée
       // (hotfix_138) → suivi de stock historique conservé.
       trackStock:   r['track_stock'] as bool? ?? true,
+      // Secteur restaurant (hotfix_141). Colonne absente sur une base pas
+      // encore migrée → null, le plat reste simplement non rattaché.
+      activityId:   r['activity_id'] as String?,
       imageUrl: r['image_url'], rating: r['rating'] as int? ?? 0,
       createdAt: createdRaw is String
           ? DateTime.tryParse(createdRaw)

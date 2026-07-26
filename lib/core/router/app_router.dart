@@ -52,6 +52,7 @@ import '../../features/restaurant/presentation/pages/menu_modifiers_page.dart';
 import '../../features/restaurant/presentation/pages/restaurant_dashboard_page.dart';
 import '../../features/restaurant/presentation/pages/restaurant_menu_page.dart';
 import '../../features/restaurant/presentation/pages/finances_hub_page.dart';
+import '../../features/restaurant/presentation/pages/inventory_reconcile_page.dart';
 import '../../features/inventaire/presentation/pages/product_form_page.dart';
 import '../../features/inventaire/presentation/pages/reception_page.dart';
 import '../../features/inventaire/presentation/pages/incidents_page.dart';
@@ -803,6 +804,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/restaurant/finances',
               pageBuilder: (c, s) => _shellPage(s,
                   FinancesHubPage(shopId: s.pathParameters['shopId']!))),
+          // Réconciliation d'inventaire (Lot 2) — comptage de fin de service.
+          GoRoute(path: '/shop/:shopId/restaurant/inventory/reconcile',
+              pageBuilder: (c, s) => _shellPage(s,
+                  InventoryReconcilePage(
+                      shopId: s.pathParameters['shopId']!))),
           GoRoute(path: '/shop/:shopId/parametres/menu-modifiers',
               builder: (c, s) => MenuModifiersPage(
                     shopId: s.pathParameters['shopId']!,
@@ -874,6 +880,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/crm/notify',
               builder: (c, s) => SendNotificationPage(shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/finances',
+              // La page comptable (CA / dépenses / pertes / bilan) est
+              // e-commerce uniquement. En restaurant, la gestion financière
+              // gastronomique passe exclusivement par le hub Finances dédié :
+              // toute tentative d'atteindre cette page (deeplink, ancien lien)
+              // est redirigée pour ne jamais exposer l'ancienne logique.
+              redirect: (c, s) {
+                final id = s.pathParameters['shopId']!;
+                return isRestaurantShop(id)
+                    ? '/shop/$id/restaurant/finances'
+                    : null;
+              },
               pageBuilder: (c, s) {
                 final tab = s.uri.queryParameters['tab'];
                 // ValueKey dépendante du `tab` : state.pageKey est basée

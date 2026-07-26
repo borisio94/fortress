@@ -111,6 +111,10 @@ class HiveBoxes {
   static const String restaurantActivities = 'restaurant_activities_box';
   /// Articles sans transformation (boissons, emballages…) — PR-B.
   static const String stockItems           = 'stock_items_box';
+  /// Charges fixes / échéances récurrentes (loyer, salaires…) — PR-C.
+  static const String fixedCharges         = 'fixed_charges_box';
+  /// Déclarations de pertes (casse, invendus, non payés…) — PR-C.
+  static const String losses               = 'losses_box';
 
   static Future<void> init() async {
     debugPrint('[Hive] HBX-A init() entered, kIsWeb=$kIsWeb');
@@ -179,6 +183,8 @@ class HiveBoxes {
       await _safeOpenMap(recipeIngredients);
       await _safeOpenMap(restaurantActivities);
       await _safeOpenMap(stockItems);
+      await _safeOpenMap(fixedCharges);
+      await _safeOpenMap(losses);
       debugPrint('[Hive] HBX-D all boxes opened (some may have failed)');
     } catch (e, st) {
       debugPrint('[Hive] HBX-FATAL outer init error: $e');
@@ -256,6 +262,7 @@ class HiveBoxes {
     pendingImageUploads,
     restaurantTables, menuModifiers, dailyMenuAvailability,
     ingredients, recipeIngredients, restaurantActivities, stockItems,
+    fixedCharges, losses,
   ];
 
   static Future<void> _safeClose(String boxName) async {
@@ -363,4 +370,6 @@ class HiveBoxes {
   static Box<Map>   get restaurantActivitiesBox =>
       Hive.box<Map>(restaurantActivities);
   static Box<Map>   get stockItemsBox         => Hive.box<Map>(stockItems);
+  static Box<Map>   get fixedChargesBox       => Hive.box<Map>(fixedCharges);
+  static Box<Map>   get lossesBox             => Hive.box<Map>(losses);
 }
