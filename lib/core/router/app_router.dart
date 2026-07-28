@@ -54,6 +54,7 @@ import '../../features/restaurant/presentation/pages/restaurant_menu_page.dart';
 import '../../features/restaurant/presentation/pages/finances_hub_page.dart';
 import '../../features/restaurant/presentation/pages/inventory_reconcile_page.dart';
 import '../../features/restaurant/presentation/pages/cash_closure_page.dart';
+import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
 import '../../features/restaurant/presentation/pages/restaurant_staff_page.dart';
 import '../../features/restaurant/presentation/pages/timeclock_page.dart';
 import '../../features/inventaire/presentation/pages/product_form_page.dart';
@@ -835,15 +836,25 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           // Prise de commande d'une table — sous-page (Scaffold propre, hors
           // shell) : le serveur y entre depuis le plan de salle et en ressort
           // par le bouton retour.
+          // `RestoBackdrop` : ces deux écrans vivent HORS du shell, ils ne
+          // reçoivent donc pas le décor du mode restaurant par héritage. On le
+          // remonte ici pour que le service garde le même fond d'un bout à
+          // l'autre — le plan de salle, l'addition et la prise de commande sont
+          // le même geste. `AppScaffold` se rend transparent quand il détecte
+          // ce décor au-dessus de lui.
           GoRoute(path: '/shop/:shopId/restaurant/table/:tableId',
-              builder: (c, s) => RestaurantOrderPage(
-                    shopId:  s.pathParameters['shopId']!,
-                    tableId: s.pathParameters['tableId']!,
+              builder: (c, s) => RestoBackdrop(
+                    child: RestaurantOrderPage(
+                      shopId:  s.pathParameters['shopId']!,
+                      tableId: s.pathParameters['tableId']!,
+                    ),
                   )),
           GoRoute(path: '/shop/:shopId/restaurant/addition/:tableId',
-              builder: (c, s) => BillPage(
-                    shopId:  s.pathParameters['shopId']!,
-                    tableId: s.pathParameters['tableId']!,
+              builder: (c, s) => RestoBackdrop(
+                    child: BillPage(
+                      shopId:  s.pathParameters['shopId']!,
+                      tableId: s.pathParameters['tableId']!,
+                    ),
                   )),
           // Badgeuse (Lot D) — HORS shell à dessein : posée en libre-service à
           // l'entrée du personnel, elle ne doit donner accès à aucune autre

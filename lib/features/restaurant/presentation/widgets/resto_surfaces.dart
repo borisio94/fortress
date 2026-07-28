@@ -12,15 +12,31 @@ import 'package:flutter/material.dart';
 
 // ─── Voile et panneaux ──────────────────────────────────────────────────────
 
-/// Fond d'écran du mode restaurant : un dégradé profond, avec [child]
-/// par-dessus.
+/// Fond d'écran du mode restaurant : une photo de salle posée sur un dégradé
+/// profond, avec [child] par-dessus.
 ///
-/// La photo de salle a été RETIRÉE. Le reste du socle ne bouge pas : panneaux
-/// translucides, chrome translucide, déclinaison clair/sombre. Ils reposent
-/// désormais sur ce dégradé au lieu d'une image — le rendu reste cohérent, et
-/// remettre une photo ne demanderait que de rajouter une couche ici.
+/// **Comment changer la photo** : dépose ton image sous [photoAsset]
+/// (`assets/images/resto_backdrop.jpg`). Le dossier est déjà déclaré dans
+/// `pubspec.yaml`, il n'y a rien d'autre à faire.
+///
+/// **Si le fichier est absent, seul le dégradé s'affiche** — exactement le
+/// rendu d'avant. C'est volontaire : un asset manquant ne doit jamais casser
+/// l'écran de quelqu'un en plein service.
+///
+/// Le dégradé RESTE peint sous la photo, il n'est pas remplacé par elle. Il
+/// couvre les bords quand le format de l'image ne correspond pas à celui de
+/// l'écran, et il porte la déclinaison clair/sombre : sans lui, le mode sombre
+/// afficherait du blanc brut autour d'une photo recadrée.
 class RestoBackdrop extends StatelessWidget {
   final Widget child;
+
+  /// Photo de salle. Absente du dépôt par défaut (cf. doc de classe).
+  static const String photoAsset = 'assets/images/resto_backdrop.jpg';
+
+  /// Opacité de la photo. À 0,8 elle domine tout en laissant le dégradé
+  /// l'habiller — au-delà, les panneaux translucides posés dessus perdent en
+  /// lisibilité, surtout en mode clair.
+  static const double photoOpacity = 0.8;
 
   const RestoBackdrop({super.key, required this.child});
 
@@ -41,6 +57,21 @@ class RestoBackdrop extends StatelessWidget {
                   ? [const Color(0xFF10161D), const Color(0xFF0B0F14)]
                   : [const Color(0xFFFFFFFF), const Color(0xFFEFF1F5)],
             ),
+          ),
+        ),
+        Opacity(
+          opacity: photoOpacity,
+          child: Image.asset(
+            photoAsset,
+            fit: BoxFit.cover,
+            // `cover` recadre plutôt que déformer : une salle étirée sur un
+            // écran large se voit immédiatement.
+            alignment: Alignment.center,
+            // Asset absent → on retombe sur le dégradé seul, sans erreur.
+            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            // Décor pur : les lecteurs d'écran n'ont rien à annoncer avant
+            // chaque page.
+            excludeFromSemantics: true,
           ),
         ),
         child,

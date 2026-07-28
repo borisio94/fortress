@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -98,6 +100,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
     final inAdaptive =
         context.findAncestorWidgetOfExactType<AdaptiveScaffold>() != null;
     if (inAdaptive) {
+      // (le décor restaurant est déjà géré par AdaptiveScaffold plus haut)
       if (widget.floatingActionButton == null
           && widget.bottomNavigationBar == null) {
         return widget.body;
@@ -119,9 +122,24 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
     return _buildMobile(context);
   }
 
+  /// Couleur de fond du Scaffold.
+  ///
+  /// TRANSPARENTE quand un [RestoBackdrop] est monté au-dessus (sous-pages
+  /// restaurant hors shell : addition, prise de commande). Un fond opaque y
+  /// masquerait entièrement le décor, et la page jurerait avec le reste du
+  /// mode restaurant.
+  ///
+  /// Détection par ancêtre, comme `inAdaptive` juste au-dessus : le décor ne
+  /// change pas pendant la vie de la page, aucune dépendance de rebuild n'est
+  /// nécessaire.
+  Color _scaffoldBg(BuildContext context) =>
+      context.findAncestorWidgetOfExactType<RestoBackdrop>() != null
+          ? Colors.transparent
+          : Theme.of(context).scaffoldBackgroundColor;
+
   Widget _buildDesktop(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: _scaffoldBg(context),
       body: Row(children: [
         ClipRect(
           child: AnimatedContainer(
@@ -138,7 +156,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
         Container(width: 1, color: Theme.of(context).semantic.borderSubtle),
         Expanded(
           child: Scaffold(
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+            backgroundColor: _scaffoldBg(context),
             appBar: _buildAppBar(context, isDesktop: true) as PreferredSizeWidget,
             body: OfflineBlockGuard(
               child: Column(
@@ -159,7 +177,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
 
   Widget _buildMobile(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: _scaffoldBg(context),
       drawer: widget.isRootPage ? AppDrawer(shopId: widget.shopId) : null,
       appBar: _buildAppBar(context, isDesktop: false) as PreferredSizeWidget,
       body: OfflineBlockGuard(
