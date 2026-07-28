@@ -1103,8 +1103,16 @@ class SaleLocalDatasource {
   /// stock ; les gardées restent sorties (déjà décrémentées à la réservation)
   /// et forment la vente finale (`completed`). Si rien n'est gardé → tout
   /// remis en stock et commande `cancelled`.
+  ///
+  /// [amountPaid] = montant TOTAL encaissé du client (cumulé, acompte inclus)
+  /// sur la vente finale, saisi au sheet de clôture. Il pilote `amount_paid` +
+  /// `payment_status` exactement comme `amountPaidOnComplete` le fait dans
+  /// [updateOrderStatus] : sans lui la commande partait en `completed` avec
+  /// `amount_paid = 0` / `unpaid` (bug « terminée mais jamais payée »), car la
+  /// clôture court-circuite volontairement `updateOrderStatus` (garde-fou
+  /// stock). `null` → comportement historique : clôture = entièrement payée.
   Future<void> closeApprovalOrder(
-      String orderId, Map<String, int> keptByItemId) async {
+      String orderId, Map<String, int> keptByItemId, {double? amountPaid}) async {
     final raw = _ordersBox.get(orderId);
     if (raw is! Map) return;
     final order = _mapToSaleWithStatus(Map<String, dynamic>.from(raw));
@@ -1135,22 +1143,39 @@ class SaleLocalDatasource {
     }
 
     // 3. Persister.
-    final closed = keptItems.isEmpty
-        ? order.copyWith(
-            status:        SaleStatus.cancelled,
-            stockReserved: false, // tout a été remis en stock
-            cancellationReason: 'aucun article gardé sur place',
-          )
-        : order.copyWith(
-            items: keptItems,
-            status: SaleStatus.completed,
-            // H2 — le réservé est consommé (gardé = vendu définitif, retours
-            // déjà recrédités ci-dessus). On éteint le flag : sinon une
-            // suppression/annulation ultérieure verrait stock_reserved=true
-            // et recréditerait du stock déjà vendu (double-crédit).
-            stockReserved: false,
-          );
+    final Sale closed;
+    if (keptItems.isEmpty) {
+      closed = order.copyWith(
+        status:        SaleStatus.cancelled,
+        stockReserved: false, // tout a été remis en stock
+        cancellationReason: 'aucun article gardé sur place',
+      );
+    } else {
+      final base = order.copyWith(
+        items: keptItems,
+        status: SaleStatus.completed,
+        // H2 — le réservé est consommé (gardé = vendu définitif, retours
+        // déjà recrédités ci-dessus). On éteint le flag : sinon une
+        // suppression/annulation ultérieure verrait stock_reserved=true
+        // et recréditerait du stock déjà vendu (double-crédit).
+        stockReserved: false,
+      );
+      // Encaissement : le total de la vente finale ne porte QUE les articles
+      // gardés (+ livraison + frais), il est donc recalculé ici et non repris
+      // du montant réservé.
+      final total = base.total;
+      final paid  = (amountPaid ?? total).clamp(0, total).toDouble();
+      closed = base.copyWith(
+        amountPaid:    paid,
+        paymentStatus: PaymentStatusX.fromAmount(paid, total),
+      );
+    }
     await updateOrder(closed);
+    // La commande est finalisée (completed ou cancelled) : plus aucun rappel
+    // de livraison à faire sonner. `updateOrderStatus` le fait pour les
+    // transitions génériques ; la clôture ne passant pas par lui, on le fait
+    // ici (sinon notification fantôme sur une tournée déjà close).
+    await DeliveryReminderService.cancelFor(orderId);
   }
 
   /// Annule une commande « à choisir sur place » réservée : remet en stock
@@ -1180,6 +1205,7 @@ class SaleLocalDatasource {
       cancellationReason: reason,
     );
     await updateOrder(cancelled);
+    await DeliveryReminderService.cancelFor(orderId);
   }
 
   /// True si le produit [pid] est suivi en stock (hotfix_138).

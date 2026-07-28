@@ -1366,9 +1366,41 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
             onChanged: () { if (mounted) setState(() {}); },
             // Clôture d'une tournée « à choisir sur place » : réconcilie le
             // stock réservé (gardé = vendu, reste = remis en stock).
-            onCloseApproval: (kept) async {
+            onCloseApproval: (res) async {
               final o = orders[i];
-              await _ds.closeApprovalOrder(o.id!, kept);
+              await _ds.closeApprovalOrder(o.id!, res.kept,
+                  amountPaid: res.amountPaidTotal);
+              // Suites de la finalisation, identiques à une complétion
+              // classique (la clôture court-circuite `updateOrderStatus`
+              // pour ne pas rejouer le stock, mais le VOLET FINANCIER doit
+              // bien avoir lieu) : écritures du livre partenaire + frais de
+              // livraison dus + rafraîchissement des stocks à l'écran.
+              final fresh = _ds.getOrderById(o.id!);
+              if (fresh != null && fresh.status == SaleStatus.completed) {
+                await _generatePartnerLedgerEntries(
+                  order: fresh,
+                  fees: fresh.fees
+                      .map((f) => OrderFee(
+                            id:     f['id']?.toString() ?? '',
+                            label:  f['label']?.toString() ?? '',
+                            amount: (f['amount'] as num?)?.toDouble() ?? 0,
+                          ))
+                      .toList(),
+                  collectedBy: res.collectedBy,
+                );
+                final dp = fresh.deliveryPrice ?? 0;
+                if (fresh.deliveryMode == DeliveryMode.partner
+                    && (fresh.deliveryLocationId ?? '').isNotEmpty
+                    && dp > 0) {
+                  await PartnerLedgerService.syncOrderDeliveryFee(
+                    shopId:            fresh.shopId,
+                    partnerLocationId: fresh.deliveryLocationId!,
+                    orderId:           o.id!,
+                    feesTotal:         dp,
+                  );
+                }
+                AppDatabase.notifyProductChange(o.shopId);
+              }
               ActivityLogService.log(
                 action: 'approval_closed',
                 targetType: 'order', targetId: o.id,
@@ -1376,7 +1408,9 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                 shopId: o.shopId,
                 details: {
                   'kept_total':
-                      kept.values.fold<int>(0, (s, v) => s + v),
+                      res.kept.values.fold<int>(0, (s, v) => s + v),
+                  'amount_paid':  res.amountPaidTotal,
+                  'collected_by': res.collectedBy.name,
                 },
               );
               if (mounted) setState(() {});
@@ -1726,7 +1760,7 @@ class _OrderCard extends ConsumerStatefulWidget {
   /// Clôture d'une tournée « à choisir sur place » : reçoit la map
   /// `{ productId: quantité gardée }` saisie dans le sheet de clôture et doit
   /// appeler `SaleLocalDatasource.closeApprovalOrder`.
-  final Future<void> Function(Map<String, int> kept) onCloseApproval;
+  final Future<void> Function(ApprovalClosureResult result) onCloseApproval;
   /// Annulation d'une tournée « à choisir sur place » : restaure tout le
   /// stock réservé (`cancelApprovalOrder`).
   final Future<void> Function() onCancelApproval;
@@ -3426,9 +3460,9 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   /// les quantités gardées par article puis délègue au callback parent qui
   /// appelle `closeApprovalOrder` (réconciliation du stock réservé).
   Future<void> _closeApproval(BuildContext context) async {
-    final kept = await showApprovalClosureSheet(context, order: widget.order);
-    if (kept == null) return; // annulé
-    await widget.onCloseApproval(kept);
+    final res = await showApprovalClosureSheet(context, order: widget.order);
+    if (res == null) return; // annulé
+    await widget.onCloseApproval(res);
     if (mounted) setState(() {});
   }
 
