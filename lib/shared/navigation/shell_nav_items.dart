@@ -245,9 +245,11 @@ final List<ShellNavItem> kShellNavItems = [
   ShellNavItem(
     icon:         Icons.restaurant_rounded,
     iconSelected: Icons.restaurant_rounded,
-    label:        (_) => 'Plan de salle',
+    label:        (_) => 'Service',
     labelMobile:  (_) => 'Salle',
-    route:        (id) => '/shop/$id/restaurant/tables',
+    // L'écran de service EST le plan de salle, augmenté du volet de prise de
+    // commande : le caissier n'a plus à naviguer entre les deux.
+    route:        (id) => '/shop/$id/restaurant/service',
     // Les serveurs (rôle 'user') doivent pouvoir ouvrir le plan de salle :
     // on s'aligne sur la permission caisse plutôt que sur isShopAdmin.
     visibleIf:    (p) => p.canAccessCaisse,

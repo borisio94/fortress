@@ -384,6 +384,39 @@ class _DishFormSheetState extends State<DishFormSheet> {
     });
   }
 
+  /// Vide la fiche recette du plat.
+  ///
+  /// Comme tout le reste du formulaire, c'est un changement de BROUILLON : il
+  /// n'est appliqué en base qu'à l'enregistrement (`_syncRecipeLines` retire
+  /// alors les lignes absentes du brouillon). Fermer sans enregistrer ne perd
+  /// donc rien — et `removeLine` remet au passage les ingrédients concernés en
+  /// « spécialisé » s'ils ne servent plus qu'à un seul plat.
+  Future<void> _clearRecipe() async {
+    final n = _recipe.length;
+    final confirmed = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.delete_sweep_outlined,
+      iconColor: Theme.of(context).semantic.danger,
+      title: 'Supprimer la fiche recette ?',
+      body: Text(
+        n > 1
+            ? 'Les $n ingrédients seront retirés de ce plat.\n\n'
+                'Le coût matières ne sera plus calculé et la vente ne '
+                'décrémentera plus leur stock. Les ingrédients eux-mêmes '
+                'restent dans votre catalogue.'
+            : 'L\'ingrédient sera retiré de ce plat.\n\n'
+                'Le coût matières ne sera plus calculé et la vente ne '
+                'décrémentera plus son stock. L\'ingrédient lui-même reste '
+                'dans votre catalogue.',
+      ),
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Supprimer',
+      onConfirm: () {},
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _recipe.clear());
+  }
+
   /// Le champ prix pilote la marge affichée → rebuild live quand il change.
   void _onMarginInputsChanged() {
     if (mounted && _recipe.isNotEmpty) setState(() {});
@@ -422,30 +455,21 @@ class _DishFormSheetState extends State<DishFormSheet> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
+  /// Sélecteur de photo du plat. Extrait du `build` pour être posé soit à
+  /// gauche des champs (écran large), soit centré au-dessus (écran étroit).
+  /// [height] : la vignette est nettement plus haute à côté des champs
+  /// (écran large) qu'empilée au-dessus d'eux — sinon elle laissait une bande
+  /// vide sous elle, la colonne de droite étant bien plus haute.
+  Widget _photoPicker(BuildContext context, {double height = 160}) {
     final theme = Theme.of(context);
     final sem = theme.semantic;
     final cs = theme.colorScheme;
-    final groups = _linkableGroups;
-
-    return AdaptiveFormFrame(
-      title: _isEdit ? 'Modifier le plat' : 'Nouveau plat',
-      icon: Icons.restaurant_rounded,
-      iconColor: AppColors.primary,
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Photo ────────────────────────────────────────────────
-            Center(
-              child: InkWell(
+    return InkWell(
                 onTap: _pickImage,
                 borderRadius: BorderRadius.circular(12),
                 child: Container(
                   width: 190,
-                  height: 132,
+                  height: height,
                   decoration: BoxDecoration(
                     color: sem.trackMuted,
                     borderRadius: BorderRadius.circular(12),
@@ -472,11 +496,17 @@ class _DishFormSheetState extends State<DishFormSheet> {
                                     style: AppTextStyles.caption),
                               ],
                             )),
-                ),
-              ),
-            ),
-            const SizedBox(height: 18),
+        ),
+    );
+  }
 
+  /// Champs d'identité du plat : nom, catégorie, secteur, prix. Extraits pour
+  /// pouvoir être rendus à droite de la photo.
+  List<Widget> _identityFields(BuildContext context) {
+    final theme = Theme.of(context);
+    final sem = theme.semantic;
+    final cs = theme.colorScheme;
+    return [
             // ── Nom ──────────────────────────────────────────────────
             const AppFieldLabel('Nom du plat', required: true),
             const SizedBox(height: 8),
@@ -553,6 +583,61 @@ class _DishFormSheetState extends State<DishFormSheet> {
               ),
             ),
             const SizedBox(height: 16),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sem = theme.semantic;
+    final cs = theme.colorScheme;
+    final groups = _linkableGroups;
+
+    return AdaptiveFormFrame(
+      title: _isEdit ? 'Modifier le plat' : 'Nouveau plat',
+      icon: Icons.restaurant_rounded,
+      iconColor: AppColors.primary,
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ══ BLOC 1 — identité du plat ═════════════════════════════
+            // Photo à gauche, nom / catégorie / secteur / prix à droite.
+            // Sous 560 px de large la colonne de droite deviendrait
+            // illisible : on empile alors comme avant.
+            LayoutBuilder(builder: (_, c) {
+              final side = c.maxWidth >= 560;
+              final photo = _photoPicker(context, height: side ? 210 : 160);
+              final fields = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: _identityFields(context),
+              );
+              if (!side) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(child: photo),
+                    const SizedBox(height: 18),
+                    fields,
+                  ],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  photo,
+                  const SizedBox(width: 16),
+                  Expanded(child: fields),
+                ],
+              );
+            }),
+
+            // ══ BLOC 2 — description et réglages ══════════════════════
+            const SizedBox(height: 22),
+            Divider(height: 1, color: sem.borderSubtle),
+            const SizedBox(height: 18),
 
             // ── Description ──────────────────────────────────────────
             const AppFieldLabel('Description'),
@@ -660,8 +745,11 @@ class _DishFormSheetState extends State<DishFormSheet> {
                   size: 18, color: AppColors.primary),
               const SizedBox(width: 8),
               Expanded(
+                // Même échelon que l'en-tête « Plus de réglages » juste
+                // au-dessus : ce sont deux sections de même niveau dans la
+                // même feuille, elles ne doivent pas avoir deux tailles.
                 child: Text('Fiche recette',
-                    style: AppTextStyles.subtitle
+                    style: AppTextStyles.bodySmBold
                         .copyWith(color: cs.onSurface)),
               ),
               TextButton.icon(
@@ -692,6 +780,17 @@ class _DishFormSheetState extends State<DishFormSheet> {
                         _priceCtrl.text.trim().replaceAll(',', '.')) ??
                     0,
               ),
+              // Vider la fiche d'un coup — le ✕ de chaque ligne reste la voie
+              // normale pour retirer UN ingrédient.
+              Center(
+                child: TextButton.icon(
+                  onPressed: _saving ? null : _clearRecipe,
+                  icon: Icon(Icons.delete_sweep_outlined,
+                      size: 18, color: sem.danger),
+                  label: Text('Supprimer la fiche recette',
+                      style: AppTextStyles.label.copyWith(color: sem.danger)),
+                ),
+              ),
             ],
 
             if (_error != null) ...[
@@ -701,27 +800,41 @@ class _DishFormSheetState extends State<DishFormSheet> {
                       AppTextStyles.caption.copyWith(color: sem.danger)),
             ],
             const SizedBox(height: 20),
-            AppPrimaryButton(
-              label: _isEdit ? 'Enregistrer' : 'Créer le plat',
-              icon: Icons.check_rounded,
-              fullWidth: true,
-              isLoading: _saving,
-              onTap: _submit,
-            ),
-            // Suppression — édition uniquement. Discret, sous le bouton
-            // principal, en rouge pour signaler l'action destructive.
-            if (_isEdit) ...[
-              const SizedBox(height: 6),
-              Center(
-                child: TextButton.icon(
-                  onPressed: _saving ? null : _deleteDish,
-                  icon: Icon(Icons.delete_outline_rounded,
-                      size: 18, color: sem.danger),
-                  label: Text('Supprimer le plat',
-                      style: AppTextStyles.label.copyWith(color: sem.danger)),
+            // Enregistrer et Supprimer sur la MÊME ligne. « Supprimer » reste
+            // secondaire — contour rouge et non aplat — pour qu'une action
+            // destructive ne se présente pas comme l'action attendue.
+            Row(children: [
+              Expanded(
+                flex: 2,
+                child: AppPrimaryButton(
+                  label: _isEdit ? 'Enregistrer' : 'Créer le plat',
+                  icon: Icons.check_rounded,
+                  fullWidth: true,
+                  isLoading: _saving,
+                  onTap: _submit,
                 ),
               ),
-            ],
+              if (_isEdit) ...[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _saving ? null : _deleteDish,
+                    icon: Icon(Icons.delete_outline_rounded,
+                        size: 18, color: sem.danger),
+                    label: Text('Supprimer',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            AppTextStyles.label.copyWith(color: sem.danger)),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 46),
+                      side: BorderSide(
+                          color: sem.danger.withValues(alpha: 0.5)),
+                    ),
+                  ),
+                ),
+              ],
+            ]),
           ],
         ),
       ),

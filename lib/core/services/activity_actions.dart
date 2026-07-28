@@ -102,6 +102,16 @@ class ActivityActions {
     'order_status_changed':       ActivityCategory.sale,
     'acompte_recorded':           ActivityCategory.sale,
     'order_cancelled_by_client_from_alert': ActivityCategory.alert,
+    // Gestes de service sous PIN gérant (restaurant — Lot A). Catégorie
+    // « alerte » : ce sont les deux façons de faire sortir de l'argent sans
+    // qu'un plat sorte, ils doivent ressortir dans le filtre des actions
+    // sensibles.
+    'round_cancelled':            ActivityCategory.alert,
+    // Contrôles de caisse (restaurant — Lot C). Le X et le Z sont des faits
+    // de caisse, pas des incidents : c'est l'ÉCART qu'on lit, dans le détail.
+    'cash_closure_x':             ActivityCategory.sale,
+    'cash_closure_z':             ActivityCategory.sale,
+    'bill_discounted':            ActivityCategory.alert,
 
     // ── Clients ──────────────────────────────────────────────────────
     'client_created':             ActivityCategory.shop,

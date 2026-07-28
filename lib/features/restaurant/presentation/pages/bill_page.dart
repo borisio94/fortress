@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/services/invoice_printer.dart';
+import '../../../../core/services/manager_gate.dart';
+import '../../../../core/services/payment_service.dart';
 import '../../../../core/services/restaurant_order_service.dart';
 import '../../../../core/services/restaurant_table_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
@@ -10,10 +14,13 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/duration_formatter.dart';
 import '../../../../features/caisse/domain/entities/sale.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../domain/entities/restaurant_table.dart';
+import '../widgets/deposit_sheet.dart';
+import '../widgets/payment_sheet.dart';
 
 /// Addition d'une table : récapitulatif, partage entre convives et
 /// encaissement (module restaurant, PR-3).
@@ -22,7 +29,7 @@ import '../../domain/entities/restaurant_table.dart';
 /// couche données partagée (`updateOrderStatus` via
 /// [RestaurantOrderService.settleAndRelease]), qui porte déjà le verrou de
 /// transitions, le décrément de stock et le statut de paiement.
-class BillPage extends StatefulWidget {
+class BillPage extends ConsumerStatefulWidget {
   final String shopId;
   final String tableId;
 
@@ -33,10 +40,10 @@ class BillPage extends StatefulWidget {
   });
 
   @override
-  State<BillPage> createState() => _BillPageState();
+  ConsumerState<BillPage> createState() => _BillPageState();
 }
 
-class _BillPageState extends State<BillPage> {
+class _BillPageState extends ConsumerState<BillPage> {
   RestaurantTable? _table;
   Sale? _order;
 
@@ -64,39 +71,127 @@ class _BillPageState extends State<BillPage> {
 
   double get _total => _order?.total ?? 0;
 
+  /// Ajoute une consigne d'emballages à l'addition (Lot B).
+  ///
+  /// Pas de PIN : la consigne AUGMENTE le montant dû, elle ne fait pas sortir
+  /// d'argent. C'est le retour (ou la perte) qui se contrôle, depuis le hub
+  /// Finances.
+  Future<void> _addDeposit() async {
+    final order = _order;
+    final table = _table;
+    if (order == null) return;
+    final deposit = await showDepositSheet(
+      context: context,
+      shopId: widget.shopId,
+      order: order,
+      holder: '${table?.name ?? 'Table'}'
+          '${(order.tabLabel ?? '').isEmpty ? '' : ' · ${order.tabLabel}'}',
+    );
+    if (deposit == null || !mounted) return;
+    // Relecture : la ligne de frais vient d'être écrite sur la commande, le
+    // total affiché doit la refléter avant l'encaissement.
+    _load();
+    AppSnack.success(
+        context,
+        '${deposit.quantity} × ${deposit.label} consigné'
+        '${deposit.quantity > 1 ? 's' : ''} — '
+        '${CurrencyFormatter.format(deposit.totalAmount.toDouble())}');
+  }
+
+  /// Applique une remise sur l'addition, sous aval du gérant.
+  ///
+  /// Sous PIN parce que c'est l'autre façon de faire sortir de l'argent sans
+  /// qu'un plat sorte : remiser après encaissement, et garder la différence.
+  Future<void> _discount() async {
+    final order = _order;
+    if (order == null) return;
+
+    final res = await showAdaptiveFormSheet<({double amount, String reason})>(
+      context: context,
+      builder: (_) => _DiscountSheet(
+        subtotal: order.subtotal,
+        current: order.discountAmount,
+      ),
+    );
+    if (res == null || !mounted) return;
+
+    final ok = await ManagerGate.require(
+      context: context,
+      perms: ref.read(permissionsProvider(widget.shopId)),
+      action: ManagerAction.discountBill,
+      shopId: widget.shopId,
+      targetId: order.id,
+      targetLabel: _table?.name,
+      details: {
+        'amount': res.amount,
+        'reason': res.reason,
+        'subtotal': order.subtotal,
+      },
+    );
+    if (!ok || !mounted) return;
+
+    await RestaurantOrderService.applyDiscount(order, res.amount);
+    if (!mounted) return;
+    _load();
+    AppSnack.success(
+        context,
+        res.amount <= 0
+            ? 'Remise retirée.'
+            : 'Remise de ${CurrencyFormatter.format(res.amount)} appliquée.');
+  }
+
   Future<void> _settle() async {
     final table = _table;
     final order = _order;
     if (table == null || order == null) return;
 
-    final confirmed = await showDialog<bool>(
+    // Reste dû = total − ce qui a déjà été encaissé (acompte). Arrondi à
+    // l'unité : le FCFA n'a pas de centimes, et un reste de 0,4 F empêcherait
+    // l'addition de tomber juste.
+    final due = (order.total - order.amountPaid).round();
+    final split = await showAdaptiveFormSheet<PaymentSplit>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Encaisser l\'addition ?'),
-        content: Text(
-          'Montant : ${CurrencyFormatter.format(_total)}\n\n'
-          'La commande sera clôturée et ${table.name} repassera libre.',
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Annuler')),
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Encaisser')),
-        ],
+      builder: (_) => PaymentSheet(
+        due: due < 0 ? 0 : due,
+        subtitle: '${table.name}'
+            '${(order.tabLabel ?? '').isEmpty ? '' : ' · ${order.tabLabel}'}',
       ),
     );
-    if (confirmed != true || !mounted) return;
+    if (split == null || !mounted) return;
 
     setState(() => _settling = true);
     try {
       final settled = await RestaurantOrderService.settleAndRelease(
         order: order,
         table: table,
+        // Addition soldée → `null` force « entièrement payé » et absorbe les
+        // décimales d'un total non entier. Sinon on transmet l'encaissé réel,
+        // qui laisse la différence en créance client.
+        amountPaid: split.isSettled
+            ? null
+            : (order.amountPaid + split.applied),
+        method: split.dominantMethod,
       );
       if (!mounted) return;
-      AppSnack.success(context, '${table.name} encaissée et libérée');
+
+      // Règlements enregistrés APRÈS la clôture : si `settleAndRelease` lève
+      // (transition interdite, stock insuffisant), aucune ligne de paiement ne
+      // doit rester derrière une addition non encaissée.
+      final orderId = order.id;
+      if (orderId != null && orderId.isNotEmpty) {
+        await PaymentService.recordSplit(
+          shopId: widget.shopId,
+          orderId: orderId,
+          split: split,
+        );
+      }
+      if (!mounted) return;
+      AppSnack.success(
+          context,
+          split.change > 0
+              ? '${table.name} encaissée — rendre '
+                  '${CurrencyFormatter.format(split.change.toDouble())}'
+              : '${table.name} encaissée et libérée');
 
       // Facture générée automatiquement après encaissement (spec §7).
       if (settled != null) {
@@ -161,7 +256,24 @@ class _BillPageState extends State<BillPage> {
                 _TableInfoCard(table: table, order: order),
                 const SizedBox(height: 16),
                 _ItemsCard(order: order),
-                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton.icon(
+                      onPressed: _settling ? null : _addDeposit,
+                      icon: const Icon(Icons.liquor_outlined, size: 18),
+                      label: const Text('Consigne'),
+                    ),
+                    TextButton.icon(
+                      onPressed: _settling ? null : _discount,
+                      icon: const Icon(Icons.percent_rounded, size: 18),
+                      label: Text(order.discountAmount > 0
+                          ? 'Modifier la remise'
+                          : 'Remise'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
                 _SplitCard(
                   total: _total,
                   covers: order.covers ?? table.capacity,
@@ -279,6 +391,20 @@ class _ItemsCard extends StatelessWidget {
                 ],
               ),
             ),
+          // Remise accordée par le gérant (geste sous PIN) : affichée en
+          // clair sur l'addition, le client doit pouvoir la lire.
+          if (order.discountAmount > 0) ...[
+            const Divider(height: 18),
+            Row(
+              children: [
+                const Expanded(
+                    child: Text('Remise', style: AppTextStyles.bodySm)),
+                Text('− ${CurrencyFormatter.format(order.discountAmount)}',
+                    style: AppTextStyles.bodySm
+                        .copyWith(color: semantic.success)),
+              ],
+            ),
+          ],
           // Frais éventuels (la commande partage le modèle de la caisse).
           if (order.totalFees > 0) ...[
             const Divider(height: 18),
@@ -393,6 +519,126 @@ class _SplitCard extends StatelessWidget {
       labelStyle: AppTextStyles.bodySm.copyWith(
         color: sel ? theme.colorScheme.primary : null,
         fontWeight: sel ? FontWeight.w600 : FontWeight.w500,
+      ),
+    );
+  }
+}
+
+/// Saisie d'une remise sur l'addition : montant + motif obligatoire.
+///
+/// Deux entrées pour un même geste — un montant en francs, ou un pourcentage
+/// converti immédiatement. Le serveur annonce « 10 % » au client, le gérant
+/// raisonne en francs sur la marge : les deux doivent tomber sur la même
+/// valeur sans calcul mental.
+class _DiscountSheet extends StatefulWidget {
+  final double subtotal;
+  final double current;
+
+  const _DiscountSheet({required this.subtotal, required this.current});
+
+  @override
+  State<_DiscountSheet> createState() => _DiscountSheetState();
+}
+
+class _DiscountSheetState extends State<_DiscountSheet> {
+  late final _amount = TextEditingController(
+      text: widget.current <= 0 ? '' : '${widget.current.round()}');
+  final _reason = TextEditingController();
+  String? _err;
+
+  @override
+  void dispose() {
+    _amount.dispose();
+    _reason.dispose();
+    super.dispose();
+  }
+
+  double get _value =>
+      double.tryParse(_amount.text.trim().replaceAll(' ', '')) ?? 0;
+
+  void _setPercent(int p) => setState(() {
+        _amount.text = '${(widget.subtotal * p / 100).round()}';
+        _err = null;
+      });
+
+  void _submit() {
+    final v = _value;
+    if (v < 0) {
+      setState(() => _err = 'Montant invalide');
+      return;
+    }
+    if (v > widget.subtotal) {
+      // Plafonné aussi côté service, mais le dire ici évite au gérant de
+      // valider un geste qui sera silencieusement rogné.
+      setState(() => _err = 'La remise ne peut pas dépasser le montant des '
+          'articles (${CurrencyFormatter.format(widget.subtotal)}).');
+      return;
+    }
+    if (_reason.text.trim().isEmpty) {
+      setState(() => _err = 'Motif obligatoire');
+      return;
+    }
+    Navigator.of(context).pop((amount: v, reason: _reason.text.trim()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return AdaptiveFormFrame(
+      title: 'Remise sur l\'addition',
+      subtitle: 'Articles : ${CurrencyFormatter.format(widget.subtotal)}',
+      icon: Icons.percent_rounded,
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Une validation du gérant est demandée.',
+                style: AppTextStyles.captionHint),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _amount,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(),
+              decoration: const InputDecoration(
+                labelText: 'Montant de la remise',
+                hintText: '0 pour retirer la remise',
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              children: [
+                for (final p in [5, 10, 15, 20])
+                  ActionChip(
+                      label: Text('$p %'), onPressed: () => _setPercent(p)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _reason,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Motif',
+                hintText: 'Geste commercial, attente en cuisine…',
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+            if (_err != null) ...[
+              const SizedBox(height: 8),
+              Text(_err!,
+                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+            ],
+            const SizedBox(height: 18),
+            AppPrimaryButton(
+              label: 'Valider la remise',
+              icon: Icons.check_rounded,
+              fullWidth: true,
+              onTap: _submit,
+            ),
+          ],
+        ),
       ),
     );
   }

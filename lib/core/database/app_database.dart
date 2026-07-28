@@ -603,6 +603,14 @@ class AppDatabase {
         await syncStockItems(shopId);
         await syncFixedCharges(shopId);
         await syncLosses(shopId);
+        await syncPayments(shopId);
+        await syncBottleDeposits(shopId);
+        await syncCashClosures(shopId);
+        await syncStaff(shopId);
+        await syncTimeRecords(shopId);
+        await syncSalaryAdvances(shopId);
+        await syncPayroll(shopId);
+        await syncDailyExpenses(shopId);
         await syncPartnerLedger(shopId);
         await syncStockLocations();
         await syncStockLevels(shopId);
@@ -885,6 +893,80 @@ class AppDatabase {
             column: 'shop_id', value: shopId),
         callback: (p) => _i._onTablePassthroughChange(
             p, HiveBoxes.lossesBox, 'losses', shopId))
+        // ── Règlements d'addition (Lot A) : la caisse et la tablette de
+        //    salle doivent voir le même reste dû, sinon on encaisse deux fois.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'payments',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.paymentsBox, 'payments', shopId))
+        // ── Consignes d'emballages (Lot B) : le comptoir enregistre, la
+        //    caisse voit le retour.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'bottle_deposits',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.bottleDepositsBox, 'bottle_deposits', shopId))
+        // ── Clôtures de caisse (Lot C) : le gérant voit l'écart depuis son
+        //    téléphone, sans attendre de repasser à la boutique.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'cash_closures',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.cashClosuresBox, 'cash_closures', shopId))
+        // ── Personnel : fiches, pointage, avances, paie (Lot D). La badgeuse
+        //    est un appareil, la paie s'ouvre sur un autre.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'employees',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.employeesBox, 'employees', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'time_records',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.timeRecordsBox, 'time_records', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'salary_advances',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.salaryAdvancesBox, 'salary_advances', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'payroll',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.payrollBox, 'payroll', shopId))
+        // ── Dépenses quotidiennes (Lot E) : saisies au marché, lues à la
+        //    caisse (elles sortent du tiroir) et au bilan.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'daily_expenses',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.dailyExpensesBox, 'daily_expenses', shopId))
         // ── Tickets de messagerie (phase 4 + notifs cloche) ────────────
         .onPostgresChanges(
         event: PostgresChangeEvent.all,
@@ -1034,6 +1116,14 @@ class AppDatabase {
       task('syncStockItems', () => syncStockItems(shopId)),
       task('syncFixedCharges', () => syncFixedCharges(shopId)),
       task('syncLosses', () => syncLosses(shopId)),
+      task('syncPayments', () => syncPayments(shopId)),
+      task('syncBottleDeposits', () => syncBottleDeposits(shopId)),
+      task('syncCashClosures', () => syncCashClosures(shopId)),
+      task('syncStaff', () => syncStaff(shopId)),
+      task('syncTimeRecords', () => syncTimeRecords(shopId)),
+      task('syncSalaryAdvances', () => syncSalaryAdvances(shopId)),
+      task('syncPayroll', () => syncPayroll(shopId)),
+      task('syncDailyExpenses', () => syncDailyExpenses(shopId)),
       task('syncActivityLogs', () async {
         await syncActivityLogs(shopId);
         _notify('activity_logs', shopId);
@@ -3997,6 +4087,46 @@ end \$\$;""",
   static Future<void> syncLosses(String shopId) =>
       _syncTablePassthrough(tableName: 'losses',
           shopId: shopId, box: HiveBoxes.lossesBox);
+
+  // ── Règlements d'addition (Lot A restaurant — hotfix_145) ──────────────
+  static Future<void> syncPayments(String shopId) =>
+      _syncTablePassthrough(tableName: 'payments',
+          shopId: shopId, box: HiveBoxes.paymentsBox);
+
+  // ── Consignes d'emballages (Lot B restaurant — hotfix_146) ─────────────
+  static Future<void> syncBottleDeposits(String shopId) =>
+      _syncTablePassthrough(tableName: 'bottle_deposits',
+          shopId: shopId, box: HiveBoxes.bottleDepositsBox);
+
+  // ── Clôtures de caisse X/Z (Lot C restaurant — hotfix_147) ─────────────
+  static Future<void> syncCashClosures(String shopId) =>
+      _syncTablePassthrough(tableName: 'cash_closures',
+          shopId: shopId, box: HiveBoxes.cashClosuresBox,
+          orderBy: 'closed_at');
+
+  // ── Personnel restaurant (Lot D — hotfix_148) ──────────────────────────
+  static Future<void> syncStaff(String shopId) =>
+      _syncTablePassthrough(tableName: 'employees',
+          shopId: shopId, box: HiveBoxes.employeesBox);
+
+  static Future<void> syncTimeRecords(String shopId) =>
+      _syncTablePassthrough(tableName: 'time_records',
+          shopId: shopId, box: HiveBoxes.timeRecordsBox,
+          orderBy: 'clock_in');
+
+  static Future<void> syncSalaryAdvances(String shopId) =>
+      _syncTablePassthrough(tableName: 'salary_advances',
+          shopId: shopId, box: HiveBoxes.salaryAdvancesBox);
+
+  static Future<void> syncPayroll(String shopId) =>
+      _syncTablePassthrough(tableName: 'payroll',
+          shopId: shopId, box: HiveBoxes.payrollBox);
+
+  // ── Dépenses quotidiennes (Lot E restaurant — hotfix_149) ──────────────
+  static Future<void> syncDailyExpenses(String shopId) =>
+      _syncTablePassthrough(tableName: 'daily_expenses',
+          shopId: shopId, box: HiveBoxes.dailyExpensesBox,
+          orderBy: 'expense_date');
   /// Sync des transferts de commandes vers livreurs/partenaires (hotfix_049).
   /// Utilisé par le filtre dashboard / commandes / finances pour scoper aux
   /// commandes assignées à un partenaire spécifique.
@@ -4162,6 +4292,8 @@ end \$\$;""",
             // (put, pas de merge). Sans ces cles, chaque pull/push realtime
             // remettrait la table a libre et viderait l'ecran Cuisine.
             'table_id':        row['table_id'],
+          'tab_label':       row['tab_label'],
+            'tab_label':       row['tab_label'],
             'covers':          row['covers'],
             'order_type':      row['order_type'] ?? 'takeaway',
             'sent_to_kitchen': row['sent_to_kitchen'] ?? false,
@@ -4677,6 +4809,7 @@ end \$\$;""",
           // (put, pas de merge). Sans ces cles, chaque pull/push realtime
           // remettrait la table a libre et viderait l'ecran Cuisine.
           'table_id':        row['table_id'],
+          'tab_label':       row['tab_label'],
           'covers':          row['covers'],
           'order_type':      row['order_type'] ?? 'takeaway',
           'sent_to_kitchen': row['sent_to_kitchen'] ?? false,

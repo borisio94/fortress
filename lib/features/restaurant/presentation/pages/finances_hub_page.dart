@@ -4,11 +4,15 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/activity_service.dart';
+import '../../../../core/services/bottle_deposit_service.dart';
+import '../../../../core/services/daily_expense_service.dart';
 import '../../../../core/services/fixed_charge_service.dart';
 import '../../../../core/services/ingredient_service.dart';
 import '../../../../core/services/loss_service.dart';
 import '../../../../core/services/reconciliation_service.dart';
+import '../../../../core/services/round_routing.dart';
 import '../../../../core/services/stock_item_service.dart';
+import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -18,11 +22,14 @@ import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../widgets/resto_empty_state.dart' show RestoEmptyState;
+import '../../domain/entities/bottle_deposit.dart';
+import '../../domain/entities/daily_expense.dart';
 import '../../domain/entities/fixed_charge.dart';
 import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/loss.dart';
 import '../../domain/entities/restaurant_activity.dart';
 import '../../domain/entities/stock_item.dart';
+import '../widgets/resto_surfaces.dart';
 
 /// Hub finances restaurant (module finances — PR-B/PR-C).
 /// Cinq onglets : Ingrédients · Activités · Stock · Charges · Pertes.
@@ -41,6 +48,17 @@ class FinancesHubPage extends StatelessWidget {
       isRootPage: false,
       actions: [
         IconButton(
+          tooltip: 'Personnel',
+          icon: const Icon(Icons.badge_outlined),
+          onPressed: () => context.push('/shop/$shopId/restaurant/personnel'),
+        ),
+        IconButton(
+          tooltip: 'Clôture de caisse',
+          icon: const Icon(Icons.point_of_sale_outlined),
+          onPressed: () =>
+              context.push('/shop/$shopId/restaurant/caisse/cloture'),
+        ),
+        IconButton(
           tooltip: 'Inventaire',
           icon: const Icon(Icons.fact_check_outlined),
           onPressed: () =>
@@ -48,11 +66,13 @@ class FinancesHubPage extends StatelessWidget {
         ),
       ],
       body: DefaultTabController(
-        length: 5,
+        length: 7,
         child: Column(
           children: [
             Material(
-              color: cs.surface,
+              // Même opacité que les cartes : la barre d'onglets était le
+              // dernier aplat plein de la page.
+              color: restoGlassFill(context),
               child: TabBar(
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
@@ -64,7 +84,9 @@ class FinancesHubPage extends StatelessWidget {
                   Tab(text: 'Ingrédients'),
                   Tab(text: 'Activités'),
                   Tab(text: 'Stock'),
+                  Tab(text: 'Dépenses'),
                   Tab(text: 'Charges'),
+                  Tab(text: 'Consignes'),
                   Tab(text: 'Pertes'),
                 ],
               ),
@@ -76,7 +98,9 @@ class FinancesHubPage extends StatelessWidget {
                   _IngredientsTab(shopId: shopId),
                   _ActivitiesTab(shopId: shopId),
                   _StockItemsTab(shopId: shopId),
+                  _DailyExpensesTab(shopId: shopId),
                   _ChargesTab(shopId: shopId),
+                  _DepositsTab(shopId: shopId),
                   _LossesTab(shopId: shopId),
                 ],
               ),
@@ -230,7 +254,8 @@ class _IngredientRow extends StatelessWidget {
               ]),
               Text(
                   '${ing.costPerUnit} F/${ing.unit} · stock $q ${ing.unit}'
-                  '${ing.alertThreshold > 0 ? ' · seuil ${_fmt(ing.alertThreshold)}' : ''}',
+                  '${ing.alertThreshold > 0 ? ' · seuil ${_fmt(ing.alertThreshold)}' : ''}'
+                  '${ing.purchaseDate == null ? '' : ' · acheté le ${_dayLabel(ing.purchaseDate!)}'}',
                   style: AppTextStyles.caption),
             ],
           ),
@@ -256,26 +281,69 @@ class _IngredientEditor extends StatefulWidget {
 
 class _IngredientEditorState extends State<_IngredientEditor> {
   late final _name = TextEditingController(text: widget.existing?.name ?? '');
-  late final _unit =
-      TextEditingController(text: widget.existing?.unit ?? 'g');
-  late final _cost = TextEditingController(
-      text: widget.existing == null ? '' : '${widget.existing!.costPerUnit}');
-  late final _stock = TextEditingController(
+
+  /// Quantité achetée — c'est aussi le stock de l'ingrédient.
+  late final _qty = TextEditingController(
       text: widget.existing == null ? '' : _fmt(widget.existing!.quantity));
-  late final _seuil = TextEditingController(
+
+  /// PRIX TOTAL payé pour [_qty] (pas le prix unitaire) : on saisit ce qui est
+  /// écrit sur le reçu, l'app en dérive le coût unitaire.
+  ///
+  /// En modification, le champ est pré-rempli avec le total correspondant à la
+  /// quantité affichée, de sorte que rouvrir puis enregistrer sans rien changer
+  /// retombe sur le même coût unitaire, au franc près.
+  late final _price = TextEditingController(
       text: widget.existing == null
           ? ''
-          : _fmt(widget.existing!.alertThreshold));
+          : '${_initialPrice(widget.existing!)}');
+
+  /// Total à afficher pour un ingrédient existant.
+  ///
+  /// Quantité nulle → le prix affiché EST le coût unitaire, exactement comme
+  /// [_derivedUnitCost] le relira. Sans ce cas, tous les ingrédients saisis
+  /// sans quantité (la majorité de l'existant) verraient leur prix affiché à 0
+  /// et EFFACÉ au premier enregistrement.
+  static int _initialPrice(Ingredient i) =>
+      i.quantity > 0 ? (i.costPerUnit * i.quantity).round() : i.costPerUnit;
+
+  /// Unité choisie dans la liste. Une unité déjà en base qui n'y figure pas
+  /// (saisie libre d'avant, « 10kg »…) est ajoutée à la liste pour ne pas être
+  /// silencieusement remplacée à l'enregistrement.
+  late String _unit = widget.existing?.unit.trim().isNotEmpty == true
+      ? widget.existing!.unit.trim()
+      : 'kg';
+
+  List<String> get _units => [
+        if (!_kIngredientUnits.contains(_unit)) _unit,
+        ..._kIngredientUnits,
+      ];
+
+  /// Date d'achat — informative. Pré-remplie à aujourd'hui pour une création :
+  /// on saisit un ingrédient le jour où on l'achète.
+  late DateTime? _purchase =
+      widget.existing == null ? DateTime.now() : widget.existing!.purchaseDate;
+
   String? _err;
   bool get _isEdit => widget.existing != null;
+
+  double get _qtyValue =>
+      double.tryParse(_qty.text.trim().replaceAll(',', '.')) ?? 0;
+
+  int get _priceValue => int.tryParse(_price.text.trim()) ?? 0;
+
+  /// Coût d'UNE unité, dérivé du prix total et de la quantité. C'est cette
+  /// valeur qui est stockée et qui alimente le coût des fiches recettes.
+  ///
+  /// Sans quantité, on ne peut rien diviser : le prix saisi est alors pris pour
+  /// le coût d'une unité (plutôt que de perdre l'information).
+  int get _derivedUnitCost =>
+      _qtyValue <= 0 ? _priceValue : (_priceValue / _qtyValue).round();
 
   @override
   void dispose() {
     _name.dispose();
-    _unit.dispose();
-    _cost.dispose();
-    _stock.dispose();
-    _seuil.dispose();
+    _qty.dispose();
+    _price.dispose();
     super.dispose();
   }
 
@@ -285,27 +353,39 @@ class _IngredientEditorState extends State<_IngredientEditor> {
       setState(() => _err = 'Nom requis');
       return;
     }
-    final unit = _unit.text.trim().isEmpty ? 'pièce' : _unit.text.trim();
-    final cost = int.tryParse(_cost.text.trim()) ?? 0;
-    final stock = double.tryParse(_stock.text.trim().replaceAll(',', '.')) ?? 0;
-    final seuil = double.tryParse(_seuil.text.trim().replaceAll(',', '.')) ?? 0;
     if (_isEdit) {
+      // `alertThreshold` n'est PAS passé : le seuil d'alerte n'est plus dans ce
+      // formulaire, et copyWith le préserve. Le repasser à 0 ici effacerait en
+      // silence les seuils déjà configurés.
       await IngredientService.update(widget.existing!.copyWith(
           name: name,
-          unit: unit,
-          costPerUnit: cost,
-          quantity: stock,
-          alertThreshold: seuil));
+          unit: _unit,
+          costPerUnit: _derivedUnitCost,
+          quantity: _qtyValue,
+          purchaseDate: _purchase,
+          // Date effacée par l'utilisateur : `null` seul voudrait dire
+          // « inchangée », il faut le dire explicitement.
+          clearPurchaseDate: _purchase == null));
     } else {
       await IngredientService.create(
           shopId: widget.shopId,
           name: name,
-          unit: unit,
-          costPerUnit: cost,
-          quantity: stock,
-          alertThreshold: seuil);
+          unit: _unit,
+          costPerUnit: _derivedUnitCost,
+          quantity: _qtyValue,
+          purchaseDate: _purchase);
     }
     if (mounted) Navigator.of(context).pop(true);
+  }
+
+  Future<void> _pickPurchaseDate() async {
+    final d = await showDatePicker(
+      context: context,
+      initialDate: _purchase ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+    );
+    if (d != null && mounted) setState(() => _purchase = d);
   }
 
   Future<void> _delete() async {
@@ -343,21 +423,99 @@ class _IngredientEditorState extends State<_IngredientEditor> {
                 textCapitalization: TextCapitalization.sentences,
                 decoration: const InputDecoration(labelText: 'Nom')),
             const SizedBox(height: 10),
+
+            // ── Quantité + unité choisie dans une liste ──────────────────
             Row(children: [
               Expanded(
-                  child: TextField(
-                      controller: _unit,
-                      decoration: const InputDecoration(
-                          labelText: 'Unité', hintText: 'g, kg, L, pièce'))),
+                child: TextField(
+                  controller: _qty,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                  ],
+                  // Le coût unitaire dérivé dépend de la quantité : il doit se
+                  // recalculer à chaque frappe, pas seulement à la validation.
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(labelText: 'Quantité'),
+                ),
+              ),
               const SizedBox(width: 10),
-              Expanded(child: _numField(_cost, 'Coût / unité (F)')),
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  initialValue: _unit,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Unité'),
+                  // Sans style explicite, les items héritent du `titleMedium`
+                  // du thème Material (16) et le menu s'affiche bien plus gros
+                  // que le texte saisi dans les champs voisins.
+                  // `AppTextStyles.input` est LA référence de taille de saisie.
+                  style: AppTextStyles.input
+                      .copyWith(color: Theme.of(context).colorScheme.onSurface),
+                  items: [
+                    for (final u in _units)
+                      DropdownMenuItem(
+                        value: u,
+                        child: Text(u,
+                            style: AppTextStyles.input.copyWith(
+                                color:
+                                    Theme.of(context).colorScheme.onSurface)),
+                      ),
+                  ],
+                  onChanged: (v) => setState(() => _unit = v ?? _unit),
+                ),
+              ),
             ]),
             const SizedBox(height: 10),
-            Row(children: [
-              Expanded(child: _numField(_stock, 'Stock', decimal: true)),
-              const SizedBox(width: 10),
-              Expanded(child: _numField(_seuil, 'Seuil alerte', decimal: true)),
-            ]),
+
+            // ── Prix total payé, coût unitaire dérivé sous le champ ──────
+            TextField(
+              controller: _price,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Prix payé (F)',
+                helperText: 'Le montant du reçu, pour toute la quantité',
+              ),
+            ),
+            if (_priceValue > 0) ...[
+              const SizedBox(height: 6),
+              Text(
+                  _qtyValue > 0
+                      ? '→ soit $_derivedUnitCost F / $_unit'
+                      : '→ pris pour $_derivedUnitCost F / $_unit '
+                          '(renseignez la quantité pour un calcul exact)',
+                  style: AppTextStyles.caption),
+            ],
+            const SizedBox(height: 10),
+
+            // ── Date d'achat (informative) ───────────────────────────────
+            InkWell(
+              onTap: _pickPurchaseDate,
+              borderRadius: BorderRadius.circular(10),
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  labelText: 'Date d\'achat',
+                  prefixIcon: const Icon(Icons.calendar_today, size: 18),
+                  // Effacer la date : elle reste optionnelle.
+                  suffixIcon: _purchase == null
+                      ? null
+                      : IconButton(
+                          tooltip: 'Effacer la date',
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          onPressed: () =>
+                              setState(() => _purchase = null),
+                        ),
+                ),
+                child: Text(
+                    _purchase == null
+                        ? 'Non renseignée'
+                        : _dayLabel(_purchase!),
+                    style: AppTextStyles.body),
+              ),
+            ),
+
             if (_err != null) ...[
               const SizedBox(height: 8),
               Text(_err!,
@@ -438,9 +596,8 @@ class _ActivitiesTabState extends _TabState<_ActivitiesTab> {
                                   style: AppTextStyles.bodyBold
                                       .copyWith(color: cs.onSurface)),
                               Text(
-                                  a.isStockMode
-                                      ? 'Mode stock${a.stockThreshold > 0 ? ' · seuil ${a.stockThreshold}' : ''}'
-                                      : 'Mode recette',
+                                  '${a.isStockMode ? 'Mode stock${a.stockThreshold > 0 ? ' · seuil ${a.stockThreshold}' : ''}' : 'Mode recette'}'
+                                  ' · ${_stationLabel(a)}',
                                   style: AppTextStyles.caption),
                             ],
                           ),
@@ -453,6 +610,16 @@ class _ActivitiesTabState extends _TabState<_ActivitiesTab> {
         ),
       ],
     );
+  }
+
+  /// Poste explicite, ou celui que le routage déduira du mode — le gérant doit
+  /// lire où partiront ses bons, pas s'il a rempli un champ.
+  String _stationLabel(RestaurantActivity a) {
+    final explicit = ServiceStation.fromKey(a.station);
+    if (explicit != null) return explicit.title;
+    return a.isStockMode
+        ? '${ServiceStation.bar.title} (auto)'
+        : '${ServiceStation.cuisine.title} (auto)';
   }
 
   Future<void> _edit(RestaurantActivity? a) async {
@@ -479,6 +646,11 @@ class _ActivityEditorState extends State<_ActivityEditor> {
           ? ''
           : '${widget.existing!.stockThreshold}');
   late String _mode = widget.existing?.mode ?? 'stock';
+
+  /// Poste de service. `null` = « Auto », le poste reste déduit du mode —
+  /// c'est l'état de toutes les activités créées avant hotfix_144.
+  late ServiceStation? _station =
+      ServiceStation.fromKey(widget.existing?.station);
   String? _err;
   bool get _isEdit => widget.existing != null;
 
@@ -497,14 +669,22 @@ class _ActivityEditorState extends State<_ActivityEditor> {
     }
     final seuil = int.tryParse(_seuil.text.trim()) ?? 0;
     if (_isEdit) {
-      await ActivityService.update(widget.existing!
-          .copyWith(name: name, mode: _mode, stockThreshold: seuil));
+      await ActivityService.update(widget.existing!.copyWith(
+        name: name,
+        mode: _mode,
+        stockThreshold: seuil,
+        station: _station?.key,
+        // Repasser sur « Auto » doit VRAIMENT détacher le poste : sans ce
+        // drapeau, `copyWith` garderait l'ancien (résolution par `??`).
+        clearStation: _station == null,
+      ));
     } else {
       await ActivityService.create(
           shopId: widget.shopId,
           name: name,
           mode: _mode,
-          stockThreshold: seuil);
+          stockThreshold: seuil,
+          station: _station?.key);
     }
     if (mounted) Navigator.of(context).pop(true);
   }
@@ -557,6 +737,32 @@ class _ActivityEditorState extends State<_ActivityEditor> {
               const SizedBox(height: 12),
               _numField(_seuil, 'Seuil d\'alerte (global)'),
             ],
+            const SizedBox(height: 14),
+            Text('Poste de service', style: AppTextStyles.caption),
+            const SizedBox(height: 2),
+            Text(
+              'Où les articles de ce secteur sont préparés. « Auto » déduit le '
+              'poste du mode : stock → bar, recette → cuisine.',
+              style: AppTextStyles.captionHint,
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                ChoiceChip(
+                  label: const Text('Auto'),
+                  selected: _station == null,
+                  onSelected: (_) => setState(() => _station = null),
+                ),
+                for (final s in ServiceStation.values)
+                  ChoiceChip(
+                    label: Text(s.title),
+                    selected: _station == s,
+                    onSelected: (_) => setState(() => _station = s),
+                  ),
+              ],
+            ),
             if (_err != null) ...[
               const SizedBox(height: 8),
               Text(_err!,
@@ -1152,6 +1358,578 @@ class _ChargeEditorState extends State<_ChargeEditor> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+//  Onglet DÉPENSES DU JOUR (Lot E — achats marché, gaz, entretien…)
+// ═══════════════════════════════════════════════════════════════════════
+class _DailyExpensesTab extends StatefulWidget {
+  final String shopId;
+  const _DailyExpensesTab({required this.shopId});
+  @override
+  State<_DailyExpensesTab> createState() => _DailyExpensesTabState();
+}
+
+class _DailyExpensesTabState extends _TabState<_DailyExpensesTab> {
+  @override
+  String get table => 'daily_expenses';
+  @override
+  String get shopId => widget.shopId;
+
+  /// Mois affiché — les dépenses se lisent par mois, comme la paie.
+  DateTime _month = DateTime.now();
+
+  DateTime get _from => DateTime(_month.year, _month.month, 1);
+  DateTime get _to => DateTime(_month.year, _month.month + 1, 0);
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final sem = Theme.of(context).semantic;
+    final items =
+        DailyExpenseService.forShop(widget.shopId, from: _from, to: _to);
+    final food = DailyExpenseService.foodCost(widget.shopId,
+        from: _from, to: _to);
+    final other = DailyExpenseService.operatingCost(widget.shopId,
+        from: _from, to: _to);
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+          child: Row(
+            children: [
+              IconButton(
+                onPressed: () => setState(
+                    () => _month = DateTime(_month.year, _month.month - 1)),
+                icon: const Icon(Icons.chevron_left_rounded),
+              ),
+              Expanded(
+                child: Text(_monthLabel(_month),
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.bodyBold),
+              ),
+              IconButton(
+                onPressed: () => setState(
+                    () => _month = DateTime(_month.year, _month.month + 1)),
+                icon: const Icon(Icons.chevron_right_rounded),
+              ),
+            ],
+          ),
+        ),
+        // Les deux chiffres qui comptent : ce qui part en matières (le food
+        // cost réel) et le reste de l'exploitation.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Row(children: [
+            Expanded(
+              child: _MiniStat(
+                label: 'Achats matières',
+                value: CurrencyFormatter.format(food.toDouble()),
+                color: cs.primary,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _MiniStat(
+                label: 'Autres dépenses',
+                value: CurrencyFormatter.format(other.toDouble()),
+                color: sem.warning,
+              ),
+            ),
+          ]),
+        ),
+        headerButton('Dépense', () => _edit(null)),
+        Expanded(
+          child: items.isEmpty
+              ? const RestoEmptyState(
+                  icon: Icons.receipt_long_outlined,
+                  title: 'Aucune dépense ce mois',
+                  subtitle: 'Achat au marché, gaz, transport… Saisir vos '
+                      'achats permet de comparer le coût réel des matières à '
+                      'ce que vos recettes prévoient.',
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                  itemCount: items.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (_, i) {
+                    final e = items[i];
+                    return _Card(
+                      onTap: () => _edit(e),
+                      child: Row(children: [
+                        Icon(e.kind.icon, size: 18, color: cs.primary),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(e.description,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppTextStyles.bodyBold
+                                      .copyWith(color: cs.onSurface)),
+                              Text(
+                                  [
+                                    e.kind.label,
+                                    _dayLabel(e.expenseDate),
+                                    if ((e.paidBy ?? '').isNotEmpty)
+                                      'payé par ${e.paidBy}',
+                                    if (!e.isCash) 'hors caisse',
+                                  ].join(' · '),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppTextStyles.caption),
+                            ],
+                          ),
+                        ),
+                        Text(CurrencyFormatter.format(e.amount.toDouble()),
+                            style: AppTextStyles.bodyBold),
+                      ]),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _edit(DailyExpense? e) async {
+    await showAdaptiveFormSheet<bool>(
+      context: context,
+      builder: (_) => _DailyExpenseEditor(shopId: widget.shopId, existing: e),
+    );
+    if (mounted) setState(() {});
+  }
+
+  static String _monthLabel(DateTime d) {
+    const months = [
+      'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+      'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
+    ];
+    return '${months[d.month - 1]} ${d.year}';
+  }
+}
+
+class _DailyExpenseEditor extends StatefulWidget {
+  final String shopId;
+  final DailyExpense? existing;
+  const _DailyExpenseEditor({required this.shopId, this.existing});
+  @override
+  State<_DailyExpenseEditor> createState() => _DailyExpenseEditorState();
+}
+
+class _DailyExpenseEditorState extends State<_DailyExpenseEditor> {
+  late final _desc =
+      TextEditingController(text: widget.existing?.description ?? '');
+  late final _amount = TextEditingController(
+      text: (widget.existing?.amount ?? 0) == 0
+          ? ''
+          : '${widget.existing!.amount}');
+  late final _paidBy =
+      TextEditingController(text: widget.existing?.paidBy ?? '');
+  late ExpenseKind _kind = widget.existing?.kind ?? ExpenseKind.achatMarche;
+  late bool _isCash = widget.existing?.isCash ?? true;
+  late DateTime _date = widget.existing?.expenseDate ?? DateTime.now();
+  String? _err;
+
+  bool get _isEdit => widget.existing != null;
+
+  @override
+  void dispose() {
+    _desc.dispose();
+    _amount.dispose();
+    _paidBy.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final desc = _desc.text.trim();
+    final amount = int.tryParse(_amount.text.trim()) ?? 0;
+    if (desc.isEmpty) {
+      setState(() => _err = 'Description requise');
+      return;
+    }
+    if (amount <= 0) {
+      setState(() => _err = 'Montant invalide');
+      return;
+    }
+    if (_isEdit) {
+      await DailyExpenseService.update(widget.existing!.copyWith(
+        description: desc,
+        amount: amount,
+        category: _kind.key,
+        paidBy: _paidBy.text.trim(),
+        isCash: _isCash,
+        expenseDate: _date,
+      ));
+    } else {
+      await DailyExpenseService.record(
+        shopId: widget.shopId,
+        description: desc,
+        amount: amount,
+        kind: _kind,
+        paidBy: _paidBy.text.trim(),
+        isCash: _isCash,
+        date: _date,
+      );
+    }
+    if (mounted) Navigator.of(context).pop(true);
+  }
+
+  Future<void> _delete() async {
+    final ok = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.delete_outline_rounded,
+      iconColor: Theme.of(context).semantic.danger,
+      title: 'Supprimer cette dépense ?',
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Supprimer',
+      onConfirm: () {},
+    );
+    if (ok != true || !mounted) return;
+    await DailyExpenseService.delete(widget.existing!.id, widget.shopId);
+    if (mounted) Navigator.of(context).pop(true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return AdaptiveFormFrame(
+      title: _isEdit ? 'Modifier la dépense' : 'Nouvelle dépense',
+      icon: Icons.receipt_long_outlined,
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _desc,
+              autofocus: !_isEdit,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                  labelText: 'Description',
+                  hintText: 'Poisson, tomates, bouteille de gaz…'),
+            ),
+            const SizedBox(height: 10),
+            _numField(_amount, 'Montant'),
+            const SizedBox(height: 12),
+            Text('Catégorie', style: AppTextStyles.caption),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final k in ExpenseKind.values)
+                  ChoiceChip(
+                    label: Text(k.label),
+                    selected: _kind == k,
+                    onSelected: (_) => setState(() => _kind = k),
+                  ),
+              ],
+            ),
+            if (_kind.isFoodCost) ...[
+              const SizedBox(height: 6),
+              Text(
+                  'Les achats de matières composent le « food cost réel », '
+                  'comparé à ce que vos fiches recettes prévoient.',
+                  style: AppTextStyles.captionHint),
+            ],
+            const SizedBox(height: 10),
+            TextField(
+              controller: _paidBy,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                  labelText: 'Payé par (optionnel)',
+                  hintText: 'Nom de la personne à rembourser'),
+            ),
+            const SizedBox(height: 6),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _isCash,
+              onChanged: (v) => setState(() => _isCash = v),
+              title: Text('Payé en espèces', style: AppTextStyles.bodySm),
+              subtitle: Text(
+                  _isCash
+                      ? 'Déduit du tiroir à la clôture de caisse.'
+                      : 'Mobile money, virement… n\'affecte pas le tiroir.',
+                  style: AppTextStyles.captionHint),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.event_outlined),
+              title: Text(_dayLabel(_date), style: AppTextStyles.bodySm),
+              trailing: const Text('Modifier'),
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: _date,
+                  firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                  lastDate: DateTime.now(),
+                );
+                if (picked != null) setState(() => _date = picked);
+              },
+            ),
+            if (_err != null) ...[
+              const SizedBox(height: 8),
+              Text(_err!,
+                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+            ],
+            const SizedBox(height: 18),
+            AppPrimaryButton(
+              label: _isEdit ? 'Enregistrer' : 'Ajouter',
+              icon: Icons.check_rounded,
+              fullWidth: true,
+              onTap: _save,
+            ),
+            if (_isEdit) ...[
+              const SizedBox(height: 6),
+              Center(
+                child: TextButton.icon(
+                  onPressed: _delete,
+                  icon: Icon(Icons.delete_outline_rounded,
+                      size: 18, color: sem.danger),
+                  label: Text('Supprimer',
+                      style: AppTextStyles.label.copyWith(color: sem.danger)),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Petit indicateur chiffré (en-tête d'onglet).
+class _MiniStat extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+  const _MiniStat(
+      {required this.label, required this.value, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: restoGlassFill(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: sem.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: AppTextStyles.captionHint),
+          Text(value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.bodyBold.copyWith(color: color)),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Onglet CONSIGNES (Lot B — emballages remis aux clients)
+// ═══════════════════════════════════════════════════════════════════════
+class _DepositsTab extends StatefulWidget {
+  final String shopId;
+  const _DepositsTab({required this.shopId});
+  @override
+  State<_DepositsTab> createState() => _DepositsTabState();
+}
+
+class _DepositsTabState extends _TabState<_DepositsTab> {
+  @override
+  String get table => 'bottle_deposits';
+  @override
+  String get shopId => widget.shopId;
+
+  /// Par défaut, seules les consignes ENCORE DUES : c'est la liste de travail
+  /// (« qui doit me rapporter des bouteilles ? »). L'historique complet ne sert
+  /// qu'à vérifier un cas précis.
+  bool _onlyOpen = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final sem = Theme.of(context).semantic;
+    final items = BottleDepositService.forShop(widget.shopId,
+        onlyOpen: _onlyOpen);
+    final out = BottleDepositService.outstanding(widget.shopId);
+
+    return Column(
+      children: [
+        // Ce que la boutique doit encore rendre, et le nombre d'emballages
+        // qu'elle doit récupérer : les deux chiffres du jour.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: _Card(
+            onTap: () {},
+            child: Row(children: [
+              Icon(Icons.liquor_outlined, size: 18, color: cs.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                    out.bottles == 0
+                        ? 'Aucun emballage dehors'
+                        : '${out.bottles} emballage'
+                            '${out.bottles > 1 ? 's' : ''} à récupérer',
+                    style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
+              ),
+              Text(CurrencyFormatter.format(out.amount.toDouble()),
+                  style: AppTextStyles.bodyBold.copyWith(color: cs.primary)),
+            ]),
+          ),
+        ),
+        Align(
+          alignment: Alignment.centerRight,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+            child: TextButton.icon(
+              onPressed: () => setState(() => _onlyOpen = !_onlyOpen),
+              icon: Icon(
+                  _onlyOpen
+                      ? Icons.history_rounded
+                      : Icons.filter_alt_off_rounded,
+                  size: 18),
+              label: Text(_onlyOpen ? 'Voir l\'historique' : 'En attente seulement'),
+            ),
+          ),
+        ),
+        Expanded(
+          child: items.isEmpty
+              ? RestoEmptyState(
+                  icon: Icons.liquor_outlined,
+                  title: _onlyOpen
+                      ? 'Aucune consigne en attente'
+                      : 'Aucune consigne',
+                  subtitle: 'Les consignes se prennent depuis l\'addition '
+                      'ou une commande à emporter.',
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                  itemCount: items.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (_, i) {
+                    final d = items[i];
+                    return _Card(
+                      onTap: d.isClosed ? () {} : () => _actions(d),
+                      child: Row(children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(d.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppTextStyles.bodyBold
+                                      .copyWith(color: cs.onSurface)),
+                              Text(
+                                  '${d.returnedQuantity}/${d.quantity} rendu'
+                                  '${d.quantity > 1 ? 's' : ''} · '
+                                  '${_dayLabel(d.createdAt)}'
+                                  '${(d.holder ?? '').isEmpty ? '' : ' · ${d.holder}'}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppTextStyles.caption),
+                            ],
+                          ),
+                        ),
+                        Text(
+                            CurrencyFormatter.format(
+                                d.outstandingAmount.toDouble()),
+                            style: AppTextStyles.bodyBold.copyWith(
+                                color: d.isClosed ? null : cs.primary)),
+                        const SizedBox(width: 8),
+                        _Pill(
+                          d.isLost
+                              ? 'perdue'
+                              : (d.outstanding == 0 ? 'rendue' : 'due'),
+                          d.isLost
+                              ? sem.danger
+                              : (d.outstanding == 0 ? sem.success : sem.warning),
+                        ),
+                      ]),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _actions(BottleDeposit d) async {
+    final choice = await showAdaptiveFormSheet<String>(
+      context: context,
+      builder: (_) => AdaptiveFormFrame(
+        title: d.label,
+        subtitle: '${d.outstanding} emballage'
+            '${d.outstanding > 1 ? 's' : ''} · '
+            '${CurrencyFormatter.format(d.outstandingAmount.toDouble())}',
+        icon: Icons.liquor_outlined,
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              leading: const Icon(Icons.assignment_return_outlined),
+              title: const Text('Emballages rendus'),
+              subtitle: const Text('Rembourse la caution au client'),
+              onTap: () => Navigator.of(context).pop('return'),
+            ),
+            ListTile(
+              leading: Icon(Icons.report_gmailerrorred_outlined,
+                  color: Theme.of(context).semantic.danger),
+              title: const Text('Consigne perdue'),
+              subtitle:
+                  const Text('Les emballages ne reviendront pas → perte'),
+              onTap: () => Navigator.of(context).pop('lost'),
+            ),
+          ]),
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    if (choice == 'return') {
+      final qty = await _askAmount(context, 'Emballages rendus',
+          suffix: '/ ${d.outstanding}');
+      if (qty == null || !mounted) return;
+      await BottleDepositService.registerReturn(d, qty.round());
+      if (!mounted) return;
+      AppSnack.success(context, 'Retour enregistré.');
+      setState(() {});
+      return;
+    }
+
+    final ok = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.report_gmailerrorred_outlined,
+      iconColor: Theme.of(context).semantic.danger,
+      title: 'Consigne perdue ?',
+      body: Text(
+          '${d.outstanding} emballage${d.outstanding > 1 ? 's' : ''} '
+          '(${CurrencyFormatter.format(d.outstandingAmount.toDouble())}) '
+          'seront enregistrés en perte : c\'est la boutique qui rachètera '
+          'les emballages au fournisseur.'),
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Déclarer la perte',
+      onConfirm: () {},
+    );
+    if (ok != true || !mounted) return;
+    await BottleDepositService.declareLost(
+      d,
+      declaredBy: LocalStorageService.getCurrentUser()?.id,
+    );
+    if (!mounted) return;
+    AppSnack.success(context, 'Perte enregistrée.');
+    setState(() {});
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 //  Onglet PERTES
 // ═══════════════════════════════════════════════════════════════════════
 class _LossesTab extends StatefulWidget {
@@ -1467,6 +2245,18 @@ String _dayLabel(DateTime d) =>
     '${d.day.toString().padLeft(2, '0')}/'
     '${d.month.toString().padLeft(2, '0')}/${d.year}';
 
+/// Unités proposées pour un ingrédient — volontairement courte et concrète :
+/// ce qu'un cuisinier achète réellement. Une unité déjà en base qui n'y figure
+/// pas est conservée et ajoutée à la liste par l'éditeur.
+const List<String> _kIngredientUnits = [
+  'g', 'kg', 'mL', 'L',
+  'pièce', 'sachet', 'paquet', 'boîte',
+  // Le casier et la bouteille sont les unités d'achat réelles des boissons
+  // (spec Lot B) : une brasserie livre au casier, le bar vend à la bouteille.
+  'bouteille', 'casier',
+  'carton', 'sac', 'bidon', 'seau', 'botte', 'tas',
+];
+
 /// Formate une quantité double sans « .0 » superflu.
 String _fmt(double v) => v == v.truncateToDouble()
     ? v.toInt().toString()
@@ -1533,7 +2323,7 @@ class _Card extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final sem = Theme.of(context).semantic;
     return Material(
-      color: cs.surface,
+      color: restoGlassFill(context),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,

@@ -50,6 +50,9 @@ class IngredientService {
   /// recette). `type` par défaut 'specialized' ; il bascule en 'shared'
   /// automatiquement dès qu'un même ingrédient est lié à ≥ 2 plats
   /// (maintenu par `RecipeService`).
+  ///
+  /// [purchaseDate] est purement informative (hotfix_142) : elle ne crée
+  /// aucune écriture de dépense — le coût matières est compté à la vente.
   static Future<Ingredient> create({
     required String shopId,
     required String name,
@@ -57,6 +60,7 @@ class IngredientService {
     int costPerUnit = 0,
     double quantity = 0,
     double alertThreshold = 0,
+    DateTime? purchaseDate,
   }) async {
     final ing = Ingredient(
       id: _id(),
@@ -66,6 +70,7 @@ class IngredientService {
       costPerUnit: costPerUnit,
       quantity: quantity,
       alertThreshold: alertThreshold,
+      purchaseDate: purchaseDate,
       createdAt: DateTime.now(),
     );
     await _put(ing);

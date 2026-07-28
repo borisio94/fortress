@@ -114,6 +114,7 @@ class SaleLocalDatasource {
       // map depuis l'entite sans merge, donc une omission effacerait la
       // table au premier ajout de plat a une commande en cours.
       'table_id':         order.tableId,
+      'tab_label':        order.tabLabel,
       'covers':           order.covers,
       'order_type':       order.orderType,
       'sent_to_kitchen':  order.sentToKitchen,
@@ -176,6 +177,7 @@ class SaleLocalDatasource {
       // map depuis l'entite sans merge, donc une omission effacerait la
       // table au premier ajout de plat a une commande en cours.
       'table_id':         order.tableId,
+      'tab_label':        order.tabLabel,
       'covers':           order.covers,
       'order_type':       order.orderType,
       'sent_to_kitchen':  order.sentToKitchen,
@@ -333,6 +335,7 @@ class SaleLocalDatasource {
       // map depuis l'entite sans merge, donc une omission effacerait la
       // table au premier ajout de plat a une commande en cours.
       'table_id':         order.tableId,
+      'tab_label':        order.tabLabel,
       'covers':           order.covers,
       'order_type':       order.orderType,
       'sent_to_kitchen':  order.sentToKitchen,
@@ -394,6 +397,7 @@ class SaleLocalDatasource {
       // map depuis l'entite sans merge, donc une omission effacerait la
       // table au premier ajout de plat a une commande en cours.
       'table_id':         order.tableId,
+      'tab_label':        order.tabLabel,
       'covers':           order.covers,
       'order_type':       order.orderType,
       'sent_to_kitchen':  order.sentToKitchen,
@@ -1499,6 +1503,7 @@ class SaleLocalDatasource {
       // les nullables par `??` — une valeur null en base y serait ignorée
       // et la commande garderait la table de `base`.
       tableId:            m['table_id'] as String?,
+      tabLabel:           m['tab_label'] as String?,
       // `covers` transite en `num` via le JSON Supabase : un cast direct
       // `as int?` lèverait sur un retour double.
       covers:             (m['covers'] as num?)?.toInt(),

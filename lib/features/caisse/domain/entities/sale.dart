@@ -327,6 +327,15 @@ class Sale extends Equatable {
   /// Table du plan de salle rattachée à la commande. `null` pour toute
   /// commande non servie en salle (e-commerce, à emporter, comptoir).
   final String? tableId;
+  /// Compte (addition) auquel appartient la commande — libellé libre :
+  /// « Compte 1 », « M. Ali »… (hotfix_143).
+  ///
+  /// Plusieurs comptes coexistent sur une même [tableId] : c'est ce champ qui
+  /// distingue deux additions à la même table. Il vit sur la COMMANDE et non
+  /// sur la table, car un compte peut exister sans table (plats à emporter).
+  /// `null` = commande sans compte nommé.
+  final String? tabLabel;
+
   /// Nombre de couverts du service. `null` hors service en salle.
   final int? covers;
   /// Canal de service : `dine_in` (salle) · `takeaway` · `delivery`.
@@ -377,6 +386,7 @@ class Sale extends Equatable {
     this.isApprovalSale = false,
     this.stockReserved  = false,
     this.tableId,
+    this.tabLabel,
     this.covers,
     this.orderType      = 'takeaway',
     this.sentToKitchen  = false,
@@ -452,6 +462,7 @@ class Sale extends Equatable {
     bool?     isApprovalSale,
     bool?     stockReserved,
     String?   tableId,
+    String?   tabLabel,
     int?      covers,
     String?   orderType,
     bool?     sentToKitchen,
@@ -502,6 +513,9 @@ class Sale extends Equatable {
     isApprovalSale: isApprovalSale ?? this.isApprovalSale,
     stockReserved:  stockReserved  ?? this.stockReserved,
     tableId:        clearTable ? null : (tableId ?? this.tableId),
+    // Le compte SURVIT au détachement de la table : une commande à emporter
+    // garde son compte, et un compte transféré ne doit pas perdre son nom.
+    tabLabel:       tabLabel ?? this.tabLabel,
     covers:         clearTable ? null : (covers  ?? this.covers),
     orderType:      orderType      ?? this.orderType,
     sentToKitchen:  sentToKitchen  ?? this.sentToKitchen,

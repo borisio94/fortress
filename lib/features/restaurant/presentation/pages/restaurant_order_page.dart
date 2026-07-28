@@ -16,6 +16,7 @@ import '../../domain/entities/restaurant_table.dart';
 import '../widgets/menu_item_tile.dart';
 import '../widgets/modifier_picker_sheet.dart';
 import '../widgets/order_recap_panel.dart';
+import '../../../../core/services/kitchen_ticket_printer.dart';
 
 /// Prise de commande pour une table (module restaurant, PR-2).
 ///
@@ -63,11 +64,15 @@ class _RestaurantOrderPageState extends State<RestaurantOrderPage> {
   void _load() {
     final table = RestaurantTableService.tableById(widget.tableId);
     if (table == null) return;
-    final order = RestaurantOrderService.currentOrderFor(table);
+    // Tournée EN ATTENTE et non « première commande de la table » : les
+    // tournées déjà envoyées sont figées, leur bon est parti en cuisine. En
+    // rouvrir une reviendrait à réécrire un bon déjà imprimé.
+    final order = RestaurantOrderService.pendingRoundFor(table);
     setState(() {
       _table = table;
       _existingOrder = order;
-      _covers = order?.covers ?? table.covers ?? 1;
+      _covers = (order?.covers ?? table.covers ?? 1)
+          .clamp(1, table.capacity);
       _lines
         ..clear()
         ..addAll(order?.items ?? const []);
@@ -185,16 +190,31 @@ class _RestaurantOrderPageState extends State<RestaurantOrderPage> {
         existing: _existingOrder,
       );
       if (thenSendToKitchen) {
-        await RestaurantOrderService.sendToKitchen(order);
+        // Numéro calculé AVANT l'envoi : une fois la tournée figée, elle
+        // compte dans le total et le numéro serait décalé d'une unité.
+        final round = RestaurantOrderService.roundNumberFor(
+            table, tabLabel: order.tabLabel);
+        await RestaurantOrderService.sendRound(order);
+        if (!mounted) return;
+        // Le bon part à l'impression : c'est le seul canal vers la cuisine,
+        // personne n'a d'écran là-bas.
+        await KitchenTicketPrinter.print(
+          context: context,
+          shopId: widget.shopId,
+          order: order,
+          tableName: table.name,
+          round: round,
+        );
       }
       if (!mounted) return;
       AppSnack.success(
           context,
           thenSendToKitchen
-              ? 'Commande envoyée en cuisine'
+              ? 'Tournée envoyée en cuisine'
               : 'Commande enregistrée');
-      // Rechargement : récupère l'id de commande fraîchement créé, sans quoi
-      // un second « Envoyer » créerait une deuxième commande pour la table.
+      // Rechargement : après un envoi, `pendingRoundFor` ne trouve plus rien
+      // et l'écran repart sur une tournée vide — prêt pour l'apéritif que le
+      // client demandera pendant la préparation.
       _load();
     } catch (e) {
       if (mounted) AppSnack.error(context, e.toString());
@@ -352,7 +372,7 @@ class _RestaurantOrderPageState extends State<RestaurantOrderPage> {
             return MenuItemTile(
               name: p.name,
               price: p.priceSellPos,
-              imageUrl: p.imageUrl,
+              imageUrl: p.mainImageUrl,
               hasModifiers: RestaurantOrderService
                   .modifiersFor(widget.shopId, p.id ?? '')
                   .isNotEmpty,
@@ -397,8 +417,11 @@ class _CoversSelector extends StatelessWidget {
           ),
           Text('$covers', style: AppTextStyles.subtitleBold),
           IconButton(
-            onPressed:
-                covers < capacity + 6 ? () => onChanged(covers + 1) : null,
+            // Plafonné à la CAPACITÉ de la table. L'ancienne tolérance de
+            // +6 laissait asseoir 10 personnes à une table de 4 : le plan de
+            // salle annonçait alors une occupation que la salle ne pouvait
+            // pas tenir. Pour un groupe plus grand, on ajoute une table.
+            onPressed: covers < capacity ? () => onChanged(covers + 1) : null,
             icon: const Icon(Icons.add_circle_outline_rounded),
           ),
         ],

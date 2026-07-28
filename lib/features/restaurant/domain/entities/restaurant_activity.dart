@@ -22,6 +22,14 @@ class RestaurantActivity {
   /// Seuil d'alerte global de l'activité (mode `stock`).
   final int stockThreshold;
 
+  /// Poste de service qui prépare les articles du secteur (hotfix_144) :
+  /// `cuisine` · `bar` · `chawarma` · `glacier` · `patisserie` · `autre`.
+  ///
+  /// `null` = non précisé. Le poste est alors DÉDUIT du [mode] (`stock` → bar,
+  /// `recipe` → cuisine) — cf. `RoundRouting.stationFor`. C'est ce qui permet
+  /// aux boutiques déjà en service de ne rien avoir à reparamétrer.
+  final String? station;
+
   final DateTime createdAt;
 
   const RestaurantActivity({
@@ -32,6 +40,7 @@ class RestaurantActivity {
     this.mode = 'stock',
     this.trackStock = true,
     this.stockThreshold = 0,
+    this.station,
   });
 
   bool get isStockMode => mode == 'stock';
@@ -42,6 +51,12 @@ class RestaurantActivity {
     String? mode,
     bool? trackStock,
     int? stockThreshold,
+    String? station,
+
+    /// Remet le poste à « non précisé » : `copyWith(station: null)` serait un
+    /// no-op silencieux (résolution par `??`), et le secteur resterait accroché
+    /// à son ancien poste. Même mécanisme que `Sale.clearTable`.
+    bool clearStation = false,
   }) =>
       RestaurantActivity(
         id: id,
@@ -51,9 +66,13 @@ class RestaurantActivity {
         mode: mode ?? this.mode,
         trackStock: trackStock ?? this.trackStock,
         stockThreshold: stockThreshold ?? this.stockThreshold,
+        station: clearStation ? null : (station ?? this.station),
       );
 
-  static const int currentSchemaVersion = 1;
+  /// v2 (hotfix_144) : ajout de [station]. Aucune step de migration — un champ
+  /// nullable ajouté se lit `null` sur les anciens enregistrements, ce qui est
+  /// exactement la valeur voulue (« poste non précisé »).
+  static const int currentSchemaVersion = 2;
   static const SchemaMigrator _migrator = SchemaMigrator(
     currentVersion: currentSchemaVersion,
     steps: {},
@@ -67,6 +86,7 @@ class RestaurantActivity {
         'mode': mode,
         'track_stock': trackStock,
         'stock_threshold': stockThreshold,
+        'station': station,
         'created_at': createdAt.toUtc().toIso8601String(),
       };
 
@@ -79,6 +99,11 @@ class RestaurantActivity {
       mode: (m['mode'] ?? 'stock').toString(),
       trackStock: m['track_stock'] as bool? ?? true,
       stockThreshold: (m['stock_threshold'] as num?)?.toInt() ?? 0,
+      // Chaîne vide traitée comme absente : un `station: ''` poussé par erreur
+      // violerait le CHECK SQL et l'upsert serait abandonné après 10 essais.
+      station: (m['station']?.toString().trim().isEmpty ?? true)
+          ? null
+          : m['station'].toString().trim(),
       createdAt: m['created_at'] == null
           ? DateTime.now()
           : (DateTime.tryParse(m['created_at'].toString())?.toLocal() ??

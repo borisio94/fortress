@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../shared/widgets/product_image_card.dart';
 
 /// Carte d'un article du menu, pensée pour la prise de commande en salle.
 ///
@@ -52,14 +53,30 @@ class MenuItemTile extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // La photo était reçue en paramètre mais jamais affichée : les
+              // plats apparaissaient comme des cartes vides à la prise de
+              // commande, alors qu'un serveur reconnaît un plat à son visuel
+              // avant de lire son nom.
               Expanded(
-                child: Text(
-                  name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.bodySmBold
-                      .copyWith(color: theme.colorScheme.onSurface),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ProductImageCard(
+                      imageUrl: imageUrl,
+                      fillParent: true,
+                      borderRadius: BorderRadius.zero,
+                    ),
+                  ),
                 ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.bodySmBold
+                    .copyWith(color: theme.colorScheme.onSurface),
               ),
               if (hasModifiers)
                 Row(

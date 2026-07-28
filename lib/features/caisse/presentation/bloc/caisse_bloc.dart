@@ -105,6 +105,20 @@ class UpdateOrderFee extends CaisseEvent {
 class ProcessSale extends CaisseEvent {}
 class ClearCart  extends CaisseEvent {}
 
+/// Compte (addition) du panier, reporté sur `Sale.tabLabel`.
+class SetOrderTab extends CaisseEvent {
+  final String? label;
+  SetOrderTab(this.label);
+  @override List<Object?> get props => [label];
+}
+
+/// Note libre du panier, reportée sur `Sale.notes` à l'enregistrement.
+class SetOrderNote extends CaisseEvent {
+  final String? note;
+  SetOrderNote(this.note);
+  @override List<Object?> get props => [note];
+}
+
 /// Rattache le panier à un LIEU (boutique OU partenaire) SANS toucher au mode
 /// de livraison. Garantit `deliveryLocationId` non vide → le bouton
 /// « Enregistrer la commande » n'est plus grisé pour une vente boutique par
@@ -291,6 +305,15 @@ class CaisseState extends Equatable {
   /// reconnexion réseau).
   final String         idempotencyKey;
 
+  /// Compte (addition) du panier — libellé libre, sans fiche client.
+  /// Reporté sur `Sale.tabLabel`. Permet plusieurs additions sur une table,
+  /// et existe aussi hors table (plats à emporter).
+  final String?        tabLabel;
+
+  /// Note libre saisie dans le panier (« sans piment », « table 4 », …).
+  /// Reportée sur `Sale.notes` à l'enregistrement comme à l'encaissement.
+  final String?        note;
+
   CaisseState({
     this.items          = const [],
     this.discountAmount = 0,
@@ -317,6 +340,8 @@ class CaisseState extends Equatable {
     this.deliveryQuartier,
     this.deliveryZone,
     this.deliveryPrice = 0,
+    this.note,
+    this.tabLabel,
     String? idempotencyKey,
   }) : idempotencyKey = idempotencyKey ?? Uuid.v4();
 
@@ -364,6 +389,10 @@ class CaisseState extends Equatable {
     String? deliveryQuartier,
     String? deliveryZone,
     double? deliveryPrice,
+    String? note,
+    bool clearNote = false,
+    String? tabLabel,
+    bool clearTabLabel = false,
     bool clearDelivery = false,
     bool clearDeliveryDate = false,
   }) => CaisseState(
@@ -415,6 +444,8 @@ class CaisseState extends Equatable {
                         : (deliveryZone ?? this.deliveryZone),
     deliveryPrice:      clearDelivery ? 0
                         : (deliveryPrice ?? this.deliveryPrice),
+    note:               clearNote ? null : (note ?? this.note),
+    tabLabel:           clearTabLabel ? null : (tabLabel ?? this.tabLabel),
   );
 
   @override
@@ -425,7 +456,7 @@ class CaisseState extends Equatable {
        deliveryMode, deliveryLocationId, deliveryPersonName, deliveryDate,
        deliveryCity, deliveryAddress,
        shipmentCity, shipmentAgency, shipmentHandler,
-       deliveryQuartier, deliveryZone, deliveryPrice];
+       deliveryQuartier, deliveryZone, deliveryPrice, note, tabLabel];
 }
 
 // ─── Bloc ─────────────────────────────────────────────────────────────────────
@@ -445,6 +476,8 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
     on<SetCartLocation>((event, emit) =>
         emit(state.copyWith(deliveryLocationId: event.locationId)));
     on<SetTaxRate>(_onSetTaxRate);
+    on<SetOrderNote>(_onSetOrderNote);
+    on<SetOrderTab>(_onSetOrderTab);
     on<SetSelectedClient>(_onSetClient);
     on<SaveOrder>(_onSaveOrder);
     on<UpdateOrderStatus>(_onUpdateOrderStatus);
@@ -726,6 +759,8 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
         // GF-1 : clé d'idempotence du panier — protège contre les doublons
         // de vente côté Supabase (UNIQUE constraint sur orders.idempotency_key).
         idempotencyKey: state.idempotencyKey,
+        notes:          state.note,
+        tabLabel:       state.tabLabel,
       );
       await ds.saveOrder(sale);
 
@@ -1072,6 +1107,23 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
   void _onSetTaxRate(SetTaxRate event, Emitter<CaisseState> emit) =>
       emit(state.copyWith(taxRate: event.rate));
 
+  /// Note du panier. Une note vidée par l'utilisateur est stockée `null` et
+  /// non `''` : `Sale.notes` doit rester absent plutôt que vide.
+  /// Compte du panier. Même normalisation que la note : vidé → `null`, pour
+  /// que `Sale.tabLabel` reste absent plutôt que vide.
+  void _onSetOrderTab(SetOrderTab event, Emitter<CaisseState> emit) {
+    final t = event.label?.trim();
+    final empty = t == null || t.isEmpty;
+    emit(state.copyWith(tabLabel: empty ? null : t, clearTabLabel: empty));
+  }
+
+  void _onSetOrderNote(SetOrderNote event, Emitter<CaisseState> emit) {
+    final trimmed = event.note?.trim();
+    emit(state.copyWith(
+        note: (trimmed == null || trimmed.isEmpty) ? null : trimmed,
+        clearNote: trimmed == null || trimmed.isEmpty));
+  }
+
   void _onSetClient(SetSelectedClient event, Emitter<CaisseState> emit) =>
       emit(event.client == null
           ? state.copyWith(clearClient: true)
@@ -1135,6 +1187,10 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
         createdAt: o.createdAt,
       )
           : null,
+      // Compte et note de la commande : sans ça, rouvrir une commande pour la
+      // modifier puis l'enregistrer les effacerait toutes les deux.
+      tabLabel:           o.tabLabel,
+      note:               o.notes,
       // Restaurer la date de livraison + le mode pour pré-remplir l'UI.
       deliveryDate:       o.scheduledAt,
       deliveryMode:       o.deliveryMode,
@@ -1329,6 +1385,8 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
           // Vente « à choisir sur place » : le moteur réservera le stock et
           // passera la commande en `processing` (cf. reserveApprovalOrder).
           isApprovalSale: event.isApprovalSale,
+          notes:          state.note,
+          tabLabel:       state.tabLabel,
         );
         if (event.isApprovalSale) {
           // Réserve (décrémente) tous les articles + persiste la commande en

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/config/restaurant_mode.dart';
+import '../../../restaurant/presentation/widgets/resto_surfaces.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -38,10 +39,20 @@ class CartWidget extends ConsumerWidget {
     // Fond panier = surface neutre cohérente avec les autres surfaces
     // (cards dashboard, inventaire). Pas de dégradé pour éviter la
     // dissonance visuelle inter-pages.
+    //
+    // En RESTAURATION uniquement, la surface est translucide pour laisser
+    // deviner le décor de salle derrière le panier. Historique du réglage :
+    // 0,60 → 0,40 (trop transparent, les lignes se noyaient dans la photo)
+    // → 0,80 → 0,90. L'e-commerce garde un fond plein — sans ce garde, sa caisse
+    // deviendrait illisible par-dessus la grille produits (cf. règle
+    // « restaurant only »).
+    final cartBg = isRestaurantShop(shopId)
+        ? cs.surface.withValues(alpha: 0.90)
+        : cs.surface;
     return LayoutBuilder(
         builder: (context, constraints) => BlocBuilder<CaisseBloc, CaisseState>(
           builder: (context, state) => ColoredBox(
-            color: cs.surface,
+            color: cartBg,
             child: SizedBox(
             height: constraints.maxHeight.isFinite
                 ? constraints.maxHeight
@@ -71,6 +82,32 @@ class CartWidget extends ConsumerWidget {
                       indent: 16),
                   itemBuilder: (ctx, i) {
                     final item = state.items[i];
+                    if (isRestaurantShop(shopId)) {
+                      return _RestoCartItemRow(
+                        item: item,
+                        onDecrement: () => ctx.read<CaisseBloc>().add(
+                            UpdateItemQuantity(item.productId,
+                                item.quantity - 1,
+                                variantName: item.variantName)),
+                        onIncrement: () => ctx.read<CaisseBloc>().add(
+                            UpdateItemQuantity(item.productId,
+                                item.quantity + 1,
+                                variantName: item.variantName)),
+                        onEditQty: () => _showQtyEditor(ctx, item),
+                        onEditPrice: () {
+                          if (!canApplyDiscount) {
+                            AppSnack.error(ctx,
+                                'Action réservée : applique une remise '
+                                'requiert la permission "sales.discount".');
+                            return;
+                          }
+                          _showPriceEditor(ctx, item);
+                        },
+                        onRemove: () => ctx.read<CaisseBloc>().add(
+                            RemoveItemFromCart(item.productId,
+                                variantName: item.variantName)),
+                      );
+                    }
                     return _CartItemRow(
                       item:        item,
                       onDecrement: () => ctx.read<CaisseBloc>().add(
@@ -246,6 +283,114 @@ class _QtyEditorSheetState extends State<_QtyEditorSheet> {
   }
 }
 
+/// Champ du COMPTE (addition) du panier.
+///
+/// Texte libre — « Compte 1 », « M. Ali », « Table 5 groupe fenêtre ». C'est
+/// lui qui permet plusieurs additions sur une même table : deux commandes de
+/// comptes différents ne se mélangent pas, même assises ensemble.
+///
+/// Sans table non plus : un compte à emporter est simplement une commande avec
+/// un libellé et sans `tableId`.
+class _OrderTabField extends StatefulWidget {
+  final String? label;
+  const _OrderTabField({required this.label});
+
+  @override
+  State<_OrderTabField> createState() => _OrderTabFieldState();
+}
+
+class _OrderTabFieldState extends State<_OrderTabField> {
+  late final _ctrl = TextEditingController(text: widget.label ?? '');
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _OrderTabField old) {
+    super.didUpdateWidget(old);
+    // Ne réécrire que si la valeur diffère : sinon le curseur sauterait au
+    // début à chaque frappe (l'état change à chaque caractère).
+    final incoming = widget.label ?? '';
+    if (incoming != _ctrl.text) _ctrl.text = incoming;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return TextField(
+      controller: _ctrl,
+      textCapitalization: TextCapitalization.sentences,
+      style: AppTextStyles.input,
+      onChanged: (v) => context.read<CaisseBloc>().add(SetOrderTab(v)),
+      decoration: InputDecoration(
+        hintText: 'Compte (ex. Compte 1, M. Ali…)',
+        isDense: true,
+        prefixIcon: const Icon(Icons.receipt_long_outlined, size: 18),
+        suffixIcon: Icon(Icons.edit_rounded,
+            size: 18, color: theme.colorScheme.primary),
+      ),
+    );
+  }
+}
+
+/// Champ de note libre du panier (« sans piment », « table 4 »…).
+///
+/// Envoie `SetOrderNote` à CHAQUE frappe : la note doit survivre à un
+/// enregistrement immédiat, sans dépendre d'une perte de focus. Le bloc
+/// normalise (trim, vide → null), donc pas de doublon de logique ici.
+class _OrderNoteField extends StatefulWidget {
+  final String? note;
+  const _OrderNoteField({required this.note});
+
+  @override
+  State<_OrderNoteField> createState() => _OrderNoteFieldState();
+}
+
+class _OrderNoteFieldState extends State<_OrderNoteField> {
+  late final _ctrl = TextEditingController(text: widget.note ?? '');
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _OrderNoteField old) {
+    super.didUpdateWidget(old);
+    // Panier vidé / commande chargée pour édition : la note vient de l'état.
+    // On ne réécrit QUE si elle diffère, sinon le curseur sauterait à chaque
+    // frappe (l'état change à chaque caractère).
+    final incoming = widget.note ?? '';
+    if (incoming != _ctrl.text) _ctrl.text = incoming;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return TextField(
+      controller: _ctrl,
+      textCapitalization: TextCapitalization.sentences,
+      style: AppTextStyles.input,
+      onChanged: (v) => context.read<CaisseBloc>().add(SetOrderNote(v)),
+      decoration: InputDecoration(
+        hintText: 'Ajouter une note…',
+        isDense: true,
+        prefixIcon: const Icon(Icons.sticky_note_2_outlined, size: 18),
+        suffixIcon: Icon(Icons.edit_rounded,
+            size: 18, color: theme.colorScheme.primary),
+      ),
+    );
+  }
+}
+
+/// Taux de taxe lisible : « 10 » et non « 10.0 ».
+String _fmtRate(double v) =>
+    v == v.truncateToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
+
 // ─── Header ───────────────────────────────────────────────────────────────────
 class _CartHeader extends StatelessWidget {
   final CaisseState state;
@@ -274,10 +419,32 @@ class _CartHeader extends StatelessWidget {
                 size: isCompact ? 15 : 16,
                 color: AppColors.textSecondary),
             SizedBox(width: isCompact ? 6 : 8),
-            Expanded(child: Text(l.caisseCartTitle,
-                style: AppTextStyles.body.copyWith(
-                    fontSize: isCompact ? 13 : 14,
-                    fontWeight: FontWeight.w700))),
+            // En restauration : titre affirmé + décompte en sous-titre, comme
+            // la maquette « Mon Panier ».
+            if (isRestaurantShop(shopId))
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // `label` (14) et non `subtitleBold` (16) : le panier
+                    // paraissait écrit plus gros que le reste de l'app.
+                    Text('Mon Panier',
+                        style: AppTextStyles.label.copyWith(
+                            color: Theme.of(context).colorScheme.onSurface)),
+                    Text(
+                        state.itemCount == 0
+                            ? 'Aucun article'
+                            : '${state.itemCount} article'
+                                '${state.itemCount > 1 ? 's' : ''} '
+                                'sélectionné${state.itemCount > 1 ? 's' : ''}',
+                        style: AppTextStyles.caption),
+                  ],
+                ),
+              )
+            else
+              Expanded(child: Text(l.caisseCartTitle,
+                  style: AppTextStyles.bodyBold)),
             if (state.itemCount > 0)
               Container(
                 padding: EdgeInsets.symmetric(
@@ -286,12 +453,13 @@ class _CartHeader extends StatelessWidget {
                 decoration: BoxDecoration(color: AppColors.primary,
                     borderRadius: BorderRadius.circular(12)),
                 child: Text('${state.itemCount}',
-                    style: AppTextStyles.micro.copyWith(
-                        fontSize: isCompact ? 10 : 11,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white)),
+                    style: AppTextStyles.microBold
+                        .copyWith(color: Colors.white)),
               ),
-            if (state.items.isNotEmpty) ...[
+            // En restauration, le pied de panier porte déjà un bouton
+            // « Vider » : ce raccourci rouge en tête faisait doublon, et deux
+            // commandes destructrices à deux endroits invitent à l'erreur.
+            if (state.items.isNotEmpty && !isRestaurantShop(shopId)) ...[
               SizedBox(width: isCompact ? 4 : 8),
               TextButton(
                 onPressed: () =>
@@ -304,9 +472,8 @@ class _CartHeader extends StatelessWidget {
                   minimumSize: Size.zero,
                 ),
                 child: Text(l.caisseClear,
-                    style: AppTextStyles.captionHint.copyWith(
-                        fontSize: isCompact ? 11 : 12,
-                        color: AppColors.error)),
+                    style: AppTextStyles.caption
+                        .copyWith(color: AppColors.error)),
               ),
             ],
           ]),
@@ -361,6 +528,178 @@ class _PriceAlertBanner extends StatelessWidget {
 }
 
 // ─── Ligne article ────────────────────────────────────────────────────────────
+/// Ligne de panier — variante RESTAURATION (maquette « Mon Panier »).
+///
+/// Carte arrondie sombre : photo · nom · pastille prix unitaire · « × » ·
+/// total de ligne en gros · quantité · corbeille.
+///
+/// Deux niveaux : identité du plat en haut (photo · nom · prix unitaire ·
+/// corbeille à l'extrême droite), ajustement en bas (− quantité + · sous-total
+/// de la ligne).
+///
+/// Décrémenter jusqu'à 0 retire la ligne : c'est déjà le comportement de
+/// `UpdateItemQuantity` dans le bloc (`quantity <= 0` → `RemoveItemFromCart`),
+/// donc aucune logique n'est dupliquée ici.
+class _RestoCartItemRow extends StatelessWidget {
+  final SaleItem     item;
+  final VoidCallback onDecrement;
+  final VoidCallback onIncrement;
+  final VoidCallback onEditQty;
+  final VoidCallback onEditPrice;
+  final VoidCallback onRemove;
+
+  const _RestoCartItemRow({
+    required this.item,
+    required this.onDecrement,
+    required this.onIncrement,
+    required this.onEditQty,
+    required this.onEditPrice,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs    = theme.colorScheme;
+    final sem   = theme.semantic;
+    final hasPriceAlert = item.isPriceAlertTriggered;
+    final priceModified = item.customPrice != null;
+    final amountColor = hasPriceAlert ? AppColors.warning : AppColors.primary;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: cs.onSurface.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: sem.borderSubtle),
+      ),
+      // Tout sur UNE ligne : le stepper et le sous-total occupent l'espace qui
+      // restait vide entre le prix unitaire et la corbeille. La ligne perd
+      // ainsi la moitié de sa hauteur, et le panier affiche plus d'articles
+      // sans défiler.
+      child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+        ProductImageCard(
+          imageUrl: item.imageUrl,
+          width: 44,
+          height: 44,
+          borderRadius: BorderRadius.circular(9),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: 3,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(item.productName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
+              const SizedBox(height: 5),
+              // Pastille prix unitaire — tappable pour corriger le prix.
+              InkWell(
+                onTap: onEditPrice,
+                borderRadius: BorderRadius.circular(20),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: amountColor.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(
+                        priceModified
+                            ? Icons.edit_rounded
+                            : Icons.check_circle_rounded,
+                        size: 13,
+                        color: amountColor),
+                    const SizedBox(width: 5),
+                    Text(CurrencyFormatter.format(item.effectivePrice),
+                        style: AppTextStyles.caption
+                            .copyWith(color: amountColor)),
+                  ]),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        // ── Stepper de quantité ────────────────────────────────────────
+        Container(
+          decoration: BoxDecoration(
+            color: cs.onSurface.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(color: sem.borderSubtle),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            // À 1, « − » retire la ligne : le bloc traite quantity <= 0 comme
+            // un retrait. L'icône change pour l'annoncer.
+            _QtyBtn(
+                dense: true,
+                icon: item.quantity <= 1
+                    ? Icons.delete_outline_rounded
+                    : Icons.remove_rounded,
+                onTap: onDecrement),
+            // Quantité tappable → saisie directe, utile pour les grandes
+            // quantités (10 bouteilles ne se tapent pas 10 fois).
+            InkWell(
+              onTap: onEditQty,
+              child: Container(
+                constraints: const BoxConstraints(minWidth: 30),
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                alignment: Alignment.center,
+                child: Text('${item.quantity}',
+                    style:
+                        AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
+              ),
+            ),
+            _QtyBtn(
+                dense: true, icon: Icons.add_rounded, onTap: onIncrement),
+          ]),
+        ),
+        const SizedBox(width: 10),
+        // ── Sous-total de la ligne ─────────────────────────────────────
+        // `label` (14) et non `subtitleBold` (16) : à 16 le montant de ligne
+        // rivalisait avec le TOTAL du panier, alors qu'il lui est subordonné.
+        Expanded(
+          flex: 2,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Sous-total',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.micro),
+              Text(CurrencyFormatter.format(item.subtotal),
+                  textAlign: TextAlign.end,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.bodyBold.copyWith(color: amountColor)),
+            ],
+          ),
+        ),
+        // Respiration entre le montant et la corbeille : collés, le pouce
+        // visait l'un en croyant toucher l'autre.
+        const SizedBox(width: 10),
+        // Corbeille à l'extrême droite, à l'écart du stepper : un doigt qui
+        // vise « − » ne doit jamais supprimer la ligne par erreur.
+        IconButton(
+          onPressed: onRemove,
+          tooltip: 'Retirer',
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+          icon: Icon(Icons.delete_outline_rounded,
+              size: 19, color: sem.danger),
+        ),
+      ]),
+    );
+  }
+}
+
 class _CartItemRow extends StatelessWidget {
   final SaleItem     item;
   final VoidCallback onDecrement;
@@ -379,13 +718,12 @@ class _CartItemRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasPriceAlert = item.isPriceAlertTriggered;
     final priceModified = item.customPrice != null;
-    // Spec round 9 : compactage mobile. Image 36 (vs 44), variante 9
-    // (vs 10), qty 10 (vs 13). Desktop garde les anciennes tailles.
+    // Compactage mobile : seule l'IMAGE varie encore. Les tailles de police
+    // passent par les échelons `AppTextStyles` — la règle du projet interdit
+    // les `fontSize` en dur, et des valeurs sur mesure (9/10/11/12/13) rendaient
+    // ce panier incohérent avec le reste de l'application.
     final isCompact = MediaQuery.of(context).size.width < 900;
     final imageSize = isCompact ? 36.0 : 44.0;
-    final variantFs = isCompact ? 9.0 : 10.0;
-    final qtyFs     = isCompact ? 10.0 : 13.0;
-    final subtotalFs= isCompact ? 11.0 : 12.0;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
@@ -407,8 +745,7 @@ class _CartItemRow extends StatelessWidget {
                     maxLines: 1, overflow: TextOverflow.ellipsis),
                 if (item.variantName != null)
                   Text(item.variantName!,
-                      style: AppTextStyles.bodySm.copyWith(
-                          fontSize: variantFs,
+                      style: AppTextStyles.micro.copyWith(
                           color: AppColors.primary,
                           fontWeight: FontWeight.w500),
                       maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -460,9 +797,7 @@ class _CartItemRow extends StatelessWidget {
         // Sous-total + stepper
         Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
           Text(CurrencyFormatter.format(item.subtotal),
-              style: AppTextStyles.body.copyWith(
-                  fontSize: subtotalFs,
-                  fontWeight: FontWeight.w700,
+              style: AppTextStyles.captionBold.copyWith(
                   color: hasPriceAlert
                       ? AppColors.warning
                       : AppColors.primary)),
@@ -481,9 +816,9 @@ class _CartItemRow extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 10, vertical: 4),
                   child: Text('${item.quantity}',
-                      style: AppTextStyles.body.copyWith(
-                          fontSize: qtyFs,
-                          fontWeight: FontWeight.w700)),
+                      style: isCompact
+                          ? AppTextStyles.microBold
+                          : AppTextStyles.bodyBold),
                 ),
               ),
               _QtyBtn(icon: Icons.add_rounded, onTap: onIncrement),
@@ -971,11 +1306,34 @@ class _CartFooter extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
+        // En restauration, TRANSPARENT : le panier peint déjà son fond
+        // translucide sur toute sa hauteur (cf. `cartBg`). Repeindre ici une
+        // surface pleine créait une seconde couche opaque, et le bas du panier
+        // devenait un aplat alors que le haut laissait voir le décor.
+        color: isRestaurantShop(shopId)
+            ? Colors.transparent
+            : Theme.of(context).colorScheme.surface,
         border: Border(top: BorderSide(
             color: Theme.of(context).semantic.borderSubtle))),
     child: Column(children: [
+      // Note libre — restauration uniquement. Persistée sur `Sale.notes` via
+      // `SetOrderNote` : ce n'est pas un champ décoratif.
+      if (isRestaurantShop(shopId)) ...[
+        _OrderTabField(label: state.tabLabel),
+        const SizedBox(height: 8),
+        _OrderNoteField(note: state.note),
+        const SizedBox(height: 10),
+      ],
       _Line(l.caisseSubtotal, CurrencyFormatter.format(state.subtotal)),
+      // Ligne de taxe : affichée dès qu'un taux est configuré sur la vente.
+      // Elle existait déjà dans le calcul du total (`state.taxAmount`) mais
+      // n'apparaissait nulle part — le client voyait un total supérieur à la
+      // somme des lignes sans explication.
+      if (state.taxRate > 0) ...[
+        const SizedBox(height: 4),
+        _Line('Taxe (${_fmtRate(state.taxRate)} %)',
+            CurrencyFormatter.format(state.taxAmount)),
+      ],
       if (state.totalFees > 0) ...[
         const SizedBox(height: 4),
         _Line('Frais', CurrencyFormatter.format(state.totalFees)),
@@ -991,27 +1349,51 @@ class _CartFooter extends StatelessWidget {
       // agrandi (échelon `title`). Donne le relief qui manquait pour que le
       // caissier relise le montant avant de valider (au lieu du même fond
       // blanc que les articles).
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-        decoration: BoxDecoration(
-          color: AppColors.primarySurface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-              color: AppColors.primary.withValues(alpha: 0.20)),
-        ),
-        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.center, children: [
-          Text(l.total.toUpperCase(),
-              style: AppTextStyles.subtitleBold.copyWith(
-                  fontWeight: FontWeight.w800, color: AppColors.primary)),
-          Flexible(
-            child: Text(CurrencyFormatter.format(state.total),
-                textAlign: TextAlign.end,
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.title.copyWith(color: AppColors.primary)),
+      // En restauration : ligne simple « Total : » + montant, comme la
+      // maquette. Ailleurs : bloc encadré, qui donne le relief nécessaire au
+      // caissier pour relire le montant avant de valider.
+      if (isRestaurantShop(shopId))
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text('${l.total} :',
+                    style: AppTextStyles.label.copyWith(
+                        color: Theme.of(context).colorScheme.onSurface)),
+                Flexible(
+                  child: Text(CurrencyFormatter.format(state.total),
+                      textAlign: TextAlign.end,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.subtitleBold
+                          .copyWith(color: AppColors.primary)),
+                ),
+              ]),
+        )
+      else
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          decoration: BoxDecoration(
+            color: AppColors.primarySurface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: AppColors.primary.withValues(alpha: 0.20)),
           ),
-        ]),
-      ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center, children: [
+            Text(l.total.toUpperCase(),
+                style: AppTextStyles.subtitleBold.copyWith(
+                    fontWeight: FontWeight.w800, color: AppColors.primary)),
+            Flexible(
+              child: Text(CurrencyFormatter.format(state.total),
+                  textAlign: TextAlign.end,
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.title.copyWith(color: AppColors.primary)),
+            ),
+          ]),
+        ),
       const SizedBox(height: 12),
       // Date de livraison déplacée vers le sheet "Enregistrer la commande"
       // qui s'ouvre au clic sur le bouton du panier (allège l'UI panier).
@@ -1050,10 +1432,18 @@ class _CartFooter extends StatelessWidget {
             final theme   = Theme.of(context);
             final cs      = theme.colorScheme;
             final sem     = theme.semantic;
+            // L'état « bloqué » se signalait par une transparence de 0,45 —
+            // par-dessus un panier translucide, le bouton devenait olive et
+            // illisible. En restauration on compose cette teinte sur la
+            // surface : même atténuation visuelle, opacité pleine.
+            final resto = isRestaurantShop(shopId);
             final bgColor = blockedBecauseSaved
                 ? sem.success
                 : isBlocked
-                    ? cs.primary.withValues(alpha: 0.45)
+                    ? (resto
+                        ? Color.alphaBlend(
+                            cs.primary.withValues(alpha: 0.45), cs.surface)
+                        : cs.primary.withValues(alpha: 0.45))
                     : cs.primary;
 
             VoidCallback? buildOnPressed() {
@@ -1125,6 +1515,79 @@ class _CartFooter extends StatelessWidget {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(btnRadius)),
             );
+
+            // ── RESTAURATION : Vider · Commander · Payer ────────────────
+            //
+            // « Payer » n'invente aucun flux : il ouvre la page de paiement
+            // (`/caisse/payment`), celle qu'empruntait déjà la caisse hors
+            // e-commerce. Elle était devenue inatteignable depuis que
+            // `kEcommerceOnlyMode` impose « Enregistrer la commande ».
+            //
+            // Le garde est `isRestaurantShop(shopId)` — déterministe par
+            // boutique, et non l'ancien `currentShopProvider` non réactif qui
+            // faisait apparaître le mauvais bouton en e-commerce.
+            if (resto) {
+              final secondaryStyle = ElevatedButton.styleFrom(
+                // OPAQUE : un fond en alpha laissait passer le décor et
+                // délavait le libellé (« Payer » quasi illisible). On compose
+                // l'incrustation sur la surface pour obtenir la même teinte en
+                // pleine opacité.
+                backgroundColor: restoOpaqueOverlay(context, 0.10),
+                foregroundColor: cs.onSurface,
+                // États désactivés OPAQUES eux aussi : par défaut Material
+                // applique une opacité de 0,12 qui laissait « Payer » quasi
+                // invisible par-dessus le décor.
+                disabledBackgroundColor: restoOpaqueOverlay(context, 0.06),
+                disabledForegroundColor:
+                    cs.onSurface.withValues(alpha: 0.45),
+                elevation: 0,
+                minimumSize: btnMinH,
+                padding: btnPad,
+                textStyle: AppTextStyles.label,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(btnRadius)),
+              );
+              return Row(children: [
+                Expanded(
+                  child: ElevatedButton(
+                    style: secondaryStyle,
+                    onPressed: state.items.isEmpty
+                        ? null
+                        : () => context.read<CaisseBloc>().add(ClearCart()),
+                    child: const Text('Vider'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Action principale — même comportement que le bouton unique
+                // (sheet de création puis SaveOrder).
+                Expanded(
+                  flex: 2,
+                  child: Tooltip(
+                    message: missing ?? '',
+                    triggerMode: missing == null
+                        ? TooltipTriggerMode.manual
+                        : TooltipTriggerMode.longPress,
+                    child: ElevatedButton(
+                      style: buttonStyle,
+                      onPressed: buildOnPressed(),
+                      child: Text(state.orderSaved == true
+                          ? 'Commande enregistrée ✓'
+                          : 'Commander'),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    style: secondaryStyle,
+                    onPressed: isBlocked
+                        ? null
+                        : () => context.push('/shop/$shopId/caisse/payment'),
+                    child: const Text('Payer'),
+                  ),
+                ),
+              ]);
+            }
 
             final btn = isEcommerce
                 ? ElevatedButton.icon(
@@ -1851,17 +2314,31 @@ class _QuickPriceChip extends StatelessWidget {
 class _QtyBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _QtyBtn({required this.icon, required this.onTap});
+
+  /// Variante resserrée, utilisée par la ligne de panier RESTAURANT où le
+  /// stepper partage sa ligne avec le nom, le prix et le sous-total.
+  ///
+  /// La taille par défaut n'est PAS réduite : elle avait été portée à 34/38 px
+  /// précisément parce que 22 px passait sous le seuil ergonomique et générait
+  /// des erreurs de tap. Un `dense` séparé évite de défaire ce correctif pour
+  /// la caisse e-commerce.
+  final bool dense;
+
+  const _QtyBtn({
+    required this.icon,
+    required this.onTap,
+    this.dense = false,
+  });
+
   @override
   Widget build(BuildContext context) {
-    // Aligné sur la taille du bouton "modifier prix" du même panier
-    // (22 mobile / 26 desktop) pour cohérence visuelle. Plus discret
-    // qu'avant — la card produit reste lisible avec moins de bruit.
     final isCompact = MediaQuery.of(context).size.width < 900;
-    // Cibles tactiles agrandies (≈34/38 vs 22/26) : l'ancien 22px était
-    // sous le seuil ergonomique et générait des erreurs de tap sur mobile.
-    final boxSize  = isCompact ? 34.0 : 38.0;
-    final iconSize = isCompact ? 18.0 : 20.0;
+    final boxSize  = dense
+        ? (isCompact ? 28.0 : 30.0)
+        : (isCompact ? 34.0 : 38.0);
+    final iconSize = dense
+        ? (isCompact ? 15.0 : 16.0)
+        : (isCompact ? 18.0 : 20.0);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),

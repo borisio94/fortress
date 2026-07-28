@@ -53,6 +53,9 @@ import '../../features/restaurant/presentation/pages/restaurant_dashboard_page.d
 import '../../features/restaurant/presentation/pages/restaurant_menu_page.dart';
 import '../../features/restaurant/presentation/pages/finances_hub_page.dart';
 import '../../features/restaurant/presentation/pages/inventory_reconcile_page.dart';
+import '../../features/restaurant/presentation/pages/cash_closure_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_staff_page.dart';
+import '../../features/restaurant/presentation/pages/timeclock_page.dart';
 import '../../features/inventaire/presentation/pages/product_form_page.dart';
 import '../../features/inventaire/presentation/pages/reception_page.dart';
 import '../../features/inventaire/presentation/pages/incidents_page.dart';
@@ -115,6 +118,7 @@ import '../../shared/widgets/adaptive_scaffold.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 import 'route_names.dart';
 import '../../shared/providers/current_shop_provider.dart';
+import '../../features/restaurant/presentation/pages/restaurant_service_page.dart';
 
 /// Transition appliquée aux 8 pages "shell" (Dashboard, Caisse, Inventaire,
 /// Clients, Finances, Commandes, Membres, Paramètres).
@@ -791,6 +795,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           // par deeplink : la page se contente d'afficher un plan vide si la
           // boutique n'est pas un établissement de restauration (aucune donnée
           // sensible exposée).
+          // Écran de SERVICE — poste de travail du caissier (Lot C) : état du
+          // restaurant à gauche, compte en cours à droite, sans navigation.
+          GoRoute(path: '/shop/:shopId/restaurant/service',
+              pageBuilder: (c, s) => _shellPage(s,
+                  RestaurantServicePage(shopId: s.pathParameters['shopId']!))),
           GoRoute(path: '/shop/:shopId/restaurant/tables',
               pageBuilder: (c, s) => _shellPage(s,
                   RestaurantTablesPage(shopId: s.pathParameters['shopId']!))),
@@ -809,6 +818,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               pageBuilder: (c, s) => _shellPage(s,
                   InventoryReconcilePage(
                       shopId: s.pathParameters['shopId']!))),
+          // Clôture de caisse aveugle X/Z (Lot C) — accessible à tout membre
+          // qui encaisse : c'est LE caissier qui compte. Seul l'historique des
+          // écarts est filtré, à l'intérieur de la page.
+          GoRoute(path: '/shop/:shopId/restaurant/caisse/cloture',
+              pageBuilder: (c, s) => _shellPage(s,
+                  CashClosurePage(shopId: s.pathParameters['shopId']!))),
+          // Personnel du restaurant (Lot D) : équipe, heures, paie.
+          GoRoute(path: '/shop/:shopId/restaurant/personnel',
+              pageBuilder: (c, s) => _shellPage(s,
+                  RestaurantStaffPage(shopId: s.pathParameters['shopId']!))),
           GoRoute(path: '/shop/:shopId/parametres/menu-modifiers',
               builder: (c, s) => MenuModifiersPage(
                     shopId: s.pathParameters['shopId']!,
@@ -826,6 +845,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                     shopId:  s.pathParameters['shopId']!,
                     tableId: s.pathParameters['tableId']!,
                   )),
+          // Badgeuse (Lot D) — HORS shell à dessein : posée en libre-service à
+          // l'entrée du personnel, elle ne doit donner accès à aucune autre
+          // page de l'application. Une seule sortie, par le bouton fermer.
+          GoRoute(path: '/shop/:shopId/restaurant/pointage',
+              builder: (c, s) =>
+                  TimeclockPage(shopId: s.pathParameters['shopId']!)),
           // Carte / inventaire : deux écrans selon le secteur. En
           // restauration c'est « Menu » — grille de plats avec photo, note
           // et ajout au panier à emporter. Route unique pour que les liens

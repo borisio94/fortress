@@ -4,9 +4,11 @@ import '../../features/dashboard/data/dashboard_providers.dart' show DashRange;
 import '../storage/hive_boxes.dart';
 import '../storage/local_storage_service.dart';
 import 'activity_service.dart';
+import 'daily_expense_service.dart';
 import 'fixed_charge_service.dart';
 import 'loss_service.dart';
 import 'recipe_service.dart';
+import 'staff_service.dart';
 
 /// Résultat par secteur d'activité (`restaurant_activities`).
 ///
@@ -52,8 +54,19 @@ class RestaurantFinanceReport {
   /// Ventes encaissées (lignes de commandes clôturées).
   final double revenue;
 
-  /// Coût matières des plats vendus (fiche recette, ou coût matière saisi).
+  /// FOOD COST THÉORIQUE : coût matières des plats vendus, déduit des fiches
+  /// recettes (ou du coût matière saisi sur le plat). C'est ce que les ventes
+  /// AURAIENT dû consommer.
   final double materialCost;
+
+  /// FOOD COST RÉEL : les achats de matières premières de la période
+  /// (`daily_expenses`, catégorie « achat marché »). C'est ce qui est
+  /// réellement sorti de la caisse pour acheter la marchandise.
+  final int realFoodCost;
+
+  /// Dépenses quotidiennes HORS matières : gaz, électricité, transport,
+  /// entretien, extras journaliers.
+  final int operatingCost;
 
   /// Charges fixes imputables à la période (FCFA).
   final int charges;
@@ -61,9 +74,7 @@ class RestaurantFinanceReport {
   /// Pertes déclarées sur la période (FCFA).
   final int losses;
 
-  /// Masse salariale de la période. Toujours 0 tant que PR-D (employés +
-  /// paie) n'est pas livrée : le champ existe pour que la formule du bénéfice
-  /// soit complète et n'ait pas à changer le jour où la paie arrive.
+  /// Masse salariale nette de la période (fiches de paie du mois, Lot D).
   final int payroll;
 
   final List<double> revenueSeries;
@@ -77,6 +88,22 @@ class RestaurantFinanceReport {
   /// rattachés ont été vendus. Trié par chiffre d'affaires décroissant.
   final List<SectorLine> sectors;
 
+  /// Seuils camerounais du food cost (spec) : au-delà de 35 %, la carte ne
+  /// dégage plus assez pour couvrir les charges.
+  static const double foodCostGood = 30;
+  static const double foodCostWarning = 35;
+
+  /// Lecture du food cost : `good` (< 30 %) · `warning` (30–35 %) · `bad`
+  /// (> 35 %). `null` si aucune vente — un taux sans chiffre d'affaires ne
+  /// veut rien dire.
+  String? get foodCostLevel {
+    if (revenue <= 0 || foodCost <= 0) return null;
+    final rate = foodCostRate;
+    if (rate < foodCostGood) return 'good';
+    if (rate <= foodCostWarning) return 'warning';
+    return 'bad';
+  }
+
   const RestaurantFinanceReport({
     required this.range,
     required this.labels,
@@ -89,19 +116,60 @@ class RestaurantFinanceReport {
     required this.expenseSeries,
     required this.lossSeries,
     required this.sectors,
+    this.realFoodCost = 0,
+    this.operatingCost = 0,
   });
 
-  /// Tout ce qui sort, hors pertes : matières + charges fixes + paie.
-  double get expenses => materialCost + charges + payroll;
+  /// La boutique saisit-elle ses achats de matières ?
+  ///
+  /// Tant qu'elle ne le fait pas, le bilan ne peut compter que le coût
+  /// THÉORIQUE. Dès qu'elle le fait, c'est l'argent réellement sorti qui
+  /// compte — c'est la question que se pose un restaurateur : « combien
+  /// j'ai gagné », pas « combien j'aurais dû gagner ».
+  bool get usesRealFoodCost => realFoodCost > 0;
+
+  /// Coût des matières retenu pour le bénéfice : le réel s'il est saisi, le
+  /// théorique sinon.
+  ///
+  /// PAS LES DEUX — c'est le piège de ce module : additionner le coût des
+  /// recettes ET les achats du marché déduirait la matière deux fois et
+  /// afficherait une perte à un restaurant rentable.
+  double get foodCost =>
+      usesRealFoodCost ? realFoodCost.toDouble() : materialCost;
+
+  /// Tout ce qui sort, hors pertes : matières + exploitation + charges fixes
+  /// + paie.
+  double get expenses => foodCost + operatingCost + charges + payroll;
 
   /// Marge brute : ventes − matières. Ce que dégage la carte avant charges.
   double get grossMargin => revenue - materialCost;
 
-  /// Bénéfice net = ventes − matières − charges − pertes − paie.
+  /// Bénéfice net = ventes − matières − exploitation − charges − pertes − paie.
   double get netProfit => revenue - expenses - losses;
 
   /// Taux de marge brute en % du chiffre d'affaires.
   double get marginRate => revenue <= 0 ? 0 : (grossMargin / revenue) * 100;
+
+  /// FOOD COST % théorique — coût des recettes rapporté aux ventes.
+  double get theoreticalFoodCostRate =>
+      revenue <= 0 ? 0 : (materialCost / revenue) * 100;
+
+  /// FOOD COST % réel — achats de matières rapportés aux ventes.
+  double get realFoodCostRate =>
+      revenue <= 0 ? 0 : (realFoodCost / revenue) * 100;
+
+  /// Le taux à afficher en premier : le réel dès qu'il existe.
+  double get foodCostRate =>
+      usesRealFoodCost ? realFoodCostRate : theoreticalFoodCostRate;
+
+  /// Écart entre achats réels et consommation théorique.
+  ///
+  /// POSITIF = on a acheté plus que ce que les ventes ont consommé. Sur un
+  /// mois entier, c'est le signal du gaspillage, du vol ou d'une fiche recette
+  /// fausse — l'indicateur que ce module existe pour donner. Sur quelques
+  /// jours, ça peut n'être qu'un stock constitué d'avance.
+  double get foodCostGap =>
+      usesRealFoodCost ? realFoodCost - materialCost : 0;
 
   /// Bénéfice par bucket, déduit des trois autres séries — elles restent donc
   /// forcément cohérentes entre elles à l'écran.
@@ -258,6 +326,49 @@ class RestaurantReportingService {
       debugPrint('[RestoReport] pertes err: $e');
     }
 
+    // ── Dépenses quotidiennes (Lot E) ──────────────────────────────────
+    // Elles sont datées au JOUR et entrent dans la série des dépenses au même
+    // titre que les charges : c'est de l'argent réellement sorti.
+    var realFoodCost = 0;
+    var operatingCost = 0;
+    final dailySeries = List<double>.filled(n, 0);
+    try {
+      for (final e in DailyExpenseService.forShop(shopId)) {
+        if (_outside(e.expenseDate, range)) continue;
+        if (e.isFoodCost) {
+          realFoodCost += e.amount;
+        } else {
+          operatingCost += e.amount;
+        }
+        dailySeries[range.bucketOf(e.expenseDate)] += e.amount.toDouble();
+      }
+    } catch (e) {
+      debugPrint('[RestoReport] dépenses err: $e');
+    }
+
+    // ── Masse salariale (Lot D) ────────────────────────────────────────
+    // Fiches de paie des mois COUVERTS par la période. Une paie est mensuelle :
+    // l'imputer au jour le jour n'aurait aucun sens, elle est rattachée au
+    // bucket de la fin de son mois.
+    var payroll = 0;
+    final payrollSeries = List<double>.filled(n, 0);
+    try {
+      for (final month in _monthsIn(range)) {
+        final amount = StaffService.payrollTotal(shopId, month);
+        if (amount <= 0) continue;
+        payroll += amount;
+        // Dernier jour du mois, ramené dans la fenêtre : sur une période à
+        // cheval, la paie doit tomber dans un bucket qui existe.
+        final parts = month.split('-');
+        final endOfMonth =
+            DateTime(int.parse(parts[0]), int.parse(parts[1]) + 1, 0);
+        final at = endOfMonth.isAfter(range.to) ? range.to : endOfMonth;
+        payrollSeries[range.bucketOf(at)] += amount.toDouble();
+      }
+    } catch (e) {
+      debugPrint('[RestoReport] paie err: $e');
+    }
+
     // ── Secteurs ───────────────────────────────────────────────────────
     final names = <String, String>{};
     try {
@@ -282,22 +393,45 @@ class RestaurantReportingService {
         ),
     ]..sort((a, b) => b.revenue.compareTo(a.revenue));
 
+    // La série des dépenses suit la même règle que le total : matières
+    // RÉELLES si elles sont saisies, théoriques sinon. Sans ça, la courbe
+    // raconterait autre chose que le bénéfice affiché juste à côté.
+    final useReal = realFoodCost > 0;
+
     return RestaurantFinanceReport(
       range: range,
       labels: labels,
       revenue: revenueSeries.fold(0, (s, v) => s + v),
       materialCost: materialSeries.fold(0, (s, v) => s + v),
+      realFoodCost: realFoodCost,
+      operatingCost: operatingCost,
       charges: charges,
       losses: losses,
-      // PR-D non livrée : aucune source de masse salariale à ce jour.
-      payroll: 0,
+      payroll: payroll,
       revenueSeries: revenueSeries,
       expenseSeries: [
-        for (var i = 0; i < n; i++) materialSeries[i] + chargeSeries[i],
+        for (var i = 0; i < n; i++)
+          (useReal ? dailySeries[i] : materialSeries[i] + dailySeries[i]) +
+              chargeSeries[i] +
+              payrollSeries[i],
       ],
       lossSeries: lossSeries,
       sectors: sectors,
     );
+  }
+
+  /// Mois `YYYY-MM` couverts par la période, du plus ancien au plus récent.
+  static List<String> _monthsIn(DashRange range) {
+    final out = <String>[];
+    var cursor = DateTime(range.from.year, range.from.month);
+    final last = DateTime(range.to.year, range.to.month);
+    // Borne de sécurité : une plage aberrante ne doit pas boucler sans fin.
+    while (!cursor.isAfter(last) && out.length < 120) {
+      out.add('${cursor.year.toString().padLeft(4, '0')}-'
+          '${cursor.month.toString().padLeft(2, '0')}');
+      cursor = DateTime(cursor.year, cursor.month + 1);
+    }
+    return out;
   }
 
   /// Date hors de la fenêtre (bornes incluses).

@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/database/app_database.dart';
+import '../../../../core/permisions/subscription_provider.dart';
+import '../../../../core/services/manager_gate.dart';
+import '../../../../features/caisse/domain/entities/sale.dart';
 import '../../../../core/services/restaurant_table_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -13,6 +17,11 @@ import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../widgets/resto_empty_state.dart';
 import '../../domain/entities/restaurant_table.dart';
+import '../../../../core/services/restaurant_order_service.dart';
+import '../../../../core/utils/currency_formatter.dart';
+import '../../../../core/services/restaurant_tab_service.dart';
+import '../../../../core/storage/local_storage_service.dart';
+import '../../../../core/services/service_incident_service.dart';
 
 /// Plan de salle — grille des tables colorées par statut (PR-1).
 ///
@@ -76,10 +85,62 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
       // plutôt qu'à la prise de commande (spec §7).
       _openBill(table);
     } else {
-      // Table en service → commande en cours. Les actions sur la table
-      // (addition, libérer) restent sur l'appui long.
-      _openOrder(table);
+      // Plusieurs comptes ouverts → on demande LEQUEL avant d'ouvrir la prise
+      // de commande. Avec un seul compte, on va droit au but : ajouter une
+      // étape de choix quand il n'y a rien à choisir ralentirait le service.
+      final tabs =
+          RestaurantTabService.tabsForTable(widget.shopId, table.id);
+      if (tabs.length > 1) {
+        await _openTabs(table, tabs);
+      } else {
+        _openOrder(table);
+      }
     }
+  }
+
+  /// Libère la table, en annonçant ce qui reste à encaisser.
+  ///
+  /// Libérer détache les comptes encore ouverts : ils survivent, mais quittent
+  /// le plan de salle. Le faire en silence ferait disparaître de l'argent du
+  /// champ de vision du serveur — d'où la confirmation chiffrée.
+  Future<void> _releaseTable(RestaurantTable table) async {
+    final tabs = RestaurantTabService.tabsForTable(widget.shopId, table.id);
+    if (tabs.isNotEmpty) {
+      final total = tabs.fold<double>(0, (s, t) => s + t.total);
+      final ok = await AppConfirmDialog.show(
+        context: context,
+        icon: Icons.warning_amber_rounded,
+        iconColor: Theme.of(context).semantic.warning,
+        title: 'Libérer avec des comptes ouverts ?',
+        body: Text(
+            '${tabs.length} compte${tabs.length > 1 ? 's' : ''} '
+            'non réglé${tabs.length > 1 ? 's' : ''} · '
+            '${CurrencyFormatter.format(total)}\n\n'
+            'Ces additions ne seront pas perdues : elles restent encaissables '
+            'depuis Commandes, mais quittent le plan de salle.'),
+        cancelLabel: 'Annuler',
+        confirmLabel: 'Libérer quand même',
+        onConfirm: () {},
+      );
+      if (ok != true) return;
+    }
+    await RestaurantTableService.release(table);
+    if (mounted) setState(() {});
+  }
+
+  /// Feuille des comptes d'une table : consulter, transférer, fusionner.
+  Future<void> _openTabs(
+      RestaurantTable table, List<RestaurantTab> tabs) async {
+    await showAdaptiveFormSheet<void>(
+      context: context,
+      builder: (_) => _TabsSheet(
+        shopId: widget.shopId,
+        table: table,
+        tabs: tabs,
+        allTables: RestaurantTableService.tablesForShop(widget.shopId),
+      ),
+    );
+    if (mounted) setState(() {});
   }
 
   /// Ouvre l'addition de la table.
@@ -220,7 +281,7 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
               subtitle: const Text('Remet la table en statut Libre'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                RestaurantTableService.release(table);
+                _releaseTable(table);
               },
             ),
             const SizedBox(height: 8),
@@ -437,10 +498,20 @@ class _TableCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final semantic = Theme.of(context).semantic;
-    final accent = table.status.color(semantic);
+    // Statut DÉDUIT des commandes, pas seulement lu sur la table : une table
+    // marquée « libre » alors qu'elle porte des commandes ouvertes (app fermée
+    // entre la prise de commande et la mise à jour de la table) affichait un
+    // état faux au service. Une réservation, elle, ne se déduit d'aucune
+    // commande : ce statut reste celui de la table.
+    final summary = RestaurantOrderService.tableSummary(table);
+    final status = summary.count > 0 &&
+            table.status == RestaurantTableStatus.libre
+        ? RestaurantTableStatus.occupee
+        : table.status;
+    final accent = status.color(semantic);
 
     return Material(
-      color: table.status.surface(semantic),
+      color: status.surface(semantic),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
@@ -455,7 +526,7 @@ class _TableCard extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(table.status.icon, color: accent, size: 26),
+              Icon(status.icon, color: accent, size: 26),
               const SizedBox(height: 6),
               Text(
                 table.name,
@@ -465,9 +536,22 @@ class _TableCard extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                table.status.label,
+                status.label,
                 style: AppTextStyles.caption.copyWith(color: accent),
               ),
+              // Comptes ouverts + total en cours : c'est ce qu'un serveur
+              // regarde en passant devant la table.
+              if (summary.count > 0) ...[
+                const SizedBox(height: 3),
+                Text(
+                  '${summary.count} compte'
+                  '${summary.count > 1 ? 's' : ''} · '
+                  '${CurrencyFormatter.format(summary.total)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.microBold.copyWith(color: accent),
+                ),
+              ],
               const SizedBox(height: 4),
               Text(
                 // Table libre → on affiche la capacité (information utile pour
@@ -477,7 +561,7 @@ class _TableCard extends StatelessWidget {
                     : '${table.covers ?? table.capacity} couverts',
                 style: AppTextStyles.captionHint,
               ),
-              if (table.status == RestaurantTableStatus.reservee &&
+              if (status == RestaurantTableStatus.reservee &&
                   table.reservationTime != null)
                 Text(
                   _hhmm(table.reservationTime!),
@@ -523,6 +607,418 @@ class _StepperButton extends StatelessWidget {
                 ? theme.colorScheme.primary
                 : theme.colorScheme.onSurface.withValues(alpha: 0.35),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+
+/// Feuille des comptes d'une table (plan de salle — Lot 3).
+///
+/// Un compte = les commandes ouvertes qui partagent un libellé. Les deux
+/// gestes de service sont ici : transférer un compte vers une autre table
+/// (le client change de place, ou passe à emporter) et fusionner deux comptes
+/// (ils paient finalement ensemble).
+class _TabsSheet extends ConsumerStatefulWidget {
+  final String shopId;
+  final RestaurantTable table;
+  final List<RestaurantTab> tabs;
+  final List<RestaurantTable> allTables;
+
+  const _TabsSheet({
+    required this.shopId,
+    required this.table,
+    required this.tabs,
+    required this.allTables,
+  });
+
+  @override
+  ConsumerState<_TabsSheet> createState() => _TabsSheetState();
+}
+
+class _TabsSheetState extends ConsumerState<_TabsSheet> {
+  late List<RestaurantTab> _tabs = widget.tabs;
+  bool _busy = false;
+
+  void _reload() => setState(() => _tabs =
+      RestaurantTabService.tabsForTable(widget.shopId, widget.table.id));
+
+  Future<void> _transfer(RestaurantTab tab) async {
+    final others =
+        widget.allTables.where((t) => t.id != widget.table.id).toList();
+    final target = await showAdaptiveFormSheet<String>(
+      context: context,
+      builder: (_) => AdaptiveFormFrame(
+        title: 'Transférer le compte',
+        subtitle: tab.displayLabel,
+        icon: Icons.swap_horiz_rounded,
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              leading: const Icon(Icons.takeout_dining_outlined),
+              title: const Text('À emporter (sans table)'),
+              onTap: () => Navigator.of(context).pop('__none__'),
+            ),
+            const Divider(height: 1),
+            for (final t in others)
+              ListTile(
+                leading: const Icon(Icons.table_restaurant_outlined),
+                title: Text(t.name),
+                subtitle: Text(t.status.label),
+                onTap: () => Navigator.of(context).pop(t.id),
+              ),
+          ]),
+        ),
+      ),
+    );
+    if (target == null || !mounted) return;
+    setState(() => _busy = true);
+    final applied = await RestaurantTabService.transferTab(
+      shopId: widget.shopId,
+      fromTableId: widget.table.id,
+      label: tab.label,
+      toTableId: target == '__none__' ? null : target,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    // Le libellé a pu être renommé si la destination portait déjà ce nom : le
+    // dire, sinon le serveur cherchera « Compte 1 » et trouvera « Compte 1 (2) ».
+    if (applied != tab.label) {
+      AppSnack.info(
+          context,
+          'Compte transféré sous « $applied » — ce nom était déjà pris '
+          'à destination.');
+    } else {
+      AppSnack.success(context, 'Compte transféré.');
+    }
+    _reload();
+  }
+
+  /// Déclare un départ sans paiement sur ce compte.
+  ///
+  /// Les bons sont clôturés et une perte du montant TOTAL est enregistrée :
+  /// c'est elle qui annule le chiffre d'affaires, sinon le bilan afficherait
+  /// une recette que personne n'a payée.
+  Future<void> _unpaid(RestaurantTab tab) async {
+    final ok = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.money_off_rounded,
+      iconColor: Theme.of(context).semantic.danger,
+      title: 'Départ sans paiement ?',
+      body: Text(
+          '« ${tab.displayLabel} » · ${CurrencyFormatter.format(tab.total)}\n\n'
+          'Le compte sera clôturé et le montant enregistré en perte '
+          '(catégorie « Non payé »). Cette écriture annule la recette : sans '
+          'elle, le bilan afficherait un chiffre d\'affaires que personne '
+          'n\'a réglé.'),
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Déclarer la perte',
+      onConfirm: () {},
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _busy = true);
+    await ServiceIncidentService.reportUnpaid(
+      shopId: widget.shopId,
+      orders: tab.orders,
+      origin: '${widget.table.name} · ${tab.displayLabel}',
+      declaredBy: LocalStorageService.getCurrentUser()?.id,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    AppSnack.success(context, 'Perte enregistrée.');
+    _reload();
+  }
+
+  /// Annule une tournée DÉJÀ envoyée en cuisine, sous aval du gérant.
+  ///
+  /// Une tournée pas encore envoyée n'a rien engagé : elle se retire en
+  /// modifiant la commande, sans perte et sans PIN. Une fois partie, la matière
+  /// est consommée — d'où le code PIN (le geste permet d'encaisser puis
+  /// d'annuler la ligne) et la perte enregistrée automatiquement.
+  Future<void> _cancelRound(RestaurantTab tab) async {
+    final sent = tab.orders
+        .where((o) => o.sentToKitchen && o.status != SaleStatus.cancelled)
+        .toList();
+    if (sent.isEmpty) {
+      AppSnack.info(
+          context,
+          'Aucune tournée envoyée sur ce compte — retirez les articles '
+          'directement depuis la commande.');
+      return;
+    }
+
+    final choice = await showAdaptiveFormSheet<({Sale order, String reason})>(
+      context: context,
+      builder: (_) => _CancelRoundSheet(
+        tabLabel: tab.displayLabel,
+        rounds: sent,
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    final ok = await ManagerGate.require(
+      context: context,
+      perms: ref.read(permissionsProvider(widget.shopId)),
+      action: ManagerAction.cancelSentRound,
+      shopId: widget.shopId,
+      targetId: choice.order.id,
+      targetLabel: '${widget.table.name} · ${tab.displayLabel}',
+      details: {
+        'reason': choice.reason,
+        'total': choice.order.total,
+        'items': choice.order.items.length,
+      },
+    );
+    if (!ok || !mounted) return;
+
+    setState(() => _busy = true);
+    final loss = await ServiceIncidentService.cancelSentRound(
+      shopId: widget.shopId,
+      order: choice.order,
+      reason: choice.reason,
+      declaredBy: LocalStorageService.getCurrentUser()?.id,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    AppSnack.success(
+        context,
+        loss == null
+            ? 'Tournée annulée.'
+            : 'Tournée annulée — perte de '
+                '${CurrencyFormatter.format(loss.amount.toDouble())} '
+                'enregistrée.');
+    _reload();
+  }
+
+  Future<void> _merge(RestaurantTab tab) async {
+    final others = _tabs.where((t) => t.label != tab.label).toList();
+    if (others.isEmpty) return;
+    final target = await showAdaptiveFormSheet<String>(
+      context: context,
+      builder: (_) => AdaptiveFormFrame(
+        title: 'Fusionner le compte',
+        subtitle: tab.displayLabel,
+        icon: Icons.merge_rounded,
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            for (final t in others)
+              ListTile(
+                leading: const Icon(Icons.receipt_long_outlined),
+                title: Text(t.displayLabel),
+                subtitle: Text('${t.itemCount} article'
+                    '${t.itemCount > 1 ? 's' : ''} · '
+                    '${CurrencyFormatter.format(t.total)}'),
+                onTap: () => Navigator.of(context).pop(t.label),
+              ),
+          ]),
+        ),
+      ),
+    );
+    if (target == null || !mounted) return;
+    setState(() => _busy = true);
+    await RestaurantTabService.mergeTabs(
+      shopId: widget.shopId,
+      tableId: widget.table.id,
+      sourceLabel: tab.label,
+      targetLabel: target,
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+    AppSnack.success(context, 'Comptes fusionnés.');
+    _reload();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final sem = Theme.of(context).semantic;
+    final total = _tabs.fold<double>(0, (s, t) => s + t.total);
+
+    return AdaptiveFormFrame(
+      title: widget.table.name,
+      subtitle: '${_tabs.length} comptes · ${CurrencyFormatter.format(total)}',
+      icon: Icons.table_restaurant_rounded,
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          for (final tab in _tabs)
+            Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: cs.onSurface.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: sem.borderSubtle),
+              ),
+              child: Row(children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(tab.displayLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.bodyBold
+                              .copyWith(color: cs.onSurface)),
+                      Text(
+                          '${tab.itemCount} article'
+                          '${tab.itemCount > 1 ? 's' : ''} · '
+                          '${tab.orderCount} bon'
+                          '${tab.orderCount > 1 ? 's' : ''}',
+                          style: AppTextStyles.caption),
+                    ],
+                  ),
+                ),
+                Text(CurrencyFormatter.format(tab.total),
+                    style:
+                        AppTextStyles.bodyBold.copyWith(color: cs.primary)),
+                PopupMenuButton<String>(
+                  enabled: !_busy,
+                  tooltip: 'Actions',
+                  onSelected: (v) => switch (v) {
+                    'transfer' => _transfer(tab),
+                    'merge' => _merge(tab),
+                    'cancel_round' => _cancelRound(tab),
+                    _ => _unpaid(tab),
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                        value: 'transfer', child: Text('Transférer…')),
+                    if (_tabs.length > 1)
+                      const PopupMenuItem(
+                          value: 'merge', child: Text('Fusionner…')),
+                    const PopupMenuItem(
+                        value: 'cancel_round',
+                        child: Text('Annuler une tournée envoyée…')),
+                    const PopupMenuItem(
+                        value: 'unpaid',
+                        child: Text('Départ sans payer…')),
+                  ],
+                ),
+              ]),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Choix de la tournée à annuler + motif.
+///
+/// Le motif est OBLIGATOIRE : il devient l'origine de la perte enregistrée, et
+/// c'est la seule chose qui distingue, trois semaines plus tard, une erreur de
+/// cuisine d'un client qui s'est ravisé.
+class _CancelRoundSheet extends StatefulWidget {
+  final String tabLabel;
+  final List<Sale> rounds;
+
+  const _CancelRoundSheet({required this.tabLabel, required this.rounds});
+
+  @override
+  State<_CancelRoundSheet> createState() => _CancelRoundSheetState();
+}
+
+class _CancelRoundSheetState extends State<_CancelRoundSheet> {
+  late Sale _selected = widget.rounds.first;
+  final _reason = TextEditingController();
+  String? _err;
+
+  /// Heure d'envoi du bon — le repère que le cuisinier et le serveur ont en
+  /// tête pour distinguer deux tournées d'un même compte.
+  static String _hhmm(DateTime d) =>
+      '${d.hour.toString().padLeft(2, '0')}:'
+      '${d.minute.toString().padLeft(2, '0')}';
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final reason = _reason.text.trim();
+    if (reason.isEmpty) {
+      setState(() => _err = 'Motif obligatoire');
+      return;
+    }
+    Navigator.of(context).pop((order: _selected, reason: reason));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    final cs = Theme.of(context).colorScheme;
+
+    return AdaptiveFormFrame(
+      title: 'Annuler une tournée envoyée',
+      subtitle: widget.tabLabel,
+      icon: Icons.cancel_schedule_send_outlined,
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'La matière est déjà engagée : le coût des ingrédients sera '
+              'enregistré en perte. Une validation du gérant est demandée.',
+              style: AppTextStyles.captionHint,
+            ),
+            const SizedBox(height: 10),
+            for (final r in widget.rounds)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                onTap: () => setState(() => _selected = r),
+                leading: Icon(
+                  _selected.id == r.id
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  color: _selected.id == r.id
+                      ? cs.primary
+                      : cs.onSurface.withValues(alpha: 0.35),
+                ),
+                title: Text(
+                    '${r.items.length} article'
+                    '${r.items.length > 1 ? 's' : ''} · '
+                    '${CurrencyFormatter.format(r.total)}',
+                    style: AppTextStyles.bodySmBold),
+                subtitle: Text(
+                    '${_hhmm(r.createdAt)} · '
+                    '${r.items.map((i) => '${i.quantity}× ${i.productName}').join(', ')}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.caption),
+              ),
+            const SizedBox(height: 6),
+            TextField(
+              controller: _reason,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Motif',
+                hintText: 'Client parti, erreur de saisie, plat indisponible…',
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+            if (_err != null) ...[
+              const SizedBox(height: 8),
+              Text(_err!,
+                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+            ],
+            const SizedBox(height: 18),
+            AppPrimaryButton(
+              label: 'Annuler cette tournée',
+              icon: Icons.block_rounded,
+              fullWidth: true,
+              color: cs.error,
+              onTap: _submit,
+            ),
+          ],
         ),
       ),
     );

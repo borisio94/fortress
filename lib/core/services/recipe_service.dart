@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:hive_flutter/hive_flutter.dart';
 
 import '../../features/caisse/domain/entities/sale_item.dart';
@@ -40,17 +40,53 @@ class RecipeService {
     }
   }
 
-  /// Nombre de plats DISTINCTS qui utilisent cet ingrédient — base du prorata
-  /// de coût partagé et de la maintenance du type specialized/shared.
+  /// Nombre de plats VIVANTS et distincts qui utilisent cet ingrédient — base
+  /// du prorata de coût partagé et de la maintenance du type
+  /// specialized/shared.
+  ///
+  /// Les plats supprimés sont exclus. La suppression d'un plat est un
+  /// soft-delete réversible et ne touche PAS ses lignes de recette (restaurer
+  /// le plat doit restaurer sa recette) — mais compter ces lignes divisait le
+  /// coût d'un ingrédient partagé par des plats fantômes, et sous-estimait
+  /// donc le coût matières de tous les autres plats qui l'utilisent.
   static int dishCountForIngredient(String shopId, String ingredientId) {
     final products = <String>{};
     for (final raw in _raw().values) {
       if (raw['shop_id']?.toString() != shopId) continue;
       if (raw['ingredient_id']?.toString() != ingredientId) continue;
       final pid = raw['product_id']?.toString();
-      if (pid != null && pid.isNotEmpty) products.add(pid);
+      if (pid == null || pid.isEmpty) continue;
+      if (!_isLiveProduct(pid)) continue;
+      products.add(pid);
     }
     return products.length;
+  }
+
+  /// Le plat existe-t-il encore, non supprimé ?
+  ///
+  /// Lecture RAW volontaire : seul `deleted_at` est utile ici, et
+  /// désérialiser le produit entier (variantes + migrations de schéma) coûte
+  /// bien plus cher dans une boucle de calcul de coût — cette fonction est
+  /// appelée pour chaque ligne partagée de chaque plat du reporting.
+  static bool _isLiveProduct(String productId) {
+    try {
+      return isLiveProductMap(HiveBoxes.productsBox.get(productId));
+    } catch (e) {
+      // Box indisponible : on garde le comportement historique (le plat
+      // compte) plutôt que de basculer tout le catalogue en « spécialisé ».
+      debugPrint('[Recipe] lecture produit err: $e');
+      return true;
+    }
+  }
+
+  /// Règle « plat vivant » sous forme pure, sans accès Hive : map absente =
+  /// plat inexistant (jamais synchronisé, ou purgé), `deleted_at` renseigné =
+  /// plat supprimé.
+  @visibleForTesting
+  static bool isLiveProductMap(Map<dynamic, dynamic>? raw) {
+    if (raw == null) return false;
+    final deleted = raw['deleted_at'];
+    return deleted == null || deleted.toString().isEmpty;
   }
 
   /// Ajoute un ingrédient à la recette d'un plat (ou met à jour sa quantité si
@@ -150,25 +186,52 @@ class RecipeService {
 
   // ── Décrément à la vente ────────────────────────────────────────────────
 
+  /// Quantité à retirer par ingrédient pour un panier donné — la RÈGLE de
+  /// consommation, isolée de Hive pour être testable.
+  ///
+  /// Deux points qui décident de la justesse de l'inventaire :
+  ///   * la quantité retirée est `quantité_recette × quantité_vendue` — le
+  ///     prorata des ingrédients partagés ne concerne QUE le coût, jamais le
+  ///     stock. Diviser le stock retiré par le nombre de plats laisserait de la
+  ///     farine fantôme dans l'inventaire à chaque service ;
+  ///   * les lignes sont AGRÉGÉES par ingrédient : deux plats qui partagent
+  ///     l'huile produisent un seul retrait, et donc une seule écriture.
+  @visibleForTesting
+  static Map<String, double> plannedConsumption(
+    Map<String, List<RecipeIngredient>> recipesByProduct,
+    List<SaleItem> items,
+  ) {
+    final planned = <String, double>{};
+    for (final item in items) {
+      final lines = recipesByProduct[item.productId];
+      if (lines == null) continue;
+      for (final line in lines) {
+        planned[line.ingredientId] = (planned[line.ingredientId] ?? 0) +
+            line.quantity * item.quantity;
+      }
+    }
+    return planned;
+  }
+
   /// Retire du stock les ingrédients consommés par les plats vendus, et émet
   /// une alerte in-app « ingrédient bas » pour ceux passés sous leur seuil.
   ///
-  /// Le décrément PHYSIQUE retire la quantité réelle utilisée
-  /// (`quantité_recette × quantité_vendue`) — le prorata partagé ne concerne
-  /// QUE le coût, jamais le stock. Retourne la liste (dédupliquée) des
-  /// ingrédients désormais sous leur seuil (utile aux tests / appelants).
+  /// Retourne la liste (dédupliquée) des ingrédients désormais sous leur seuil
+  /// (utile aux tests / appelants).
   static Future<List<Ingredient>> consumeForOrder(
       String shopId, List<SaleItem> items) async {
-    final low = <String, Ingredient>{};
+    final recipes = <String, List<RecipeIngredient>>{};
     for (final item in items) {
       final pid = item.productId;
       if (pid.isEmpty) continue;
-      for (final line in forProduct(shopId, pid)) {
-        await IngredientService.consume(
-            shopId, line.ingredientId, line.quantity * item.quantity);
-        final ing = IngredientService.byId(shopId, line.ingredientId);
-        if (ing != null && ing.isLowStock) low[ing.id] = ing;
-      }
+      recipes.putIfAbsent(pid, () => forProduct(shopId, pid));
+    }
+
+    final low = <String, Ingredient>{};
+    for (final entry in plannedConsumption(recipes, items).entries) {
+      await IngredientService.consume(shopId, entry.key, entry.value);
+      final ing = IngredientService.byId(shopId, entry.key);
+      if (ing != null && ing.isLowStock) low[ing.id] = ing;
     }
     // Alertes stock bas ingrédient (dédup 60s côté NotificationService).
     if (low.isNotEmpty && NotificationService.enabledForCurrentUser.value) {

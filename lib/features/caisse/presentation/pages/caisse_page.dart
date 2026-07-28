@@ -60,6 +60,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/utils/phone_formatter.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../crm/data/models/client_model.dart';
+import '../../../restaurant/presentation/widgets/resto_surfaces.dart';
 
 class CaissePage extends ConsumerStatefulWidget {
   final String shopId;
@@ -858,7 +859,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 
       // ── Filtres ─────────────────────────────────────────────
       Container(
-        color: Theme.of(context).colorScheme.surface,
+        // Opacité des cartes en restauration : ces bandeaux de filtres
+        // étaient les derniers aplats pleins de la page.
+        color: restoDecorActive
+            ? restoGlassFill(context)
+            : Theme.of(context).colorScheme.surface,
         child: TabBar(
           controller: _filter,
           isScrollable: true,
@@ -887,7 +892,9 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
       // Recherche extensible + filtre date + export en icônes compactes
       // (au lieu de 2 lignes). La plage de dates active affiche son libellé.
       Container(
-        color: Theme.of(context).colorScheme.surface,
+        color: restoDecorActive
+            ? restoGlassFill(context)
+            : Theme.of(context).colorScheme.surface,
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
         child: Row(children: [
           // Barre de recherche (prend tout l'espace restant)

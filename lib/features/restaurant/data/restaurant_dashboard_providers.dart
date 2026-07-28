@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/services/ingredient_service.dart';
 import '../../../core/services/restaurant_reporting_service.dart';
+import '../../../core/services/stock_item_service.dart';
 import '../../../core/storage/hive_boxes.dart';
 import '../../dashboard/data/dashboard_providers.dart';
 
@@ -9,6 +11,28 @@ import '../../dashboard/data/dashboard_providers.dart';
 ///
 /// Volontairement séparé de `dashboard_providers.dart` : celui-ci alimente le
 /// tableau de bord e-commerce, qui ne doit pas porter de calculs de salle.
+/// Une commande encore ouverte, prête à afficher dans le tableau de bord.
+class OpenOrderLine {
+  final String orderId;
+
+  /// « Table 5 », « Emporter #4821 », « Livraison #4821 ».
+  final String label;
+
+  /// « En préparation », « Prêt », « En livraison », « Programmée »…
+  final String statusLabel;
+
+  /// Étape de service, pour la couleur de la puce : 0 = à traiter,
+  /// 1 = en préparation, 2 = prêt / en route.
+  final int stage;
+
+  const OpenOrderLine({
+    required this.orderId,
+    required this.label,
+    required this.statusLabel,
+    required this.stage,
+  });
+}
+
 class RestaurantDashData {
   /// Nombre de commandes par canal, sur la période sélectionnée.
   final int dineIn;
@@ -26,6 +50,16 @@ class RestaurantDashData {
   final int busyTables;
   final int totalTables;
 
+  /// Commandes encore ouvertes — état COURANT, hors période : une commande de
+  /// la veille non clôturée reste à traiter aujourd'hui.
+  final int openCount;
+
+  /// Les plus récentes de ces commandes, pour la liste du tableau de bord.
+  final List<OpenOrderLine> openOrders;
+
+  /// Ingrédients + articles de stock au niveau ou sous leur seuil.
+  final int lowStockCount;
+
   const RestaurantDashData({
     this.dineIn = 0,
     this.takeaway = 0,
@@ -34,6 +68,9 @@ class RestaurantDashData {
     this.inKitchen = 0,
     this.busyTables = 0,
     this.totalTables = 0,
+    this.openCount = 0,
+    this.openOrders = const [],
+    this.lowStockCount = 0,
   });
 
   int get totalOrders => dineIn + takeaway + delivery;
@@ -88,7 +125,28 @@ final restaurantDashProvider =
 
   var dineIn = 0, takeaway = 0, delivery = 0;
   var inKitchen = 0;
+  var openCount = 0;
   final byWeekday = List<int>.filled(7, 0);
+
+  // Commandes ouvertes collectées avec leur date, pour ne garder que les plus
+  // récentes après le parcours (les plus anciennes sont rarement actionnables).
+  final open = <({DateTime at, OpenOrderLine line})>[];
+
+  // Nom de table par id — résolu une fois, la liste des tables est courte.
+  final tableNames = <String, String>{};
+  try {
+    for (final raw in HiveBoxes.restaurantTablesBox.values) {
+      if (raw['shop_id']?.toString() != shopId) continue;
+      final id = raw['id']?.toString();
+      if (id == null) continue;
+      final name = (raw['name'] ?? '').toString().trim();
+      final number = (raw['number'] as num?)?.toInt();
+      tableNames[id] =
+          name.isNotEmpty ? name : (number == null ? 'Table' : 'Table $number');
+    }
+  } catch (e) {
+    debugPrint('[RestaurantDash] noms de tables err: $e');
+  }
 
   // Fenêtre glissante de 7 jours pour l'histogramme, indépendante de la
   // période choisie : « commandes par jour de la semaine » n'a de sens que
@@ -119,6 +177,39 @@ final restaurantDashProvider =
           raw['kitchen_ready'] != true &&
           !_kClosedStatuses.contains(status)) {
         inKitchen++;
+      }
+
+      // Commandes encore ouvertes : également un état COURANT, indépendant de
+      // la période sélectionnée.
+      if (!_kClosedStatuses.contains(status)) {
+        openCount++;
+        final orderId = raw['id']?.toString() ?? '';
+        final type = raw['order_type']?.toString();
+        final tableId = raw['table_id']?.toString();
+        final short = orderId.length <= 4
+            ? orderId
+            : orderId.substring(orderId.length - 4);
+        final label = switch (type) {
+          'dine_in' => tableNames[tableId] ?? 'Salle',
+          'delivery' => 'Livraison #$short',
+          _ => 'Emporter #$short',
+        };
+        // L'avancement se lit sur les drapeaux de cuisine, pas sur le statut :
+        // c'est eux que le service met à jour bon par bon.
+        final (String statusLabel, int stage) = raw['kitchen_ready'] == true
+            ? (type == 'delivery' ? ('En livraison', 2) : ('Prêt', 2))
+            : raw['sent_to_kitchen'] == true
+                ? ('En préparation', 1)
+                : (status == 'scheduled' ? ('Programmée', 0) : ('À envoyer', 0));
+        open.add((
+          at: date,
+          line: OpenOrderLine(
+            orderId: orderId,
+            label: label,
+            statusLabel: statusLabel,
+            stage: stage,
+          ),
+        ));
       }
 
       if (!date.isBefore(weekFrom)) {
@@ -158,6 +249,19 @@ final restaurantDashProvider =
     debugPrint('[RestaurantDash] tables err: $e');
   }
 
+  // Stock bas : ingrédients + articles vendus tels quels, même règle que le
+  // badge de navigation (un seul chiffre pour l'utilisateur).
+  var lowStock = 0;
+  try {
+    lowStock = IngredientService.forShop(shopId).where((i) => i.isLowStock).length +
+        StockItemService.lowStock(shopId).length;
+  } catch (e) {
+    debugPrint('[RestaurantDash] stock bas err: $e');
+  }
+
+  // Les plus récentes en tête, cinq au plus : la carte doit rester lisible.
+  open.sort((a, b) => b.at.compareTo(a.at));
+
   return RestaurantDashData(
     dineIn: dineIn,
     takeaway: takeaway,
@@ -166,5 +270,8 @@ final restaurantDashProvider =
     inKitchen: inKitchen,
     busyTables: busy,
     totalTables: total,
+    openCount: openCount,
+    openOrders: [for (final o in open.take(5)) o.line],
+    lowStockCount: lowStock,
   );
 });

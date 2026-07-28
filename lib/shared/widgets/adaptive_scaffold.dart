@@ -38,6 +38,7 @@ import 'alerts/scheduled_alerts_banner_host.dart';
 import '../providers/scheduled_alerts_provider.dart';
 import '../providers/new_web_orders_provider.dart';
 import '../navigation/page_titles.dart';
+import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
 
 /// Largeur minimale en logical pixels pour activer le layout desktop
 /// (sidebar fixe 190px + topbar, drawer toujours visible). En dessous,
@@ -180,7 +181,7 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
     // Layout desktop ssi OS desktop + fenêtre ≥ 900px de large. Sur fenêtre
     // étroite (utilisateur qui split-screen, ou OS mobile), on bascule
     // automatiquement sur le layout mobile.
-    return _useDesktopLayout(context)
+    final shell = _useDesktopLayout(context)
         ? _DesktopShell(
             shopId:        widget.shopId,
             body:          widget.body,
@@ -197,6 +198,20 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
             perms:         perms,
             selectedIndex: selectedIdx,
           );
+
+    // Fond photographique du mode restaurant, posé SOUS TOUT LE SHELL —
+    // barre latérale et barre supérieure comprises, qui sont rendues
+    // translucides plus bas. Enveloppé ici et non autour du seul corps de page
+    // pour que le décor traverse l'écran d'un bord à l'autre.
+    //
+    // L'e-commerce n'est jamais concerné : sans ce garde, il perdrait son fond
+    // de thème (cf. règle « restaurant only »).
+    // Publie l'état du décor pour les widgets partagés ouverts par-dessus
+    // (feuilles de formulaire, dialogues) : leur contexte est celui du
+    // Navigator racine et ne peut pas remonter jusqu'à la boutique.
+    restoDecorActive = isRestaurantShop(widget.shopId);
+    if (!restoDecorActive) return shell;
+    return RestoBackdrop(child: shell);
   }
 }
 
@@ -310,7 +325,11 @@ class _MobileShell extends StatelessWidget {
             fontWeight: FontWeight.w500, color: appBarFg);
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      // Transparent en restauration : le fond photographique est monté sous ce
+      // Scaffold (cf. AdaptiveScaffold.build).
+      backgroundColor: isRestaurantShop(shopId)
+          ? Colors.transparent
+          : theme.scaffoldBackgroundColor,
       // Drawer latéral (spec round 9 prompt 5) — remplace la bottom nav.
       // Largeur 80% screen, contenu arborescent _MobileDrawer.
       drawer: _MobileDrawer(
@@ -1097,8 +1116,12 @@ class _DesktopShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final resto = isRestaurantShop(shopId);
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      // Transparent en restauration : le fond photographique est monté SOUS ce
+      // Scaffold, un fond opaque ici le masquerait entièrement.
+      backgroundColor:
+          resto ? Colors.transparent : theme.scaffoldBackgroundColor,
       floatingActionButton: fab,
       body: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         _DesktopSidebar(
@@ -1193,9 +1216,15 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
     final isDark     = theme.brightness == Brightness.dark;
     // Fond identique au contenu (scaffold) plutôt qu'une teinte dérivée
     // de la palette : le menu ne se détache plus en une bande sombre.
-    final navBg      = isDark
-        ? theme.scaffoldBackgroundColor
-        : theme.colorScheme.surface;
+    //
+    // En restauration, translucide : le décor doit se deviner derrière les
+    // libellés de navigation. Le tiroir mobile, lui, reste opaque — un tiroir
+    // translucide laisserait voir la page en dessous, illisible.
+    final navBg      = isRestaurantShop(widget.shopId)
+        ? restoChromeFill(context)
+        : (isDark
+            ? theme.scaffoldBackgroundColor
+            : theme.colorScheme.surface);
     final navDivider = isDark
         ? palette.primaryLight.withValues(alpha: 0.15)
         : theme.colorScheme.onSurface.withValues(alpha: 0.08);
@@ -1518,7 +1547,11 @@ class _DesktopTopbar extends StatelessWidget {
         : kShellNavItems[selectedIndex].label(l);
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        // Translucide en restauration : le décor traverse aussi la bande du
+        // haut, comme sur la maquette.
+        color: isRestaurantShop(shopId)
+            ? restoChromeFill(context)
+            : theme.colorScheme.surface,
         border: Border(
             bottom: BorderSide(
                 color: theme.colorScheme.onSurface.withValues(alpha:0.08))),
@@ -1645,10 +1678,18 @@ class _CartBadgeBtn extends ConsumerWidget {
     }
     final theme    = Theme.of(context);
     final bloc     = context.read<CaisseBloc>();
+    // En restauration, la feuille elle-même doit être transparente : le panier
+    // a un fond translucide, mais il reposait jusqu'ici sur la surface PLEINE
+    // de la feuille modale, qui masquait entièrement le décor.
+    final resto = isRestaurantShop(shopId);
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: theme.colorScheme.surface,
+      backgroundColor:
+          resto ? Colors.transparent : theme.colorScheme.surface,
+      // Voile de la modale allégé : à 0,54 (défaut Material) la salle derrière
+      // était écrasée, et rendre le panier translucide n'aurait rien donné.
+      barrierColor: resto ? Colors.black.withValues(alpha: 0.30) : null,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (sheetCtx) => BlocProvider.value(
@@ -1669,8 +1710,14 @@ class _CartBadgeBtn extends ConsumerWidget {
             minChildSize:     0.5,
             maxChildSize:     0.97,
             expand: false,
-            builder: (_, __) =>
-                CartWidget(shopId: shopId, isEcommerce: isEcom),
+            // Le `shape` de la feuille ne découpe pas son contenu : avec un
+            // fond transparent, le panier redeviendrait un rectangle à angles
+            // droits. On le découpe donc explicitement.
+            builder: (_, __) => ClipRRect(
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(20)),
+              child: CartWidget(shopId: shopId, isEcommerce: isEcom),
+            ),
           ),
         ),
       ),

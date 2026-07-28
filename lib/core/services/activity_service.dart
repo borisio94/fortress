@@ -47,6 +47,7 @@ class ActivityService {
     required String name,
     String mode = 'stock',
     int stockThreshold = 0,
+    String? station,
   }) async {
     final a = RestaurantActivity(
       id: _id(),
@@ -54,6 +55,7 @@ class ActivityService {
       name: name.trim(),
       mode: mode,
       stockThreshold: stockThreshold,
+      station: station,
       createdAt: DateTime.now(),
     );
     await _put(a);

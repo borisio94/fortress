@@ -4,6 +4,7 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/duration_formatter.dart';
 import '../../../../features/caisse/domain/entities/sale.dart';
+import '../../../../features/caisse/domain/entities/sale_item.dart';
 
 /// Ancienneté d'un bon de cuisine.
 ///
@@ -35,7 +36,18 @@ class KitchenTicketCard extends StatelessWidget {
   final Sale order;
   final String tableLabel;
 
-  /// Index des articles cochés (aide au dressage, non persistée).
+  /// Articles À AFFICHER — pas forcément tous ceux de la commande : quand un
+  /// poste est sélectionné, l'écran ne montre que les siens (un bon de bar sur
+  /// l'écran cuisine, c'est un plat qu'on cherche et qui n'existe pas).
+  final List<SaleItem> items;
+
+  /// Postes AUTRES que celui affiché, concernés par la même tournée. Signalés
+  /// en en-tête parce que « Commande prête » vaut pour le bon entier : le
+  /// cuisinier doit savoir qu'il libère aussi la boisson du bar.
+  final List<String> otherStations;
+
+  /// Index des articles cochés, dans le référentiel de [items] (aide au
+  /// dressage, non persistée).
   final Set<int> checked;
 
   final ValueChanged<int> onToggleItem;
@@ -45,9 +57,11 @@ class KitchenTicketCard extends StatelessWidget {
     super.key,
     required this.order,
     required this.tableLabel,
+    required this.items,
     required this.checked,
     required this.onToggleItem,
     required this.onReady,
+    this.otherStations = const [],
   });
 
   @override
@@ -59,8 +73,7 @@ class KitchenTicketCard extends StatelessWidget {
     final urgency = KitchenUrgencyX.fromElapsed(elapsed);
     final accent = urgency.color(semantic);
 
-    final allChecked =
-        order.items.isNotEmpty && checked.length >= order.items.length;
+    final allChecked = items.isNotEmpty && checked.length >= items.length;
 
     return Container(
       decoration: BoxDecoration(
@@ -96,19 +109,24 @@ class KitchenTicketCard extends StatelessWidget {
               ],
             ),
           ),
-          if (order.covers != null)
+          if (order.covers != null || otherStations.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-              child: Text('${order.covers} couverts',
+              child: Text(
+                  [
+                    if (order.covers != null) '${order.covers} couverts',
+                    if (otherStations.isNotEmpty)
+                      'aussi ${otherStations.join(' · ')}',
+                  ].join(' · '),
                   style: AppTextStyles.captionHint),
             ),
           // ── Articles ────────────────────────────────────────────────
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              itemCount: order.items.length,
+              itemCount: items.length,
               itemBuilder: (_, i) {
-                final item = order.items[i];
+                final item = items[i];
                 final isChecked = checked.contains(i);
                 final options = item.modifiersLabel;
                 return InkWell(

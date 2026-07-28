@@ -32,6 +32,7 @@ import '../../../shop_selector/domain/entities/shop_summary.dart';
 import '../../../auth/domain/entities/user.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../auth/presentation/bloc/auth_event.dart';
+import '../../../restaurant/presentation/widgets/resto_surfaces.dart';
 
 class ParametresPage extends ConsumerWidget {
   final String shopId;
@@ -58,6 +59,10 @@ class ParametresPage extends ConsumerWidget {
         children: [
           _ProfileHeader(user: user, shop: shop, perms: perms),
           const SizedBox(height: 20),
+          // Les tuiles de sommaire forment UNE seule carte en restauration
+          // (cf. `_SectionGroup`) : empilées, huit cartes translucides
+          // laissaient voir le décor dans chaque interstice.
+          _SectionGroup(children: [
 
           if (perms.isShopAdmin)
             _SectionNavTile(
@@ -121,6 +126,7 @@ class ParametresPage extends ConsumerWidget {
               subtitle: 'Réinitialisation, suppression de compte…',
               onTap: () => go('danger'),
             ),
+          ]),
         ],
       );
   }
@@ -333,6 +339,39 @@ Widget _integrationsSection(BuildContext context, String shopId,
 
 // ─── Tuile de navigation vers une section (sommaire Paramètres) ───────────────
 
+/// Regroupe les tuiles de sommaire dans une seule carte en mode restaurant.
+///
+/// Hors restauration, c'est un simple passe-plat : chaque tuile garde sa
+/// propre carte, comme avant.
+class _SectionGroup extends StatelessWidget {
+  final List<Widget> children;
+  const _SectionGroup({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = children.whereType<Widget>().toList();
+    if (!restoDecorActive) return Column(children: visible);
+    return Container(
+      decoration: BoxDecoration(
+        color: restoGlassFill(context),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: restoGlassBorder(context)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: [
+        for (var i = 0; i < visible.length; i++) ...[
+          if (i > 0)
+            Divider(
+                height: 1,
+                thickness: 1,
+                color: Theme.of(context).semantic.borderSubtle),
+          visible[i],
+        ],
+      ]),
+    );
+  }
+}
+
 class _SectionNavTile extends StatelessWidget {
   final IconData icon;
   final Color color;
@@ -347,17 +386,24 @@ class _SectionNavTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.only(bottom: restoDecorActive ? 0 : 10),
       child: Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Theme.of(context).semantic.borderSubtle),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.03),
-                blurRadius: 8, offset: const Offset(0, 2)),
-          ],
-        ),
+        // En restauration : aucune décoration propre. Les tuiles sont
+        // regroupées dans UNE carte par `_SectionGroup`, sinon on empilait
+        // huit cartes translucides et le décor se lisait à travers chaque
+        // interstice.
+        decoration: restoDecorActive
+            ? null
+            : BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(14),
+                border:
+                    Border.all(color: Theme.of(context).semantic.borderSubtle),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 8, offset: const Offset(0, 2)),
+                ],
+              ),
         child: InkWell(
           onTap: () {
             HapticFeedback.selectionClick();
@@ -428,11 +474,20 @@ class _ProfileHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [AppColors.primary, AppColors.primaryLight],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        // En restauration, l'en-tête reprend la teinte des cartes : le dégradé
+        // vif écrasait le décor et tirait l'œil vers une zone purement
+        // informative. Ailleurs, il garde son dégradé de marque.
+        gradient: restoDecorActive
+            ? null
+            : LinearGradient(
+                colors: [AppColors.primary, AppColors.primaryLight],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+        color: restoDecorActive ? restoGlassFill(context) : null,
+        border: restoDecorActive
+            ? Border.all(color: restoGlassBorder(context))
+            : null,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(children: [

@@ -22,6 +22,7 @@ import '../../domain/models/member_role.dart';
 import 'employee_form_sheet.dart';
 import '../widgets/owner_approval_banner.dart';
 import '../../../../shared/widgets/form_sheet.dart';
+import '../../../restaurant/presentation/widgets/resto_surfaces.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // EmployeesPage — Ressources humaines.
@@ -580,7 +581,7 @@ class _StatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
       decoration: BoxDecoration(
-        color: sem.elevatedSurface,
+        color: (restoDecorActive ? restoGlassFill(context) : sem.elevatedSurface),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: sem.borderSubtle),
       ),
@@ -746,7 +747,7 @@ class _MembersFilterPopupBtn extends StatelessWidget {
         )).toList(),
         child: Container(
           decoration: BoxDecoration(
-            color: isActive ? cs.primary.withValues(alpha: 0.10) : sem.elevatedSurface,
+            color: isActive ? cs.primary.withValues(alpha: 0.10) : (restoDecorActive ? restoGlassFill(context) : sem.elevatedSurface),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
                 color: isActive
@@ -806,7 +807,7 @@ class _MembersSearchBar extends StatelessWidget {
         contentPadding: const EdgeInsets.symmetric(
             horizontal: 12, vertical: 12),
         filled: true,
-        fillColor: sem.elevatedSurface,
+        fillColor: (restoDecorActive ? restoGlassFill(context) : sem.elevatedSurface),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: sem.borderSubtle),
@@ -949,7 +950,7 @@ class _SectionCard extends StatelessWidget {
     final sem   = theme.semantic;
     return Container(
       decoration: BoxDecoration(
-        color: sem.elevatedSurface,
+        color: (restoDecorActive ? restoGlassFill(context) : sem.elevatedSurface),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: sem.borderSubtle),
         boxShadow: accentEdge

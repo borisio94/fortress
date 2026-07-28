@@ -7,6 +7,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../features/dashboard/data/dashboard_providers.dart';
 import '../../features/inventaire/domain/entities/stock_location.dart';
+import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
 
 /// Barre de chips « Vue » partagée entre Dashboard, Produits, Vente, Commandes.
 ///
@@ -161,7 +162,9 @@ class _ViewFilterChipBarState extends ConsumerState<ViewFilterChipBar> {
             duration: const Duration(milliseconds: 150),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: active ? cs.primary : cs.surface,
+              color: active
+                  ? cs.primary
+                  : (restoDecorActive ? restoGlassFill(context) : cs.surface),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
                   color: active ? cs.primary : sem.borderSubtle),
@@ -230,7 +233,12 @@ class _ViewFilterChipBarState extends ConsumerState<ViewFilterChipBar> {
       // Rendu onglets : groupe compact aligné à gauche, scrollable
       // horizontalement si trop large. Pas de border pleine largeur —
       // l'indicateur souligné par onglet suffit comme repère visuel.
-      return Align(
+      // En restauration, la bande reçoit la teinte des cartes sur TOUTE sa
+      // largeur : sans fond, c'était le décor brut qui passait entre les
+      // onglets, seule zone de la page à ne rien avoir derrière le texte.
+      return Container(
+        width: double.infinity,
+        color: restoDecorActive ? restoGlassFill(context) : null,
         alignment: Alignment.centerLeft,
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -246,7 +254,7 @@ class _ViewFilterChipBarState extends ConsumerState<ViewFilterChipBar> {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        color: cs.surface,
+        color: restoDecorActive ? restoGlassFill(context) : cs.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: sem.borderSubtle),
       ),

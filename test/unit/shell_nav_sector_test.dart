@@ -67,9 +67,13 @@ void main() {
 
     test('le menu restaurant suit la maquette de référence', () {
       final routes = labelsFor('restaurant');
-      // Plan de salle · Menu · Commandes · Analyses · Équipe · Messagerie
+      // Service · Menu · Commandes · Analyses · Équipe · Messagerie
       // (+ Paramètres et Abonnement, rendus dans le pied de la sidebar).
-      expect(routes, contains('/shop/shop_1/restaurant/tables'));
+      //
+      // « Plan de salle » a été REMPLACÉ par « Service » (Lot C) : l'écran de
+      // service contient le plan de salle en volet gauche et la prise de
+      // commande à droite, le caissier n'ayant plus à naviguer entre les deux.
+      expect(routes, contains('/shop/shop_1/restaurant/service'));
       expect(routes, contains('/shop/shop_1/inventaire'));   // « Menu »
       expect(routes, contains('/shop/shop_1/caisse/orders')); // « Commandes »
       expect(routes, contains('/shop/shop_1/employees'));    // « Équipe »
@@ -125,6 +129,7 @@ void main() {
     test('l\'e-commerce est INCHANGÉ', () {
       final routes = labelsFor('ecommerce');
       // Aucun module restaurant ne doit fuiter côté boutique…
+      expect(routes, isNot(contains('/shop/shop_1/restaurant/service')));
       expect(routes, isNot(contains('/shop/shop_1/restaurant/tables')));
       expect(routes, isNot(contains('/shop/shop_1/restaurant/cuisine')));
       // …et rien de l'existant ne doit avoir disparu.

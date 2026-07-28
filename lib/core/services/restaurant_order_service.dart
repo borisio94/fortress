@@ -5,8 +5,11 @@ import '../../features/caisse/domain/entities/sale.dart';
 import '../../features/caisse/domain/entities/sale_item.dart';
 import '../../features/restaurant/domain/entities/menu_modifier.dart';
 import '../../features/restaurant/domain/entities/restaurant_table.dart';
+import '../config/restaurant_mode.dart';
 import '../database/app_database.dart';
 import '../storage/hive_boxes.dart';
+import 'daily_menu_service.dart';
+import 'recipe_service.dart';
 import 'restaurant_table_service.dart';
 
 /// Opérations de commande propres au service en salle.
@@ -67,6 +70,44 @@ class RestaurantOrderService {
     );
   }
 
+  /// TOUTES les commandes ouvertes d'une table — un compte par commande.
+  ///
+  /// Une table peut héberger plusieurs comptes simultanés : clients distincts
+  /// assis ensemble, ou groupes qui paieront séparément. Le lien réel est
+  /// `Sale.tableId` ; `RestaurantTable.currentOrderId`, au singulier, ne peut
+  /// en désigner qu'un et reste donc un raccourci d'affichage hérité.
+  ///
+  /// Triées de la plus ancienne à la plus récente : l'ordre d'arrivée à table
+  /// est celui que le service a en tête.
+  static List<Sale> openOrdersFor(RestaurantTable table) {
+    try {
+      final open = <Sale>[];
+      for (final o in _ds.getOrders(table.shopId)) {
+        if (o.tableId != table.id) continue;
+        if (o.isDeleted) continue;
+        if (o.status == SaleStatus.completed ||
+            o.status == SaleStatus.cancelled) {
+          continue;
+        }
+        open.add(o);
+      }
+      open.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      return open;
+    } catch (e) {
+      debugPrint('[Restaurant] openOrdersFor err: $e');
+      return const [];
+    }
+  }
+
+  /// Nombre de comptes ouverts et total cumulé d'une table.
+  static ({int count, double total}) tableSummary(RestaurantTable table) {
+    final orders = openOrdersFor(table);
+    return (
+      count: orders.length,
+      total: orders.fold<double>(0, (s, o) => s + o.total),
+    );
+  }
+
   /// Commande en cours d'une table, ou `null` si la table n'en a pas.
   ///
   /// Résout d'abord par `currentOrderId`, puis retombe sur une recherche par
@@ -95,6 +136,37 @@ class RestaurantOrderService {
     return null;
   }
 
+  /// Tournée EN ATTENTE d'une table : la commande pas encore envoyée en
+  /// cuisine, sur laquelle les nouveaux articles s'ajoutent.
+  ///
+  /// Une tournée = un envoi = un bon de cuisine. Une fois envoyée, elle est
+  /// figée : commander un apéritif pendant la préparation ouvre une NOUVELLE
+  /// tournée plutôt que de corriger le bon déjà parti en cuisine.
+  ///
+  /// [tabLabel] cadre la recherche sur un compte précis — deux clients à la
+  /// même table ont chacun leurs tournées.
+  static Sale? pendingRoundFor(RestaurantTable table, {String? tabLabel}) {
+    final wanted = (tabLabel ?? '').trim();
+    for (final o in openOrdersFor(table)) {
+      if ((o.tabLabel ?? '').trim() != wanted) continue;
+      if (o.sentToKitchen) continue;
+      return o;
+    }
+    return null;
+  }
+
+  /// Numéro de la tournée en cours sur un compte (1 pour la première).
+  ///
+  /// Sert au bon de cuisine : « Tournée 2 » dit au cuisinier qu'il s'agit
+  /// d'un ajout et non d'un doublon du bon précédent.
+  static int roundNumberFor(RestaurantTable table, {String? tabLabel}) {
+    final wanted = (tabLabel ?? '').trim();
+    return openOrdersFor(table)
+            .where((o) => (o.tabLabel ?? '').trim() == wanted)
+            .length +
+        1;
+  }
+
   /// Crée ou met à jour la commande d'une table.
   ///
   /// Statut `scheduled` : le stock n'est pas décrémenté à la prise de
@@ -106,6 +178,7 @@ class RestaurantOrderService {
     required List<SaleItem> items,
     required int covers,
     Sale? existing,
+    String? tabLabel,
   }) async {
     final now = DateTime.now();
     if (existing != null) {
@@ -130,6 +203,7 @@ class RestaurantOrderService {
       // Le nom de table sert de libellé client sur la facture et dans les
       // listes de commandes, où un client nommé est attendu.
       clientName: table.name,
+      tabLabel: tabLabel,
     );
     await _ds.saveOrder(order);
     // Lien retour table → commande, pour rouvrir la bonne commande au tap.
@@ -140,6 +214,17 @@ class RestaurantOrderService {
       openedAt: table.openedAt ?? now,
     ));
     return order;
+  }
+
+  /// Envoie une tournée en cuisine : elle est marquée `sentToKitchen` et donc
+  /// FIGÉE. `pendingRoundFor` ne la renverra plus, et les articles suivants
+  /// ouvriront une nouvelle tournée — c'est ce qui permet de commander un
+  /// apéritif pendant que le plat est en préparation, sans réécrire un bon
+  /// déjà imprimé.
+  static Future<Sale> sendRound(Sale order) async {
+    final sent = order.copyWith(sentToKitchen: true);
+    await _ds.updateOrder(sent);
+    return sent;
   }
 
   /// Crée une commande à emporter prise au comptoir.
@@ -206,6 +291,76 @@ class RestaurantOrderService {
     AppDatabase.notifyOrderChange(order.shopId);
   }
 
+  /// Consomme le stock d'une commande SERVIE : disponibilités du jour +
+  /// ingrédients des fiches recettes (Lot B).
+  ///
+  /// Jusqu'ici ce décrément n'existait QUE sur le chemin de la caisse
+  /// (`CaisseBloc`) : une table encaissée depuis l'addition, ou une commande
+  /// remise au comptoir, ne retirait aucun ingrédient. Les fiches recettes
+  /// étaient donc saisies et chiffrées, mais l'inventaire ne bougeait jamais —
+  /// la réconciliation trouvait un écart à chaque service.
+  ///
+  /// QUAND : à la CLÔTURE (encaissement, remise au comptoir) et à l'annulation
+  /// d'une tournée déjà envoyée — les deux seuls moments où la matière est
+  /// certainement partie. Une tournée annulée AVANT envoi n'a rien engagé et ne
+  /// décrémente rien. Chaque commande passe donc par un état terminal une seule
+  /// fois (verrou GF-4), ce qui interdit le double décrément sans avoir à
+  /// stocker un drapeau supplémentaire.
+  ///
+  /// JAMAIS bloquant : la vente est déjà enregistrée, une erreur de
+  /// bookkeeping ne doit pas la faire échouer.
+  static Future<void> consumeStockFor(
+      String shopId, List<SaleItem> items) async {
+    try {
+      if (!isRestaurantShop(shopId)) return;
+      await DailyMenuService.consumeForOrder(shopId, items);
+      await RecipeService.consumeForOrder(shopId, items);
+    } catch (e) {
+      debugPrint('[Restaurant] décrément service err: $e');
+    }
+  }
+
+  /// Ajoute une ligne de frais à la commande (consigne d'emballages, Lot B).
+  ///
+  /// Les frais s'AJOUTENT au total facturé (cf. `Sale.total`) : c'est ce qui
+  /// fait entrer la caution dans l'encaissement sans dupliquer une mécanique
+  /// de facturation. Le suivi des retours, lui, vit dans `bottle_deposits`.
+  ///
+  /// Retourne la commande à jour — l'appelant travaille souvent sur une copie
+  /// mémoire qu'il doit rafraîchir.
+  static Future<Sale> addFee(
+    Sale order, {
+    required String label,
+    required double amount,
+  }) async {
+    final fees = [
+      ...order.fees,
+      {
+        'id': 'fee_${DateTime.now().microsecondsSinceEpoch}',
+        'label': label,
+        'amount': amount,
+      },
+    ];
+    await _patchOrder(order, {'fees': fees});
+    return order.copyWith(fees: fees);
+  }
+
+  /// Applique une remise sur l'addition (geste sous PIN gérant — Lot A).
+  ///
+  /// PLAFONNÉE au sous-total : au-delà, `Sale.total` deviendrait négatif et la
+  /// commande produirait un encaissement… négatif, que rien en aval ne sait
+  /// interpréter. Une remise supérieure au montant des articles est de toute
+  /// façon un geste commercial qui n'existe pas — c'est un remboursement.
+  ///
+  /// Update CIBLÉ comme les autres transitions de service : une réécriture
+  /// complète entrerait en course avec un autre poste sur `status`.
+  static Future<void> applyDiscount(Sale order, double amount) async {
+    final capped = amount < 0
+        ? 0.0
+        : (amount > order.subtotal ? order.subtotal : amount);
+    await _patchOrder(order, {'discount_amount': capped});
+  }
+
   /// Demande l'addition : la table passe en statut `addition`.
   ///
   /// N'écrit rien sur la commande — c'est un état de SERVICE (le client a
@@ -232,9 +387,20 @@ class RestaurantOrderService {
     required Sale order,
     required RestaurantTable table,
     double? amountPaid,
+    PaymentMethod? method,
   }) async {
     final id = order.id;
     if (id == null || id.isEmpty) return null;
+
+    // Mode de règlement dominant, écrit AVANT la clôture par un update ciblé :
+    // `updateOrderStatus` ne touche pas à ce champ, et une réécriture complète
+    // de la commande entrerait en course avec lui sur `status`.
+    //
+    // Le détail (mixte, opérateur, rendu monnaie) vit dans `payments` — cette
+    // colonne ne porte qu'une valeur, celle du plus gros règlement.
+    if (method != null && method != order.paymentMethod) {
+      await _patchOrder(order, {'payment_method': method.name});
+    }
 
     await _ds.updateOrderStatus(
       id,
@@ -243,10 +409,30 @@ class RestaurantOrderService {
       amountPaidOnComplete: amountPaid,
     );
 
+    // Le stock suit la clôture, pas l'inverse : si `updateOrderStatus` lève,
+    // rien n'a été vendu et rien ne doit sortir de l'inventaire.
+    await consumeStockFor(table.shopId, order.items);
+
     // Libération APRÈS clôture réussie : si `updateOrderStatus` lève (GF-4,
     // stock insuffisant…), la table doit rester occupée plutôt que d'être
     // rendue disponible alors que l'addition n'est pas réglée.
-    await RestaurantTableService.release(table);
+    //
+    // Et libération CONDITIONNELLE : une table porte plusieurs comptes
+    // (clients distincts assis ensemble). La libérer dès qu'UN seul est réglé
+    // faisait disparaître les autres du plan de salle — et `release`, qui
+    // détache les commandes restantes, transformait leurs additions en
+    // comptes flottants. Le premier client payait, le second devenait
+    // invisible pour le serveur.
+    final remaining = openOrdersFor(table);
+    if (remaining.isEmpty) {
+      await RestaurantTableService.release(table);
+    } else if (table.currentOrderId == id) {
+      // Il reste des comptes : la table NE se libère pas. On efface seulement
+      // son pointeur vers l'addition qu'on vient d'encaisser, sinon elle
+      // rouvrirait sur une commande déjà payée.
+      await RestaurantTableService.save(
+          table.copyWith(currentOrderId: null));
+    }
 
     // La commande GARDE son `table_id` : c'est un fait historique utile aux
     // statistiques par table et à la relecture d'une facture. Seule la table
@@ -303,17 +489,30 @@ class RestaurantOrderService {
 
   /// Remise d'une commande à emporter au client : clôture + encaissement.
   ///
-  /// Paiement à la réception (spec §10) → on force « entièrement payé » en
-  /// laissant `amountPaidOnComplete` à null. Aucune table à libérer ici,
-  /// contrairement à [settleAndRelease].
-  static Future<void> collectTakeaway(Sale order) async {
+  /// Paiement à la réception (spec §10) : [amountPaid] laissé à `null` force
+  /// « entièrement payé » — c'est le cas nominal du comptoir. Une valeur
+  /// inférieure au total laisse une créance, comme en salle.
+  ///
+  /// [method] écrit le mode de règlement dominant (le détail des règlements
+  /// vit dans `payments`). Aucune table à libérer ici, contrairement à
+  /// [settleAndRelease].
+  static Future<void> collectTakeaway(
+    Sale order, {
+    double? amountPaid,
+    PaymentMethod? method,
+  }) async {
     final id = order.id;
     if (id == null || id.isEmpty) return;
+    if (method != null && method != order.paymentMethod) {
+      await _patchOrder(order, {'payment_method': method.name});
+    }
     await _ds.updateOrderStatus(
       id,
       SaleStatus.completed,
       completedAt: DateTime.now(),
+      amountPaidOnComplete: amountPaid,
     );
+    await consumeStockFor(order.shopId, order.items);
   }
 
   /// Bons de cuisine en cours : envoyés et pas encore prêts.

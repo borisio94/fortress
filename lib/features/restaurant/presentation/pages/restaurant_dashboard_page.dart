@@ -3,7 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/database/app_database.dart';
+import '../../../../core/services/daily_menu_service.dart';
+import '../../../../core/services/ingredient_service.dart';
 import '../../../../core/services/restaurant_reporting_service.dart';
+import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -13,6 +17,7 @@ import '../../../../shared/widgets/product_image_card.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
 import '../../data/restaurant_dashboard_providers.dart';
 import '../widgets/resto_kpi_tile.dart';
+import '../widgets/resto_surfaces.dart';
 
 /// Tableau de bord dédié à la restauration.
 ///
@@ -27,13 +32,57 @@ import '../widgets/resto_kpi_tile.dart';
 ///
 /// L'écran e-commerce (`DashboardPage`) n'est pas touché : le routeur choisit
 /// l'un ou l'autre selon le secteur de la boutique.
-class RestaurantDashboardPage extends ConsumerWidget {
+class RestaurantDashboardPage extends ConsumerStatefulWidget {
   final String shopId;
 
   const RestaurantDashboardPage({super.key, required this.shopId});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<RestaurantDashboardPage> createState() =>
+      _RestaurantDashboardPageState();
+}
+
+class _RestaurantDashboardPageState
+    extends ConsumerState<RestaurantDashboardPage> {
+  @override
+  void initState() {
+    super.initState();
+    // Sans cet abonnement, `dashSignalProvider` n'est jamais incrémenté depuis
+    // la restauration (seul l'écran e-commerce le faisait) : les providers
+    // `family` servaient leur résultat en cache et les chiffres restaient
+    // figés jusqu'à un changement de période. Une vente encaissée doit se voir
+    // tout de suite.
+    AppDatabase.addListener(_onDataChanged);
+    DailyMenuService.revision.addListener(_onMenuChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(dashSignalProvider.notifier).state++;
+    });
+  }
+
+  @override
+  void dispose() {
+    AppDatabase.removeListener(_onDataChanged);
+    DailyMenuService.revision.removeListener(_onMenuChanged);
+    super.dispose();
+  }
+
+  void _onDataChanged(String table, String shopId) {
+    if (!mounted) return;
+    // '_all' = notification globale (reset, flush de la file offline).
+    if (shopId != widget.shopId && shopId != '_all') return;
+    ref.read(dashSignalProvider.notifier).state++;
+  }
+
+  /// Les disponibilités du jour vivent hors Hive synchronisé : elles ont leur
+  /// propre notifieur.
+  void _onMenuChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shopId = widget.shopId;
     final data = ref.watch(dashDataProvider(shopId));
     final resto = ref.watch(restaurantDashProvider(shopId));
     final finance = ref.watch(restaurantFinanceProvider(shopId));
@@ -44,9 +93,16 @@ class RestaurantDashboardPage extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _KpiRow(shopId: shopId, resto: resto),
+          // ── Bandeau principal : 4 indicateurs du service ──────────────
+          _TopKpiRow(shopId: shopId, resto: resto, data: data, finance: finance),
           const SizedBox(height: 16),
+          // ── Trois panneaux : commandes · carte du jour · ingrédients ───
+          _ServiceRow(shopId: shopId, resto: resto),
+          const SizedBox(height: 16),
+          // ── Rapport financier ─────────────────────────────────────────
           _FinanceKpiRow(report: finance),
+          const SizedBox(height: 16),
+          _FoodCostCard(report: finance),
           const SizedBox(height: 16),
           _FinanceChartCard(report: finance),
           const SizedBox(height: 16),
@@ -64,46 +120,54 @@ class RestaurantDashboardPage extends ConsumerWidget {
   }
 }
 
-/// Bandeau des 4 tuiles colorées.
+/// Bandeau principal : les 4 chiffres qu'on regarde en entrant en service.
 ///
-/// Indicateurs d'EXPLOITATION uniquement (commandes, cuisine, salle, livraison).
-/// Toute la lecture FINANCIÈRE (recette, dépense, ticket) a été retirée du
-/// tableau de bord : la gestion des finances gastronomiques passe désormais
-/// exclusivement par le module Finances restaurant (fiche recette + hub).
-class _KpiRow extends StatelessWidget {
+/// Ventes de la période · commandes encore ouvertes · clients servis · stock
+/// bas. Chaque tuile mène à l'écran qui permet d'agir dessus.
+class _TopKpiRow extends ConsumerWidget {
   final String shopId;
   final RestaurantDashData resto;
+  final DashData data;
+  final RestaurantFinanceReport finance;
 
-  const _KpiRow({required this.shopId, required this.resto});
+  const _TopKpiRow({
+    required this.shopId,
+    required this.resto,
+    required this.data,
+    required this.finance,
+  });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sem = Theme.of(context).semantic;
+    final period = ref.watch(dashPeriodProvider);
     final tiles = <Widget>[
-      RestoKpiTile(
-        value: resto.totalOrders.toString(),
-        label: 'Commandes',
-        icon: Icons.receipt_long_rounded,
-        color: RestoTileColors.orders,
+      _StatCard(
+        // Le libellé suit le sélecteur de période : annoncer « du jour » sur
+        // une plage mensuelle serait un mensonge à l'écran.
+        title: 'Ventes · ${_periodLabel(period)}',
+        value: CurrencyFormatter.format(finance.revenue),
+        accent: true,
         onTap: () => context.push('/shop/$shopId/caisse/orders'),
       ),
-      RestoKpiTile(
-        value: resto.inKitchen.toString(),
-        label: 'En cuisine',
-        icon: Icons.restaurant_rounded,
-        color: RestoTileColors.expense,
+      _StatCard(
+        title: 'Commandes en cours',
+        value: resto.openCount.toString(),
+        icon: Icons.receipt_long_rounded,
+        onTap: () => context.push('/shop/$shopId/caisse/orders'),
       ),
-      RestoKpiTile(
-        value: '${resto.busyTables} / ${resto.totalTables}',
-        label: 'Tables occupées',
-        icon: Icons.table_chart_outlined,
-        color: RestoTileColors.average,
-        onTap: () => context.push('/shop/$shopId/restaurant/tables'),
+      _StatCard(
+        title: 'Clients servis',
+        value: data.clientCount.toString(),
+        icon: Icons.people_alt_outlined,
       ),
-      RestoKpiTile(
-        value: resto.delivery.toString(),
-        label: 'Livraisons',
-        icon: Icons.local_shipping_rounded,
-        color: RestoTileColors.revenue,
+      _StatCard(
+        title: 'Stock bas',
+        value: resto.lowStockCount.toString(),
+        suffix: resto.lowStockCount > 1 ? 'alertes' : 'alerte',
+        valueColor: resto.lowStockCount > 0 ? sem.danger : null,
+        icon: Icons.inventory_2_outlined,
+        onTap: () => context.push('/shop/$shopId/restaurant/finances'),
       ),
     ];
 
@@ -115,8 +179,6 @@ class _KpiRow extends StatelessWidget {
         itemCount: tiles.length,
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: wide ? 4 : 2,
-          // Tuiles larges et basses, comme la maquette : le badge et le
-          // texte sont côte à côte, pas empilés.
           childAspectRatio: wide ? 2.15 : 1.85,
           mainAxisSpacing: 12,
           crossAxisSpacing: 12,
@@ -125,6 +187,467 @@ class _KpiRow extends StatelessWidget {
       );
     });
   }
+}
+
+/// Tuile d'indicateur : intitulé discret au-dessus, chiffre en grand dessous.
+///
+/// [accent] souligne la tuile d'une barre à la couleur de marque — réservé à
+/// l'indicateur principal (les ventes), comme sur la maquette.
+class _StatCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final String? suffix;
+  final Color? valueColor;
+  final IconData? icon;
+  final bool accent;
+  final VoidCallback? onTap;
+
+  const _StatCard({
+    required this.title,
+    required this.value,
+    this.suffix,
+    this.valueColor,
+    this.icon,
+    this.accent = false,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Material(
+      color: restoGlassFill(context),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: restoGlassBorder(context)),
+          ),
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.bodySm.copyWith(
+                                  color: cs.onSurface
+                                      .withValues(alpha: 0.6))),
+                        ),
+                        if (icon != null)
+                          Icon(icon,
+                              size: 18,
+                              color: cs.onSurface.withValues(alpha: 0.3)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.baseline,
+                        textBaseline: TextBaseline.alphabetic,
+                        children: [
+                          Text(value,
+                              maxLines: 1,
+                              style: AppTextStyles.title.copyWith(
+                                  color: valueColor ?? cs.onSurface,
+                                  fontWeight: FontWeight.w800)),
+                          if (suffix != null) ...[
+                            const SizedBox(width: 5),
+                            Text(suffix!,
+                                style: AppTextStyles.bodySm.copyWith(
+                                    color: valueColor ??
+                                        cs.onSurface
+                                            .withValues(alpha: 0.6))),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (accent)
+                Positioned(
+                  left: 14,
+                  right: 14,
+                  bottom: 0,
+                  child: Container(
+                    height: 3,
+                    decoration: BoxDecoration(
+                      color: cs.primary,
+                      borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(3)),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  RANGÉE DE SERVICE — commandes · carte du jour · ingrédients
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Les trois panneaux du service, côte à côte sur large écran, empilés sinon.
+class _ServiceRow extends StatelessWidget {
+  final String shopId;
+  final RestaurantDashData resto;
+
+  const _ServiceRow({required this.shopId, required this.resto});
+
+  @override
+  Widget build(BuildContext context) {
+    final orders = _OpenOrdersCard(shopId: shopId, resto: resto);
+    final menu = _DailyMenuCard(shopId: shopId);
+    final stock = _IngredientsCard(shopId: shopId);
+
+    return LayoutBuilder(builder: (_, c) {
+      if (c.maxWidth >= 1040) {
+        return IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(flex: 4, child: orders),
+              const SizedBox(width: 16),
+              Expanded(flex: 5, child: menu),
+              const SizedBox(width: 16),
+              Expanded(flex: 3, child: stock),
+            ],
+          ),
+        );
+      }
+      if (c.maxWidth >= 700) {
+        return Column(children: [
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: orders),
+                const SizedBox(width: 16),
+                Expanded(child: stock),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          menu,
+        ]);
+      }
+      return Column(children: [
+        orders,
+        const SizedBox(height: 16),
+        menu,
+        const SizedBox(height: 16),
+        stock,
+      ]);
+    });
+  }
+}
+
+/// Commandes encore ouvertes, les plus récentes en tête.
+class _OpenOrdersCard extends StatelessWidget {
+  final String shopId;
+  final RestaurantDashData resto;
+
+  const _OpenOrdersCard({required this.shopId, required this.resto});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final sem = theme.semantic;
+    final lines = resto.openOrders;
+
+    /// Couleur et icône par étape de service.
+    (Color, IconData) look(int stage) => switch (stage) {
+          2 => (sem.success, Icons.check_circle_outline_rounded),
+          1 => (sem.warning, Icons.local_fire_department_outlined),
+          _ => (cs.primary, Icons.schedule_rounded),
+        };
+
+    return _Card(
+      title: 'Commandes en cours',
+      subtitle: resto.openCount > lines.length
+          ? '${resto.openCount} au total'
+          : null,
+      child: lines.isEmpty
+          ? const _EmptyBlock(
+              icon: Icons.done_all_rounded,
+              message: 'Aucune commande en attente. Service à jour.',
+            )
+          : Column(
+              children: [
+                for (final o in lines)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Material(
+                      color: restoGlassInner(context),
+                      borderRadius: BorderRadius.circular(12),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () =>
+                            context.push('/shop/$shopId/caisse/orders'),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 11),
+                          child: Row(
+                            children: [
+                              Icon(look(o.stage).$2,
+                                  size: 19, color: look(o.stage).$1),
+                              const SizedBox(width: 10),
+                              Flexible(
+                                child: Text(o.label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: AppTextStyles.bodyBold
+                                        .copyWith(color: cs.onSurface)),
+                              ),
+                              const SizedBox(width: 8),
+                              Text('|',
+                                  style: AppTextStyles.bodySm.copyWith(
+                                      color: sem.borderSubtle)),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(o.statusLabel,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: AppTextStyles.bodySm
+                                        .copyWith(color: look(o.stage).$1)),
+                              ),
+                              Icon(Icons.chevron_right_rounded,
+                                  size: 20,
+                                  color:
+                                      cs.onSurface.withValues(alpha: 0.35)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+    );
+  }
+}
+
+/// Carte du jour : les plats et leur disponibilité du moment.
+class _DailyMenuCard extends StatelessWidget {
+  final String shopId;
+
+  const _DailyMenuCard({required this.shopId});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final sem = Theme.of(context).semantic;
+
+    // Les plats vendables d'abord : en service, ce qu'on cherche c'est ce
+    // qu'on peut proposer maintenant.
+    final dishes = LocalStorageService.getProductsForShop(shopId)
+        .where((p) => p.isActive && p.id != null)
+        .toList();
+    dishes.sort((a, b) {
+      final av = DailyMenuService.read(shopId, a.id!).isAvailable ? 0 : 1;
+      final bv = DailyMenuService.read(shopId, b.id!).isAvailable ? 0 : 1;
+      return av != bv ? av - bv : a.name.compareTo(b.name);
+    });
+    final shown = dishes.take(4).toList();
+
+    return _Card(
+      title: 'Menu du jour',
+      trailing: TextButton(
+        // La carte restaurant vit sur la route `/inventaire` (même route que
+        // l'inventaire e-commerce, l'écran change selon le secteur).
+        onPressed: () => context.push('/shop/$shopId/inventaire'),
+        child: Text('Voir la carte',
+            style: AppTextStyles.bodySm.copyWith(color: cs.primary)),
+      ),
+      child: shown.isEmpty
+          ? const _EmptyBlock(
+              icon: Icons.restaurant_menu_rounded,
+              message: 'Aucun plat sur la carte. Ajoutez-en depuis le Menu.',
+            )
+          : SizedBox(
+              height: 176,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: shown.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (_, i) {
+                  final p = shown[i];
+                  final avail = DailyMenuService.read(shopId, p.id!);
+                  return SizedBox(
+                    width: 132,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: restoGlassInner(context),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: sem.borderSubtle),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(
+                            height: 104,
+                            width: double.infinity,
+                            child: Opacity(
+                              // Plat indisponible : photo grisée, comme sur la
+                              // carte — l'information doit se voir d'un coup
+                              // d'œil, pas seulement se lire.
+                              opacity: avail.isAvailable ? 1 : 0.45,
+                              child: ProductImageCard(
+                                imageUrl: p.mainImageUrl,
+                                fillParent: true,
+                                borderRadius: BorderRadius.zero,
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 9),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Text(p.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: AppTextStyles.bodySm
+                                          .copyWith(color: cs.onSurface)),
+                                  Text(
+                                      avail.isAvailable
+                                          ? CurrencyFormatter.format(
+                                              p.priceSellPos)
+                                          : (avail.isSoldOut
+                                              ? 'Épuisé'
+                                              : 'Indisponible'),
+                                      maxLines: 1,
+                                      style: AppTextStyles.captionBold
+                                          .copyWith(
+                                              color: avail.isAvailable
+                                                  ? cs.primary
+                                                  : sem.danger)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+    );
+  }
+}
+
+/// Stock d'ingrédients : les plus urgents d'abord, puis deux raccourcis.
+class _IngredientsCard extends StatelessWidget {
+  final String shopId;
+
+  const _IngredientsCard({required this.shopId});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final sem = theme.semantic;
+
+    // Stock bas en tête : c'est ce sur quoi il faut agir.
+    final all = IngredientService.forShop(shopId);
+    all.sort((a, b) {
+      if (a.isLowStock != b.isLowStock) return a.isLowStock ? -1 : 1;
+      return a.quantity.compareTo(b.quantity);
+    });
+    final shown = all.take(4).toList();
+
+    return _Card(
+      title: 'Stock d\'ingrédients',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (shown.isEmpty)
+            const _EmptyBlock(
+              icon: Icons.eco_outlined,
+              message: 'Aucun ingrédient enregistré.',
+            )
+          else
+            for (final i in shown)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: restoGlassInner(context),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: sem.borderSubtle),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.eco_outlined,
+                          size: 17,
+                          color: i.isLowStock ? sem.danger : cs.primary),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Text(i.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTextStyles.bodySm
+                                .copyWith(color: cs.onSurface)),
+                      ),
+                      Text(
+                          '${_qty(i.quantity)} ${i.unit}',
+                          style: AppTextStyles.bodySmBold.copyWith(
+                              color:
+                                  i.isLowStock ? sem.danger : cs.onSurface)),
+                    ],
+                  ),
+                ),
+              ),
+          const SizedBox(height: 4),
+          FilledButton.icon(
+            onPressed: () => context.push('/shop/$shopId/restaurant/finances'),
+            icon: const Icon(Icons.add_rounded, size: 18),
+            label: const Text('Ajouter ingrédient'),
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 42)),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => context
+                .push('/shop/$shopId/restaurant/inventory/reconcile'),
+            icon: const Icon(Icons.fact_check_outlined, size: 18),
+            label: const Text('Inventaire'),
+            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Quantité lisible, sans « .0 » superflu.
+  String _qty(double v) =>
+      v == v.truncateToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -172,8 +695,11 @@ class _FinanceKpiRow extends StatelessWidget {
       _FinanceTile(
         curve: _Curve.expense,
         amount: report.expenses,
+        // « dont matières » suit la même règle que le bénéfice : les achats
+        // réels dès qu'ils sont saisis, l'estimation des recettes sinon.
         hint: 'dont matières '
-            '${CurrencyFormatter.format(report.materialCost)}',
+            '${CurrencyFormatter.format(report.foodCost)}'
+            '${report.payroll > 0 ? ' · paie ${CurrencyFormatter.format(report.payroll.toDouble())}' : ''}',
       ),
       _FinanceTile(curve: _Curve.loss, amount: report.losses.toDouble()),
     ];
@@ -196,6 +722,160 @@ class _FinanceKpiRow extends StatelessWidget {
   }
 }
 
+/// Carte FOOD COST (Lot E) — l'indicateur de survie d'un restaurant.
+///
+/// Le food cost est la part du chiffre d'affaires qui repart en matières
+/// premières. Au-delà de 35 %, la carte ne dégage plus assez pour couvrir le
+/// loyer et les salaires : c'est le premier chiffre qu'un restaurateur doit
+/// voir, avant même son bénéfice.
+///
+/// Deux mesures cohabitent, et leur ÉCART est le vrai signal :
+///   * le THÉORIQUE vient des fiches recettes — ce que les plats vendus
+///     auraient dû consommer ;
+///   * le RÉEL vient des achats saisis — ce qui est réellement sorti.
+/// Un réel durablement supérieur au théorique, c'est du gaspillage, du vol, ou
+/// une fiche recette fausse.
+class _FoodCostCard extends StatelessWidget {
+  final RestaurantFinanceReport report;
+  const _FoodCostCard({required this.report});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sem = theme.semantic;
+    final level = report.foodCostLevel;
+    // Pas de vente sur la période : un taux sans chiffre d'affaires ne veut
+    // rien dire, on n'affiche pas une pastille rouge trompeuse.
+    if (level == null) return const SizedBox.shrink();
+
+    final color = switch (level) {
+      'good' => sem.success,
+      'warning' => sem.warning,
+      _ => sem.danger,
+    };
+    final rate = report.foodCostRate;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: restoGlassFill(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: sem.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.restaurant_menu_rounded, size: 18, color: color),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Food cost', style: AppTextStyles.bodyBold),
+              ),
+              Text('${rate.toStringAsFixed(1)} %',
+                  style: AppTextStyles.title.copyWith(color: color)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Barre de niveau : la position par rapport aux seuils se lit plus
+          // vite qu'un pourcentage.
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: (rate / 50).clamp(0.0, 1.0),
+              minHeight: 6,
+              backgroundColor: sem.trackMuted,
+              valueColor: AlwaysStoppedAnimation(color),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+              switch (level) {
+                'good' => 'Sous les 30 % — bonne maîtrise des matières.',
+                'warning' =>
+                  'Entre 30 et 35 % — surveillez les portions et les pertes.',
+                _ => 'Au-dessus de 35 % — la carte ne couvre plus ses charges.',
+              },
+              style: AppTextStyles.captionHint),
+          const Divider(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: _FoodCostSide(
+                  label: report.usesRealFoodCost ? 'Réel (achats)' : 'Estimé',
+                  amount: report.foodCost,
+                  rate: report.foodCostRate,
+                  strong: true,
+                ),
+              ),
+              if (report.usesRealFoodCost)
+                Expanded(
+                  child: _FoodCostSide(
+                    label: 'Théorique (recettes)',
+                    amount: report.materialCost,
+                    rate: report.theoreticalFoodCostRate,
+                  ),
+                ),
+            ],
+          ),
+          if (report.usesRealFoodCost && report.foodCostGap.abs() > 0) ...[
+            const SizedBox(height: 6),
+            Text(
+                report.foodCostGap > 0
+                    ? 'Vous avez acheté '
+                        '${CurrencyFormatter.format(report.foodCostGap)} '
+                        'de plus que ce que vos ventes ont consommé — stock '
+                        'constitué, gaspillage ou fiche recette à revoir.'
+                    : 'Vous avez consommé '
+                        '${CurrencyFormatter.format(-report.foodCostGap)} '
+                        'de plus que vos achats de la période — vous puisez '
+                        'dans le stock existant.',
+                style: AppTextStyles.caption.copyWith(
+                    color: report.foodCostGap > 0 ? sem.warning : null)),
+          ],
+          if (!report.usesRealFoodCost) ...[
+            const SizedBox(height: 6),
+            Text(
+                'Estimé d\'après vos fiches recettes. Saisissez vos achats '
+                'dans Finances → Dépenses pour obtenir le coût réel.',
+                style: AppTextStyles.captionHint),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Un côté de la comparaison food cost (réel / théorique).
+class _FoodCostSide extends StatelessWidget {
+  final String label;
+  final double amount;
+  final double rate;
+  final bool strong;
+
+  const _FoodCostSide({
+    required this.label,
+    required this.amount,
+    required this.rate,
+    this.strong = false,
+  });
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: AppTextStyles.captionHint),
+          Text(CurrencyFormatter.format(amount),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style:
+                  strong ? AppTextStyles.bodyBold : AppTextStyles.bodySmBold),
+          Text('${rate.toStringAsFixed(1)} % du CA',
+              style: AppTextStyles.micro),
+        ],
+      );
+}
+
 /// Tuile d'indicateur financier : pastille de couleur de courbe + montant.
 class _FinanceTile extends StatelessWidget {
   final _Curve curve;
@@ -216,9 +896,9 @@ class _FinanceTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: cs.surface,
+        color: restoGlassFill(context),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: sem.borderSubtle),
+        border: Border.all(color: restoGlassBorder(context)),
       ),
       child: Row(
         children: [
@@ -1024,7 +1704,7 @@ class _TrendingCardState extends State<_TrendingCard> {
                   return Container(
                     width: 222,
                     decoration: BoxDecoration(
-                      color: sem.elevatedSurface,
+                      color: restoGlassInner(context),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: sem.borderSubtle),
                     ),
@@ -1120,14 +1800,15 @@ class _Card extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final sem = theme.semantic;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        // Panneau translucide : le fond photographique du mode restaurant doit
+        // se deviner derrière les cartes (cf. RestoBackdrop).
+        color: restoGlassFill(context),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: sem.borderSubtle),
+        border: Border.all(color: restoGlassBorder(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

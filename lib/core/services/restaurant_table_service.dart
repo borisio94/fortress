@@ -4,6 +4,8 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../../features/restaurant/domain/entities/restaurant_table.dart';
 import '../database/app_database.dart';
 import '../storage/hive_boxes.dart';
+import 'restaurant_tab_service.dart';
+import 'restaurant_order_service.dart';
 
 /// Service Hive-first du plan de salle. Toute mutation est :
 ///   1. écrite IMMÉDIATEMENT dans Hive (offline-first),
@@ -110,11 +112,21 @@ class RestaurantTableService {
     return opened;
   }
 
-  /// Libère la table : remet tout le contexte de service à null.
+  /// Libère la table : remet tout le contexte de service à null ET détache
+  /// les commandes encore ouvertes.
   ///
   /// `currentOrderId` est explicitement remis à null — sans ça, la table
   /// rouvrirait sur la commande du service précédent au prochain client.
+  ///
+  /// Le DÉTACHEMENT est indispensable depuis que le plan de salle déduit le
+  /// statut des commandes ouvertes : sans lui, une table libérée qui porte
+  /// encore un compte non soldé repassait aussitôt en « occupée » et devenait
+  /// impossible à libérer. Les commandes ne sont pas supprimées — elles
+  /// deviennent des comptes sans table, toujours encaissables.
   static Future<RestaurantTable> release(RestaurantTable table) async {
+    for (final order in RestaurantOrderService.openOrdersFor(table)) {
+      await RestaurantTabService.detachFromTable(order);
+    }
     final freed = table.copyWith(
       status: RestaurantTableStatus.libre,
       covers: null,

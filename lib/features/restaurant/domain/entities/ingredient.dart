@@ -29,6 +29,12 @@ class Ingredient {
   /// 'specialized' (un seul plat) ou 'shared' (plusieurs plats).
   final String type;
 
+  /// Date d'achat (date seule, sans heure) — INFORMATIF (hotfix_142).
+  ///
+  /// N'entre pas dans le calcul du bénéfice : le coût matières est compté à la
+  /// vente, via la fiche recette. `null` = non renseignée.
+  final DateTime? purchaseDate;
+
   final DateTime createdAt;
 
   const Ingredient({
@@ -41,7 +47,14 @@ class Ingredient {
     this.alertThreshold = 0,
     this.costPerUnit = 0,
     this.type = 'specialized',
+    this.purchaseDate,
   });
+
+  /// Clé `yyyy-MM-dd` d'une date (stockage DATE sans heure).
+  static String dayKey(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
 
   bool get isShared => type == 'shared';
 
@@ -55,6 +68,10 @@ class Ingredient {
     double? alertThreshold,
     int? costPerUnit,
     String? type,
+    DateTime? purchaseDate,
+    /// Efface la date d'achat (un `null` passé à [purchaseDate] signifie
+    /// « inchangée », comme pour tous les autres champs).
+    bool clearPurchaseDate = false,
   }) =>
       Ingredient(
         id: id,
@@ -66,6 +83,9 @@ class Ingredient {
         alertThreshold: alertThreshold ?? this.alertThreshold,
         costPerUnit: costPerUnit ?? this.costPerUnit,
         type: type ?? this.type,
+        purchaseDate: clearPurchaseDate
+            ? null
+            : (purchaseDate ?? this.purchaseDate),
       );
 
   static const int currentSchemaVersion = 1;
@@ -84,6 +104,8 @@ class Ingredient {
         'alert_threshold': alertThreshold,
         'cost_per_unit': costPerUnit,
         'type': type,
+        'purchase_date':
+            purchaseDate == null ? null : dayKey(purchaseDate!),
         'created_at': createdAt.toUtc().toIso8601String(),
       };
 
@@ -98,6 +120,11 @@ class Ingredient {
       alertThreshold: (m['alert_threshold'] as num?)?.toDouble() ?? 0,
       costPerUnit: (m['cost_per_unit'] as num?)?.toInt() ?? 0,
       type: (m['type'] ?? 'specialized').toString(),
+      // Absente des ingrédients antérieurs à hotfix_142 → non renseignée.
+      purchaseDate: m['purchase_date'] == null ||
+              m['purchase_date'].toString().isEmpty
+          ? null
+          : DateTime.tryParse(m['purchase_date'].toString()),
       createdAt: m['created_at'] == null
           ? DateTime.now()
           : (DateTime.tryParse(m['created_at'].toString())?.toLocal() ??

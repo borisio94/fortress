@@ -115,6 +115,25 @@ class HiveBoxes {
   static const String fixedCharges         = 'fixed_charges_box';
   /// Déclarations de pertes (casse, invendus, non payés…) — PR-C.
   static const String losses               = 'losses_box';
+  /// Règlements d'addition (espèces, MTN, Orange…) — Lot A, hotfix_145.
+  static const String payments             = 'payments_box';
+  /// Consignes d'emballages remises aux clients — Lot B, hotfix_146.
+  static const String bottleDeposits       = 'bottle_deposits_box';
+  /// Contrôles de caisse aveugles (rapports X et Z) — Lot C, hotfix_147.
+  static const String cashClosures         = 'cash_closures_box';
+  // ── Personnel du restaurant (Lot D, hotfix_148) — serveuses, cuisiniers…
+  //    DISTINCT des membres de l'app (shop_memberships) : ce personnel n'a
+  //    pas de compte Fortress.
+  /// Fiches du personnel (table `employees`).
+  static const String employees            = 'employees_box';
+  /// Pointages (entrée / sortie de service).
+  static const String timeRecords          = 'time_records_box';
+  /// Avances sur salaire.
+  static const String salaryAdvances       = 'salary_advances_box';
+  /// Fiches de paie mensuelles (table `payroll`).
+  static const String payroll              = 'payroll_box';
+  /// Dépenses quotidiennes (achat marché, gaz, entretien…) — Lot E, hotfix_149.
+  static const String dailyExpenses        = 'daily_expenses_box';
 
   static Future<void> init() async {
     debugPrint('[Hive] HBX-A init() entered, kIsWeb=$kIsWeb');
@@ -185,6 +204,14 @@ class HiveBoxes {
       await _safeOpenMap(stockItems);
       await _safeOpenMap(fixedCharges);
       await _safeOpenMap(losses);
+      await _safeOpenMap(payments);
+      await _safeOpenMap(bottleDeposits);
+      await _safeOpenMap(cashClosures);
+      await _safeOpenMap(employees);
+      await _safeOpenMap(timeRecords);
+      await _safeOpenMap(salaryAdvances);
+      await _safeOpenMap(payroll);
+      await _safeOpenMap(dailyExpenses);
       debugPrint('[Hive] HBX-D all boxes opened (some may have failed)');
     } catch (e, st) {
       debugPrint('[Hive] HBX-FATAL outer init error: $e');
@@ -262,7 +289,8 @@ class HiveBoxes {
     pendingImageUploads,
     restaurantTables, menuModifiers, dailyMenuAvailability,
     ingredients, recipeIngredients, restaurantActivities, stockItems,
-    fixedCharges, losses,
+    fixedCharges, losses, payments, bottleDeposits, cashClosures,
+    employees, timeRecords, salaryAdvances, payroll, dailyExpenses,
   ];
 
   static Future<void> _safeClose(String boxName) async {
@@ -372,4 +400,12 @@ class HiveBoxes {
   static Box<Map>   get stockItemsBox         => Hive.box<Map>(stockItems);
   static Box<Map>   get fixedChargesBox       => Hive.box<Map>(fixedCharges);
   static Box<Map>   get lossesBox             => Hive.box<Map>(losses);
+  static Box<Map>   get paymentsBox           => Hive.box<Map>(payments);
+  static Box<Map>   get bottleDepositsBox     => Hive.box<Map>(bottleDeposits);
+  static Box<Map>   get cashClosuresBox       => Hive.box<Map>(cashClosures);
+  static Box<Map>   get employeesBox          => Hive.box<Map>(employees);
+  static Box<Map>   get timeRecordsBox        => Hive.box<Map>(timeRecords);
+  static Box<Map>   get salaryAdvancesBox     => Hive.box<Map>(salaryAdvances);
+  static Box<Map>   get payrollBox            => Hive.box<Map>(payroll);
+  static Box<Map>   get dailyExpensesBox      => Hive.box<Map>(dailyExpenses);
 }
