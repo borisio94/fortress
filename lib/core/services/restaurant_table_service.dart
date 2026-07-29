@@ -112,6 +112,46 @@ class RestaurantTableService {
     return opened;
   }
 
+  /// Libère la table SI plus aucun compte n'y est ouvert.
+  ///
+  /// À appeler après toute opération qui retire une commande d'une table :
+  /// encaissement, transfert de compte, départ sans payer, annulation d'une
+  /// tournée. Sans ça, une table dont le dernier compte est parti restait
+  /// « occupée » alors que plus personne n'y est assis — et il fallait la
+  /// libérer à la main pour pouvoir y placer le client suivant.
+  ///
+  /// N'est JAMAIS appelée à l'aveugle sur tout le plan de salle : une table
+  /// qu'on vient d'ouvrir n'a légitimement aucune commande (les clients
+  /// consultent la carte). La libérer reviendrait à la rendre disponible sous
+  /// les fesses des clients.
+  ///
+  /// Retourne la table libérée, ou `null` si elle avait encore un compte.
+  static Future<RestaurantTable?> releaseIfEmpty(RestaurantTable table) async {
+    if (table.isFree) return null;
+    if (RestaurantOrderService.openOrdersFor(table).isNotEmpty) return null;
+    return release(table);
+  }
+
+  /// Ajuste le nombre de couverts d'un service en cours — des convives sont
+  /// partis, ou d'autres se sont ajoutés.
+  ///
+  /// La table RESTE occupée : ce sont des sièges qui se libèrent, pas la table.
+  /// C'est ce qui permet de placer deux clients sur une table de six déjà
+  /// entamée, cas courant quand on partage les grandes tables.
+  ///
+  /// Borné entre 1 et la capacité : zéro couvert n'est pas un service (c'est
+  /// une table à libérer), et on ne peut pas asseoir plus de monde que de
+  /// places.
+  static Future<RestaurantTable> updateCovers(
+      RestaurantTable table, int covers) async {
+    final capped = covers < 1
+        ? 1
+        : (covers > table.capacity ? table.capacity : covers);
+    final updated = table.copyWith(covers: capped);
+    await _persist(updated);
+    return updated;
+  }
+
   /// Libère la table : remet tout le contexte de service à null ET détache
   /// les commandes encore ouvertes.
   ///

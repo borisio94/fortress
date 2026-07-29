@@ -30,6 +30,7 @@ RestaurantTable _table({
     );
 
 void main() {
+  _coversTests();
   group('RestaurantTableStatus — clés persistées', () {
     test('les clés SQL sont sans accent et stables', () {
       expect(RestaurantTableStatus.libre.key, 'libre');
@@ -206,6 +207,52 @@ void main() {
     test('les clés proposées dans Paramètres sont uniques', () {
       final keys = kEstablishmentTypes.map((t) => t.key).toList();
       expect(keys.toSet().length, keys.length);
+    });
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Places libérées en cours de service
+//
+// Un convive qui part n'est pas une table qui se libère : sur une table de six
+// occupée par deux personnes, quatre places restent disponibles. Libérer la
+// table entière ferait disparaître l'addition des clients restés assis ; ne
+// rien ajuster empêcherait d'y placer qui que ce soit.
+// ─────────────────────────────────────────────────────────────────────────────
+void _coversTests() {
+  group('Couverts et places restantes', () {
+    RestaurantTable service(int covers, {int capacity = 6}) => RestaurantTable(
+          id: 'rt_1',
+          shopId: 'shop_1',
+          number: 1,
+          name: 'T1',
+          capacity: capacity,
+          status: RestaurantTableStatus.occupee,
+          covers: covers,
+          createdAt: DateTime(2026, 7, 29),
+        );
+
+    test('les couverts survivent à un aller-retour toMap/fromMap', () {
+      final back = RestaurantTable.fromMap(service(2).toMap());
+      expect(back.covers, 2);
+      expect(back.capacity, 6);
+      // 4 places restent : c'est ce que le plan de salle doit annoncer.
+      expect(back.capacity - back.covers!, 4);
+    });
+
+    test('une table pleine ne laisse aucune place', () {
+      final back = RestaurantTable.fromMap(service(6).toMap());
+      expect(back.capacity - back.covers!, 0);
+    });
+
+    test('ajuster les couverts NE libère PAS la table', () {
+      // La règle qui compte : deux convives partent d'une table de six, la
+      // table reste occupée — sinon l'addition des quatre restants
+      // disparaîtrait du plan de salle.
+      final adjusted = service(6).copyWith(covers: 4);
+      expect(adjusted.status, RestaurantTableStatus.occupee);
+      expect(adjusted.isFree, isFalse);
+      expect(adjusted.covers, 4);
     });
   });
 }

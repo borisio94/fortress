@@ -153,6 +153,28 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
     context.push('/shop/${widget.shopId}/restaurant/table/${table.id}');
   }
 
+  /// Des convives sont partis (ou arrivés) : on ajuste les couverts SANS
+  /// libérer la table.
+  ///
+  /// C'est ce qui permet de placer deux clients sur une table de six déjà
+  /// entamée — courant quand on partage les grandes tables. Libérer la table
+  /// entière ferait disparaître l'addition des clients restés assis.
+  Future<void> _editCovers(RestaurantTable table) async {
+    final covers = await _askCovers(table,
+        title: 'Couverts — ${table.name}');
+    if (covers == null || !mounted) return;
+    final updated = await RestaurantTableService.updateCovers(table, covers);
+    if (!mounted) return;
+    setState(() {});
+    final free = updated.capacity - (updated.covers ?? updated.capacity);
+    AppSnack.success(
+        context,
+        free > 0
+            ? '${updated.name} — $free place${free > 1 ? 's' : ''} libre'
+                '${free > 1 ? 's' : ''}'
+            : '${updated.name} — table complète');
+  }
+
   Future<void> _openService(RestaurantTable table) async {
     final covers = await _askCovers(table);
     if (covers == null || !mounted) return;
@@ -165,7 +187,10 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
   }
 
   /// Sélecteur de couverts (+/−) borné par la capacité de la table.
-  Future<int?> _askCovers(RestaurantTable table) {
+  ///
+  /// Sert à l'ouverture du service ET à l'ajustement en cours de repas, quand
+  /// des convives s'en vont : [title] distingue les deux.
+  Future<int?> _askCovers(RestaurantTable table, {String? title}) {
     var covers = table.covers ?? table.capacity;
     return showAdaptiveFormSheet<int>(
       context: context,
@@ -173,7 +198,7 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
         builder: (ctx, setSheetState) {
           final theme = Theme.of(ctx);
           return AdaptiveFormFrame(
-            title: 'Ouvrir ${table.name}',
+            title: title ?? 'Ouvrir ${table.name}',
             subtitle: 'Capacité ${table.capacity} personnes',
             icon: Icons.people_rounded,
             body: Padding(
@@ -272,6 +297,18 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
                   await RestaurantTableService.requestBill(table);
                 }
                 if (mounted) _openBill(table);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.event_seat_outlined,
+                  color: theme.colorScheme.primary),
+              title: const Text('Des places se libèrent'),
+              subtitle: Text(
+                  '${table.covers ?? table.capacity} couverts sur '
+                  '${table.capacity} — ajustez si des convives sont partis'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _editCovers(table);
               },
             ),
             ListTile(
@@ -558,7 +595,11 @@ class _TableCard extends StatelessWidget {
                 // placer un groupe) ; en service → les couverts réels.
                 table.isFree
                     ? '${table.capacity} places'
-                    : '${table.covers ?? table.capacity} couverts',
+                    // En service, on annonce les places ENCORE LIBRES quand il
+                    // y en a : c'est l'information qu'on cherche en plaçant un
+                    // client, et une table de six occupée par deux personnes
+                    // n'est pas une table pleine.
+                    : _coversLabel(table),
                 style: AppTextStyles.captionHint,
               ),
               if (status == RestaurantTableStatus.reservee &&
@@ -577,6 +618,18 @@ class _TableCard extends StatelessWidget {
   static String _hhmm(DateTime d) =>
       '${d.hour.toString().padLeft(2, '0')}:'
       '${d.minute.toString().padLeft(2, '0')}';
+
+  /// Couverts d'une table en service, avec les places restantes.
+  ///
+  /// « 2 couverts · 4 libres » plutôt que « 2 couverts » : en salle, ce qu'on
+  /// cherche du regard c'est où placer les clients qui entrent, pas combien
+  /// sont déjà assis.
+  static String _coversLabel(RestaurantTable table) {
+    final covers = table.covers ?? table.capacity;
+    final free = table.capacity - covers;
+    if (free <= 0) return '$covers couverts';
+    return '$covers couverts · $free libre${free > 1 ? 's' : ''}';
+  }
 }
 
 /// Bouton rond +/− du sélecteur de couverts. `onTap: null` → désactivé.
@@ -681,6 +734,9 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
       label: tab.label,
       toTableId: target == '__none__' ? null : target,
     );
+    // Le dernier compte vient peut-être de quitter cette table : elle doit
+    // redevenir disponible immédiatement, sans geste supplémentaire.
+    await RestaurantTableService.releaseIfEmpty(widget.table);
     if (!mounted) return;
     setState(() => _busy = false);
     // Le libellé a pu être renommé si la destination portait déjà ce nom : le

@@ -8,6 +8,7 @@ import '../storage/local_storage_service.dart';
 import 'loss_service.dart';
 import 'recipe_service.dart';
 import 'restaurant_order_service.dart';
+import 'restaurant_table_service.dart';
 
 /// Incidents de service — le chaînon qui manquait entre la salle et le module
 /// Pertes (Lot E).
@@ -82,6 +83,8 @@ class ServiceIncidentService {
     // La perte ci-dessous, elle, ne porte que le versant financier.
     await RestaurantOrderService.consumeStockFor(shopId, order.items);
 
+    await _releaseTableOf(order);
+
     final amount = materialCostOf(shopId, order.items).round();
     if (amount <= 0) return null;
     return LossService.record(
@@ -141,6 +144,8 @@ class ServiceIncidentService {
         debugPrint('[Incident] clôture impayé err: $e');
       }
     }
+    await _releaseTableOf(orders.first);
+
     final amount = total.round();
     if (amount <= 0) return null;
     return LossService.record(
@@ -152,6 +157,19 @@ class ServiceIncidentService {
       origin: origin,
       declaredBy: declaredBy,
     );
+  }
+
+  /// Rend la table au service si l'incident a emporté son dernier compte.
+  ///
+  /// Un départ sans payer ou une tournée annulée libèrent la table aussi
+  /// sûrement qu'un encaissement : les clients sont partis. Sans ça, elle
+  /// restait « occupée » et il fallait la libérer à la main.
+  static Future<void> _releaseTableOf(Sale order) async {
+    final id = order.tableId;
+    if (id == null || id.isEmpty) return;
+    final table = RestaurantTableService.tableById(id);
+    if (table == null) return;
+    await RestaurantTableService.releaseIfEmpty(table);
   }
 
   /// Catégorie de perte attendue pour chaque incident — exposée pour que les
