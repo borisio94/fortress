@@ -38,6 +38,15 @@ class RestoBackdrop extends StatelessWidget {
   /// lisibilité, surtout en mode clair.
   static const double photoOpacity = 0.8;
 
+  /// Le voile posé sur la photo est [restoChromeFill] — EXACTEMENT la teinte
+  /// de la barre latérale et de la barre supérieure.
+  ///
+  /// La zone de contenu et le chrome reçoivent ainsi le même traitement : le
+  /// décor a la même présence partout, et aucune zone de l'écran n'est plus
+  /// chargée qu'une autre. C'est la fonction elle-même qui est réutilisée, pas
+  /// sa valeur recopiée — les deux ne peuvent donc pas diverger si le réglage
+  /// change un jour.
+
   const RestoBackdrop({super.key, required this.child});
 
   @override
@@ -73,6 +82,12 @@ class RestoBackdrop extends StatelessWidget {
             // chaque page.
             excludeFromSemantics: true,
           ),
+        ),
+        // Voile de lisibilité, à l'opacité du chrome (cf. doc de classe). Sans
+        // lui, la zone de contenu affichait la photo en pleine force sous des
+        // textes écrits à nu — paragraphe d'aide, état vide — illisibles.
+        Positioned.fill(
+          child: ColoredBox(color: restoChromeFill(context)),
         ),
         child,
       ],
