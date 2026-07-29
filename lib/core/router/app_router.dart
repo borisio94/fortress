@@ -310,6 +310,37 @@ final authRouterNotifierProvider = Provider<AuthRouterNotifier>((ref) {
 // lors de la navigation entre routes shell et routes hors-shell
 final _shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
 
+/// Garde des routes du module restaurant.
+///
+/// Jusqu'ici ces écrans n'étaient protégés que par la VISIBILITÉ de leur entrée
+/// de menu (`ShellNavItem.visibleIf`). Masquer un item n'empêche pas d'atteindre
+/// l'URL : n'importe quel membre connecté pouvait ouvrir `/restaurant/personnel`
+/// et y lire les salaires et les avances de toute l'équipe.
+///
+/// Deux filtres :
+///   * SECTEUR — hors restauration ces écrans n'ont pas de sens ; on renvoie au
+///     tableau de bord plutôt que d'afficher une page vide (même parti pris que
+///     la redirection de l'ancienne page Finances, plus bas).
+///   * RÔLE — [adminOnly] pour tout ce qui expose de l'argent : salaires,
+///     marges, coûts matières, écarts d'inventaire.
+///
+/// Le service courant (plan de salle, cuisine, addition, clôture de caisse)
+/// reste ouvert à tout membre : ce sont les écrans de travail de l'équipe, et
+/// c'est le caissier lui-même qui compte son tiroir.
+String? _restaurantGuard(Ref ref, GoRouterState s, {bool adminOnly = false}) {
+  final id = s.pathParameters['shopId'] ?? '';
+  if (id.isEmpty) return null;
+  if (!isRestaurantShop(id)) return '/shop/$id/dashboard';
+  if (!adminOnly) return null;
+  final perms = ref.read(permissionsProvider(id));
+  // On ne renvoie que si l'on SAIT que l'utilisateur est un membre non-admin.
+  // Au tout premier rendu après un deep-link, les rôles peuvent ne pas être
+  // encore hydratés (`isMember` faux) : rediriger un owner vers son tableau de
+  // bord parce que son rôle n'est pas encore chargé serait pire que le mal.
+  if (perms.isMember && !perms.isShopAdmin) return shopLandingRoute(id);
+  return null;
+}
+
 final appRouterProvider = Provider<GoRouter>((ref) {
   final notifier = ref.watch(authRouterNotifierProvider);
 
@@ -799,23 +830,29 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           // Écran de SERVICE — poste de travail du caissier (Lot C) : état du
           // restaurant à gauche, compte en cours à droite, sans navigation.
           GoRoute(path: '/shop/:shopId/restaurant/service',
+              redirect: (c, st) => _restaurantGuard(ref, st),
               pageBuilder: (c, s) => _shellPage(s,
                   RestaurantServicePage(shopId: s.pathParameters['shopId']!))),
           GoRoute(path: '/shop/:shopId/restaurant/tables',
+              redirect: (c, st) => _restaurantGuard(ref, st),
               pageBuilder: (c, s) => _shellPage(s,
                   RestaurantTablesPage(shopId: s.pathParameters['shopId']!))),
           GoRoute(path: '/shop/:shopId/restaurant/cuisine',
+              redirect: (c, st) => _restaurantGuard(ref, st),
               pageBuilder: (c, s) => _shellPage(s,
                   KitchenPage(shopId: s.pathParameters['shopId']!))),
           GoRoute(path: '/shop/:shopId/restaurant/takeaway',
+              redirect: (c, st) => _restaurantGuard(ref, st),
               pageBuilder: (c, s) => _shellPage(s,
                   TakeawayPage(shopId: s.pathParameters['shopId']!))),
           // Finances restaurant (PR-B) — hub Ingrédients / Activités / Stock.
           GoRoute(path: '/shop/:shopId/restaurant/finances',
+              redirect: (c, st) => _restaurantGuard(ref, st, adminOnly: true),
               pageBuilder: (c, s) => _shellPage(s,
                   FinancesHubPage(shopId: s.pathParameters['shopId']!))),
           // Réconciliation d'inventaire (Lot 2) — comptage de fin de service.
           GoRoute(path: '/shop/:shopId/restaurant/inventory/reconcile',
+              redirect: (c, st) => _restaurantGuard(ref, st, adminOnly: true),
               pageBuilder: (c, s) => _shellPage(s,
                   InventoryReconcilePage(
                       shopId: s.pathParameters['shopId']!))),
@@ -823,10 +860,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           // qui encaisse : c'est LE caissier qui compte. Seul l'historique des
           // écarts est filtré, à l'intérieur de la page.
           GoRoute(path: '/shop/:shopId/restaurant/caisse/cloture',
+              redirect: (c, st) => _restaurantGuard(ref, st),
               pageBuilder: (c, s) => _shellPage(s,
                   CashClosurePage(shopId: s.pathParameters['shopId']!))),
           // Personnel du restaurant (Lot D) : équipe, heures, paie.
           GoRoute(path: '/shop/:shopId/restaurant/personnel',
+              redirect: (c, st) => _restaurantGuard(ref, st, adminOnly: true),
               pageBuilder: (c, s) => _shellPage(s,
                   RestaurantStaffPage(shopId: s.pathParameters['shopId']!))),
           GoRoute(path: '/shop/:shopId/parametres/menu-modifiers',
@@ -843,6 +882,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           // le même geste. `AppScaffold` se rend transparent quand il détecte
           // ce décor au-dessus de lui.
           GoRoute(path: '/shop/:shopId/restaurant/table/:tableId',
+              redirect: (c, st) => _restaurantGuard(ref, st),
               builder: (c, s) => RestoBackdrop(
                     child: RestaurantOrderPage(
                       shopId:  s.pathParameters['shopId']!,
@@ -850,6 +890,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                     ),
                   )),
           GoRoute(path: '/shop/:shopId/restaurant/addition/:tableId',
+              redirect: (c, st) => _restaurantGuard(ref, st),
               builder: (c, s) => RestoBackdrop(
                     child: BillPage(
                       shopId:  s.pathParameters['shopId']!,
@@ -860,6 +901,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           // l'entrée du personnel, elle ne doit donner accès à aucune autre
           // page de l'application. Une seule sortie, par le bouton fermer.
           GoRoute(path: '/shop/:shopId/restaurant/pointage',
+              redirect: (c, st) => _restaurantGuard(ref, st),
               builder: (c, s) =>
                   TimeclockPage(shopId: s.pathParameters['shopId']!)),
           // Carte / inventaire : deux écrans selon le secteur. En
