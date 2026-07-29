@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/kitchen_ticket_printer.dart';
@@ -12,6 +13,7 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../../../features/caisse/domain/entities/sale.dart';
 import '../../../../features/caisse/domain/entities/sale_item.dart';
 import '../../../../features/inventaire/domain/entities/product.dart';
+import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -309,6 +311,182 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
 
   // ── Volet droit : le compte en cours ─────────────────────────────────
 
+  /// Feuille d'actions sur la table sélectionnée.
+  ///
+  /// Encaisser, ajuster les places, libérer : ces trois gestes n'existaient que
+  /// dans le plan de salle, qui n'a aucune entrée de menu. Depuis l'écran de
+  /// service — le seul réellement accessible — une table ouverte ne pouvait
+  /// plus être rendue.
+  Future<void> _tableActions(RestaurantTable table) async {
+    final theme = Theme.of(context);
+    final tabs = RestaurantTabService.tabsForTable(widget.shopId, table.id);
+    final total = tabs.fold<double>(0, (s, t) => s + t.total);
+    final free = table.capacity - (table.covers ?? table.capacity);
+
+    final action = await showAdaptiveFormSheet<String>(
+      context: context,
+      builder: (sheetCtx) => AdaptiveFormFrame(
+        title: table.name,
+        subtitle: tabs.isEmpty
+            ? 'Aucun compte ouvert'
+            : '${tabs.length} compte${tabs.length > 1 ? 's' : ''} · '
+                '${CurrencyFormatter.format(total)}',
+        icon: Icons.table_restaurant_rounded,
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 20),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (tabs.isNotEmpty)
+              ListTile(
+                leading: Icon(Icons.receipt_long_rounded,
+                    color: theme.semantic.danger),
+                title: const Text('Addition / encaisser'),
+                subtitle: const Text('Récapitulatif, partage et paiement'),
+                onTap: () => Navigator.of(sheetCtx).pop('bill'),
+              ),
+            ListTile(
+              leading: Icon(Icons.event_seat_outlined,
+                  color: theme.colorScheme.primary),
+              title: const Text('Des places se libèrent'),
+              subtitle: Text('${table.covers ?? table.capacity} couverts sur '
+                  '${table.capacity}'
+                  '${free > 0 ? ' · $free libre${free > 1 ? 's' : ''}' : ''}'),
+              onTap: () => Navigator.of(sheetCtx).pop('covers'),
+            ),
+            if (tabs.isNotEmpty)
+              ListTile(
+                leading: Icon(Icons.swap_horiz_rounded,
+                    color: theme.colorScheme.primary),
+                title: const Text('Gérer les comptes'),
+                subtitle: const Text('Transférer, fusionner, annuler une '
+                    'tournée, départ sans payer'),
+                // Ces gestes vivent dans le plan de salle, qui n'a pas d'entrée
+                // de menu (l'écran de service le remplace, par choix produit).
+                // Cette passerelle les rend atteignables sans dupliquer un
+                // écran entier dans la navigation.
+                onTap: () => Navigator.of(sheetCtx).pop('tabs'),
+              ),
+            ListTile(
+              leading: Icon(Icons.check_circle_outline_rounded,
+                  color: theme.semantic.success),
+              title: const Text('Libérer la table'),
+              subtitle: Text(tabs.isEmpty
+                  ? 'Remet la table en statut Libre'
+                  : 'Les comptes ouverts restent encaissables'),
+              onTap: () => Navigator.of(sheetCtx).pop('release'),
+            ),
+          ]),
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+
+    switch (action) {
+      case 'bill':
+        context.push(
+            '/shop/${widget.shopId}/restaurant/addition/${table.id}');
+      case 'covers':
+        await _editCovers(table);
+      case 'tabs':
+        context.push('/shop/${widget.shopId}/restaurant/tables');
+      case 'release':
+        await _releaseTable(table, tabs, total);
+    }
+  }
+
+  /// Ajuste les couverts sans libérer la table (des convives sont partis).
+  Future<void> _editCovers(RestaurantTable table) async {
+    var covers = table.covers ?? table.capacity;
+    final chosen = await showAdaptiveFormSheet<int>(
+      context: context,
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (ctx, setSheet) => AdaptiveFormFrame(
+          title: 'Couverts — ${table.name}',
+          subtitle: 'Capacité ${table.capacity} personnes',
+          icon: Icons.event_seat_outlined,
+          body: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                IconButton(
+                  iconSize: 32,
+                  onPressed: covers > 1
+                      ? () => setSheet(() => covers -= 1)
+                      : null,
+                  icon: const Icon(Icons.remove_circle_outline_rounded),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Text('$covers', style: AppTextStyles.title),
+                ),
+                IconButton(
+                  iconSize: 32,
+                  onPressed: covers < table.capacity
+                      ? () => setSheet(() => covers += 1)
+                      : null,
+                  icon: const Icon(Icons.add_circle_outline_rounded),
+                ),
+              ]),
+              const SizedBox(height: 18),
+              AppPrimaryButton(
+                label: 'Enregistrer',
+                icon: Icons.check_rounded,
+                fullWidth: true,
+                onTap: () => Navigator.of(sheetCtx).pop(covers),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+    if (chosen == null || !mounted) return;
+    final updated =
+        await RestaurantTableService.updateCovers(table, chosen);
+    if (!mounted) return;
+    setState(() {
+      _table = updated;
+      _covers = updated.covers ?? updated.capacity;
+    });
+    final left = updated.capacity - (updated.covers ?? updated.capacity);
+    AppSnack.success(
+        context,
+        left > 0
+            ? '${updated.name} — $left place${left > 1 ? 's' : ''} libre'
+                '${left > 1 ? 's' : ''}'
+            : '${updated.name} — table complète');
+  }
+
+  /// Libère la table. Les comptes ouverts ne sont pas perdus : ils quittent le
+  /// plan de salle mais restent encaissables — le dire, sinon le serveur croit
+  /// avoir effacé de l'argent.
+  Future<void> _releaseTable(
+      RestaurantTable table, List<RestaurantTab> tabs, double total) async {
+    if (tabs.isNotEmpty) {
+      final ok = await AppConfirmDialog.show(
+        context: context,
+        icon: Icons.warning_amber_rounded,
+        iconColor: Theme.of(context).semantic.warning,
+        title: 'Libérer avec des comptes ouverts ?',
+        body: Text('${tabs.length} compte${tabs.length > 1 ? 's' : ''} '
+            'non réglé${tabs.length > 1 ? 's' : ''} · '
+            '${CurrencyFormatter.format(total)}\n\n'
+            'Ces additions restent encaissables depuis Commandes, mais '
+            'quittent le plan de salle.'),
+        cancelLabel: 'Annuler',
+        confirmLabel: 'Libérer quand même',
+        onConfirm: () {},
+      );
+      if (ok != true || !mounted) return;
+    }
+    await RestaurantTableService.release(table);
+    if (!mounted) return;
+    setState(() {
+      _table = null;
+      _tab = '';
+      _lines.clear();
+    });
+    AppSnack.success(context, '${table.name} libérée');
+  }
+
   Widget _buildContextBar({bool back = false}) {
     final table = _table;
     final cs = Theme.of(context).colorScheme;
@@ -370,6 +548,15 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
                 ? () => setState(() => _covers += 1)
                 : null,
             icon: const Icon(Icons.add_circle_outline_rounded, size: 20),
+          ),
+          // Actions de table (addition, places, libération). Elles vivaient
+          // uniquement dans le plan de salle — un écran qu'AUCUNE entrée de
+          // menu n'atteint. Une table ouverte devenait donc impossible à
+          // libérer depuis l'interface accessible.
+          IconButton(
+            tooltip: 'Actions sur la table',
+            onPressed: () => _tableActions(table),
+            icon: const Icon(Icons.more_vert_rounded, size: 20),
           ),
         ],
       ]),
