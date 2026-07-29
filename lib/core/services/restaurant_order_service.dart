@@ -227,6 +227,34 @@ class RestaurantOrderService {
     return sent;
   }
 
+  /// Annule une tournée PAS ENCORE envoyée en cuisine.
+  ///
+  /// Rien n'a été engagé : aucun ingrédient prélevé, aucun bon imprimé. Il n'y
+  /// a donc NI perte à déclarer, NI code gérant à demander — contrairement à
+  /// l'annulation d'une tournée déjà partie ([ServiceIncidentService]), où la
+  /// matière est perdue.
+  ///
+  /// Le motif est écrit AVANT le changement de statut : `updateOrderStatus`
+  /// relit `cancellation_reason` dans la map et refuse l'annulation s'il est
+  /// vide (garde-fou GF-4).
+  ///
+  /// Libère la table si c'était son dernier compte — sinon elle resterait
+  /// « occupée » sans personne assis.
+  static Future<void> cancelPendingRound(
+    Sale order, {
+    required String reason,
+  }) async {
+    final id = order.id;
+    if (id == null || id.isEmpty) return;
+    await _patchOrder(order, {'cancellation_reason': reason.trim()});
+    await _ds.updateOrderStatus(id, SaleStatus.cancelled);
+
+    final tableId = order.tableId;
+    if (tableId == null || tableId.isEmpty) return;
+    final table = RestaurantTableService.tableById(tableId);
+    if (table != null) await RestaurantTableService.releaseIfEmpty(table);
+  }
+
   /// Crée une commande à emporter prise au comptoir.
   ///
   /// Statut `scheduled` : le stock n'est pas décrémenté à la prise mais à

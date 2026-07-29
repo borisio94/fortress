@@ -368,6 +368,14 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
                     '${free > 0 ? ' · $free libre${free > 1 ? 's' : ''}' : ''}'),
                 onTap: () => Navigator.of(sheetCtx).pop('covers'),
               ),
+            if (_pending != null && !_pending!.sentToKitchen)
+              ListTile(
+                leading: Icon(Icons.remove_shopping_cart_outlined,
+                    color: theme.semantic.danger),
+                title: const Text('Annuler la tournée en cours'),
+                subtitle: const Text('Pas encore envoyée — aucune perte'),
+                onTap: () => Navigator.of(sheetCtx).pop('cancel_round'),
+              ),
             if (tabs.isNotEmpty)
               ListTile(
                 leading: Icon(Icons.swap_horiz_rounded,
@@ -404,8 +412,67 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
         await _editCovers(table);
       case 'tabs':
         context.push('/shop/${widget.shopId}/restaurant/tables');
+      case 'cancel_round':
+        await _cancelPendingRound(table);
       case 'release':
         await _releaseTable(table, tabs, total);
+    }
+  }
+
+  /// Annule la tournée en attente du compte courant.
+  ///
+  /// Rien n'a été envoyé en cuisine : aucune matière engagée, donc ni perte à
+  /// déclarer ni code gérant à demander. Le motif reste obligatoire — c'est le
+  /// garde-fou d'annulation commun à toutes les commandes.
+  Future<void> _cancelPendingRound(RestaurantTable table) async {
+    final pending = _pending;
+    if (pending == null) return;
+    final ctrl = TextEditingController();
+    final reason = await showAdaptiveFormSheet<String>(
+      context: context,
+      builder: (ctx) => AdaptiveFormFrame(
+        title: 'Annuler la tournée',
+        subtitle: '${table.name} · '
+            '${CurrencyFormatter.format(pending.total)}',
+        icon: Icons.remove_shopping_cart_outlined,
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(
+                'Cette tournée n\'est pas partie en cuisine : rien n\'a été '
+                'préparé, aucune perte ne sera enregistrée.',
+                style: AppTextStyles.captionHint),
+            const SizedBox(height: 12),
+            AppField(
+              controller: ctrl,
+              hint: 'Motif : client parti, erreur de saisie…',
+              autofocus: true,
+            ),
+            const SizedBox(height: 18),
+            AppPrimaryButton(
+              label: 'Annuler la tournée',
+              icon: Icons.check_rounded,
+              fullWidth: true,
+              onTap: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+            ),
+          ]),
+        ),
+      ),
+    );
+    ctrl.dispose();
+    if (reason == null || reason.isEmpty || !mounted) return;
+    try {
+      await RestaurantOrderService.cancelPendingRound(pending, reason: reason);
+      if (!mounted) return;
+      final fresh = RestaurantTableService.tableById(table.id);
+      setState(() {
+        _table = fresh;
+        _lines.clear();
+        _pending = null;
+      });
+      AppSnack.success(context, 'Tournée annulée');
+    } catch (e) {
+      if (mounted) AppSnack.error(context, e.toString());
     }
   }
 
