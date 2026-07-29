@@ -20,6 +20,7 @@ final _range = DashRange(DateTime(2026, 7, 1), DateTime(2026, 7, 31));
 /// (hotfix_149).
 const _kSqlCategories = {
   'achat_marche',
+  'consigne_rendue',
   'electricite',
   'gaz',
   'eau',
@@ -56,6 +57,30 @@ RestaurantFinanceReport _report({
 
 void main() {
   group('Food cost — théorique vs réel', () {
+    test('une saisie DÉRISOIRE ne fait pas basculer le bilan', () {
+      // Le bug corrigé : 500 F d'achats saisis sur un mois où les ventes ont
+      // consommé 300 000 F de matières faisait tomber le coût matières à 500 F
+      // et le bénéfice explosait. Le seuil de couverture (50 %) l'empêche.
+      final r = _report(materialCost: 300000, realFoodCost: 500);
+      expect(r.usesRealFoodCost, isFalse);
+      expect(r.partialFoodCostEntry, isTrue);
+      expect(r.foodCost, 300000);
+    });
+
+    test('une saisie qui couvre la moitié du théorique bascule', () {
+      final r = _report(materialCost: 300000, realFoodCost: 150000);
+      expect(r.usesRealFoodCost, isTrue);
+      expect(r.partialFoodCostEntry, isFalse);
+      expect(r.foodCost, 150000);
+    });
+
+    test('sans fiches recettes, le réel est la seule mesure', () {
+      // Aucun coût théorique calculable : on ne peut pas exiger une couverture
+      // d'un chiffre qui n'existe pas.
+      final r = _report(materialCost: 0, realFoodCost: 500);
+      expect(r.usesRealFoodCost, isTrue);
+    });
+
     test('sans achats saisis, le théorique fait foi', () {
       final r = _report(materialCost: 300000);
       expect(r.usesRealFoodCost, isFalse);
@@ -68,6 +93,7 @@ void main() {
       // « combien j'aurais dû gagner ».
       final r = _report(materialCost: 300000, realFoodCost: 380000);
       expect(r.usesRealFoodCost, isTrue);
+      expect(r.partialFoodCostEntry, isFalse);
       expect(r.foodCost, 380000);
       expect(r.foodCostRate, closeTo(38, 0.001));
     });

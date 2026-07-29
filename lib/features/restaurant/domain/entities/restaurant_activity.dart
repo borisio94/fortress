@@ -5,8 +5,9 @@ import '../../../../core/storage/schema_migrator.dart';
 /// plus tard, les ventes/bénéfices par secteur (PR-E).
 ///
 /// Deux modes :
-///   * `stock`  : articles vendus tels quels (stock connu + seuil minimal,
-///     pas de fiche recette) → voir [StockItem].
+///   * `stock`  : secteur sans fiche recette — les articles y sont vendus tels
+///     quels (bar). Leur stock se tient sur le PRODUIT, via « Suivi du stock »,
+///     et se décrémente donc automatiquement à la vente.
 ///   * `recipe` : plats cuisinés (fiche recette + décrément ingrédients).
 class RestaurantActivity {
   final String id;

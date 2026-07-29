@@ -8,6 +8,7 @@ import '../../features/restaurant/domain/entities/payment.dart';
 import '../database/app_database.dart';
 import '../storage/hive_boxes.dart';
 import 'daily_expense_service.dart';
+import 'staff_service.dart';
 import 'payment_service.dart';
 
 /// Clôture de caisse aveugle — rapports X et Z (Lot C — hotfix_147).
@@ -30,8 +31,25 @@ class CashClosureService {
   /// une habitude de la caisse, pas une donnée à synchroniser).
   static String _floatKey(String shopId) => 'cash_float_$shopId';
 
-  /// Fond de caisse configuré (0 par défaut).
+  /// Fond de caisse de la boutique (0 par défaut).
+  ///
+  /// Lu D'ABORD sur la dernière clôture enregistrée, qui est SYNCHRONISÉE :
+  /// sans ça, la tablette de salle (fond 20 000) et le téléphone du gérant
+  /// (fond 0) calculaient deux totaux attendus différents pour la même caisse,
+  /// et l'un des deux annonçait un écart de 20 000 F.
+  ///
+  /// La préférence locale ne sert plus que de valeur de démarrage, avant la
+  /// toute première clôture — et de mémoire de saisie sur l'appareil qui l'a
+  /// renseignée.
   static int openingFloat(String shopId) {
+    for (final c in forShop(shopId)) {
+      if (c.openingFloat > 0) return c.openingFloat;
+    }
+    return localFloat(shopId);
+  }
+
+  /// Valeur saisie sur CET appareil (préférence locale).
+  static int localFloat(String shopId) {
     try {
       final v = HiveBoxes.settingsBox.get(_floatKey(shopId));
       return (v as num?)?.toInt() ?? 0;
@@ -108,11 +126,15 @@ class CashClosureService {
         openingFloat: openingFloat(shopId),
         payments: payments,
         orders: orders,
-        // Sorties d'espèces de la période (Lot E) : l'argent du marché part
-        // souvent directement du tiroir. Sans cette déduction, un achat de
-        // 30 000 F apparaît le soir comme un manquant de 30 000 F, et le
-        // caissier est suspecté d'un vol qu'il n'a pas commis.
-        cashOut: DailyExpenseService.cashOut(shopId, from: start, to: end),
+        // TOUTES les sorties d'espèces de la période : dépenses du jour
+        // (achat au marché…), avances sur salaire versées du tiroir, salaires
+        // payés en liquide, et remboursements de consigne — ces derniers
+        // arrivent en dépenses via la catégorie `consigne_rendue`.
+        //
+        // Chacune de ces sorties, non déduite, apparaissait le soir comme un
+        // manquant imputé au caissier.
+        cashOut: DailyExpenseService.cashOut(shopId, from: start, to: end) +
+            StaffService.cashOut(shopId, from: start, to: end),
       );
     } catch (e) {
       debugPrint('[Closure] systemCash err: $e');

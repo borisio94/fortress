@@ -249,7 +249,7 @@ final restaurantDashProvider =
     debugPrint('[RestaurantDash] tables err: $e');
   }
 
-  // Stock bas : ingrédients + articles vendus tels quels, même règle que le
+  // Stock bas : ingrédients + fournitures, même règle que le
   // badge de navigation (un seul chiffre pour l'utilisateur).
   var lowStock = 0;
   try {

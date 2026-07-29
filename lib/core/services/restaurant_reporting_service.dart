@@ -120,13 +120,30 @@ class RestaurantFinanceReport {
     this.operatingCost = 0,
   });
 
-  /// La boutique saisit-elle ses achats de matières ?
+  /// Part MINIMALE du coût théorique que les achats saisis doivent couvrir
+  /// pour que le bilan bascule sur le réel.
   ///
-  /// Tant qu'elle ne le fait pas, le bilan ne peut compter que le coût
-  /// THÉORIQUE. Dès qu'elle le fait, c'est l'argent réellement sorti qui
-  /// compte — c'est la question que se pose un restaurateur : « combien
-  /// j'ai gagné », pas « combien j'aurais dû gagner ».
-  bool get usesRealFoodCost => realFoodCost > 0;
+  /// Sans ce garde-fou, une SEULE dépense de 500 F saisie dans un mois où les
+  /// ventes ont consommé 300 000 F de matières faisait basculer tout le bilan
+  /// sur le réel : le coût matières tombait à 500 F et le bénéfice affiché
+  /// explosait. Le défaut se déclenchait précisément quand quelqu'un
+  /// commençait à saisir ses achats sans aller au bout — le pire moment.
+  static const double realFoodCostCoverage = 0.5;
+
+  /// La saisie des achats est-elle assez complète pour porter le bilan ?
+  ///
+  /// Oui si aucun coût théorique n'est calculable (pas de fiches recettes :
+  /// le réel est alors la seule mesure disponible), ou si les achats couvrent
+  /// au moins [realFoodCostCoverage] du théorique.
+  bool get usesRealFoodCost =>
+      realFoodCost > 0 &&
+      (materialCost <= 0 ||
+          realFoodCost >= materialCost * realFoodCostCoverage);
+
+  /// Des achats ont été saisis, mais trop peu pour être crédibles face à ce que
+  /// les ventes ont consommé. Le bilan reste sur le théorique et l'écran doit
+  /// le dire — sinon le gérant croit ses achats pris en compte.
+  bool get partialFoodCostEntry => realFoodCost > 0 && !usesRealFoodCost;
 
   /// Coût des matières retenu pour le bénéfice : le réel s'il est saisi, le
   /// théorique sinon.
@@ -337,8 +354,13 @@ class RestaurantReportingService {
         if (_outside(e.expenseDate, range)) continue;
         if (e.isFoodCost) {
           realFoodCost += e.amount;
-        } else {
+        } else if (e.isCharge) {
           operatingCost += e.amount;
+        } else {
+          // Remboursement de consigne : sortie de caisse, PAS une charge. Le
+          // client récupère l'argent qu'il avait versé — l'imputer au bénéfice
+          // ferait payer au restaurant une somme qui ne lui a jamais appartenu.
+          continue;
         }
         dailySeries[range.bucketOf(e.expenseDate)] += e.amount.toDouble();
       }

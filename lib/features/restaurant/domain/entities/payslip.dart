@@ -37,6 +37,10 @@ class Payslip {
   /// Date de versement effectif. `null` = fiche préparée, pas encore payée.
   final DateTime? paidAt;
 
+  /// Salaire versé EN ESPÈCES (défaut) : il sort alors du tiroir à la date de
+  /// [paidAt], et la clôture de caisse doit le déduire.
+  final bool paidCash;
+
   final String? notes;
   final DateTime createdAt;
 
@@ -54,6 +58,7 @@ class Payslip {
     this.minutesWorked = 0,
     this.netSalary = 0,
     this.paidAt,
+    this.paidCash = true,
     this.notes,
   });
 
@@ -82,6 +87,7 @@ class Payslip {
     int? advancesDeducted,
     int? netSalary,
     DateTime? paidAt,
+    bool? paidCash,
     String? notes,
   }) =>
       Payslip(
@@ -98,6 +104,7 @@ class Payslip {
         minutesWorked: minutesWorked,
         netSalary: netSalary ?? this.netSalary,
         paidAt: paidAt ?? this.paidAt,
+        paidCash: paidCash ?? this.paidCash,
         notes: notes ?? this.notes,
       );
 
@@ -121,6 +128,7 @@ class Payslip {
         'minutes_worked': minutesWorked,
         'net_salary': netSalary,
         'paid_at': paidAt?.toUtc().toIso8601String(),
+        'paid_cash': paidCash,
         'notes': notes,
         'created_at': createdAt.toUtc().toIso8601String(),
       };
@@ -152,6 +160,7 @@ class Payslip {
             advances: advances,
           ),
       paidAt: _parseDate(m['paid_at']),
+      paidCash: m['paid_cash'] as bool? ?? true,
       notes: _nullIfEmpty(m['notes']),
       createdAt: _parseDate(m['created_at']) ?? DateTime.now(),
     );

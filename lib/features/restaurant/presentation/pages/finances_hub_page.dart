@@ -83,7 +83,7 @@ class FinancesHubPage extends StatelessWidget {
                 tabs: const [
                   Tab(text: 'Ingrédients'),
                   Tab(text: 'Activités'),
-                  Tab(text: 'Stock'),
+                  Tab(text: 'Fournitures'),
                   Tab(text: 'Dépenses'),
                   Tab(text: 'Charges'),
                   Tab(text: 'Consignes'),
@@ -816,14 +816,26 @@ class _StockItemsTabState extends _TabState<_StockItemsTab> {
     final items = StockItemService.forShop(widget.shopId);
     return Column(
       children: [
-        headerButton('Article', () => _edit(null)),
+        // Orientation explicite : c'est LA confusion du module. Une boisson
+        // saisie ici ne se décrémenterait jamais à la vente, et son stock
+        // divergerait dès le premier service.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Text(
+              'Ce que vous consommez sans le revendre : emballages, gaz, '
+              'entretien, charbon. Pour une boisson revendue telle quelle, '
+              'créez plutôt un plat avec « Suivi du stock » — il se décrémente '
+              'tout seul à chaque vente.',
+              style: AppTextStyles.captionHint),
+        ),
+        headerButton('Fourniture', () => _edit(null)),
         Expanded(
           child: items.isEmpty
               ? const RestoEmptyState(
                   icon: Icons.inventory_2_outlined,
-                  title: 'Aucun article',
-                  subtitle:
-                      'Boissons, emballages… articles vendus tels quels.',
+                  title: 'Aucune fourniture',
+                  subtitle: 'Emballages, gaz, produits d\'entretien… tout ce '
+                      'qui se consomme sans être revendu.',
                 )
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
@@ -1618,7 +1630,7 @@ class _DailyExpenseEditorState extends State<_DailyExpenseEditor> {
               spacing: 6,
               runSpacing: 6,
               children: [
-                for (final k in ExpenseKind.values)
+                for (final k in ExpenseKind.selectable)
                   ChoiceChip(
                     label: Text(k.label),
                     selected: _kind == k,

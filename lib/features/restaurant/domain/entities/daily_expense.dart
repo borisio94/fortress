@@ -12,6 +12,8 @@ enum ExpenseKind {
   transport('transport', 'Transport', Icons.local_taxi_outlined),
   entretien('entretien', 'Entretien', Icons.cleaning_services_outlined),
   personnel('personnel', 'Extras personnel', Icons.person_add_alt_outlined),
+  consigneRendue(
+      'consigne_rendue', 'Consigne rendue', Icons.assignment_return_outlined),
   autre('autre', 'Autre', Icons.more_horiz_rounded);
 
   const ExpenseKind(this.key, this.label, this.icon);
@@ -23,6 +25,20 @@ enum ExpenseKind {
   /// L'achat de matières premières EST le food cost réel : c'est la seule
   /// catégorie comparable au coût matières théorique des fiches recettes.
   bool get isFoodCost => this == ExpenseKind.achatMarche;
+
+  /// Vraie charge d'exploitation ?
+  ///
+  /// Le remboursement d'une consigne n'en est PAS une : le client récupère
+  /// l'argent qu'il avait lui-même versé. Cette ligne sort bien du tiroir (elle
+  /// compte donc pour la clôture de caisse) mais la compter en dépense
+  /// amputerait le bénéfice d'une somme qui n'a jamais appartenu au restaurant.
+  bool get isCharge => this != ExpenseKind.consigneRendue;
+
+  /// Catégories proposées à la saisie manuelle. `consigne_rendue` en est
+  /// exclue : elle est écrite automatiquement au retour des emballages, la
+  /// saisir à la main créerait un doublon de sortie de caisse.
+  static List<ExpenseKind> get selectable =>
+      ExpenseKind.values.where((k) => k != ExpenseKind.consigneRendue).toList();
 
   static ExpenseKind fromKey(String? k) {
     final v = (k ?? '').trim().toLowerCase();
@@ -72,6 +88,9 @@ class DailyExpense {
   ExpenseKind get kind => ExpenseKind.fromKey(category);
 
   bool get isFoodCost => kind.isFoodCost;
+
+  /// Charge d'exploitation réelle (cf. [ExpenseKind.isCharge]).
+  bool get isCharge => kind.isCharge;
 
   /// Clé `yyyy-MM-dd` d'une date (stockage DATE sans heure).
   static String dayKey(DateTime d) =>

@@ -457,6 +457,35 @@ class StaffService {
     }
   }
 
+  /// Espèces sorties du tiroir pour le personnel sur une période : avances
+  /// versées en liquide + salaires payés en liquide.
+  ///
+  /// Sans cette déduction, une avance de 20 000 F prise dans la caisse apparaît
+  /// le soir comme un manquant de 20 000 F — et le caissier est suspecté d'un
+  /// vol qu'il n'a pas commis. C'est le faux positif qui fait abandonner la
+  /// clôture aveugle.
+  static int cashOut(String shopId, {DateTime? from, DateTime? to}) {
+    var total = 0;
+    bool inRange(DateTime d) =>
+        (from == null || !d.isBefore(from)) && (to == null || !d.isAfter(to));
+
+    for (final a in advances(shopId)) {
+      // La date d'avance est une DATE (minuit) : on la compare à la journée,
+      // pas à l'heure de la clôture, sinon une avance du matin sortirait de la
+      // fenêtre d'un contrôle fait à 22 h.
+      if (!a.isCash) continue;
+      if (!inRange(a.advanceDate)) continue;
+      total += a.amount;
+    }
+    for (final p in payslips(shopId)) {
+      final paidAt = p.paidAt;
+      if (paidAt == null || !p.paidCash) continue;
+      if (!inRange(paidAt)) continue;
+      total += p.netSalary;
+    }
+    return total;
+  }
+
   /// Masse salariale nette d'un mois — alimente le bilan (Lot E).
   static int payrollTotal(String shopId, String month) => payslips(shopId,
           month: month)

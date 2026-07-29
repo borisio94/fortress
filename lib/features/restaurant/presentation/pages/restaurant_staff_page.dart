@@ -64,6 +64,17 @@ class RestaurantStaffPage extends StatelessWidget {
               ),
             ),
             Divider(height: 1, color: sem.borderSubtle),
+            // Lever l'ambiguïté avec « Accès à l'app », juste au-dessus dans
+            // le menu : ici ce sont les gens qui travaillent en salle et en
+            // cuisine, pas les comptes qui se connectent.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Text(
+                  'Serveuses, cuisiniers, plongeurs — ils badgent avec un code '
+                  'à 4 chiffres et n\'ont pas de compte Fortress. Les comptes '
+                  'de connexion sont dans « Accès à l\'app ».',
+                  style: AppTextStyles.captionHint),
+            ),
             Expanded(
               child: TabBarView(
                 children: [

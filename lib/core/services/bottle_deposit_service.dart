@@ -2,9 +2,11 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:hive_flutter/hive_flutter.dart';
 
 import '../../features/restaurant/domain/entities/bottle_deposit.dart';
+import '../../features/restaurant/domain/entities/daily_expense.dart';
 import '../../features/restaurant/domain/entities/loss.dart';
 import '../database/app_database.dart';
 import '../storage/hive_boxes.dart';
+import 'daily_expense_service.dart';
 import 'loss_service.dart';
 
 /// Service Hive-first des consignes d'emballages (Lot B — hotfix_146).
@@ -90,11 +92,33 @@ class BottleDepositService {
 
   /// Enregistre le retour de [count] emballages (plafonné à ce qui reste dû,
   /// cf. [BottleDeposit.withReturn]).
+  ///
+  /// ENREGISTRE AUSSI LA SORTIE DE CAISSE : rendre les emballages, c'est rendre
+  /// la caution au client, et cet argent quitte le tiroir. Sans cette écriture,
+  /// le remboursement apparaissait comme un manquant au comptage du soir.
+  ///
+  /// La ligne est catégorisée `consigne_rendue` : elle sort de la caisse mais
+  /// n'est PAS une charge — le client récupère son propre argent, l'imputer au
+  /// bénéfice serait faux (cf. `ExpenseKind.isCharge`).
   static Future<BottleDeposit> registerReturn(
       BottleDeposit deposit, int count) async {
     final updated = deposit.withReturn(count);
-    if (updated.returnedQuantity == deposit.returnedQuantity) return deposit;
+    final returned = updated.returnedQuantity - deposit.returnedQuantity;
+    if (returned <= 0) return deposit;
     await _put(updated);
+
+    final refund = returned * deposit.depositPerUnit;
+    if (refund > 0) {
+      await DailyExpenseService.record(
+        shopId: deposit.shopId,
+        description: '${deposit.label} — $returned emballage'
+            '${returned > 1 ? 's' : ''} rendu${returned > 1 ? 's' : ''}'
+            '${(deposit.holder ?? '').isEmpty ? '' : ' · ${deposit.holder}'}',
+        amount: refund,
+        kind: ExpenseKind.consigneRendue,
+        isCash: true,
+      );
+    }
     return updated;
   }
 

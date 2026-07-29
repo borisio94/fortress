@@ -222,6 +222,19 @@ void main() {
       expect(total, -15000);
     });
 
+    test('avances et salaires en espèces sortent aussi du tiroir', () {
+      // Trois sorties cohabitent (dépenses, avances, salaires) : elles sont
+      // agrégées par l'appelant en un seul `cashOut`. Ce que ce test verrouille,
+      // c'est qu'elles se CUMULENT et se soustraient toutes.
+      final total = CashClosureService.computeSystemCash(
+        openingFloat: 20000,
+        payments: [_pay('o1', 100000)],
+        orders: const [],
+        cashOut: 30000 + 20000 + 45000, // marché + avance + salaire
+      );
+      expect(total, 25000);
+    });
+
     test('cas complet : fond + service + comptoir', () {
       final total = CashClosureService.computeSystemCash(
         openingFloat: 20000,

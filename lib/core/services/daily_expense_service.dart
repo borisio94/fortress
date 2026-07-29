@@ -58,9 +58,12 @@ class DailyExpenseService {
 
   /// Tout ce qui n'est PAS de la matière première — l'exploitation courante
   /// (électricité, gaz, transport…).
+  ///
+  /// EXCLUT les remboursements de consigne : le client récupère son propre
+  /// argent, ce n'est pas une charge du restaurant (cf. `ExpenseKind.isCharge`).
   static int operatingCost(String shopId, {DateTime? from, DateTime? to}) =>
       forShop(shopId, from: from, to: to)
-          .where((e) => !e.isFoodCost)
+          .where((e) => !e.isFoodCost && e.isCharge)
           .fold(0, (s, e) => s + e.amount);
 
   /// Espèces sorties du tiroir sur la période.

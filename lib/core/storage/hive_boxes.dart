@@ -109,7 +109,9 @@ class HiveBoxes {
   static const String recipeIngredients  = 'recipe_ingredients_box';
   /// Activités connexes du restaurant (Chawarma, Bar…) — PR-B.
   static const String restaurantActivities = 'restaurant_activities_box';
-  /// Articles sans transformation (boissons, emballages…) — PR-B.
+  /// Fournitures consommées sans être revendues (emballages, gaz,
+  /// entretien) — PR-B. Les boissons revendues sont des PRODUITS avec suivi
+  /// de stock, décrémentés automatiquement à la vente.
   static const String stockItems           = 'stock_items_box';
   /// Charges fixes / échéances récurrentes (loyer, salaires…) — PR-C.
   static const String fixedCharges         = 'fixed_charges_box';

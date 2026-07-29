@@ -461,13 +461,32 @@ final List<ShellNavItem> kShellNavItems = [
     visibleIf:    (p) => p.isMember,
     group:        3,
   ),
-  // « Équipe » — équivalent restaurant du « Teams » de la maquette. Pointe
-  // sur la gestion des employés, qui n'a pas d'entrée de premier niveau en
-  // e-commerce (elle y vit sous CRM › Membres).
+  // ── Deux notions distinctes, deux entrées distinctes ────────────────────
+  //
+  // Elles se ressemblent et n'ont rien à voir. Les confondre coûte cher : on
+  // cherche la paie d'une serveuse dans la page des comptes, ou on croit avoir
+  // « supprimé un employé » alors qu'on a révoqué un accès.
+  //
+  //   * « Personnel » = les gens qui travaillent au restaurant (serveuses,
+  //     cuisiniers, plongeurs). Ils n'ont PAS de compte : ils badgent avec un
+  //     code à 4 chiffres. C'est là que vivent salaires, heures et avances.
+  //   * « Accès à l'app » = les comptes qui se connectent à Fortress, avec
+  //     leurs permissions. Beaucoup moins nombreux, et rarement touchés.
   ShellNavItem(
-    icon:         Icons.people_outline_rounded,
-    iconSelected: Icons.people_rounded,
-    label:        (_) => 'Équipe',
+    icon:         Icons.badge_outlined,
+    iconSelected: Icons.badge_rounded,
+    label:        (_) => 'Personnel',
+    route:        (id) => '/shop/$id/restaurant/personnel',
+    // Salaires et avances : même exigence que la route elle-même
+    // (cf. `_restaurantGuard(adminOnly: true)`).
+    visibleIf:    (p) => p.isShopAdmin,
+    sectorIn:     kRestaurantSectors,
+    group:        3,
+  ),
+  ShellNavItem(
+    icon:         Icons.manage_accounts_outlined,
+    iconSelected: Icons.manage_accounts_rounded,
+    label:        (_) => 'Accès à l\'app',
     route:        (id) => '/shop/$id/employees',
     visibleIf:    (p) => p.canManageMembers,
     sectorIn:     kRestaurantSectors,

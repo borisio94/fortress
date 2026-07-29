@@ -1,10 +1,16 @@
 import '../../../../core/storage/schema_migrator.dart';
 
-/// Article sans transformation (module finances — PR-B) : boisson, emballage,
-/// article vendu tel quel. Stock connu + seuil minimal + coût + prix de vente.
+/// Une FOURNITURE : ce que le restaurant consomme sans le revendre tel quel —
+/// emballages, gaz, produits d'entretien, glaçons, charbon.
 ///
-/// Rattachable à une [RestaurantActivity] (mode `stock`) via [activityId]
-/// (référence logique, pas de FK — cf. hotfix_140).
+/// CE N'EST PAS LE STOCK DES BOISSONS. Une bière revendue à la bouteille est un
+/// PRODUIT du catalogue avec « Suivi du stock » activé : son stock est alors
+/// décrémenté automatiquement à chaque vente par le moteur de stock commun.
+/// Tenir les boissons ici créerait un second stock, jamais décrémenté par les
+/// ventes, qui divergerait du premier dès le premier service.
+///
+/// Les fournitures, elles, ne passent par aucune vente : leur quantité ne bouge
+/// qu'au réapprovisionnement et au comptage de fin de service (réconciliation).
 class StockItem {
   final String id;
   final String shopId;

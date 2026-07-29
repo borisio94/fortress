@@ -248,6 +248,53 @@ void main() {
     });
   });
 
+  group('Sorties d\'espèces du personnel', () {
+    test('une avance est réputée versée en espèces par défaut', () {
+      // Cas dominant au restaurant : le gérant prend l'argent dans le tiroir.
+      // Sans ce défaut, la clôture continuerait d'annoncer un manquant.
+      final a = SalaryAdvance(
+        id: 'sa_1',
+        shopId: 'shop_1',
+        employeeId: 'em_1',
+        amount: 20000,
+        advanceDate: DateTime(2026, 7, 15),
+        createdAt: DateTime(2026, 7, 15),
+      );
+      expect(a.isCash, isTrue);
+      expect(SalaryAdvance.fromMap(a.toMap()).isCash, isTrue);
+    });
+
+    test('une avance par virement ne touche pas le tiroir', () {
+      final a = SalaryAdvance(
+        id: 'sa_1',
+        shopId: 'shop_1',
+        employeeId: 'em_1',
+        amount: 20000,
+        advanceDate: DateTime(2026, 7, 15),
+        isCash: false,
+        createdAt: DateTime(2026, 7, 15),
+      );
+      expect(SalaryAdvance.fromMap(a.toMap()).isCash, isFalse);
+    });
+
+    test('un salaire est réputé payé en espèces, et seulement une fois payé', () {
+      final slip = Payslip(
+        id: 'pr_1',
+        shopId: 'shop_1',
+        employeeId: 'em_1',
+        month: '2026-07',
+        netSalary: 65000,
+        createdAt: DateTime(2026, 7, 31),
+      );
+      expect(slip.paidCash, isTrue);
+      // Tant que la fiche n'est pas payée, rien ne sort du tiroir.
+      expect(slip.isPaid, isFalse);
+      final paid = slip.copyWith(paidAt: DateTime(2026, 8, 2));
+      expect(Payslip.fromMap(paid.toMap()).isPaid, isTrue);
+      expect(Payslip.fromMap(paid.toMap()).paidCash, isTrue);
+    });
+  });
+
   group('SalaryAdvance — rattachement au mois de paie', () {
     test('la clé de mois est au format de payroll.month', () {
       expect(SalaryAdvance.monthKey(DateTime(2026, 7, 28)), '2026-07');

@@ -28,6 +28,12 @@ class SalaryAdvance {
   /// effectivement retenue et ne doit plus l'être.
   final bool isDeducted;
 
+  /// Avance versée EN ESPÈCES (défaut) : elle sort alors du tiroir et doit
+  /// être déduite du total attendu à la clôture de caisse. Sans ce suivi, une
+  /// avance de 20 000 F prise dans la caisse apparaît le soir comme un
+  /// manquant de 20 000 F.
+  final bool isCash;
+
   final DateTime createdAt;
 
   const SalaryAdvance({
@@ -41,6 +47,7 @@ class SalaryAdvance {
     this.reason,
     this.deductedFromMonth,
     this.isDeducted = false,
+    this.isCash = true,
   });
 
   /// Clé de mois `YYYY-MM` — le format de `payroll.month`, et donc la seule
@@ -59,6 +66,7 @@ class SalaryAdvance {
     DateTime? advanceDate,
     String? deductedFromMonth,
     bool? isDeducted,
+    bool? isCash,
   }) =>
       SalaryAdvance(
         id: id,
@@ -71,6 +79,7 @@ class SalaryAdvance {
         advanceDate: advanceDate ?? this.advanceDate,
         deductedFromMonth: deductedFromMonth ?? this.deductedFromMonth,
         isDeducted: isDeducted ?? this.isDeducted,
+        isCash: isCash ?? this.isCash,
       );
 
   static const int currentSchemaVersion = 1;
@@ -90,6 +99,7 @@ class SalaryAdvance {
         'advance_date': dayKey(advanceDate),
         'deducted_from_month': deductedFromMonth,
         'is_deducted': isDeducted,
+        'is_cash': isCash,
         'created_at': createdAt.toUtc().toIso8601String(),
       };
 
@@ -110,6 +120,7 @@ class SalaryAdvance {
       deductedFromMonth:
           _nullIfEmpty(m['deducted_from_month']) ?? monthKey(date),
       isDeducted: m['is_deducted'] as bool? ?? false,
+      isCash: m['is_cash'] as bool? ?? true,
       createdAt: m['created_at'] == null
           ? DateTime.now()
           : (DateTime.tryParse(m['created_at'].toString())?.toLocal() ??
