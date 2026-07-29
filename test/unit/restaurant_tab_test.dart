@@ -41,6 +41,7 @@ Sale _order({
     );
 
 void main() {
+  _newTabTests();
   group('Regroupement par compte', () {
     test('deux comptes distincts à la même table restent séparés', () {
       // Le cas qui motive tout le lot : deux clients assis ensemble.
@@ -136,6 +137,52 @@ void main() {
       // « Sans compte » n'est pas un nom : deux lots sans libellé PEUVENT
       // se rejoindre, c'est le comportement attendu.
       expect(RestaurantTabService.uniqueLabel('', {''}), '');
+    });
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Compte fraîchement ouvert (écran de service)
+//
+// Un compte n'est pas une entité stockée : c'est le regroupement des commandes
+// qui partagent un libellé. Un compte qu'on vient d'ouvrir n'a donc AUCUNE
+// commande — `groupByLabel` ne le renvoie pas, et l'écran n'affichait aucune
+// puce : « Ouvrir » semblait sans effet alors que le compte était sélectionné.
+// ─────────────────────────────────────────────────────────────────────────────
+void _newTabTests() {
+  /// Reproduit la règle d'affichage de l'écran de service : les comptes qui
+  /// portent des commandes, plus celui qui vient d'être ouvert.
+  List<String> visibleLabels(List<RestaurantTab> tabs, String current) {
+    final labels = [for (final t in tabs.where((t) => !t.isUnnamed)) t.label];
+    if (current.isNotEmpty && !labels.contains(current)) labels.add(current);
+    return labels;
+  }
+
+  group('Puces de comptes affichées', () {
+    test('un compte ouvert SANS commande reste visible', () {
+      // Le bug : aucune commande → aucun tab → aucune puce → écran figé.
+      expect(visibleLabels(const [], 'Compte 1'), ['Compte 1']);
+    });
+
+    test('pas de doublon quand le compte reçoit sa première commande', () {
+      final tabs = RestaurantTabService.groupByLabel(
+          [_order(id: 'o1', tabLabel: 'Compte 1')], 'rt_1');
+      expect(visibleLabels(tabs, 'Compte 1'), ['Compte 1']);
+    });
+
+    test('le compte principal n\'est jamais dupliqué', () {
+      // Il a sa propre puce, en dur : le libellé vide ne doit rien ajouter.
+      final tabs = RestaurantTabService.groupByLabel([_order(id: 'o1')], 'rt_1');
+      expect(visibleLabels(tabs, ''), isEmpty);
+    });
+
+    test('les comptes existants restent listés', () {
+      final tabs = RestaurantTabService.groupByLabel([
+        _order(id: 'o1', tabLabel: 'Compte 1'),
+        _order(id: 'o2', tabLabel: 'M. Ali'),
+      ], 'rt_1');
+      expect(visibleLabels(tabs, 'Compte 2').length, 3);
+      expect(visibleLabels(tabs, 'Compte 2'), contains('Compte 2'));
     });
   });
 }

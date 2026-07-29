@@ -198,6 +198,16 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
     }
   }
 
+  /// Libellés de comptes à afficher : ceux qui portent déjà des commandes,
+  /// PLUS celui qui vient d'être ouvert et qui n'a encore rien.
+  List<String> _visibleTabLabels(List<RestaurantTab> tabs) {
+    final labels = [
+      for (final t in tabs.where((t) => !t.isUnnamed)) t.label,
+    ];
+    if (_tab.isNotEmpty && !labels.contains(_tab)) labels.add(_tab);
+    return labels;
+  }
+
   /// Ouvre un nouveau compte sur la table courante.
   Future<void> _newTab() async {
     final table = _table;
@@ -232,6 +242,11 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
     ctrl.dispose();
     if (label == null || label.isEmpty || !mounted) return;
     _select(table, label);
+    if (!mounted) return;
+    // Le compte est vide par construction : le dire, sinon on croit que rien
+    // ne s'est passé.
+    AppSnack.success(
+        context, '« $label » ouvert — ajoutez ses plats puis enregistrez');
   }
 
   @override
@@ -343,15 +358,16 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
                 subtitle: const Text('Récapitulatif, partage et paiement'),
                 onTap: () => Navigator.of(sheetCtx).pop('bill'),
               ),
-            ListTile(
-              leading: Icon(Icons.event_seat_outlined,
-                  color: theme.colorScheme.primary),
-              title: const Text('Des places se libèrent'),
-              subtitle: Text('${table.covers ?? table.capacity} couverts sur '
-                  '${table.capacity}'
-                  '${free > 0 ? ' · $free libre${free > 1 ? 's' : ''}' : ''}'),
-              onTap: () => Navigator.of(sheetCtx).pop('covers'),
-            ),
+            if (!table.isFree)
+              ListTile(
+                leading: Icon(Icons.event_seat_outlined,
+                    color: theme.colorScheme.primary),
+                title: const Text('Des places se libèrent'),
+                subtitle: Text('${table.covers ?? table.capacity} convives sur '
+                    '${table.capacity} places'
+                    '${free > 0 ? ' · $free libre${free > 1 ? 's' : ''}' : ''}'),
+                onTap: () => Navigator.of(sheetCtx).pop('covers'),
+              ),
             if (tabs.isNotEmpty)
               ListTile(
                 leading: Icon(Icons.swap_horiz_rounded,
@@ -426,6 +442,19 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
                   icon: const Icon(Icons.add_circle_outline_rounded),
                 ),
               ]),
+              const SizedBox(height: 6),
+              // On saisit le nombre de convives QUI RESTENT, pas le nombre de
+              // places qu'on libère. Sans ce rappel chiffré en direct, on ne
+              // sait pas dans quel sens tourne le compteur.
+              Text(
+                  table.capacity - covers > 0
+                      ? '$covers convive${covers > 1 ? 's' : ''} à table · '
+                          '${table.capacity - covers} place'
+                          '${table.capacity - covers > 1 ? 's' : ''} libre'
+                          '${table.capacity - covers > 1 ? 's' : ''}'
+                      : 'Table complète — aucune place libre',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.captionHint),
               const SizedBox(height: 18),
               AppPrimaryButton(
                 label: 'Enregistrer',
@@ -519,11 +548,18 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
                       label: 'Compte principal',
                       selected: _tab.isEmpty,
                       onTap: () => _select(table, '')),
-                  for (final t in tabs.where((t) => !t.isUnnamed))
+                  // Un compte n'est PAS une entité stockée : c'est le
+                  // regroupement des commandes qui portent le même libellé
+                  // (cf. RestaurantTabService). Un compte qu'on vient d'ouvrir
+                  // n'a donc encore aucune commande, et n'apparaissait nulle
+                  // part — « Ouvrir » semblait sans effet alors que le compte
+                  // était bel et bien sélectionné. On ajoute donc le compte
+                  // COURANT à la liste tant qu'il n'a rien à lui.
+                  for (final label in _visibleTabLabels(tabs))
                     _TabChip(
-                        label: t.label,
-                        selected: _tab == t.label,
-                        onTap: () => _select(table, t.label)),
+                        label: label,
+                        selected: _tab == label,
+                        onTap: () => _select(table, label)),
                   _TabChip(
                       label: '+ Compte',
                       selected: false,
