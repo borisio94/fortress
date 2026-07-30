@@ -339,6 +339,20 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
           accent: t.status.color(Theme.of(context).semantic),
           onTap: () => _select(t, ''),
         ),
+        // Accès au plan de salle — c'est là que les tables se créent, se
+        // renomment et se suppriment. Sans cette ligne, une boutique
+        // fraîchement créée n'avait AUCUN moyen d'ajouter sa première table :
+        // la salle restait vide et l'écran répétait « Choisissez une table ».
+        _FloorRow(
+          title: tables.isEmpty ? 'Créer mes tables' : '+ Table',
+          subtitle: tables.isEmpty
+              ? 'Aucune table — composez votre salle'
+              : 'Ajouter, renommer, réserver',
+          selected: false,
+          accent: Theme.of(context).colorScheme.primary,
+          onTap: () =>
+              context.push('/shop/${widget.shopId}/restaurant/tables'),
+        ),
         const SizedBox(height: 16),
         Text('À EMPORTER', style: AppTextStyles.microBold),
         const SizedBox(height: 8),
@@ -721,7 +735,11 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            'Choisissez une table à gauche pour prendre une commande.',
+            _tables.isEmpty
+                ? 'Aucune table pour l\'instant. Touchez « Créer mes tables » '
+                    'à gauche pour composer votre salle — ou « Nouvelle '
+                    'commande » pour vendre au comptoir.'
+                : 'Choisissez une table à gauche pour prendre une commande.',
             textAlign: TextAlign.center,
             style: AppTextStyles.bodySecondary,
           ),
