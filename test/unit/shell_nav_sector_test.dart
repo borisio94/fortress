@@ -81,14 +81,16 @@ void main() {
       expect(routes, contains('/shop/shop_1/parametres'));
     });
 
-    test('Cuisine, À emporter et Caisse sortent du menu restaurant', () {
+    test('Cuisine et À emporter SONT dans le menu restaurant', () {
       final routes = labelsFor('restaurant');
-      // Retirés à la demande : le menu suit strictement la maquette. Les
-      // écrans Cuisine et À emporter existent toujours et restent
-      // atteignables par leur route directe.
-      expect(routes, isNot(contains('/shop/shop_1/restaurant/cuisine')));
-      expect(routes, isNot(contains('/shop/shop_1/restaurant/takeaway')));
-      // Caisse est remplacée par « Commandes ».
+      // Ils en avaient été retirés pour coller à une maquette — mais sans
+      // entrée de menu ces deux écrans étaient INATTEIGNABLES : la Cuisine est
+      // l'écran de poste du cuisinier (et porte tout le filtrage par poste),
+      // « À emporter » est le seul endroit où l'on remet et encaisse une
+      // commande de comptoir.
+      expect(routes, contains('/shop/shop_1/restaurant/cuisine'));
+      expect(routes, contains('/shop/shop_1/restaurant/takeaway'));
+      // Caisse reste remplacée par « Commandes » en restauration.
       expect(routes, isNot(contains('/shop/shop_1/caisse')));
     });
 

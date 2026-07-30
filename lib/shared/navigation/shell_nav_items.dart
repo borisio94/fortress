@@ -4,6 +4,7 @@ import '../../core/i18n/app_localizations.dart';
 import '../../core/permisions/app_permissions.dart';
 import '../../core/services/fixed_charge_service.dart';
 import '../../core/services/ingredient_service.dart';
+import '../../core/services/restaurant_order_service.dart';
 import '../../core/services/stock_item_service.dart';
 import '../../core/storage/hive_boxes.dart';
 
@@ -143,9 +144,22 @@ int _webOrdersBadge(String shopId) {
   }).length;
 }
 
+/// Bons EN COURS en cuisine : envoyés, pas encore prêts. C'est le compteur que
+/// le caissier surveille du coin de l'œil pour savoir si la cuisine décroche.
+int _kitchenBadge(String shopId) {
+  if (shopId.isEmpty) return 0;
+  return RestaurantOrderService.kitchenTickets(shopId).length;
+}
+
+/// Commandes à emporter encore à remettre au client.
+int _takeawayBadge(String shopId) {
+  if (shopId.isEmpty) return 0;
+  return RestaurantOrderService.takeawayOrders(shopId).length;
+}
+
 /// Alertes des finances restaurant — pastille sur l'item « Finances » :
-/// ingrédients + articles « stock » sous leur seuil, plus les charges fixes
-/// à régler bientôt ou en retard.
+/// ingrédients + fournitures sous leur seuil, plus les charges fixes à régler
+/// bientôt ou en retard.
 int _restaurantFinanceBadge(String shopId) {
   if (shopId.isEmpty) return 0;
   var n = 0;
@@ -259,13 +273,37 @@ final List<ShellNavItem> kShellNavItems = [
   // « Commandes » — équivalent restaurant de l'item Caisse, qui pointe
   // directement sur la liste des commandes plutôt que sur l'écran de vente.
   //
-  // Cuisine (`/restaurant/cuisine`) et À emporter (`/restaurant/takeaway`)
-  // ne figurent PLUS dans la navigation : le menu suit strictement la
-  // maquette de référence. Les deux écrans existent toujours et restent
-  // atteignables par leur route directe — voir `RouteNames.restaurantKitchen`
-  // et `restaurantTakeaway`. Leurs compteurs de pastille ont été SUPPRIMÉS
-  // avec les items : les réécrire fera 8 lignes le jour où ils reviennent,
-  // moins coûteux que du code mort qu'on n'ose plus toucher.
+  // Cuisine et À emporter sont REVENUS dans la navigation (le commentaire
+  // précédent annonçait « 8 lignes le jour où ils reviennent » — nous y
+  // sommes). Ils avaient été retirés pour coller à une maquette, mais sans
+  // entrée de menu ces deux écrans étaient tout simplement INATTEIGNABLES :
+  //   * la Cuisine est un écran de POSTE, posé en permanence sur la tablette
+  //     du cuisinier — il ne s'atteint pas par une passerelle occasionnelle,
+  //     et tout le filtrage par poste devenait inutilisable ;
+  //   * « À emporter » est le seul endroit où l'on REMET et encaisse une
+  //     commande de comptoir (l'écran de service ne fait que la créer).
+  ShellNavItem(
+    // `soup_kitchen` est absent des polices anciennes et s'afficherait en carré
+    // vide : on reste sur des glyphes éprouvés dans ce repo.
+    icon:         Icons.outdoor_grill_outlined,
+    iconSelected: Icons.outdoor_grill_rounded,
+    label:        (_) => 'Cuisine',
+    route:        (id) => '/shop/$id/restaurant/cuisine',
+    visibleIf:    (p) => p.canAccessCaisse,
+    sectorIn:     kRestaurantSectors,
+    badge:        _kitchenBadge,
+    primary:      true,
+  ),
+  ShellNavItem(
+    icon:         Icons.takeout_dining_outlined,
+    iconSelected: Icons.takeout_dining_rounded,
+    label:        (_) => 'À emporter',
+    route:        (id) => '/shop/$id/restaurant/takeaway',
+    visibleIf:    (p) => p.canAccessCaisse,
+    sectorIn:     kRestaurantSectors,
+    badge:        _takeawayBadge,
+    primary:      true,
+  ),
   ShellNavItem(
     icon:         Icons.receipt_long_outlined,
     iconSelected: Icons.receipt_long_rounded,
