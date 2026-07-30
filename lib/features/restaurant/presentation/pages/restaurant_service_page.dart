@@ -48,8 +48,16 @@ class RestaurantServicePage extends StatefulWidget {
 class _RestaurantServicePageState extends State<RestaurantServicePage> {
   late final OnDataChanged _listener;
 
-  /// Table sélectionnée. `null` = volet « À emporter ».
+  /// Table sélectionnée. `null` = aucune table (état initial OU comptoir).
   RestaurantTable? _table;
+
+  /// Volet À EMPORTER actif.
+  ///
+  /// Indispensable : `_table == null` est ambigu — c'est l'état de départ
+  /// (rien choisi) ET celui du comptoir. Sans ce drapeau, sélectionner « à
+  /// emporter » laissait le message « Choisissez une table » et la grille de
+  /// plats restait invisible.
+  bool _takeaway = false;
 
   /// Compte en cours. Vide = compte sans nom.
   String _tab = '';
@@ -101,11 +109,15 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
 
   /// Charge le compte [tab] de [table] dans le volet de droite.
   void _select(RestaurantTable? table, String tab) {
+    // `table == null` = volet À EMPORTER : la tournée en attente s'y cherche
+    // par libellé de compte, puisqu'il n'y a pas de table pour la porter.
     final pending = table == null
-        ? null
+        ? RestaurantOrderService.pendingTakeawayRound(widget.shopId,
+            tabLabel: tab)
         : RestaurantOrderService.pendingRoundFor(table, tabLabel: tab);
     setState(() {
       _table = table;
+      _takeaway = table == null;
       _tab = tab;
       _pending = pending;
       _covers = (pending?.covers ?? table?.covers ?? 1)
@@ -152,35 +164,44 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
   /// Enregistre la tournée, et l'envoie en cuisine si demandé.
   Future<void> _save({bool send = false}) async {
     final table = _table;
-    if (table == null) {
-      AppSnack.error(context, 'Choisissez une table.');
-      return;
-    }
     if (_lines.isEmpty) {
       AppSnack.error(context, 'Ajoutez au moins un article.');
       return;
     }
     setState(() => _saving = true);
     try {
-      final order = await RestaurantOrderService.saveTableOrder(
-        table: table,
-        items: List.of(_lines),
-        covers: _covers,
-        existing: _pending,
-        tabLabel: _tab.isEmpty ? null : _tab,
-      );
+      // Sans table = vente au comptoir. Même geste pour le serveur, deux
+      // écritures différentes : une commande de salle porte une table et des
+      // couverts, une commande à emporter n'a ni l'un ni l'autre.
+      final order = table == null
+          ? await RestaurantOrderService.saveTakeawayOrder(
+              shopId: widget.shopId,
+              items: List.of(_lines),
+              existing: _pending,
+              tabLabel: _tab.isEmpty ? null : _tab,
+            )
+          : await RestaurantOrderService.saveTableOrder(
+              table: table,
+              items: List.of(_lines),
+              covers: _covers,
+              existing: _pending,
+              tabLabel: _tab.isEmpty ? null : _tab,
+            );
       if (send) {
         // Numéro calculé AVANT l'envoi : une fois figée, la tournée compte
-        // dans le total et le numéro serait décalé.
-        final round =
-            RestaurantOrderService.roundNumberFor(table, tabLabel: _tab);
+        // dans le total et le numéro serait décalé. Au comptoir il n'y a pas
+        // de suite de tournées à numéroter — le bon part en « Tournée 1 ».
+        final round = table == null
+            ? 1
+            : RestaurantOrderService.roundNumberFor(table, tabLabel: _tab);
         await RestaurantOrderService.sendRound(order);
         if (!mounted) return;
         await KitchenTicketPrinter.print(
           context: context,
           shopId: widget.shopId,
           order: order,
-          tableName: table.name,
+          // `null` → le bon s'imprime « À EMPORTER » (cf. KitchenTicketPrinter).
+          tableName: table?.name,
           round: round,
         );
       }
@@ -189,13 +210,38 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
           context, send ? 'Tournée envoyée en cuisine' : 'Tournée enregistrée');
       // Après un envoi la tournée est figée : on repart d'un panneau vide,
       // prêt pour l'apéritif demandé pendant la préparation.
-      _select(RestaurantTableService.tableById(table.id) ?? table,
-          send ? _tab : _tab);
+      _select(
+          table == null
+              ? null
+              : (RestaurantTableService.tableById(table.id) ?? table),
+          _tab);
     } catch (e) {
       if (mounted) AppSnack.error(context, e.toString());
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// Ouvre une commande à emporter, sur un libellé LIBRE.
+  ///
+  /// Sans ça, « + Commande » reprenait toujours la tournée sans libellé : deux
+  /// clients au comptoir en même temps se retrouvaient sur la même addition.
+  void _newTakeaway() {
+    final taken = RestaurantTabService.tabsForTable(widget.shopId, null)
+        .map((t) => t.label)
+        .toSet();
+    if (!taken.contains('')) {
+      _select(null, '');
+      return;
+    }
+    for (var i = 2; i < 100; i++) {
+      final label = 'Comptoir $i';
+      if (!taken.contains(label)) {
+        _select(null, label);
+        return;
+      }
+    }
+    _select(null, '');
   }
 
   /// Libellés de comptes à afficher : ceux qui portent déjà des commandes,
@@ -296,23 +342,26 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
         const SizedBox(height: 16),
         Text('À EMPORTER', style: AppTextStyles.microBold),
         const SizedBox(height: 8),
-        if (takeaway.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-            child: Text('Aucun compte à emporter',
-                style: AppTextStyles.caption),
-          )
-        else
-          for (final tab in takeaway)
-            _FloorRow(
-              title: tab.displayLabel,
-              subtitle: '${tab.itemCount} article'
-                  '${tab.itemCount > 1 ? 's' : ''} · '
-                  '${CurrencyFormatter.format(tab.total)}',
-              selected: false,
-              accent: Theme.of(context).colorScheme.primary,
-              onTap: () {},
-            ),
+        // Les comptes à emporter étaient affichés avec un `onTap` VIDE, et
+        // aucune ligne ne permettait d'en ouvrir un : la vente au comptoir
+        // était inaccessible depuis cet écran.
+        for (final tab in takeaway)
+          _FloorRow(
+            title: tab.displayLabel,
+            subtitle: '${tab.itemCount} article'
+                '${tab.itemCount > 1 ? 's' : ''} · '
+                '${CurrencyFormatter.format(tab.total)}',
+            selected: _takeaway && _tab == tab.label,
+            accent: Theme.of(context).colorScheme.primary,
+            onTap: () => _select(null, tab.label),
+          ),
+        _FloorRow(
+          title: takeaway.isEmpty ? 'Nouvelle commande' : '+ Commande',
+          subtitle: 'À emporter — comptoir',
+          selected: _takeaway && !takeaway.any((t) => t.label == _tab),
+          accent: Theme.of(context).colorScheme.primary,
+          onTap: _newTakeaway,
+        ),
       ],
     );
   }
@@ -603,7 +652,7 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(table?.name ?? 'Service',
+              Text(table?.name ?? (_takeaway ? 'À emporter' : 'Service'),
                   style:
                       AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
               // Sélecteur de compte : c'est lui qui dit sur quelle addition
@@ -667,7 +716,7 @@ class _RestaurantServicePageState extends State<RestaurantServicePage> {
   }
 
   Widget _buildOrderPane({required bool showHeader}) {
-    if (_table == null) {
+    if (_table == null && !_takeaway) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),

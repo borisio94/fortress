@@ -227,6 +227,59 @@ class RestaurantOrderService {
     return sent;
   }
 
+  /// Tournée EN ATTENTE d'un compte À EMPORTER (sans table).
+  ///
+  /// Équivalent de [pendingRoundFor] pour le comptoir : un compte à emporter n'a
+  /// pas de table, il n'est identifié que par son libellé.
+  static Sale? pendingTakeawayRound(String shopId, {String? tabLabel}) {
+    final wanted = (tabLabel ?? '').trim();
+    for (final o in takeawayOrders(shopId)) {
+      if ((o.tabLabel ?? '').trim() != wanted) continue;
+      if (o.sentToKitchen) continue;
+      return o;
+    }
+    return null;
+  }
+
+  /// Crée ou met à jour une commande À EMPORTER prise au comptoir.
+  ///
+  /// Pendant de [saveTableOrder] pour le comptoir. Même sémantique : statut
+  /// `scheduled`, donc le stock n'est décrémenté qu'à la remise au client — une
+  /// commande abandonnée avant paiement ne coûte rien.
+  static Future<Sale> saveTakeawayOrder({
+    required String shopId,
+    required List<SaleItem> items,
+    Sale? existing,
+    String? tabLabel,
+    String? clientName,
+  }) async {
+    if (existing != null) {
+      final updated = existing.copyWith(items: items);
+      await _ds.updateOrder(updated);
+      return updated;
+    }
+    final now = DateTime.now();
+    final label = (tabLabel ?? '').trim();
+    final order = Sale(
+      id: 'order_${now.millisecondsSinceEpoch}',
+      shopId: shopId,
+      items: items,
+      paymentMethod: PaymentMethod.cash,
+      status: SaleStatus.scheduled,
+      createdAt: now,
+      orderType: 'takeaway',
+      tabLabel: label.isEmpty ? null : label,
+      // Les listes de commandes affichent un nom de client : sans valeur, une
+      // commande de comptoir apparaîtrait vide et illisible. Le libellé du
+      // compte fait un meilleur repère que « Comptoir » quand il existe.
+      clientName: (clientName?.trim().isNotEmpty ?? false)
+          ? clientName!.trim()
+          : (label.isEmpty ? 'Comptoir' : label),
+    );
+    await _ds.saveOrder(order);
+    return order;
+  }
+
   /// Annule une tournée PAS ENCORE envoyée en cuisine.
   ///
   /// Rien n'a été engagé : aucun ingrédient prélevé, aucun bon imprimé. Il n'y
