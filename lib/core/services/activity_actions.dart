@@ -112,6 +112,9 @@ class ActivityActions {
     'cash_closure_x':             ActivityCategory.sale,
     'cash_closure_z':             ActivityCategory.sale,
     'bill_discounted':            ActivityCategory.alert,
+    // Vente encaissée défaite (retour en « programmée ») : restitue stock,
+    // paiement et écritures partenaire. La porte la plus large des trois.
+    'paid_sale_reopened':         ActivityCategory.alert,
 
     // ── Clients ──────────────────────────────────────────────────────
     'client_created':             ActivityCategory.shop,

@@ -1,4 +1,9 @@
 import 'package:fortress/shared/widgets/app_snack.dart';
+import '../../../../core/services/restaurant_order_service.dart';
+import '../../../../core/services/stock_item_service.dart';
+import '../../../restaurant/presentation/widgets/courier_sheet.dart';
+import '../../../restaurant/presentation/widgets/packaging_sheet.dart';
+import '../../../restaurant/presentation/widgets/restaurant_checkout.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
@@ -35,6 +40,7 @@ import '../../../../core/services/export_models.dart';
 import '../../../../core/services/export_service.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../core/config/app_modes.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../shared/widgets/export_scope_selector.dart';
 import '../../data/exports/orders_export_source.dart';
@@ -57,6 +63,7 @@ import '../../../../core/services/whatsapp/whatsapp_template_renderer.dart';
 import '../../../parametres/domain/entities/whatsapp_template.dart';
 import '../../../parametres/presentation/providers/whatsapp_template_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../../core/services/manager_gate.dart';
 import '../../../../core/utils/phone_formatter.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../crm/data/models/client_model.dart';
@@ -1058,6 +1065,47 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               final becomingCompleted = status == SaleStatus.completed
                   && order.status != SaleStatus.completed;
 
+              // ── RESTAURATION : encaissement DIRECT ────────────────────
+              //
+              // Une seule question — le mode de règlement — puis la commande
+              // passe à « payée ». On court-circuite ici tout le parcours
+              // e-commerce qui suit (feuille « Qui a encaissé ? », frais de
+              // complétion, écritures partenaire, mode de livraison) : ces
+              // étapes existent parce qu'une commande e-commerce VOYAGE, avec
+              // un livreur et parfois un dépôt partenaire. Au restaurant, le
+              // client est devant le comptoir.
+              //
+              // `settleRestaurantOrder` clôture lui-même la commande, libère
+              // la table s'il y a lieu et enregistre les règlements — d'où le
+              // `return` : repasser dans `updateOrderStatus` plus bas
+              // rejouerait la transition sur une vente déjà complétée.
+              if (becomingCompleted && isRestaurantShop(order.shopId)) {
+                final paid = await settleRestaurantOrder(
+                    context: context, order: order);
+                if (!paid) return;                   // renoncé ou échec
+                AppDatabase.notifyProductChange(order.shopId);
+                ActivityLogService.log(
+                  action:      'order_delivered',
+                  targetType:  'order',
+                  targetId:    order.id,
+                  targetLabel: order.clientName ?? 'Commande',
+                  shopId:      order.shopId,
+                  details: {
+                    'from':  order.status.name,
+                    'to':    status.name,
+                    'total': order.total,
+                    'context': 'encaissement restaurant',
+                  },
+                );
+                if (!mounted) return;
+                final idx = _tabIndexForStatus(status);
+                if (_filter.index != 0 && idx != null && _filter.index != idx) {
+                  _filter.animateTo(idx);
+                }
+                setState(() {});
+                return;
+              }
+
               // Repasser Complétée → Programmée (correction d'erreur /
               // re-finalisation). Action sensible (réservée admin) : confirme,
               // PURGE les écritures partenaire de la commande, puis laisse le
@@ -1280,6 +1328,9 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               await _ds.updateOrderStatus(order.id!, status,
                   completedAt: completedAt,
                   amountPaidOnComplete: amountPaidOnComplete);
+              // (La libération de table du restaurant vivait ici. Elle est
+              // remontée dans `settleRestaurantOrder`, qui court-circuite tout
+              // ce parcours : ce point n'est plus atteint en restauration.)
               // R6 — à la finalisation, le stock a déjà été décrémenté dans
               // updateOrderStatus (StockEngagement → StockService.sale). On
               // force en plus une notification produit pour que TOUT écran
@@ -1889,6 +1940,13 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                             ),
                         ]),
                       ),
+                      // ÉTAT DE SERVICE (restauration) — « En cuisine »,
+                      // « Prête », « Servie ». Le statut commercial seul
+                      // (« Programmée ») ne dit rien de l'avancement du plat :
+                      // deux commandes programmées peuvent être, l'une encore
+                      // au piano, l'autre déjà sur la table.
+                      ..._channelChip(),
+                      ..._serviceStateChip(),
                       // Chip « À choisir sur place » — visible uniquement
                       // pour les ventes d'approbation (tournée à réconcilier).
                       if (widget.order.isApprovalSale)
@@ -2112,7 +2170,14 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   // Allège la carte : les actions secondaires (Copier message,
                   // Relancer, Transférer, Reprogrammer, Rupture…) passent dans
                   // une feuille au lieu d'occuper plusieurs lignes (densité).
-                  if (_contextualActions(context).isNotEmpty) ...[
+                  //
+                  // MASQUÉ EN RESTAURATION : tout ce qu'il regroupait y est
+                  // soit sans objet — relancer un client assis à sa table,
+                  // reprogrammer une commande qu'on prépare à l'instant —,
+                  // soit devenu un bouton à part entière (emballer, livreur).
+                  // Il ne restait qu'une porte vers une feuille vide ou
+                  // trompeuse.
+                  if (!_isResto && _contextualActions(context).isNotEmpty) ...[
                     _WideActionButton(
                       icon: Icons.more_horiz_rounded,
                       label: 'Actions',
@@ -2148,6 +2213,17 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     ]),
                     const SizedBox(height: 8),
                   ],
+
+                  // Avancement du SERVICE (restauration) — envoyé en cuisine,
+                  // prêt, servi. Ces trois évènements n'avaient plus aucune
+                  // porte depuis que l'écran de service a quitté le menu : une
+                  // fois la cuisine terminée, le bon sortait de l'écran Cuisine
+                  // et plus personne ne pouvait le déclarer prêt ni servi.
+                  ..._buildServiceProgress(context, s),
+                  // EMBALLAGE — bouton direct, au moment où il sert.
+                  ..._buildPackagingAction(context, s),
+                  // LIVREUR — commandes à livrer uniquement.
+                  ..._buildCourierAction(context, s),
 
                   // Actions
                   Row(children: [
@@ -2226,7 +2302,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                           color: AppColors.warning,
                           bgColor: AppColors.warning.withValues(alpha: 0.12),
                           tooltip: 'Repasser en programmée',
-                          onTap: () => widget.onUpdate(SaleStatus.scheduled),
+                          onTap: () => _reopenPaidSale(context),
                         ),
                         const SizedBox(width: 6),
                       ],
@@ -2296,7 +2372,11 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     // seuls les articles sont figés une fois la commande
                     // complétée (cf. _onSaveOrder). Masqué sur annulée/
                     // refusée/remboursée (frais sans objet).
-                    if (widget.canEdit
+                    // Masqué en restauration : ce sheet porte les frais de
+                    // LIVRAISON et la dette partenaire, deux notions sans
+                    // objet quand le client emporte lui-même sa commande.
+                    if (!_isResto
+                        && widget.canEdit
                         && widget.order.status != SaleStatus.cancelled
                         && widget.order.status != SaleStatus.refused
                         && widget.order.status != SaleStatus.refunded) ...[
@@ -2386,6 +2466,10 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     final s = o.status;
     final hasPhone = (o.clientPhone ?? '').trim().isNotEmpty;
     final list = <_OrderActionItem>[];
+
+    // L'emballage a QUITTÉ cette liste : il a son propre bouton sur la carte
+    // (`_buildPackagingAction`), affiché au moment où il sert. Et la feuille
+    // « Actions » elle-même ne s'ouvre plus en restauration.
     if (_canRemindClient()) {
       list.add(_OrderActionItem(
           icon: Icons.phonelink_ring_rounded,
@@ -2396,7 +2480,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     // Disponible tant que la commande est active (Programmée OU En cours) :
     // le client peut confirmer via le lien web (→ En cours) et il faut alors
     // pouvoir envoyer le message au livreur/partenaire.
-    if ((s == SaleStatus.scheduled || s == SaleStatus.processing)
+    if (!_isResto
+        && (s == SaleStatus.scheduled || s == SaleStatus.processing)
         && _permsForOrder().canTransferDelivery) {
       list.add(_OrderActionItem(
           icon: Icons.content_copy_rounded,
@@ -2420,7 +2505,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
           color: AppColors.warning,
           onTap: () => _askReschedule(context)));
     }
-    if (widget.canEdit
+    if (!_isResto
+        && widget.canEdit
         && s == SaleStatus.scheduled
         && OrdersExportSource
             .partnerLocationsForShop(o.shopId).isNotEmpty) {
@@ -2440,7 +2526,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     }
     // Commande web dont le prix de livraison reste à fixer (quartier non
     // répertorié) — remplace le bandeau retiré de la carte repliée.
-    if (o.deliveryFeeToFix) {
+    if (!_isResto && o.deliveryFeeToFix) {
       list.add(_OrderActionItem(
           icon: Icons.local_shipping_outlined,
           label: 'Fixer les frais de livraison',
@@ -2449,6 +2535,17 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     }
     return list;
   }
+
+  /// Boutique de RESTAURATION — commande prise sur place, emportée par le
+  /// client lui-même. Tout ce qui relève de la livraison (étape « en cours »,
+  /// frais de course, transfert à un partenaire, refus à la porte) est retiré
+  /// de la carte : ce sont des gestes qui n'auront jamais lieu ici, et chacun
+  /// d'eux est une occasion de se tromper.
+  ///
+  /// Déduit du SECTEUR de la boutique portant la commande — pas d'un provider
+  /// réactif, qui pouvait rendre une valeur périmée et faire apparaître le
+  /// mauvais bouton d'encaissement.
+  bool get _isResto => isRestaurantShop(widget.order.shopId);
 
   /// Feuille listant les actions contextuelles. Tap → ferme + exécute.
   void _showActionsSheet(
@@ -3125,6 +3222,37 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   AppPermissions _permsForOrder() =>
       ref.read(permissionsProvider(widget.order.shopId));
 
+  /// Défaire une vente DÉJÀ ENCAISSÉE (retour en « programmée »).
+  ///
+  /// En RESTAURATION, sous PIN gérant et journalisé. C'est la troisième porte
+  /// par laquelle l'argent ressort sans qu'un plat sorte, après l'annulation
+  /// d'une tournée et la remise sur addition — et la plus large, puisqu'elle
+  /// restitue stock, paiement et écritures partenaire. La permission
+  /// `canCancelSale` seule ne disait pas QUI avait autorisé le geste.
+  ///
+  /// Hors restauration, le comportement est inchangé : le circuit e-commerce a
+  /// ses propres contrôles (partenaires, transferts) et n'a pas de gérant de
+  /// salle au bout du comptoir.
+  Future<void> _reopenPaidSale(BuildContext context) async {
+    if (_isResto) {
+      final ok = await ManagerGate.require(
+        context: context,
+        perms: _permsForOrder(),
+        action: ManagerAction.reopenPaidSale,
+        shopId: widget.order.shopId,
+        targetId: widget.order.id,
+        targetLabel: widget.order.clientName,
+        details: {
+          'total': widget.order.total,
+          'amount_paid': widget.order.amountPaid,
+          'order_type': widget.order.orderType,
+        },
+      );
+      if (!ok) return;
+    }
+    widget.onUpdate(SaleStatus.scheduled);
+  }
+
   /// Ouvre le sheet « Copier message livraison ». Génère le message
   /// final (template résolu + variables partenaire + lien court produits)
   /// et le met dans le presse-papier. Le user colle ensuite manuellement
@@ -3174,10 +3302,313 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   ///     la paire « Validée / Annulée par client » est déjà affichée (échéance).
   ///   * En cours    → « Encaisser & finaliser » (→ complétée).
   ///   * États terminaux → pastille de statut en lecture seule.
+  ///
+  /// EN RESTAURATION, l'étape « en cours de livraison » n'existe pas : le
+  /// client commande sur place et emporte lui-même. Une commande programmée
+  /// s'encaisse donc DIRECTEMENT, sans passer par un état intermédiaire qui
+  /// n'aurait aucune réalité en salle. Le stock suit : `scheduled → completed`
+  /// décrémente en une fois (cf. `StockEngagement.decide`).
+  /// Emballages de la commande — facturés au client, déduits du stock.
+  ///
+  /// Ouvert À LA DEMANDE, jamais d'office : sur place l'emballage est
+  /// l'exception, et l'imposer à chaque commande ralentirait tout le service
+  /// pour un cas minoritaire.
+  Future<void> _addPackaging(BuildContext context) async {
+    final billed = await showPackagingSheet(
+      context: context,
+      shopId: widget.order.shopId,
+      order: widget.order,
+    );
+    if (billed == null || !context.mounted) return;
+    if (billed > 0) {
+      AppSnack.success(
+          context, '$billed emballage(s) ajouté(s) — stock déduit');
+    }
+  }
+
+  /// Cette commande porte-t-elle déjà des emballages facturés ?
+  ///
+  /// Repéré sur les LIGNES DE FRAIS, seule trace qu'un emballage a été posé —
+  /// `showPackagingSheet` en écrit une par article retenu.
+  bool get _hasPackaging => widget.order.fees.any((f) {
+        final label = (f['label'] as String?)?.toLowerCase() ?? '';
+        return _packagingNames.any(label.contains);
+      });
+
+  /// Noms des fournitures facturables, en minuscules — ce sont les libellés
+  /// que `showPackagingSheet` écrit sur les frais.
+  List<String> get _packagingNames => StockItemService
+      .sellable(widget.order.shopId)
+      .map((i) => i.name.toLowerCase())
+      .toList();
+
+  /// BOUTON D'EMBALLAGE, affiché au moment où il sert — un seul geste au lieu
+  /// des trois qu'imposait le menu « Actions ».
+  ///
+  /// Le moment diffère selon le canal, parce que la réalité diffère :
+  ///   * À EMPORTER — dès le premier état : la commande part dans un
+  ///     contenant, c'est sa nature même ;
+  ///   * SUR PLACE — seulement une fois TERMINÉE : on emballe les restes, et
+  ///     avant la fin du repas il n'y a rien à emballer. Le proposer plus tôt
+  ///     encombrerait chaque table de la salle ;
+  ///   * À LIVRER — OBLIGATOIRE : une commande qui voyage doit être fermée.
+  ///     Le bouton s'affiche donc en avertissement tant que rien n'est posé,
+  ///     et l'encaissement est refusé (cf. `_buildServiceProgress`).
+  List<Widget> _buildPackagingAction(BuildContext context, SaleStatus s) {
+    if (!_isResto) return const [];
+    if (s != SaleStatus.scheduled && s != SaleStatus.processing) {
+      return const [];
+    }
+    final o = widget.order;
+    final delivery = o.orderType == 'delivery';
+    final show = switch (o.orderType) {
+      'takeaway' => true,
+      'delivery' => true,
+      _ => o.finished,
+    };
+    if (!show) return const [];
+
+    // DÉJÀ EMBALLÉE → plus rien à proposer. La feuille « Type de commande »
+    // pose désormais les emballages à la prise, pour l'emporté comme pour la
+    // livraison : la commande arrive ici avec sa ligne de frais. Le bouton
+    // « Emballages — ajouter » qui subsistait laissait croire à une étape en
+    // attente, et rouvrir la feuille aurait facturé une seconde fois le même
+    // contenant. Les restes d'un repas en salle, eux, n'ont encore rien :
+    // le bouton s'affiche pour eux comme avant.
+    if (_hasPackaging) return const [];
+
+    return [
+      _WideActionButton(
+        icon: Icons.takeout_dining_outlined,
+        label: delivery ? 'Emballer (obligatoire)' : 'Emballer',
+        // Une livraison sans emballage se signale en orange : ce n'est pas
+        // une option qu'on aurait oubliée, c'est une étape manquante.
+        color: delivery ? AppColors.warning : AppColors.primary,
+        onPressed: () => _addPackaging(context),
+      ),
+      const SizedBox(height: 8),
+    ];
+  }
+
+  /// ASSIGNER UN LIVREUR — commandes à livrer, tant qu'elles sont ouvertes.
+  ///
+  /// Le nom retenu s'inscrit sur la commande et le bouton l'affiche : on doit
+  /// savoir qui porte la commande sans ouvrir quoi que ce soit.
+  List<Widget> _buildCourierAction(BuildContext context, SaleStatus s) {
+    if (!_isResto || widget.order.orderType != 'delivery') return const [];
+    if (s != SaleStatus.scheduled && s != SaleStatus.processing) {
+      return const [];
+    }
+    final assigned = (widget.order.deliveryPersonName ?? '').trim();
+    return [
+      _WideActionButton(
+        icon: Icons.delivery_dining_outlined,
+        label: assigned.isEmpty ? 'Assigner un livreur' : assigned,
+        color: assigned.isEmpty ? AppColors.warning : AppColors.primary,
+        onPressed: () => _assignCourier(context),
+      ),
+      const SizedBox(height: 8),
+    ];
+  }
+
+  Future<void> _assignCourier(BuildContext context) async {
+    final choice = await showCourierSheet(
+      context: context,
+      shopId: widget.order.shopId,
+      current: widget.order.deliveryPersonName,
+    );
+    if (choice == null || !context.mounted) return;
+    try {
+      await SaleLocalDatasource()
+          .updateOrder(widget.order.copyWith(
+              deliveryPersonName: choice.label));
+      if (context.mounted) {
+        AppSnack.success(context, 'Commande confiée à ${choice.name}');
+      }
+    } catch (e) {
+      if (context.mounted) AppSnack.error(context, e.toString());
+    }
+  }
+
+  /// CANAL de la commande — « Emporter » ou « Livraison », dès le premier
+  /// état et jusqu'au bout.
+  ///
+  /// Sur place n'a PAS de pastille : c'est le cas par défaut d'un restaurant,
+  /// et l'étiqueter reviendrait à baliser toute la liste pour ne rien
+  /// distinguer. Le nom de la table le dit déjà.
+  ///
+  /// Elle se lit avant tout le reste parce que c'est elle qui commande le
+  /// geste : une commande à emporter s'emballe, une commande sur place se
+  /// sert.
+  List<Widget> _channelChip() {
+    if (!_isResto) return const [];
+    final (String label, IconData icon) = switch (widget.order.orderType) {
+      'takeaway' => ('Emporter', Icons.takeout_dining_outlined),
+      'delivery' => ('Livraison', Icons.local_shipping_outlined),
+      _ => ('', Icons.circle),
+    };
+    if (label.isEmpty) return const [];
+    return [
+      _ServiceChip(label: label, icon: icon, color: AppColors.primary),
+    ];
+  }
+
+  /// Pastille d'état de service, en regard du statut commercial.
+  ///
+  /// Muette hors restauration, et muette sur une commande jamais partie en
+  /// cuisine : « pas encore envoyée » est déjà dit par le bouton d'action
+  /// juste dessous, et une pastille de plus sur chaque carte ferait du bruit.
+  List<Widget> _serviceStateChip() {
+    if (!_isResto) return const [];
+    final o = widget.order;
+    // Une commande ENCAISSÉE est terminée, quoi qu'en disent ses drapeaux :
+    // on ne fait pas payer un client dont l'assiette n'est pas arrivée. La
+    // pastille ne dépend donc pas d'un parcours de service complet — un
+    // encaissement direct, ou une commande dont un drapeau s'est perdu en
+    // route, reste correctement étiquetée.
+    if (o.status == SaleStatus.completed) {
+      return [
+        _ServiceChip(
+            label: 'Terminée',
+            icon: Icons.done_all_rounded,
+            color: AppColors.secondary),
+      ];
+    }
+    if (!o.sentToKitchen) return const [];
+
+    final (String label, IconData icon, Color color) = o.isInKitchen
+        ? ('En préparation', Icons.local_fire_department_rounded,
+            AppColors.warning)
+        : o.isWaitingService
+            ? ('Prête', Icons.room_service_outlined, AppColors.primary)
+            : o.finished
+                ? ('Terminée', Icons.done_all_rounded, AppColors.secondary)
+                : ('Servie', Icons.check_circle_outline_rounded,
+                    AppColors.secondary);
+
+    return [_ServiceChip(label: label, icon: icon, color: color)];
+  }
+
+  /// AVANCEMENT DU SERVICE — un bouton, celui de l'étape suivante.
+  ///
+  /// `Envoyer en cuisine → Commande prête → Servie` puis l'encaissement, qui
+  /// garde sa propre ligne : ces boutons ne le remplacent pas. Un client qui
+  /// paie tout de suite ne doit pas avoir à franchir trois étapes de service
+  /// d'abord — et à l'inverse, avancer le service ne doit pas encaisser.
+  ///
+  /// À EMPORTER, l'étape « servie » devient « Remise au client » : rien n'est
+  /// servi à une table, la commande passe par-dessus le comptoir. Le canevas
+  /// distingue d'ailleurs les deux cycles (`Prête → Servie → …` en salle,
+  /// `Prête → Terminée` au comptoir).
+  ///
+  /// Rendu seulement sur les commandes VIVANTES : une commande encaissée ou
+  /// annulée n'a plus de service à faire avancer.
+  List<Widget> _buildServiceProgress(BuildContext context, SaleStatus s) {
+    if (!_isResto) return const [];
+    if (s != SaleStatus.scheduled && s != SaleStatus.processing) {
+      return const [];
+    }
+    final o = widget.order;
+
+    final IconData icon;
+    final String label;
+    final Future<void> Function() action;
+    if (!o.sentToKitchen) {
+      icon   = Icons.local_fire_department_rounded;
+      label  = 'Envoyer en préparation';
+      action = () => RestaurantOrderService.sendToKitchen(o);
+    } else if (o.isInKitchen) {
+      icon   = Icons.room_service_outlined;
+      label  = 'Commande prête';
+      action = () => RestaurantOrderService.markKitchenReady(o);
+    } else if (o.isWaitingService && o.orderType == 'dine_in') {
+      // « Servie » n'a de sens qu'en salle : au comptoir comme en livraison,
+      // remettre la commande et clore le service sont le MÊME geste — on passe
+      // donc directement à « Terminée » plutôt que d'imposer deux taps pour un
+      // seul évènement réel.
+      icon   = Icons.restaurant_rounded;
+      label  = 'Marquer servie';
+      action = () => RestaurantOrderService.markServed(o);
+    } else if (!o.finished) {
+      // Fin du service, argent non encaissé. Le libellé nomme la réalité du
+      // canal : un client attablé finit de manger, un client au comptoir
+      // récupère, un client livré est livré.
+      (icon, label) = switch (o.orderType) {
+        'takeaway' => (Icons.shopping_bag_outlined, 'Commande récupérée'),
+        'delivery' => (Icons.local_shipping_outlined, 'Livrée au client'),
+        _          => (Icons.done_all_rounded, 'Repas terminé'),
+      };
+      action = () async {
+        // GARDE LIVRAISON : une commande qui voyage doit être emballée. La
+        // refuser ICI, au moment de la remise, plutôt qu'à l'encaissement :
+        // c'est le dernier instant où le contenant est encore entre les mains
+        // du restaurant.
+        if (o.orderType == 'delivery' && !_hasPackaging) {
+          if (context.mounted) {
+            AppSnack.error(context,
+                'Emballez la commande avant de la remettre au livreur.');
+          }
+          return;
+        }
+        await RestaurantOrderService.markFinished(o);
+      };
+    } else {
+      // Terminée : il ne reste que l'encaissement, dont la ligne est juste
+      // dessous. Un bouton de plus ne ferait que du bruit.
+      return const [];
+    }
+
+    return [
+      Row(children: [
+        Expanded(
+          child: _WideActionButton(
+            icon: icon,
+            label: label,
+            color: AppColors.primary,
+            onPressed: () async {
+              try {
+                await action();
+              } catch (e) {
+                if (context.mounted) AppSnack.error(context, e.toString());
+              }
+            },
+          ),
+        ),
+        // Retour en arrière d'UN cran. « Prête » cliqué par erreur renvoie le
+        // bon en préparation ; « terminée » de trop rouvre le service. Sans
+        // ça, la seule issue serait d'encaisser un plat jamais parti.
+        if (o.kitchenReady) ...[
+          const SizedBox(width: 6),
+          _ActionBtn(
+            icon: Icons.undo_rounded,
+            color: AppColors.warning,
+            bgColor: AppColors.warning.withValues(alpha: 0.12),
+            tooltip: o.finished
+                ? 'Rouvrir le service'
+                : 'Renvoyer en préparation',
+            onTap: () => o.finished
+                ? RestaurantOrderService.reopenService(o)
+                : RestaurantOrderService.reopenKitchen(o),
+          ),
+        ],
+      ]),
+      const SizedBox(height: 8),
+    ];
+  }
+
   Widget _buildStatusAction(SaleStatus s) {
     switch (s) {
       case SaleStatus.scheduled:
         if (_canConfirmClient()) return _StatusChip(status: s);
+        if (_isResto) {
+          return _WideActionButton(
+            icon: Icons.point_of_sale_rounded,
+            label: 'Encaisser & finaliser',
+            color: AppColors.secondary,
+            filled: true,
+            onPressed: () => widget.onUpdate(SaleStatus.completed),
+          );
+        }
         return _WideActionButton(
           icon: Icons.local_shipping_outlined,
           label: 'Démarrer la livraison',
@@ -3205,6 +3636,14 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   /// explicite, jamais comme une sélection de statut. Chaque option déclenche
   /// le flux métier dédié (motif d'annulation / frais de course refusée).
   Future<void> _askCancelOrRefuse(BuildContext context) async {
+    // « Refusée » décrit un client qui refuse une LIVRAISON à sa porte. En
+    // salle, personne ne refuse un plat qu'il vient de commander : il annule.
+    // Proposer un choix dont une branche est sans objet ne fait qu'ajouter un
+    // appui et une hésitation.
+    if (_isResto) {
+      await _askCancelReason(context);
+      return;
+    }
     final choice = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Theme.of(context).colorScheme.surface,
@@ -3526,7 +3965,10 @@ class _FormatPickerSheetState extends State<_FormatPickerSheet> {
     _PaperFormat('Ticket 57', 'Rouleau standard POS 57mm',  57, 140, Icons.receipt_outlined,     true),
   ];
 
-  int _selected = 0;
+  // Ticket 80 mm par défaut (index 3) : c'est le format d'impression de
+  // l'établissement. Les formats A4/A5/A6 restent proposés pour un envoi
+  // par e-mail ou une impression bureautique.
+  int _selected = 3;
 
   @override
   Widget build(BuildContext context) {
@@ -4009,6 +4451,34 @@ class _WideActionButton extends StatelessWidget {
 /// Pastille de statut en LECTURE SEULE (remplace l'ancien menu déroulant
 /// `_StatusMenu`). Le changement de statut passe désormais uniquement par
 /// des boutons d'évènement contextuels, jamais par une sélection directe.
+/// Pastille d'état de SERVICE (restauration) — « En préparation », « Prête »,
+/// « Servie », « Terminée ». Distincte de [_StatusChip], qui porte le statut
+/// commercial : une commande peut être « Programmée » et déjà « Prête ».
+class _ServiceChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  const _ServiceChip({
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(6)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 10, color: color),
+          const SizedBox(width: 3),
+          Text(label, style: AppTextStyles.microBold.copyWith(color: color)),
+        ]),
+      );
+}
+
 class _StatusChip extends StatelessWidget {
   final SaleStatus status;
   const _StatusChip({required this.status});

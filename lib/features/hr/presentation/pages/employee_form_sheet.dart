@@ -11,6 +11,7 @@ import '../../../../shared/widgets/auth_fields.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../data/providers/employees_provider.dart';
 import '../../../../core/permisions/subscription_provider.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../domain/models/employee.dart';
 import '../../domain/models/employee_permission.dart';
 import '../../domain/models/member_role.dart';
@@ -82,8 +83,13 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
         ...e.permissions, // grants
       }.difference(e.denies);
     } else {
-      // Nouvel employé : preset caissier (cohérent avec rôle user par défaut).
-      _selected = {...EmployeePermissionPresets.cashier};
+      // Nouvel employé : préréglage de départ le plus RESTREINT du secteur.
+      // En restauration c'est « Serveur » — le poste le plus courant, et celui
+      // dont les droits sont les plus étroits. Partir du plus large obligerait
+      // à penser à retirer, et on ne pense pas à retirer.
+      _selected = isRestaurantShop(widget.shopId)
+          ? {...EmployeePermissionPresets.waiter}
+          : {...EmployeePermissionPresets.cashier};
     }
   }
 
@@ -473,6 +479,7 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
                     _PresetSelector(
                       selected: _selected,
                       onApply: _applyPreset,
+                      shopId: widget.shopId,
                     ),
                     const SizedBox(height: 14),
                     // Permissions par groupe
@@ -810,7 +817,12 @@ class _StatusSelector extends StatelessWidget {
 class _PresetSelector extends StatelessWidget {
   final Set<EmployeePermission>             selected;
   final ValueChanged<Set<EmployeePermission>> onApply;
-  const _PresetSelector({required this.selected, required this.onApply});
+  final String                              shopId;
+  const _PresetSelector({
+    required this.selected,
+    required this.onApply,
+    required this.shopId,
+  });
 
   /// Compare deux sets de permissions (égalité stricte).
   static bool _eq(Set<EmployeePermission> a, Set<EmployeePermission> b) =>
@@ -827,10 +839,23 @@ class _PresetSelector extends StatelessWidget {
           EmployeePermissionPresets.admin),
       _PresetSpec(l.hrPresetEmployee,   Icons.badge_outlined,
           EmployeePermissionPresets.employee),
-      _PresetSpec(l.hrPresetCashier,    Icons.point_of_sale_rounded,
-          EmployeePermissionPresets.cashier),
-      _PresetSpec(l.hrPresetStock,      Icons.inventory_rounded,
-          EmployeePermissionPresets.stockManager),
+      // Postes de SALLE — proposés à la place des préréglages de commerce sur
+      // une boutique de restauration. Les mélanger tous ferait six choix dont
+      // la moitié n'a aucun sens pour l'établissement, et c'est en cochant au
+      // hasard dans une liste trop longue qu'on accorde un droit de trop.
+      if (isRestaurantShop(shopId)) ...[
+        _PresetSpec('Serveur',            Icons.room_service_outlined,
+            EmployeePermissionPresets.waiter),
+        _PresetSpec('Caissier restaurant', Icons.point_of_sale_rounded,
+            EmployeePermissionPresets.restaurantCashier),
+        _PresetSpec('Cuisinier',          Icons.outdoor_grill_outlined,
+            EmployeePermissionPresets.cook),
+      ] else ...[
+        _PresetSpec(l.hrPresetCashier,    Icons.point_of_sale_rounded,
+            EmployeePermissionPresets.cashier),
+        _PresetSpec(l.hrPresetStock,      Icons.inventory_rounded,
+            EmployeePermissionPresets.stockManager),
+      ],
       _PresetSpec(l.hrPresetAccountant, Icons.calculate_rounded,
           EmployeePermissionPresets.accountant),
       _PresetSpec(l.hrPresetClear,      Icons.layers_clear_rounded,

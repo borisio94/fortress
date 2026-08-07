@@ -9,16 +9,25 @@ import 'pin_service.dart';
 
 /// Gestes de service qui exigent l'aval du gérant (Lot A).
 ///
-/// Ce sont les deux points par lesquels l'argent sort d'un restaurant sans
-/// qu'un plat sorte : annuler une tournée déjà partie en cuisine, et remiser
-/// une addition. Laissés libres, ils permettent d'encaisser au comptant puis
-/// d'annuler la ligne.
+/// Ce sont les points par lesquels l'argent sort d'un restaurant sans qu'un
+/// plat sorte : annuler une tournée déjà partie en cuisine, remiser une
+/// addition, et défaire une vente déjà encaissée. Laissés libres, ils
+/// permettent d'encaisser au comptant puis d'effacer la ligne.
 enum ManagerAction {
   /// Annulation d'une tournée DÉJÀ envoyée en cuisine (matière engagée).
   cancelSentRound,
 
   /// Remise appliquée sur une addition.
   discountBill,
+
+  /// Retour en arrière sur une vente DÉJÀ ENCAISSÉE (repasser en programmée).
+  ///
+  /// C'est la troisième porte, et la plus large : elle restitue le stock, le
+  /// paiement et les écritures partenaire. Sous simple permission elle ne
+  /// laissait aucune trace de QUI avait autorisé le geste — or c'est
+  /// exactement le scénario qu'on cherche à couvrir : la commande a été payée
+  /// en espèces, puis la ligne disparaît.
+  reopenPaidSale,
 }
 
 extension ManagerActionX on ManagerAction {
@@ -28,16 +37,19 @@ extension ManagerActionX on ManagerAction {
   String get logAction => switch (this) {
         ManagerAction.cancelSentRound => 'round_cancelled',
         ManagerAction.discountBill => 'bill_discounted',
+        ManagerAction.reopenPaidSale => 'paid_sale_reopened',
       };
 
   String get title => switch (this) {
         ManagerAction.cancelSentRound => 'Annuler une tournée envoyée',
         ManagerAction.discountBill => 'Remise sur l\'addition',
+        ManagerAction.reopenPaidSale => 'Défaire une vente encaissée',
       };
 
   bool canExecute(AppPermissions perms) => switch (this) {
         ManagerAction.cancelSentRound => perms.canCancelSale,
         ManagerAction.discountBill => perms.canApplyDiscount,
+        ManagerAction.reopenPaidSale => perms.canCancelSale,
       };
 }
 
