@@ -20,6 +20,7 @@ import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../domain/entities/restaurant_table.dart';
 import '../widgets/deposit_sheet.dart';
+import '../widgets/packaging_sheet.dart';
 import '../widgets/payment_sheet.dart';
 
 /// Addition d'une table : récapitulatif, partage entre convives et
@@ -75,6 +76,30 @@ class _BillPageState extends ConsumerState<BillPage> {
   ///
   /// Pas de PIN : la consigne AUGMENTE le montant dû, elle ne fait pas sortir
   /// d'argent. C'est le retour (ou la perte) qui se contrôle, depuis le hub
+  /// Emballe des RESTES de fin de repas.
+  ///
+  /// À la demande, jamais d'office : sur place l'emballage est l'exception, et
+  /// imposer cette feuille à chaque encaissement ralentirait tout le service
+  /// pour un cas minoritaire.
+  Future<void> _addPackaging() async {
+    final order = _order;
+    if (order == null) return;
+    final billed = await showPackagingSheet(
+      context: context,
+      shopId: widget.shopId,
+      order: order,
+      isLeftovers: true,
+    );
+    if (billed == null || !mounted) return;
+    // Relecture : les lignes de frais viennent d'être écrites, le total
+    // affiché doit les refléter AVANT l'encaissement.
+    _load();
+    if (billed > 0) {
+      AppSnack.success(
+          context, '$billed emballage(s) ajouté(s) — stock déduit');
+    }
+  }
+
   /// Finances.
   Future<void> _addDeposit() async {
     final order = _order;
@@ -259,6 +284,11 @@ class _BillPageState extends ConsumerState<BillPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    TextButton.icon(
+                      onPressed: _settling ? null : _addPackaging,
+                      icon: const Icon(Icons.takeout_dining_outlined, size: 18),
+                      label: const Text('Restes'),
+                    ),
                     TextButton.icon(
                       onPressed: _settling ? null : _addDeposit,
                       icon: const Icon(Icons.liquor_outlined, size: 18),

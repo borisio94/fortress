@@ -58,8 +58,8 @@ void main() {
       expect(tabs.last.orderCount, 1);
     });
 
-    test('les commandes sans libellé forment UN seul compte', () {
-      // Sinon une table dont personne n'a nommé les comptes afficherait
+    test('les commandes sans libellé forment UN seul groupe', () {
+      // Sinon une table dont personne n'a nommé ses commandes afficherait
       // autant d'additions que de tournées.
       final tabs = RestaurantTabService.groupByLabel([
         _order(id: 'o1', minute: 0),
@@ -68,7 +68,7 @@ void main() {
 
       expect(tabs.length, 1);
       expect(tabs.single.isUnnamed, isTrue);
-      expect(tabs.single.displayLabel, 'Sans compte');
+      expect(tabs.single.displayLabel, 'Sans nom');
       expect(tabs.single.orderCount, 2);
     });
 

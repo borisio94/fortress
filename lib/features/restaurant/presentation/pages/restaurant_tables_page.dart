@@ -16,6 +16,7 @@ import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../widgets/resto_empty_state.dart';
+import '../widgets/table_form_sheet.dart';
 import '../../domain/entities/restaurant_table.dart';
 import '../../../../core/services/restaurant_order_service.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -73,34 +74,14 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
 
   // ── Actions ─────────────────────────────────────────────────────────────
 
-  /// Tap sur une table.
-  ///
-  /// Libre → ouverture d'un service (saisie des couverts).
-  /// Occupée / addition / réservée → feuille d'actions sur le service courant.
-  Future<void> _onTapTable(RestaurantTable table) async {
-    if (table.isFree) {
-      await _openService(table);
-    } else if (table.status == RestaurantTableStatus.addition) {
-      // Le client a demandé l'addition → on va droit à l'encaissement
-      // plutôt qu'à la prise de commande (spec §7).
-      _openBill(table);
-    } else {
-      // Plusieurs comptes ouverts → on demande LEQUEL avant d'ouvrir la prise
-      // de commande. Avec un seul compte, on va droit au but : ajouter une
-      // étape de choix quand il n'y a rien à choisir ralentirait le service.
-      final tabs =
-          RestaurantTabService.tabsForTable(widget.shopId, table.id);
-      if (tabs.length > 1) {
-        await _openTabs(table, tabs);
-      } else {
-        _openOrder(table);
-      }
-    }
-  }
+  // Le tap sur une table ouvrait ici la prise de commande (service, choix du
+  // compte, écran de commande). Retiré : la carte est devenue informative, et
+  // toute commande passe par le Menu. Ne subsistent que les actions sur la
+  // TABLE, derrière le bouton ⋮ de la carte.
 
   /// Libère la table, en annonçant ce qui reste à encaisser.
   ///
-  /// Libérer détache les comptes encore ouverts : ils survivent, mais quittent
+  /// Libérer détache les commandes encore ouvertes : elles survivent, mais quittent
   /// le plan de salle. Le faire en silence ferait disparaître de l'argent du
   /// champ de vision du serveur — d'où la confirmation chiffrée.
   Future<void> _releaseTable(RestaurantTable table) async {
@@ -111,9 +92,9 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
         context: context,
         icon: Icons.warning_amber_rounded,
         iconColor: Theme.of(context).semantic.warning,
-        title: 'Libérer avec des comptes ouverts ?',
+        title: 'Libérer avec des commandes ouvertes ?',
         body: Text(
-            '${tabs.length} compte${tabs.length > 1 ? 's' : ''} '
+            '${tabs.length} commande${tabs.length > 1 ? 's' : ''} '
             'non réglé${tabs.length > 1 ? 's' : ''} · '
             '${CurrencyFormatter.format(total)}\n\n'
             'Ces additions ne seront pas perdues : elles restent encaissables '
@@ -128,7 +109,7 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
     if (mounted) setState(() {});
   }
 
-  /// Feuille des comptes d'une table : consulter, transférer, fusionner.
+  /// Feuille des commandes d'une table : consulter, transférer, fusionner.
   Future<void> _openTabs(
       RestaurantTable table, List<RestaurantTab> tabs) async {
     await showAdaptiveFormSheet<void>(
@@ -146,11 +127,6 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
   /// Ouvre l'addition de la table.
   void _openBill(RestaurantTable table) {
     context.push('/shop/${widget.shopId}/restaurant/addition/${table.id}');
-  }
-
-  /// Ouvre la prise de commande de la table.
-  void _openOrder(RestaurantTable table) {
-    context.push('/shop/${widget.shopId}/restaurant/table/${table.id}');
   }
 
   /// Des convives sont partis (ou arrivés) : on ajuste les couverts SANS
@@ -175,16 +151,9 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
             : '${updated.name} — table complète');
   }
 
-  Future<void> _openService(RestaurantTable table) async {
-    final covers = await _askCovers(table);
-    if (covers == null || !mounted) return;
-    final opened =
-        await RestaurantTableService.openService(table: table, covers: covers);
-    if (!mounted) return;
-    // Enchaîne directement sur la prise de commande : ouvrir une table sans
-    // rien commander n'a pas de sens en service.
-    _openOrder(opened);
-  }
+  // `_openService` (saisie des couverts puis prise de commande) a disparu avec
+  // le tap sur la carte : c'est la feuille « Type de commande » du Menu qui
+  // ouvre désormais le service en posant la table et ses couverts.
 
   /// Sélecteur de couverts (+/−) borné par la capacité de la table.
   ///
@@ -263,9 +232,18 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
     );
   }
 
-  /// Actions disponibles sur une table en service.
+  /// Actions sur la TABLE — jamais sur la commande.
+  ///
+  /// Seule porte d'action du plan de salle depuis que la carte est devenue
+  /// informative : elle ouvrait la prise de commande au tap, or toute commande
+  /// passe par le Menu. Ce qui reste ici relève de la table elle-même.
+  ///
+  /// Le contenu suit l'état : une table LIBRE n'a ni addition à réclamer ni
+  /// couverts à ajuster, mais elle peut être supprimée — ce qu'une table en
+  /// service ne peut pas (on effacerait des additions ouvertes).
   Future<void> _showTableActions(RestaurantTable table) async {
     final theme = Theme.of(context);
+    final free  = table.isFree;
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: theme.colorScheme.surface,
@@ -281,46 +259,76 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
                 style: AppTextStyles.captionHint),
             const SizedBox(height: 8),
             const Divider(height: 1),
-            ListTile(
-              leading: Icon(Icons.receipt_long_rounded,
-                  color: theme.semantic.danger),
-              title: Text(table.status == RestaurantTableStatus.addition
-                  ? 'Voir l\'addition'
-                  : 'Demander l\'addition'),
-              subtitle: const Text('Récapitulatif, partage et encaissement'),
-              onTap: () async {
-                Navigator.of(ctx).pop();
-                // Bascule le statut avant d'ouvrir : la table doit passer
-                // en rouge sur le plan de salle dès que le client réclame
-                // l'addition, même si le serveur n'encaisse pas tout de suite.
-                if (table.status != RestaurantTableStatus.addition) {
-                  await RestaurantTableService.requestBill(table);
-                }
-                if (mounted) _openBill(table);
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.event_seat_outlined,
-                  color: theme.colorScheme.primary),
-              title: const Text('Des places se libèrent'),
-              subtitle: Text(
-                  '${table.covers ?? table.capacity} couverts sur '
-                  '${table.capacity} — ajustez si des convives sont partis'),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                _editCovers(table);
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.check_circle_outline_rounded,
-                  color: theme.semantic.success),
-              title: const Text('Libérer la table'),
-              subtitle: const Text('Remet la table en statut Libre'),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                _releaseTable(table);
-              },
-            ),
+            if (!free) ...[
+              ListTile(
+                leading: Icon(Icons.receipt_long_rounded,
+                    color: theme.semantic.danger),
+                title: Text(table.status == RestaurantTableStatus.addition
+                    ? 'Voir l\'addition'
+                    : 'Demander l\'addition'),
+                subtitle: const Text('Récapitulatif, partage et encaissement'),
+                onTap: () async {
+                  Navigator.of(ctx).pop();
+                  // Bascule le statut avant d'ouvrir : la table doit passer
+                  // en rouge sur le plan de salle dès que le client réclame
+                  // l'addition, même si le serveur n'encaisse pas tout de suite.
+                  if (table.status != RestaurantTableStatus.addition) {
+                    await RestaurantTableService.requestBill(table);
+                  }
+                  if (mounted) _openBill(table);
+                },
+              ),
+              // Comptes de la table : consulter, TRANSFÉRER vers une autre
+              // table, FUSIONNER. Ces deux opérations n'existent nulle part
+              // ailleurs — elles étaient atteintes par le tap sur la carte,
+              // elles se rangent naturellement ici.
+              ListTile(
+                leading: Icon(Icons.receipt_outlined,
+                    color: theme.colorScheme.primary),
+                title: const Text('Comptes de la table'),
+                subtitle: const Text('Consulter, transférer, fusionner'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _openTabs(
+                      table,
+                      RestaurantTabService.tabsForTable(
+                          widget.shopId, table.id));
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.event_seat_outlined,
+                    color: theme.colorScheme.primary),
+                title: const Text('Des places se libèrent'),
+                subtitle: Text(
+                    '${table.covers ?? table.capacity} couverts sur '
+                    '${table.capacity} — ajustez si des convives sont partis'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _editCovers(table);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.check_circle_outline_rounded,
+                    color: theme.semantic.success),
+                title: const Text('Libérer la table'),
+                subtitle: const Text('Remet la table en statut Libre'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _releaseTable(table);
+                },
+              ),
+            ] else
+              ListTile(
+                leading: Icon(Icons.delete_outline_rounded,
+                    color: theme.semantic.danger),
+                title: const Text('Supprimer la table'),
+                subtitle: const Text('Possible tant qu\'aucun service n\'y '
+                    'est ouvert'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _deleteTable(table);
+                },
+              ),
             const SizedBox(height: 8),
           ],
         ),
@@ -328,75 +336,13 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
     );
   }
 
-  /// Formulaire de création d'une table (nom + capacité).
+  /// Formulaire de création d'une table.
+  ///
+  /// Le formulaire lui-même vit dans `table_form_sheet.dart` : l'écran de mise
+  /// en route l'ouvre aussi, et deux copies auraient divergé.
   Future<void> _createTable() async {
-    final nameCtrl = TextEditingController();
-    final capCtrl = TextEditingController(text: '4');
-    final suggested = RestaurantTableService.nextNumber(widget.shopId);
-    nameCtrl.text = 'T$suggested';
-
-    final created = await showAdaptiveFormSheet<bool>(
-      context: context,
-      builder: (ctx) => AdaptiveFormFrame(
-        title: 'Nouvelle table',
-        subtitle: 'Table n°$suggested',
-        icon: Icons.restaurant_rounded,
-        body: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const AppFieldLabel('Nom de la table', required: true),
-              const SizedBox(height: 8),
-              AppField(
-                controller: nameCtrl,
-                hint: 'T$suggested',
-                autofocus: true,
-                prefixIcon: Icons.label_outline_rounded,
-              ),
-              const SizedBox(height: 16),
-              const AppFieldLabel('Capacité (couverts)', required: true),
-              const SizedBox(height: 8),
-              AppField(
-                controller: capCtrl,
-                hint: '4',
-                numbersOnly: true,
-                keyboardType: TextInputType.number,
-                prefixIcon: Icons.people_outline_rounded,
-              ),
-              const SizedBox(height: 20),
-              AppPrimaryButton(
-                label: 'Créer la table',
-                icon: Icons.add_rounded,
-                fullWidth: true,
-                onTap: () => Navigator.of(ctx).pop(true),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    if (created != true) {
-      nameCtrl.dispose();
-      capCtrl.dispose();
-      return;
-    }
-
-    final name = nameCtrl.text.trim();
-    // Capacité bornée : une saisie vide ou absurde retombe sur 4 plutôt que
-    // de créer une table à 0 place (rendrait le sélecteur de couverts inerte).
-    final capacity = (int.tryParse(capCtrl.text.trim()) ?? 4).clamp(1, 99);
-    nameCtrl.dispose();
-    capCtrl.dispose();
-
-    await RestaurantTableService.addTable(
-      shopId: widget.shopId,
-      name: name.isEmpty ? 'T$suggested' : name,
-      capacity: capacity,
-    );
-    if (!mounted) return;
+    final created = await showTableForm(context: context, shopId: widget.shopId);
+    if (!created || !mounted) return;
     AppSnack.success(context, 'Table créée');
   }
 
@@ -458,26 +404,27 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
   Widget _buildGrid(List<RestaurantTable> tables) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Grille fluide : ~150 dp par carte, 2 colonnes minimum sur mobile.
-        final columns = (constraints.maxWidth / 150).floor().clamp(2, 8);
+        // Grille fluide : ~240 dp par carte (contre 150), 2 colonnes minimum
+        // sur mobile. Le plan de salle se lit maintenant à distance — c'est un
+        // tableau d'état posé sur un comptoir, plus une grille à parcourir de
+        // près. Moins de colonnes, des cartes nettement plus grandes.
+        final columns = (constraints.maxWidth / 240).floor().clamp(2, 6);
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 88),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            childAspectRatio: 0.95,
+            mainAxisSpacing: 14,
+            crossAxisSpacing: 14,
+            childAspectRatio: 1.05,
           ),
           itemCount: tables.length,
           itemBuilder: (_, i) => _TableCard(
             table: tables[i],
-            onTap: () => _onTapTable(tables[i]),
-            // Appui long : actions sur la table elle-même. Sur une table en
-            // service on propose addition/libération ; sur une table libre,
-            // la seule action sensée est la suppression.
-            onLongPress: () => tables[i].isFree
-                ? _deleteTable(tables[i])
-                : _showTableActions(tables[i]),
+            // Actions sur la TABLE elle-même (renommer, libérer, addition,
+            // supprimer), par un bouton explicite dans le coin. La carte, elle,
+            // ne réagit plus au tap : elle ouvrait la prise de commande, et
+            // toute commande passe désormais par le Menu.
+            onActions: () => _showTableActions(tables[i]),
           ),
         );
       },
@@ -521,15 +468,23 @@ class _StatusLegend extends StatelessWidget {
 }
 
 /// Carte d'une table — couleur et icône dérivées du statut.
+/// Carte d'état d'une table — INFORMATIVE.
+///
+/// Elle ne réagit plus au tap. Elle ouvrait la prise de commande, ce qui
+/// faisait du plan de salle un second point d'entrée des commandes, alors que
+/// tout passe désormais par le Menu (panier → « Type de commande »). Deux
+/// chemins pour le même acte, c'est deux comportements qui divergent au
+/// premier changement.
+///
+/// Seul le bouton d'actions en coin est cliquable, et il ne touche qu'à la
+/// TABLE : addition, couverts, libération, suppression.
 class _TableCard extends StatelessWidget {
   final RestaurantTable table;
-  final VoidCallback onTap;
-  final VoidCallback onLongPress;
+  final VoidCallback onActions;
 
   const _TableCard({
     required this.table,
-    required this.onTap,
-    required this.onLongPress,
+    required this.onActions,
   });
 
   @override
@@ -546,50 +501,75 @@ class _TableCard extends StatelessWidget {
         ? RestaurantTableStatus.occupee
         : table.status;
     final accent = status.color(semantic);
+    // Plats prêts au passe et pas encore apportés. C'est la SEULE information
+    // du plan de salle qui appelle une action immédiate : elle prend donc la
+    // bordure de la carte, pas une pastille discrète en coin.
+    final waiting = RestaurantOrderService.waitingServiceFor(table).length;
+    final border = waiting > 0 ? semantic.warning : accent;
 
     return Material(
       color: status.surface(semantic),
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.all(10),
+      borderRadius: BorderRadius.circular(14),
+      // `StackFit.expand` : sans lui, le Stack se dimensionne sur son contenu
+      // et le cadre bordé flottait au milieu d'une carte plus grande, le ⋮
+      // tombant hors de la bordure. Le cadre doit occuper TOUTE la cellule.
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Container(
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: accent.withValues(alpha: 0.45)),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+                color: border.withValues(alpha: waiting > 0 ? 1 : 0.45),
+                width: waiting > 0 ? 2 : 1),
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(status.icon, color: accent, size: 26),
-              const SizedBox(height: 6),
+              Icon(status.icon, color: accent, size: 38),
+              if (waiting > 0) ...[
+                const SizedBox(height: 4),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: semantic.warning,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                      waiting > 1 ? 'À SERVIR ($waiting)' : 'À SERVIR',
+                      maxLines: 1,
+                      style: AppTextStyles.microBold
+                          .copyWith(color: Colors.white)),
+                ),
+              ],
+              const SizedBox(height: 8),
               Text(
                 table.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.subtitleBold.copyWith(color: accent),
+                style: AppTextStyles.title.copyWith(color: accent),
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 3),
               Text(
                 status.label,
-                style: AppTextStyles.caption.copyWith(color: accent),
+                style: AppTextStyles.bodySm.copyWith(color: accent),
               ),
               // Comptes ouverts + total en cours : c'est ce qu'un serveur
               // regarde en passant devant la table.
               if (summary.count > 0) ...[
-                const SizedBox(height: 3),
+                const SizedBox(height: 5),
                 Text(
-                  '${summary.count} compte'
+                  '${summary.count} commande'
                   '${summary.count > 1 ? 's' : ''} · '
                   '${CurrencyFormatter.format(summary.total)}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.microBold.copyWith(color: accent),
+                  style: AppTextStyles.bodySmBold.copyWith(color: accent),
                 ),
               ],
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Text(
                 // Table libre → on affiche la capacité (information utile pour
                 // placer un groupe) ; en service → les couverts réels.
@@ -600,17 +580,34 @@ class _TableCard extends StatelessWidget {
                     // client, et une table de six occupée par deux personnes
                     // n'est pas une table pleine.
                     : _coversLabel(table),
-                style: AppTextStyles.captionHint,
+                style: AppTextStyles.caption,
               ),
               if (status == RestaurantTableStatus.reservee &&
                   table.reservationTime != null)
                 Text(
                   _hhmm(table.reservationTime!),
-                  style: AppTextStyles.microBold.copyWith(color: accent),
+                  style: AppTextStyles.bodySmBold.copyWith(color: accent),
                 ),
             ],
           ),
         ),
+          // Seul élément cliquable de la carte, DANS le cadre bordé. Discret
+          // mais toujours visible : enfoui derrière un appui long, il serait
+          // introuvable sur le web.
+          Positioned(
+            top: 4,
+            right: 4,
+            child: IconButton(
+              onPressed: onActions,
+              icon: Icon(Icons.more_vert_rounded, size: 18, color: accent),
+              tooltip: 'Actions sur la table',
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(
+                  minWidth: 30, minHeight: 30),
+              padding: EdgeInsets.zero,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -703,7 +700,7 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
     final target = await showAdaptiveFormSheet<String>(
       context: context,
       builder: (_) => AdaptiveFormFrame(
-        title: 'Transférer le compte',
+        title: 'Transférer la commande',
         subtitle: tab.displayLabel,
         icon: Icons.swap_horiz_rounded,
         body: Padding(
@@ -744,10 +741,10 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
     if (applied != tab.label) {
       AppSnack.info(
           context,
-          'Compte transféré sous « $applied » — ce nom était déjà pris '
+          'Commande transférée sous « $applied » — ce nom était déjà pris '
           'à destination.');
     } else {
-      AppSnack.success(context, 'Compte transféré.');
+      AppSnack.success(context, 'Commande transférée.');
     }
     _reload();
   }
@@ -765,7 +762,7 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
       title: 'Départ sans paiement ?',
       body: Text(
           '« ${tab.displayLabel} » · ${CurrencyFormatter.format(tab.total)}\n\n'
-          'Le compte sera clôturé et le montant enregistré en perte '
+          'La commande sera clôturée et le montant enregistré en perte '
           '(catégorie « Non payé »). Cette écriture annule la recette : sans '
           'elle, le bilan afficherait un chiffre d\'affaires que personne '
           'n\'a réglé.'),
@@ -800,7 +797,7 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
     if (sent.isEmpty) {
       AppSnack.info(
           context,
-          'Aucune tournée envoyée sur ce compte — retirez les articles '
+          'Aucune tournée envoyée sur cette commande — retirez les articles '
           'directement depuis la commande.');
       return;
     }
@@ -854,7 +851,7 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
     final target = await showAdaptiveFormSheet<String>(
       context: context,
       builder: (_) => AdaptiveFormFrame(
-        title: 'Fusionner le compte',
+        title: 'Fusionner la commande',
         subtitle: tab.displayLabel,
         icon: Icons.merge_rounded,
         body: Padding(
@@ -883,7 +880,26 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
     );
     if (!mounted) return;
     setState(() => _busy = false);
-    AppSnack.success(context, 'Comptes fusionnés.');
+    AppSnack.success(context, 'Commandes fusionnées.');
+    _reload();
+  }
+
+  /// Marque tous les bons prêts de ce compte comme apportés au client.
+  ///
+  /// Un compte peut porter plusieurs bons prêts (deux tournées terminées
+  /// coup sur coup). Le serveur apporte le tout en une fois — lui demander un
+  /// appui par bon n'apporterait rien et laisserait le signal allumé sur une
+  /// table déjà servie.
+  Future<void> _markServed(RestaurantTab tab) async {
+    final pending = tab.waitingService;
+    if (pending.isEmpty) return;
+    setState(() => _busy = true);
+    for (final order in pending) {
+      await RestaurantOrderService.markServed(order);
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    AppSnack.success(context, '${tab.displayLabel} — servie');
     _reload();
   }
 
@@ -895,7 +911,7 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
 
     return AdaptiveFormFrame(
       title: widget.table.name,
-      subtitle: '${_tabs.length} comptes · ${CurrencyFormatter.format(total)}',
+      subtitle: '${_tabs.length} commandes · ${CurrencyFormatter.format(total)}',
       icon: Icons.table_restaurant_rounded,
       body: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
@@ -927,9 +943,30 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
                           '${tab.orderCount} bon'
                           '${tab.orderCount > 1 ? 's' : ''}',
                           style: AppTextStyles.caption),
+                      if (tab.isWaitingService)
+                        Text('Prête à servir',
+                            style: AppTextStyles.captionHint
+                                .copyWith(color: sem.warning)),
                     ],
                   ),
                 ),
+                // Bouton de SERVICE — il n'apparaît que sur les comptes dont
+                // la cuisine a fini. Le placer en tête de rangée, avant le
+                // total, le met sur le chemin du serveur qui vient de recevoir
+                // l'alerte.
+                if (tab.isWaitingService) ...[
+                  FilledButton.icon(
+                    onPressed: _busy ? null : () => _markServed(tab),
+                    icon: const Icon(Icons.room_service_outlined, size: 16),
+                    label: const Text('Servie'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: sem.warning,
+                      minimumSize: const Size(0, 34),
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 Text(CurrencyFormatter.format(tab.total),
                     style:
                         AppTextStyles.bodyBold.copyWith(color: cs.primary)),

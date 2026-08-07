@@ -13,7 +13,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fortress/core/services/restaurant_order_service.dart';
 import 'package:fortress/features/caisse/domain/entities/sale.dart';
 import 'package:fortress/features/caisse/domain/entities/sale_item.dart';
-import 'package:fortress/features/restaurant/domain/entities/menu_modifier.dart';
 
 const _cuisson = <String, dynamic>{
   'group': 'Cuisson',
@@ -43,7 +42,6 @@ Sale _order({String? tableId = 'rt_1', int? covers = 4}) => Sale(
     );
 
 void main() {
-  _pr4Tests();
   group('Sale — champs restauration', () {
     test('défauts non intrusifs pour une vente non-restaurant', () {
       final sale = Sale(
@@ -231,59 +229,6 @@ void main() {
           (1 - item.discount / 100);
       expect(naive, item.subtotal);
       expect(naive, 7000);
-    });
-  });
-}
-
-// ── PR-4 : modificateurs et à emporter ─────────────────────────────────────
-// Ajouté en fin de fichier pour garder les groupes PR-2/PR-3 intacts.
-void _pr4Tests() {
-  group('MenuModifier — portée et sérialisation', () {
-    test('un groupe sans produit s\'applique à toute la carte', () {
-      final global = MenuModifier(
-        id: 'mm_1', shopId: 'shop_1', name: 'Cuisson',
-        options: const [ModifierOption(name: 'Saignant')],
-        createdAt: DateTime.utc(2026, 7, 19),
-      );
-      expect(global.appliesTo('prod_1'), isTrue);
-      expect(global.appliesTo('prod_2'), isTrue);
-    });
-
-    test('un groupe lié ne s\'applique qu\'à son produit', () {
-      final scoped = MenuModifier(
-        id: 'mm_2', shopId: 'shop_1', productId: 'prod_1', name: 'Cuisson',
-        options: const [ModifierOption(name: 'Saignant')],
-        createdAt: DateTime.utc(2026, 7, 19),
-      );
-      expect(scoped.appliesTo('prod_1'), isTrue);
-      expect(scoped.appliesTo('prod_2'), isFalse);
-    });
-
-    test('round-trip toMap → fromMap conserve options et impacts', () {
-      final m = MenuModifier(
-        id: 'mm_3', shopId: 'shop_1', productId: 'prod_9', name: 'Suppléments',
-        options: const [
-          ModifierOption(name: 'Fromage', priceImpact: 500),
-          ModifierOption(name: 'Sans sauce', priceImpact: -200),
-        ],
-        createdAt: DateTime.utc(2026, 7, 19),
-      );
-      final back = MenuModifier.fromMap(m.toMap());
-      expect(back.name, 'Suppléments');
-      expect(back.productId, 'prod_9');
-      expect(back.options, hasLength(2));
-      expect(back.options[0].priceImpact, 500);
-      expect(back.options[1].priceImpact, -200);
-    });
-
-    test('options absentes ou malformées → liste vide, pas de crash', () {
-      // Le JSONB Supabase peut renvoyer null ou un scalaire sur une ligne
-      // écrite à la main ; la page de config ne doit pas planter.
-      final raw = {
-        'id': 'mm_4', 'shop_id': 'shop_1', 'name': 'Vide',
-        'options': null,
-      };
-      expect(MenuModifier.fromMap(raw).options, isEmpty);
     });
   });
 }

@@ -1,15 +1,14 @@
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 
 import '../../features/caisse/data/repositories/sale_local_datasource.dart';
 import '../../features/caisse/domain/entities/sale.dart';
 import '../../features/caisse/domain/entities/sale_item.dart';
-import '../../features/restaurant/domain/entities/menu_modifier.dart';
 import '../../features/restaurant/domain/entities/restaurant_table.dart';
 import '../config/restaurant_mode.dart';
 import '../database/app_database.dart';
 import '../storage/hive_boxes.dart';
 import 'daily_menu_service.dart';
-import 'recipe_service.dart';
+import 'notification_service.dart';
 import 'restaurant_table_service.dart';
 
 /// Opérations de commande propres au service en salle.
@@ -99,6 +98,13 @@ class RestaurantOrderService {
     }
   }
 
+  /// Comptes de la table dont les plats sont PRÊTS mais pas encore apportés.
+  ///
+  /// C'est le seul état qui mérite d'attirer l'œil sur un plan de salle : la
+  /// cuisine a fini et personne n'est encore allé chercher l'assiette.
+  static List<Sale> waitingServiceFor(RestaurantTable table) =>
+      openOrdersFor(table).where((o) => o.isWaitingService).toList();
+
   /// Nombre de comptes ouverts et total cumulé d'une table.
   static ({int count, double total}) tableSummary(RestaurantTable table) {
     final orders = openOrdersFor(table);
@@ -177,8 +183,14 @@ class RestaurantOrderService {
     required RestaurantTable table,
     required List<SaleItem> items,
     required int covers,
+    /// Couverts à poser sur LA TABLE. Distinct de [covers], qui reste ceux de
+    /// CETTE commande : une table peut héberger plusieurs tablées, et le plan
+    /// de salle doit afficher leur somme. `null` → [covers], comportement
+    /// d'origine pour une table qu'on ouvre.
+    int? tableCovers,
     Sale? existing,
     String? tabLabel,
+    String? notes,
   }) async {
     final now = DateTime.now();
     if (existing != null) {
@@ -204,12 +216,13 @@ class RestaurantOrderService {
       // listes de commandes, où un client nommé est attendu.
       clientName: table.name,
       tabLabel: tabLabel,
+      notes: (notes?.trim().isNotEmpty ?? false) ? notes!.trim() : null,
     );
     await _ds.saveOrder(order);
     // Lien retour table → commande, pour rouvrir la bonne commande au tap.
     await RestaurantTableService.save(table.copyWith(
       status: RestaurantTableStatus.occupee,
-      covers: covers,
+      covers: tableCovers ?? covers,
       currentOrderId: order.id,
       openedAt: table.openedAt ?? now,
     ));
@@ -252,6 +265,11 @@ class RestaurantOrderService {
     Sale? existing,
     String? tabLabel,
     String? clientName,
+    /// Facultatif : permet de rappeler le client quand la commande traîne au
+    /// comptoir. Aucun client CRM n'est créé pour autant — une commande à
+    /// emporter n'a pas à peupler le fichier clients.
+    String? clientPhone,
+    String? notes,
   }) async {
     if (existing != null) {
       final updated = existing.copyWith(items: items);
@@ -275,9 +293,107 @@ class RestaurantOrderService {
       clientName: (clientName?.trim().isNotEmpty ?? false)
           ? clientName!.trim()
           : (label.isEmpty ? 'Comptoir' : label),
+      clientPhone: (clientPhone?.trim().isNotEmpty ?? false)
+          ? clientPhone!.trim()
+          : null,
+      notes: (notes?.trim().isNotEmpty ?? false) ? notes!.trim() : null,
     );
     await _ds.saveOrder(order);
     return order;
+  }
+
+  /// Commande À LIVRER prise au comptoir.
+  ///
+  /// Volontairement à l'écart du circuit de livraison e-commerce (quartiers
+  /// tarifés, partenaire-livreur, transferts de stock, statut « en cours ») :
+  /// ici, livrer c'est une adresse et des frais. `deliveryMode` reste NUL —
+  /// le renseigner ferait entrer la commande dans les validations e-commerce,
+  /// qui exigeraient une ville puis un partenaire.
+  ///
+  /// Les frais rejoignent `deliveryPrice`, que `Sale.total` additionne déjà :
+  /// pas de ligne de frais séparée, donc pas de risque de double comptage.
+  static Future<Sale> saveDeliveryOrder({
+    required String shopId,
+    required List<SaleItem> items,
+    required String clientName,
+    String? clientPhone,
+    String? address,
+    double deliveryFee = 0,
+    /// Livreur retenu, sous la forme « Nom · téléphone ». Exigé par le
+    /// formulaire de prise de commande ; le paramètre reste nullable pour les
+    /// appels programmatiques et les commandes anciennes.
+    String? courier,
+    String? tabLabel,
+    String? notes,
+  }) async {
+    final now = DateTime.now();
+    final label = (tabLabel ?? '').trim();
+    final order = Sale(
+      id: 'order_${now.millisecondsSinceEpoch}',
+      shopId: shopId,
+      items: items,
+      paymentMethod: PaymentMethod.cash,
+      status: SaleStatus.scheduled,
+      createdAt: now,
+      orderType: 'delivery',
+      tabLabel: label.isEmpty ? null : label,
+      clientName: clientName.trim().isEmpty ? 'Livraison' : clientName.trim(),
+      clientPhone: (clientPhone?.trim().isNotEmpty ?? false)
+          ? clientPhone!.trim()
+          : null,
+      deliveryAddress:
+          (address?.trim().isNotEmpty ?? false) ? address!.trim() : null,
+      deliveryPrice: deliveryFee > 0 ? deliveryFee : null,
+      deliveryPersonName:
+          (courier?.trim().isNotEmpty ?? false) ? courier!.trim() : null,
+      notes: (notes?.trim().isNotEmpty ?? false) ? notes!.trim() : null,
+    );
+    await _ds.saveOrder(order);
+    return order;
+  }
+
+  /// Prochain NUMÉRO DE RETRAIT libre du jour — « R1 », « R2 »…
+  ///
+  /// Premier numéro RÉELLEMENT libre, pas « nombre de commandes + 1 » : deux
+  /// commandes encaissées puis une troisième prise reprendrait « R3 » alors
+  /// que R1 et R2 sont retournés au client depuis longtemps. Le repère doit
+  /// rester court pour être criable au comptoir.
+  ///
+  /// Remis à zéro chaque jour : un numéro n'a de sens que le temps du service.
+  static String nextPickupNumber(String shopId) {
+    final today = DateTime.now();
+    final labels = <String>[];
+    for (final o in _ds.getOrders(shopId)) {
+      if (o.orderType != 'takeaway') continue;
+      final d = o.createdAt;
+      if (d.year != today.year ||
+          d.month != today.month ||
+          d.day != today.day) {
+        continue;
+      }
+      labels.add(o.tabLabel ?? '');
+    }
+    return firstFreePickup(labels);
+  }
+
+  /// Part PURE de [nextPickupNumber] — testable sans Hive.
+  ///
+  /// Comparaison insensible à la casse : un « r3 » tapé à la main ne doit pas
+  /// laisser le générateur reproposer « R3 » au client suivant.
+  @visibleForTesting
+  static String firstFreePickup(Iterable<String> takenLabels) {
+    final taken = <String>{
+      for (final l in takenLabels) l.trim().toLowerCase(),
+    }..remove('');
+    // Borne haute, comme pour les libellés de compte : au-delà, on rend
+    // quand même un repère plutôt que de boucler sans fin.
+    for (var n = 1; n <= 999; n++) {
+      if (!taken.contains('r$n')) return 'R$n';
+    }
+    // Repli HORS de la plage balayée. Un modulo retomberait dans R1–R999,
+    // c'est-à-dire sur un numéro déjà crié au comptoir : deux clients avec le
+    // même repère, et c'est le plat qui part au mauvais.
+    return 'R${DateTime.now().millisecondsSinceEpoch}';
   }
 
   /// Annule une tournée PAS ENCORE envoyée en cuisine.
@@ -347,12 +463,88 @@ class RestaurantOrderService {
       _patchOrder(order, {'sent_to_kitchen': true, 'kitchen_ready': false});
 
   /// Marque la préparation terminée (bouton « Commande prête — servir »).
-  static Future<void> markKitchenReady(Sale order) =>
-      _patchOrder(order, {'kitchen_ready': true});
+  ///
+  /// ALERTE LA SALLE au passage. C'est le point de rupture du service : la
+  /// cuisine a fini, elle passe à autre chose, et l'assiette attend au passe.
+  /// Sans notification, elle n'est découverte qu'au prochain regard d'un
+  /// serveur — c'est là que les plats refroidissent.
+  ///
+  /// `served` est remis à false : un bon renvoyé en cuisine puis redéclaré
+  /// prêt doit re-alerter, sinon la seconde préparation partirait dans le
+  /// silence.
+  static Future<void> markKitchenReady(Sale order) async {
+    await _patchOrder(order, {'kitchen_ready': true, 'served': false});
+    if (!NotificationService.enabledForCurrentUser.value) return;
+    NotificationService.notify(
+      kind: NotifKind.kitchenReady,
+      title: '🍽 Commande prête',
+      message: '${_serviceLabel(order)} — à servir',
+      shopId: order.shopId,
+      targetId: order.id,
+    );
+  }
 
-  /// Renvoie un bon en cuisine (correction d'un « prêt » cliqué par erreur).
-  static Future<void> reopenKitchen(Sale order) =>
-      _patchOrder(order, {'kitchen_ready': false});
+  /// Marque les plats APPORTÉS au client — éteint le signal en salle.
+  static Future<void> markServed(Sale order) =>
+      _patchOrder(order, {'served': true});
+
+  /// Renvoie un bon en préparation (correction d'un « prêt » cliqué par
+  /// erreur). Remet aussi à zéro les étapes suivantes : un bon qui repart au
+  /// piano n'est ni servi ni terminé.
+  static Future<void> reopenKitchen(Sale order) => _patchOrder(
+      order, {'kitchen_ready': false, 'served': false, 'finished': false});
+
+  /// SERVICE TERMINÉ, argent non encaissé.
+  ///
+  /// Sur place : le client a fini de manger. Au comptoir : il a récupéré sa
+  /// commande. En livraison : le livreur l'a remise. Rien à faire de plus côté
+  /// service — il ne reste que l'addition.
+  ///
+  /// Pose `served` au passage : on ne termine pas un repas qui n'a jamais été
+  /// apporté. Sans ça, une commande à emporter — qui saute l'étape « servie » —
+  /// resterait éternellement « prête » dans les compteurs de salle.
+  static Future<void> markFinished(Sale order) =>
+      _patchOrder(order, {'served': true, 'finished': true});
+
+  /// Retour en arrière depuis « terminée » : le client se rassoit, redemande.
+  static Future<void> reopenService(Sale order) =>
+      _patchOrder(order, {'finished': false});
+
+  /// Libère la table d'une commande qu'on vient d'encaisser, SI plus aucun
+  /// compte n'y est ouvert.
+  ///
+  /// Pendant de [settleAndRelease] pour les encaissements qui ne passent pas
+  /// par l'addition : « Encaisser & finaliser » depuis la page Commandes
+  /// clôturait la vente sans jamais toucher au plan de salle, et la table
+  /// restait occupée alors que les clients étaient partis depuis longtemps.
+  ///
+  /// Silencieux et sans effet hors restauration, sur une commande sans table,
+  /// ou tant qu'un autre compte reste ouvert.
+  static Future<void> releaseTableAfterPayment(Sale order) async {
+    final tableId = order.tableId;
+    if (tableId == null || tableId.isEmpty) return;
+    final table = RestaurantTableService.tableById(tableId);
+    if (table == null || table.isFree) return;
+    try {
+      await RestaurantTableService.releaseIfEmpty(table);
+    } catch (e) {
+      debugPrint('[Restaurant] libération table post-paiement err: $e');
+    }
+  }
+
+  /// « Table 4 » · « À emporter — Awa » · à défaut le libellé du compte.
+  /// Sert au message d'alerte : un serveur doit savoir OÙ aller, pas quel
+  /// identifiant de commande a changé d'état.
+  static String _serviceLabel(Sale order) {
+    final tab = (order.tabLabel ?? '').trim();
+    final table = order.tableId == null
+        ? null
+        : RestaurantTableService.tableById(order.tableId!);
+    if (table != null) {
+      return tab.isEmpty ? 'Table ${table.name}' : 'Table ${table.name} · $tab';
+    }
+    return tab.isEmpty ? 'À emporter' : 'À emporter · $tab';
+  }
 
   static Future<void> _patchOrder(
       Sale order, Map<String, dynamic> fields) async {
@@ -394,8 +586,10 @@ class RestaurantOrderService {
       String shopId, List<SaleItem> items) async {
     try {
       if (!isRestaurantShop(shopId)) return;
+      // Disponibilités du jour seulement. Le stock des ingrédients ne se
+      // décrémente plus à la vente : sans quantité par plat, il n'y a rien à
+      // retirer (cf. `RecipeService`).
       await DailyMenuService.consumeForOrder(shopId, items);
-      await RecipeService.consumeForOrder(shopId, items);
     } catch (e) {
       debugPrint('[Restaurant] décrément service err: $e');
     }
@@ -473,15 +667,25 @@ class RestaurantOrderService {
     final id = order.id;
     if (id == null || id.isEmpty) return null;
 
-    // Mode de règlement dominant, écrit AVANT la clôture par un update ciblé :
-    // `updateOrderStatus` ne touche pas à ce champ, et une réécriture complète
-    // de la commande entrerait en course avec lui sur `status`.
+    // Mode de règlement dominant + FIN DE SERVICE, écrits AVANT la clôture par
+    // un update ciblé : `updateOrderStatus` ne touche pas à ces champs, et une
+    // réécriture complète de la commande entrerait en course avec lui sur
+    // `status`.
     //
-    // Le détail (mixte, opérateur, rendu monnaie) vit dans `payments` — cette
-    // colonne ne porte qu'une valeur, celle du plus gros règlement.
-    if (method != null && method != order.paymentMethod) {
-      await _patchOrder(order, {'payment_method': method.name});
-    }
+    // Le détail du règlement (opérateur, référence) vit dans `payments` — la
+    // colonne `payment_method` ne porte qu'une valeur.
+    //
+    // POURQUOI FORCER `served` ET `finished` : une commande encaissée est
+    // servie et terminée, par définition — on ne fait pas payer un client dont
+    // l'assiette n'est pas arrivée. Sans ça, un encaissement direct (sans
+    // parcourir « prête → servie → terminée ») laissait ces drapeaux à false,
+    // et la commande apparaissait payée mais jamais terminée dans les listes.
+    await _patchOrder(order, {
+      if (method != null && method != order.paymentMethod)
+        'payment_method': method.name,
+      'served': true,
+      'finished': true,
+    });
 
     await _ds.updateOrderStatus(
       id,
@@ -584,9 +788,14 @@ class RestaurantOrderService {
   }) async {
     final id = order.id;
     if (id == null || id.isEmpty) return;
-    if (method != null && method != order.paymentMethod) {
-      await _patchOrder(order, {'payment_method': method.name});
-    }
+    // `served` + `finished` forcés : remettre une commande au client, c'est
+    // clore son service. Même raison qu'en salle — cf. [settleAndRelease].
+    await _patchOrder(order, {
+      if (method != null && method != order.paymentMethod)
+        'payment_method': method.name,
+      'served': true,
+      'finished': true,
+    });
     await _ds.updateOrderStatus(
       id,
       SaleStatus.completed,
@@ -613,39 +822,6 @@ class RestaurantOrderService {
       return tickets;
     } catch (e) {
       debugPrint('[Restaurant] kitchenTickets err: $e');
-      return [];
-    }
-  }
-
-  /// Groupes de modificateurs applicables à un produit.
-  static List<MenuModifier> modifiersFor(String shopId, String productId) {
-    try {
-      // Dédupliqué PAR NOM : un groupe lié à plusieurs produits est stocké
-      // en autant de lignes que de produits (cf. MenuModifierService), et
-      // un groupe peut être à la fois global et explicitement lié. Sans
-      // cette déduplication, « Cuisson » s'afficherait deux fois dans la
-      // feuille de choix.
-      //
-      // La ligne SPÉCIFIQUE au produit gagne sur la ligne globale : elle
-      // porte les options que le gérant a voulues pour ce plat précis.
-      final byName = <String, MenuModifier>{};
-      for (final raw in HiveBoxes.menuModifiersBox.values) {
-        if (raw['shop_id']?.toString() != shopId) continue;
-        try {
-          final m = MenuModifier.fromMap(Map<String, dynamic>.from(raw));
-          if (!m.appliesTo(productId) || m.options.isEmpty) continue;
-          final existing = byName[m.name];
-          if (existing == null || (existing.productId == null &&
-              m.productId != null)) {
-            byName[m.name] = m;
-          }
-        } catch (_) {/* ligne corrompue ignorée */}
-      }
-      final out = byName.values.toList()
-        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-      return out;
-    } catch (e) {
-      debugPrint('[Restaurant] modifiersFor err: $e');
       return [];
     }
   }

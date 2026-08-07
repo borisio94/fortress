@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:hive_flutter/hive_flutter.dart';
 
 import '../../features/restaurant/domain/entities/restaurant_table.dart';
@@ -38,6 +38,36 @@ class RestaurantTableService {
       debugPrint('[Restaurant] tablesForShop err: $e');
       return [];
     }
+  }
+
+  /// CAPACITÉ DE LA SALLE : places totales, occupées et libres.
+  ///
+  /// « Places » et non « tables » : une table de huit à moitié occupée n'est
+  /// ni libre ni pleine, et compter les tables masquerait justement les
+  /// chaises encore disponibles — celles qu'on cherche quand des clients
+  /// entrent.
+  static ({int total, int seated, int free}) seating(String shopId) =>
+      computeSeating(tablesForShop(shopId));
+
+  /// Part PURE de [seating] — testable sans Hive.
+  ///
+  /// Une table occupée dont les couverts ne sont pas renseignés est comptée
+  /// PLEINE. C'est la même hypothèse que la feuille de prise de commande, et
+  /// c'est la prudente : annoncer des places qui n'existent pas ferait entrer
+  /// des clients qu'on ne pourrait pas asseoir.
+  @visibleForTesting
+  static ({int total, int seated, int free}) computeSeating(
+      List<RestaurantTable> tables) {
+    var total = 0;
+    var seated = 0;
+    for (final t in tables) {
+      total += t.capacity;
+      if (t.isFree) continue;
+      final c = t.covers ?? t.capacity;
+      seated += c > t.capacity ? t.capacity : c;
+    }
+    final free = total - seated;
+    return (total: total, seated: seated, free: free < 0 ? 0 : free);
   }
 
   static RestaurantTable? tableById(String id) {

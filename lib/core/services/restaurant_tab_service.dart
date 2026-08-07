@@ -3,14 +3,14 @@ import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import '../../features/caisse/data/repositories/sale_local_datasource.dart';
 import '../../features/caisse/domain/entities/sale.dart';
 
-/// Un compte (addition) : les commandes ouvertes qui partagent un même
+/// Une commande nommée (addition) : les commandes ouvertes qui partagent un même
 /// libellé sur une même table.
 class RestaurantTab {
-  /// Libellé du compte. Vide = commandes sans compte nommé, regroupées
-  /// ensemble sous « Sans compte ».
+  /// Libellé de la commande. Vide = commandes sans nom, regroupées ensemble
+  /// sous « Sans nom ».
   final String label;
 
-  /// Table d'accueil, ou `null` pour un compte à emporter.
+  /// Table d'accueil, ou `null` pour une commande à emporter.
   final String? tableId;
 
   final List<Sale> orders;
@@ -31,18 +31,25 @@ class RestaurantTab {
 
   bool get isUnnamed => label.isEmpty;
 
-  String get displayLabel => isUnnamed ? 'Sans compte' : label;
+  String get displayLabel => isUnnamed ? 'Sans nom' : label;
+
+  /// Bons PRÊTS que personne n'a encore apportés au client.
+  List<Sale> get waitingService =>
+      orders.where((o) => o.isWaitingService).toList();
+
+  /// La cuisine a fini sur au moins un bon de cette commande.
+  bool get isWaitingService => waitingService.isNotEmpty;
 }
 
-/// Gestion des comptes de service (plan de salle — Lot 3).
+/// Gestion des commandes nommées d'une table (plan de salle — Lot 3).
 ///
-/// Un compte n'est PAS une entité stockée : c'est le regroupement des
+/// Une commande nommée n'est PAS une entité stockée : c'est le regroupement des
 /// commandes ouvertes qui partagent `tableId` + `tabLabel`. Transférer,
 /// fusionner ou scinder revient donc à réécrire ces deux champs sur un lot de
 /// commandes — aucune table supplémentaire, aucune migration.
 ///
 /// La contrepartie, c'est que le libellé porte l'identité : deux tables
-/// peuvent avoir chacune leur « Compte 1 ». Toute opération est donc cadrée
+/// peuvent avoir chacune leur « Commande 1 ». Toute opération est donc cadrée
 /// par le COUPLE (table, libellé), et un transfert vers une table qui porte
 /// déjà ce libellé renomme la destination au lieu de fusionner en silence
 /// (cf. [uniqueLabel]).
@@ -67,9 +74,9 @@ class RestaurantTabService {
     }
   }
 
-  /// Comptes ouverts d'une table, du plus ancien au plus récent.
+  /// Commandes ouvertes d'une table, de la plus ancienne à la plus récente.
   ///
-  /// [tableId] `null` → les comptes SANS table (plats à emporter).
+  /// [tableId] `null` → les commandes SANS table (plats à emporter).
   static List<RestaurantTab> tabsForTable(String shopId, String? tableId) {
     final orders = _openOrders(shopId)
         .where((o) => (o.tableId ?? '') == (tableId ?? ''))
@@ -77,11 +84,41 @@ class RestaurantTabService {
     return groupByLabel(orders, tableId);
   }
 
+  /// PREMIER NOM LIBRE pour une nouvelle commande sur cette table.
+  ///
+  /// Le nom ne peut PAS être déduit du nombre de commandes existantes : une
+  /// commande ouverte à l'écran mais dont rien n'a encore été enregistré
+  /// n'existe pas côté données. Compter les commandes persistées proposait
+  /// donc « Commande 2 » une fois de plus à chaque tentative, et choisir un
+  /// nom déjà pris rouvre la commande existante au lieu d'en créer une — d'où
+  /// l'impression de ne jamais pouvoir dépasser deux.
+  ///
+  /// [alsoTaken] permet d'exclure en plus la commande en cours d'ouverture,
+  /// que l'appelant seul connaît.
+  static String nextFreeLabel(
+    String shopId,
+    String? tableId, {
+    Iterable<String> alsoTaken = const [],
+  }) {
+    final taken = <String>{
+      for (final t in tabsForTable(shopId, tableId)) t.label.trim(),
+      for (final l in alsoTaken) l.trim(),
+    }..removeWhere((l) => l.isEmpty);
+    // Borne haute : une table à 99 commandes ouvertes relève de la donnée
+    // corrompue, pas du service. On rend quand même un nom plutôt que de
+    // boucler sans fin.
+    for (var n = 1; n <= 99; n++) {
+      final candidate = 'Commande $n';
+      if (!taken.contains(candidate)) return candidate;
+    }
+    return 'Commande ${DateTime.now().millisecondsSinceEpoch % 1000}';
+  }
+
   /// Regroupement PUR par libellé — testable sans Hive.
   ///
-  /// Les commandes sans libellé forment un seul compte « Sans compte » plutôt
-  /// qu'un compte par commande : sinon une table dont personne n'a nommé les
-  /// comptes afficherait autant d'additions que de tournées.
+  /// Les commandes sans libellé forment un seul groupe « Sans nom » plutôt
+  /// qu'un groupe par bon : sinon une table dont personne n'a nommé ses
+  /// commandes afficherait autant d'additions que de tournées.
   @visibleForTesting
   static List<RestaurantTab> groupByLabel(List<Sale> orders, String? tableId) {
     final byLabel = <String, List<Sale>>{};
@@ -93,7 +130,7 @@ class RestaurantTabService {
       list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
       tabs.add(RestaurantTab(label: label, tableId: tableId, orders: list));
     });
-    // Les comptes nommés d'abord, puis « Sans compte » ; à égalité, le plus
+    // Les commandes nommées d'abord, puis « Sans nom » ; à égalité, la plus
     // ancien en tête (ordre d'arrivée à table).
     tabs.sort((a, b) {
       if (a.isUnnamed != b.isUnnamed) return a.isUnnamed ? 1 : -1;
@@ -105,8 +142,8 @@ class RestaurantTabService {
   /// Libellé libre à la destination : renvoie [label] s'il n'est pas déjà
   /// pris, sinon « label (2) », « label (3) »…
   ///
-  /// Fonction PURE. Sans elle, transférer « Compte 1 » vers une table qui a
-  /// déjà son « Compte 1 » fusionnerait deux additions étrangères — et le
+  /// Fonction PURE. Sans elle, transférer « Commande 1 » vers une table qui a
+  /// déjà sa « Commande 1 » fusionnerait deux additions étrangères — et le
   /// serveur ne s'en apercevrait qu'au moment de faire payer.
   @visibleForTesting
   static String uniqueLabel(String label, Set<String> taken) {
@@ -118,7 +155,7 @@ class RestaurantTabService {
     return label;
   }
 
-  /// Transfère un compte vers une autre table (ou vers « à emporter » si
+  /// Transfère une commande vers une autre table (ou vers « à emporter » si
   /// [toTableId] est `null`).
   ///
   /// Retourne le libellé effectivement appliqué : il peut différer de
@@ -153,7 +190,7 @@ class RestaurantTabService {
     return applied;
   }
 
-  /// Fusionne le compte [sourceLabel] dans [targetLabel], sur la même table.
+  /// Fusionne la commande [sourceLabel] dans [targetLabel], sur la même table.
   static Future<void> mergeTabs({
     required String shopId,
     required String? tableId,
