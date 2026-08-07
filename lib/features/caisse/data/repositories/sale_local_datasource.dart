@@ -119,6 +119,8 @@ class SaleLocalDatasource {
       'order_type':       order.orderType,
       'sent_to_kitchen':  order.sentToKitchen,
       'kitchen_ready':    order.kitchenReady,
+      'served':           order.served,
+      'finished':         order.finished,
       'fees':           order.fees,
       // GF-1 : clé d'idempotence du panier — persistée en Hive ET pushée
       // à Supabase pour bénéficier de l'UNIQUE constraint (hotfix_080).
@@ -182,6 +184,8 @@ class SaleLocalDatasource {
       'order_type':       order.orderType,
       'sent_to_kitchen':  order.sentToKitchen,
       'kitchen_ready':    order.kitchenReady,
+      'served':           order.served,
+      'finished':         order.finished,
       'fees':           order.fees,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
@@ -340,6 +344,8 @@ class SaleLocalDatasource {
       'order_type':       order.orderType,
       'sent_to_kitchen':  order.sentToKitchen,
       'kitchen_ready':    order.kitchenReady,
+      'served':           order.served,
+      'finished':         order.finished,
       'fees':           order.fees,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
@@ -402,6 +408,8 @@ class SaleLocalDatasource {
       'order_type':       order.orderType,
       'sent_to_kitchen':  order.sentToKitchen,
       'kitchen_ready':    order.kitchenReady,
+      'served':           order.served,
+      'finished':         order.finished,
       'fees':           order.fees,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
@@ -1536,6 +1544,8 @@ class SaleLocalDatasource {
       orderType:          (m['order_type'] as String?) ?? 'takeaway',
       sentToKitchen:      (m['sent_to_kitchen'] as bool?) ?? false,
       kitchenReady:       (m['kitchen_ready'] as bool?) ?? false,
+      served:             (m['served'] as bool?) ?? false,
+      finished:           (m['finished'] as bool?) ?? false,
     );
   }
 

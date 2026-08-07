@@ -341,10 +341,19 @@ class Sale extends Equatable {
   /// Canal de service : `dine_in` (salle) · `takeaway` · `delivery`.
   /// Non-nullable avec défaut, comme [source] — la colonne est NOT NULL.
   final String orderType;
-  /// Bon envoyé en cuisine (alimente l'écran Cuisine).
+  /// Bon envoyé en préparation (alimente l'écran Préparation, tous postes).
   final bool sentToKitchen;
   /// Préparation terminée, prête à être servie.
   final bool kitchenReady;
+
+  /// Plats effectivement APPORTÉS au client.
+  ///
+  /// Distinct de [kitchenReady], et c'est tout l'intérêt : entre le moment où
+  /// la cuisine pose l'assiette au passe et celui où le serveur la dépose sur
+  /// la table, il s'écoule un temps pendant lequel le plat refroidit sans que
+  /// personne ne soit alerté. Ce drapeau est ce qui permet de faire ressortir
+  /// la table tant que le service n'est pas fait.
+  final bool served;
 
   const Sale({
     this.id,
@@ -391,10 +400,32 @@ class Sale extends Equatable {
     this.orderType      = 'takeaway',
     this.sentToKitchen  = false,
     this.kitchenReady   = false,
+    this.served         = false,
+    this.finished       = false,
   });
 
   /// True si la commande est soft-deleted (cf. hotfix_084).
   bool get isDeleted => deletedAt != null;
+
+  /// LA CUISINE A FINI, LE CLIENT N'A RIEN. C'est l'état qui doit alerter :
+  /// c'est là, et seulement là, que des plats refroidissent au passe.
+  bool get isWaitingService => kitchenReady && !served;
+
+  /// Service TERMINÉ, mais pas encore encaissé.
+  ///
+  /// En salle : le client a fini de manger. Au comptoir : il a récupéré sa
+  /// commande. En livraison : le livreur l'a remise. Trois réalités, un seul
+  /// fait — il n'y a plus rien à faire pour le service, il ne reste que
+  /// l'argent.
+  ///
+  /// Étape DISTINCTE de l'encaissement à dessein : on dessert une table bien
+  /// avant que le client ne demande l'addition, et une commande à emporter
+  /// part souvent payée d'avance. Confondre les deux, c'est soit libérer la
+  /// table trop tôt, soit la garder occupée après le départ.
+  final bool finished;
+
+  /// Prête à encaisser : le service est fait, l'argent non.
+  bool get isFinished => finished;
 
   double get subtotal  => items.fold(0, (s, i) => s + i.subtotal);
   /// Somme des dépenses supplémentaires de la commande (emballage, etc.).
@@ -467,6 +498,8 @@ class Sale extends Equatable {
     String?   orderType,
     bool?     sentToKitchen,
     bool?     kitchenReady,
+    bool?     served,
+    bool?     finished,
     /// Détache la commande de sa table (libération après encaissement).
     /// Indispensable : ce `copyWith` résout les nullables par `??`, donc
     /// `copyWith(tableId: null)` serait un no-op silencieux et la commande
@@ -520,6 +553,8 @@ class Sale extends Equatable {
     orderType:      orderType      ?? this.orderType,
     sentToKitchen:  sentToKitchen  ?? this.sentToKitchen,
     kitchenReady:   kitchenReady   ?? this.kitchenReady,
+    served:         served         ?? this.served,
+    finished:       finished       ?? this.finished,
   );
 
   /// True si la commande est servie en salle (rattachée à une table).
@@ -535,5 +570,5 @@ class Sale extends Equatable {
   // donnée a bougé.
   List<Object?> get props =>
       [id, shopId, items, total, status,
-       tableId, sentToKitchen, kitchenReady];
+       tableId, sentToKitchen, kitchenReady, served, finished];
 }

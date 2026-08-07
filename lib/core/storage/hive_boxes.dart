@@ -97,7 +97,6 @@ class HiveBoxes {
   // groupes de modificateurs de menu (cuisson, suppléments…). Passthrough :
   // les lignes sont les Map Supabase brutes, clé = id TEXT généré client.
   static const String restaurantTables = 'restaurant_tables_box';
-  static const String menuModifiers    = 'menu_modifiers_box';
   /// Disponibilités du jour d'un restaurant : par (shopId, productId), un
   /// enregistrement `{date, enabled, count}`. Réinitialisé chaque jour (une
   /// entrée dont la `date` n'est pas aujourd'hui est ignorée → défaut dispo).
@@ -198,7 +197,6 @@ class HiveBoxes {
       await _safeOpenMap(partnerLedger);
       await _safeOpenMap(pendingImageUploads);
       await _safeOpenMap(restaurantTables);
-      await _safeOpenMap(menuModifiers);
       await _safeOpenMap(dailyMenuAvailability);
       await _safeOpenMap(ingredients);
       await _safeOpenMap(recipeIngredients);
@@ -289,7 +287,7 @@ class HiveBoxes {
     acknowledgedAlerts,
     partnerLedger,
     pendingImageUploads,
-    restaurantTables, menuModifiers, dailyMenuAvailability,
+    restaurantTables, dailyMenuAvailability,
     ingredients, recipeIngredients, restaurantActivities, stockItems,
     fixedCharges, losses, payments, bottleDeposits, cashClosures,
     employees, timeRecords, salaryAdvances, payroll, dailyExpenses,
@@ -391,7 +389,6 @@ class HiveBoxes {
   static Box<Map>   get pendingImageUploadsBox =>
       Hive.box<Map>(pendingImageUploads);
   static Box<Map>   get restaurantTablesBox => Hive.box<Map>(restaurantTables);
-  static Box<Map>   get menuModifiersBox    => Hive.box<Map>(menuModifiers);
   static Box<Map>   get dailyMenuAvailabilityBox =>
       Hive.box<Map>(dailyMenuAvailability);
   static Box<Map>   get ingredientsBox       => Hive.box<Map>(ingredients);

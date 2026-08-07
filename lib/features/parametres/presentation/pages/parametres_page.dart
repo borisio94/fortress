@@ -16,7 +16,6 @@ import 'danger_action_page.dart';
 import '../../../../core/services/pin_service.dart';
 import '../../../../core/widgets/owner_pin_dialog.dart';
 import '../../../../core/widgets/owner_pin_setup_dialog.dart';
-import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
@@ -218,17 +217,10 @@ Widget _boutiqueSection(BuildContext context, String shopId,
         color: AppColors.primary,
         onTap: () => context.push('/shop/$shopId/parametres/livraison'),
       ),
-      // Module restaurant : tuile masquée hors restauration, pour ne pas
-      // encombrer les Paramètres d'une boutique e-commerce.
-      if (isRestaurantShop(shopId))
-        _Tile(
-          icon: Icons.tune_rounded,
-          label: 'Modificateurs de menu',
-          subtitle: 'Cuisson, options et suppléments par plat',
-          color: AppColors.secondary,
-          onTap: () =>
-              context.push('/shop/$shopId/parametres/menu-modifiers'),
-        ),
+      // « Modificateurs de menu » a été SUPPRIMÉ (2026-08-03). Le restaurant
+      // connaît ses combinaisons à l'avance : chacune devient un plat entier
+      // de la carte (« Riz sauce tomate viande »), plutôt qu'un riz auquel on
+      // accroche une sauce puis une viande au moment de la commande.
       if (perms.canExportProducts || perms.canExportFinances)
         _Tile(
           icon: Icons.file_download_outlined,

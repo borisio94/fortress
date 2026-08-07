@@ -54,16 +54,32 @@ class StaffMember {
 
   /// Fonctions SUGGÉRÉES à la saisie. Ni exhaustives ni contraignantes : la
   /// base accepte n'importe quel libellé (cf. hotfix_148).
+  /// Les postes proposés en raccourci à la saisie. Le champ reste libre : la
+  /// liste couvre les cas courants, elle ne les enferme pas.
+  ///
+  /// `Livreur`, `Chawarmier` et `Glacier` manquaient alors que les trois
+  /// existent dans l'établissement : le chawarma et la glacerie sont des
+  /// activités déclarées, et une commande à livrer doit pouvoir désigner qui
+  /// la porte.
   static const List<String> suggestedRoles = [
     'Gérant',
     'Caissier',
     'Serveur',
     'Cuisinier',
     'Aide-cuisine',
+    'Chawarmier',
+    'Glacier',
     'Barman',
+    'Livreur',
     'Plongeur',
     'Agent d\'entretien',
   ];
+
+  /// Poste des livreurs — sert à proposer les bonnes personnes au moment
+  /// d'assigner une commande à livrer. Comparaison insensible à la casse et
+  /// aux accents approximatifs d'une saisie libre.
+  static bool isCourierRole(String role) =>
+      role.trim().toLowerCase().startsWith('livreur');
 
   /// Clé `yyyy-MM-dd` d'une date (stockage DATE sans heure).
   static String dayKey(DateTime d) =>

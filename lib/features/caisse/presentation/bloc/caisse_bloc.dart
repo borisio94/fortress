@@ -12,7 +12,6 @@ import '../../../inventaire/domain/entities/product.dart';
 import '../../../../core/services/stock_service.dart';
 import '../../../../core/services/delivery_reminder_service.dart';
 import '../../../../core/services/daily_menu_service.dart';
-import '../../../../core/services/recipe_service.dart';
 import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/utils/uuid.dart';
 
@@ -771,9 +770,9 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
       try {
         if (isRestaurantShop(event.shopId)) {
           await DailyMenuService.consumeForOrder(event.shopId, sale.items);
-          // Finances : décrémente le stock des ingrédients des recettes vendues
-          // + alerte si un ingrédient passe sous son seuil.
-          await RecipeService.consumeForOrder(event.shopId, sale.items);
+          // Le stock des INGRÉDIENTS n'est plus décrémenté ici : sans quantité
+          // par plat, l'app ignore combien de grammes part dans une assiette.
+          // Il ne bouge qu'à la réception et au comptage d'inventaire.
         }
       } catch (e) {
         debugPrint('[Restaurant] décrément vente err: $e');
@@ -1403,12 +1402,12 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
         } else {
           await ds.saveOrder(order);
         }
-        // Restaurant : décrémente le stock du jour + les ingrédients des
-        // recettes vendues (jamais bloquant).
+        // Restaurant : décrémente le stock du jour des plats (disponibilités).
+        // Les ingrédients ne sont plus décrémentés — cf. commentaire dans
+        // `_onCompleteSale`. Jamais bloquant.
         try {
           if (isRestaurantShop(event.shopId)) {
             await DailyMenuService.consumeForOrder(event.shopId, order.items);
-            await RecipeService.consumeForOrder(event.shopId, order.items);
           }
         } catch (e) {
           debugPrint('[Restaurant] décrément commande err: $e');

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/services/ingredient_service.dart';
 import '../../../core/services/restaurant_reporting_service.dart';
+import '../../../core/services/restaurant_table_service.dart';
 import '../../../core/services/stock_item_service.dart';
 import '../../../core/storage/hive_boxes.dart';
 import '../../dashboard/data/dashboard_providers.dart';
@@ -50,6 +51,12 @@ class RestaurantDashData {
   final int busyTables;
   final int totalTables;
 
+  /// CAPACITÉ EN PLACES — la salle, pas les tables. Une table de huit à moitié
+  /// occupée n'est ni libre ni pleine : compter les tables masquerait
+  /// justement les chaises encore disponibles.
+  final int totalSeats;
+  final int freeSeats;
+
   /// Commandes encore ouvertes — état COURANT, hors période : une commande de
   /// la veille non clôturée reste à traiter aujourd'hui.
   final int openCount;
@@ -68,6 +75,8 @@ class RestaurantDashData {
     this.inKitchen = 0,
     this.busyTables = 0,
     this.totalTables = 0,
+    this.totalSeats = 0,
+    this.freeSeats = 0,
     this.openCount = 0,
     this.openOrders = const [],
     this.lowStockCount = 0,
@@ -237,6 +246,7 @@ final restaurantDashProvider =
     debugPrint('[RestaurantDash] agrégation err: $e');
   }
 
+  final seats = RestaurantTableService.seating(shopId);
   var busy = 0, total = 0;
   try {
     for (final raw in HiveBoxes.restaurantTablesBox.values) {
@@ -270,6 +280,8 @@ final restaurantDashProvider =
     inKitchen: inKitchen,
     busyTables: busy,
     totalTables: total,
+    totalSeats: seats.total,
+    freeSeats: seats.free,
     openCount: openCount,
     openOrders: [for (final o in open.take(5)) o.line],
     lowStockCount: lowStock,

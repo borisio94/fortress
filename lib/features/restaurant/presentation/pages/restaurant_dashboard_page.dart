@@ -7,6 +7,7 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/services/daily_menu_service.dart';
 import '../../../../core/services/ingredient_service.dart';
 import '../../../../core/services/restaurant_reporting_service.dart';
+import '../../../../core/services/restaurant_setup_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -93,6 +94,14 @@ class _RestaurantDashboardPageState
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // ── Configuration incomplète ──────────────────────────────────
+          // Le routeur redirige déjà vers /restaurant/setup ; cette bannière
+          // couvre le cas où l'on atteint le tableau de bord par un chemin
+          // qui n'est pas gardé (retour arrière navigateur, lien direct).
+          if (!RestaurantSetupService.stepFor(shopId).isComplete) ...[
+            _SetupBanner(shopId: shopId),
+            const SizedBox(height: 16),
+          ],
           // ── Bandeau principal : 4 indicateurs du service ──────────────
           _TopKpiRow(shopId: shopId, resto: resto, data: data, finance: finance),
           const SizedBox(height: 16),
@@ -156,6 +165,24 @@ class _TopKpiRow extends ConsumerWidget {
         icon: Icons.receipt_long_rounded,
         onTap: () => context.push('/shop/$shopId/caisse/orders'),
       ),
+      // CAPACITÉ DE LA SALLE — places libres sur places totales.
+      //
+      // En PLACES et non en tables : une table de huit à moitié occupée n'est
+      // ni libre ni pleine, et un compteur de tables masquerait justement les
+      // chaises encore disponibles — celles qu'on cherche quand des clients
+      // se présentent à l'entrée.
+      _StatCard(
+        title: 'Places libres',
+        value: resto.freeSeats.toString(),
+        suffix: 'sur ${resto.totalSeats}',
+        // Salle pleine : l'information vaut d'être vue de loin, c'est elle qui
+        // décide si l'on fait patienter ou si l'on refuse.
+        valueColor: resto.totalSeats > 0 && resto.freeSeats == 0
+            ? sem.danger
+            : null,
+        icon: Icons.event_seat_outlined,
+        onTap: () => context.push('/shop/$shopId/restaurant/tables'),
+      ),
       _StatCard(
         title: 'Clients servis',
         value: data.clientCount.toString(),
@@ -217,17 +244,17 @@ class _StatCard extends StatelessWidget {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 
-    return Material(
-      color: restoGlassFill(context),
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: onTap,
+    return Container(
+      // Relief : dégradé vertical, arête haute claire, ombre portée. Le
+      // `Material` passe en transparent par-dessus — il ne sert plus qu'à
+      // porter l'encre du toucher, sa couleur écraserait le dégradé.
+      decoration: restoReliefDecoration(context, radius: 14),
+      child: Material(
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(14),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: restoGlassBorder(context)),
-          ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
           child: Stack(
             children: [
               Padding(
@@ -677,12 +704,32 @@ extension _CurveX on _Curve {
 ///
 /// Les couleurs sont celles des courbes du graphique juste en dessous : une
 /// pastille verte ici = la courbe verte là.
-class _FinanceKpiRow extends StatelessWidget {
+///
+/// BÉNÉFICE, DÉPENSES ET PERTES SONT MASQUÉS À L'OUVERTURE. Le tableau de bord
+/// vit sur une tablette de salle, à portée de regard des clients et de toute
+/// l'équipe ; ce que gagne l'établissement n'a pas à s'afficher en continu. Ils
+/// se révèlent d'un geste, et se remasquent au prochain passage.
+///
+/// Les VENTES restent visibles : c'est l'indicateur de service, celui qu'on
+/// consulte en salle, et il ne dit rien de la rentabilité.
+class _FinanceKpiRow extends StatefulWidget {
   final RestaurantFinanceReport report;
   const _FinanceKpiRow({required this.report});
 
   @override
+  State<_FinanceKpiRow> createState() => _FinanceKpiRowState();
+}
+
+class _FinanceKpiRowState extends State<_FinanceKpiRow> {
+  /// Volontairement NON persisté : le masquage doit être l'état par défaut à
+  /// chaque ouverture. Mémoriser « affiché » reviendrait à ne masquer qu'une
+  /// fois, ce qui ne protège rien.
+  bool _revealed = false;
+
+  @override
   Widget build(BuildContext context) {
+    final report = widget.report;
+    final cs = Theme.of(context).colorScheme;
     final tiles = <Widget>[
       _FinanceTile(curve: _Curve.sales, amount: report.revenue),
       _FinanceTile(
@@ -691,6 +738,8 @@ class _FinanceKpiRow extends StatelessWidget {
         // La marge brute contextualise le bénéfice : un bénéfice net faible
         // avec une marge brute élevée désigne les charges, pas la carte.
         hint: 'Marge brute ${report.marginRate.toStringAsFixed(0)} %',
+        hidden: !_revealed,
+        onTap: () => setState(() => _revealed = !_revealed),
       ),
       _FinanceTile(
         curve: _Curve.expense,
@@ -700,25 +749,57 @@ class _FinanceKpiRow extends StatelessWidget {
         hint: 'dont matières '
             '${CurrencyFormatter.format(report.foodCost)}'
             '${report.payroll > 0 ? ' · paie ${CurrencyFormatter.format(report.payroll.toDouble())}' : ''}',
+        hidden: !_revealed,
+        onTap: () => setState(() => _revealed = !_revealed),
       ),
-      _FinanceTile(curve: _Curve.loss, amount: report.losses.toDouble()),
+      _FinanceTile(
+        curve: _Curve.loss,
+        amount: report.losses.toDouble(),
+        hidden: !_revealed,
+        onTap: () => setState(() => _revealed = !_revealed),
+      ),
     ];
 
-    return LayoutBuilder(builder: (_, c) {
-      final wide = c.maxWidth >= 760;
-      return GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: tiles.length,
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: wide ? 4 : 2,
-          childAspectRatio: wide ? 2.15 : 1.85,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-        ),
-        itemBuilder: (_, i) => tiles[i],
-      );
-    });
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(children: [
+          Expanded(
+            child: Text(
+                _revealed
+                    ? 'Résultat financier'
+                    : 'Résultat financier — masqué',
+                style: AppTextStyles.bodySmBold
+                    .copyWith(color: cs.onSurface.withValues(alpha: 0.7))),
+          ),
+          TextButton.icon(
+            onPressed: () => setState(() => _revealed = !_revealed),
+            icon: Icon(
+                _revealed
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                size: 16),
+            label: Text(_revealed ? 'Masquer' : 'Afficher'),
+          ),
+        ]),
+        const SizedBox(height: 4),
+        LayoutBuilder(builder: (_, c) {
+          final wide = c.maxWidth >= 760;
+          return GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: tiles.length,
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: wide ? 4 : 2,
+              childAspectRatio: wide ? 2.15 : 1.85,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+            ),
+            itemBuilder: (_, i) => tiles[i],
+          );
+        }),
+      ],
+    );
   }
 }
 
@@ -757,11 +838,10 @@ class _FoodCostCard extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: restoGlassFill(context),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: sem.borderSubtle),
-      ),
+      // Arête haute teintée du NIVEAU de food cost : la carte s'annonce avant
+      // d'être lue. Vert, orange ou rouge selon le seuil franchi.
+      decoration: restoReliefDecoration(context,
+          radius: 14, accent: color.withValues(alpha: 0.55)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -882,7 +962,21 @@ class _FinanceTile extends StatelessWidget {
   final double amount;
   final String? hint;
 
-  const _FinanceTile({required this.curve, required this.amount, this.hint});
+  /// Montant remplacé par des points. La tuile garde sa place et son libellé :
+  /// on doit voir QU'IL Y A un bénéfice à consulter, pas sa valeur.
+  final bool hidden;
+
+  /// Révèle au toucher — la tuile masquée est elle-même l'interrupteur, plus
+  /// direct que de viser le bouton d'en-tête.
+  final VoidCallback? onTap;
+
+  const _FinanceTile({
+    required this.curve,
+    required this.amount,
+    this.hint,
+    this.hidden = false,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -891,56 +985,81 @@ class _FinanceTile extends StatelessWidget {
     final sem = theme.semantic;
     // Un bénéfice négatif se lit en rouge : c'est l'information la plus
     // importante de l'écran, elle ne doit pas se fondre dans le violet.
-    final negative = curve == _Curve.profit && amount < 0;
+    //
+    // JAMAIS quand la tuile est masquée : la couleur trahirait ce que les
+    // points cachent. Un rectangle rouge dit « vous perdez de l'argent » aussi
+    // clairement que le montant lui-même.
+    final negative = !hidden && curve == _Curve.profit && amount < 0;
 
     return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: restoGlassFill(context),
+      decoration: restoReliefDecoration(context, radius: 14),
+      child: Material(
+        // Transparent : la couleur du Material écraserait le dégradé du
+        // relief. Il ne porte plus que l'encre du toucher.
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: restoGlassBorder(context)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 6,
-            height: 38,
-            decoration: BoxDecoration(
-              color: negative ? sem.danger : curve.color,
-              borderRadius: BorderRadius.circular(3),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    CurrencyFormatter.format(amount),
-                    maxLines: 1,
-                    style: AppTextStyles.title.copyWith(
-                      color: negative ? sem.danger : cs.onSurface,
-                      fontWeight: FontWeight.w800,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 6,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: negative
+                      ? sem.danger
+                      : (hidden
+                          ? curve.color.withValues(alpha: 0.35)
+                          : curve.color),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        hidden ? '••• •••' : CurrencyFormatter.format(amount),
+                        maxLines: 1,
+                        style: AppTextStyles.title.copyWith(
+                          color: negative
+                              ? sem.danger
+                              : cs.onSurface.withValues(
+                                  alpha: hidden ? 0.45 : 1),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 2),
+                    Text(
+                      // L'indice est masqué avec le montant : « Marge brute
+                      // 62 % » et « dont matières 93 400 F » en disent autant
+                      // que le chiffre principal.
+                      hidden ? curve.label : (hint ?? curve.label),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySm
+                          .copyWith(color: cs.onSurface.withValues(alpha: 0.6)),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  hint ?? curve.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.bodySm
-                      .copyWith(color: cs.onSurface.withValues(alpha: 0.6)),
-                ),
-              ],
-            ),
+              ),
+              if (hidden)
+                Icon(Icons.visibility_outlined,
+                    size: 15, color: cs.onSurface.withValues(alpha: 0.35)),
+            ],
           ),
-        ],
+        ),
+        ),
       ),
     );
   }
@@ -1803,13 +1922,10 @@ class _Card extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        // Panneau translucide : le fond photographique du mode restaurant doit
-        // se deviner derrière les cartes (cf. RestoBackdrop).
-        color: restoGlassFill(context),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: restoGlassBorder(context)),
-      ),
+      // Panneau translucide EN RELIEF : le fond photographique du mode
+      // restaurant se devine toujours derrière les cartes (cf. RestoBackdrop),
+      // mais celles-ci sont désormais posées dessus, pas peintes dedans.
+      decoration: restoReliefDecoration(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1907,3 +2023,62 @@ String _periodLabel(DashPeriod p) => switch (p) {
       DashPeriod.year      => 'Cette année',
       DashPeriod.custom    => 'Période personnalisée',
     };
+
+/// Bannière de configuration incomplète.
+///
+/// Elle disparaît d'elle-même une fois les deux étapes faites — l'état est
+/// recalculé depuis Hive à chaque rendu, il n'y a rien à « fermer » ni à
+/// marquer comme vu.
+class _SetupBanner extends StatelessWidget {
+  final String shopId;
+  const _SetupBanner({required this.shopId});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final sem = Theme.of(context).semantic;
+    final step = RestaurantSetupService.stepFor(shopId);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: sem.warning.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: sem.warning.withValues(alpha: 0.35)),
+      ),
+      child: Row(children: [
+        Icon(Icons.rocket_launch_outlined, size: 20, color: sem.warning),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Votre restaurant n\'est pas encore configuré',
+                  style:
+                      AppTextStyles.bodySmBold.copyWith(color: cs.onSurface)),
+              Text(
+                  switch (step) {
+                    RestaurantSetupStep.needsTable =>
+                      'Étape 1 sur 3 — créez votre première table.',
+                    RestaurantSetupStep.needsMenuItem =>
+                      'Étape 2 sur 3 — créez un plat avec au moins un '
+                          'ingrédient.',
+                    _ => 'Étape 3 sur 3 — enregistrez ce que vous avez payé '
+                        'vos ingrédients.',
+                  },
+                  style: AppTextStyles.caption),
+            ],
+          ),
+        ),
+        const SizedBox(width: 10),
+        FilledButton(
+          onPressed: () => context.go('/shop/$shopId/restaurant/setup'),
+          style: FilledButton.styleFrom(
+            backgroundColor: sem.warning,
+            minimumSize: const Size(0, 38),
+          ),
+          child: const Text('Configurer'),
+        ),
+      ]),
+    );
+  }
+}

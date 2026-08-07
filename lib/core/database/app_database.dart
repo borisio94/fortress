@@ -596,7 +596,6 @@ class AppDatabase {
         await syncDeliveryZones(shopId);
         await syncDeliveryQuartiers(shopId);
         await syncRestaurantTables(shopId);
-        await syncMenuModifiers(shopId);
         await syncIngredients(shopId);
         await syncRecipeIngredients(shopId);
         await syncRestaurantActivities(shopId);
@@ -833,14 +832,6 @@ class AppDatabase {
             column: 'shop_id', value: shopId),
         callback: (p) => _i._onTablePassthroughChange(
             p, HiveBoxes.restaurantTablesBox, 'restaurant_tables', shopId))
-        .onPostgresChanges(
-        event: PostgresChangeEvent.all,
-        schema: 'public', table: 'menu_modifiers',
-        filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'shop_id', value: shopId),
-        callback: (p) => _i._onTablePassthroughChange(
-            p, HiveBoxes.menuModifiersBox, 'menu_modifiers', shopId))
         // ── Finances restaurant (PR-A) : ingrédients + lignes de recette ──
         .onPostgresChanges(
         event: PostgresChangeEvent.all,
@@ -1109,7 +1100,6 @@ class AppDatabase {
       task('syncDeliveryZones', () => syncDeliveryZones(shopId)),
       task('syncDeliveryQuartiers', () => syncDeliveryQuartiers(shopId)),
       task('syncRestaurantTables', () => syncRestaurantTables(shopId)),
-      task('syncMenuModifiers', () => syncMenuModifiers(shopId)),
       task('syncIngredients', () => syncIngredients(shopId)),
       task('syncRecipeIngredients', () => syncRecipeIngredients(shopId)),
       task('syncRestaurantActivities', () => syncRestaurantActivities(shopId)),
@@ -1773,7 +1763,9 @@ create table if not exists public.orders (
   covers           integer,
   order_type       text             not null default 'takeaway',
   sent_to_kitchen  boolean          not null default false,
-  kitchen_ready    boolean          not null default false
+  kitchen_ready    boolean          not null default false,
+  served           boolean          not null default false,
+  finished         boolean          not null default false
 );
 create index if not exists orders_shop_id_idx on public.orders(shop_id);
 create index if not exists orders_status_idx  on public.orders(status);
@@ -4054,13 +4046,6 @@ end \$\$;""",
       _syncTablePassthrough(tableName: 'restaurant_tables',
           shopId: shopId, box: HiveBoxes.restaurantTablesBox,
           orderBy: 'number');
-  /// Sync des groupes de modificateurs de menu (hotfix_137). Alimenté en PR-4
-  /// (configuration des modificateurs) ; synchronisé dès PR-1 pour que la box
-  /// soit peuplée quand l'écran de config arrivera.
-  static Future<void> syncMenuModifiers(String shopId) =>
-      _syncTablePassthrough(tableName: 'menu_modifiers',
-          shopId: shopId, box: HiveBoxes.menuModifiersBox);
-
   // ── Module finances restaurant (PR-A) ──────────────────────────────────
   static Future<void> syncIngredients(String shopId) =>
       _syncTablePassthrough(tableName: 'ingredients',
@@ -4292,12 +4277,13 @@ end \$\$;""",
             // (put, pas de merge). Sans ces cles, chaque pull/push realtime
             // remettrait la table a libre et viderait l'ecran Cuisine.
             'table_id':        row['table_id'],
-          'tab_label':       row['tab_label'],
             'tab_label':       row['tab_label'],
             'covers':          row['covers'],
             'order_type':      row['order_type'] ?? 'takeaway',
             'sent_to_kitchen': row['sent_to_kitchen'] ?? false,
             'kitchen_ready':   row['kitchen_ready'] ?? false,
+            'served':          row['served'] ?? false,
+            'finished':        row['finished'] ?? false,
             // Soft-delete (hotfix_084) — symétrie avec _mapToSaleWithStatus.
             'deleted_at':    row['deleted_at'],
             'deleted_by':    row['deleted_by'],
@@ -4814,6 +4800,8 @@ end \$\$;""",
           'order_type':      row['order_type'] ?? 'takeaway',
           'sent_to_kitchen': row['sent_to_kitchen'] ?? false,
           'kitchen_ready':   row['kitchen_ready'] ?? false,
+          'served':          row['served'] ?? false,
+          'finished':        row['finished'] ?? false,
           // Soft-delete (hotfix_084) — symétrie avec _mapToSaleWithStatus.
           // NB : une commande deleted_at != null est déjà retirée du Hive plus
           // haut, donc ces 3 champs sont en pratique toujours null ici ;

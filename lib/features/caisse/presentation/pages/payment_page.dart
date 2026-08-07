@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/database/app_database.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -171,7 +172,13 @@ class _PaymentView extends StatelessWidget {
                         // Globale (aucun chip sélectionné), `deliveryLocationId`
                         // est null → on bloque l'encaissement. L'opérateur
                         // doit retourner sur la caisse et choisir un chip.
-                        if ((state.deliveryLocationId ?? '').isEmpty) {
+                        //
+                        // HORS RESTAURATION seulement : un restaurant n'a ni
+                        // dépôt partenaire ni sélecteur de lieu, ce garde y
+                        // bloquerait « Payer » sans issue possible (même
+                        // raison que dans `cart_widget`).
+                        if (!isRestaurantShop(shopId)
+                            && (state.deliveryLocationId ?? '').isEmpty) {
                           AppSnack.error(context,
                               'Sélectionne une boutique ou un partenaire '
                               'avant de valider la vente.');
