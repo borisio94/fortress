@@ -43,7 +43,7 @@ class DocumentService {
 
   /// Génère une facture PDF en bytes.
   static Future<Uint8List> generateInvoice(Sale order, {
-    InvoiceFormat format = InvoiceFormat.a4,
+    InvoiceFormat format = InvoiceFormat.thermal80,
     PdfPageFormat? pageFormat,
     ShopSummary? shop,
     String? currency,
@@ -295,7 +295,7 @@ class DocumentService {
 
   /// Dialogue d'impression natif.
   static Future<void> printInvoice(Sale order, {
-    InvoiceFormat format = InvoiceFormat.a4,
+    InvoiceFormat format = InvoiceFormat.thermal80,
     PdfPageFormat? pageFormat,
     ShopSummary? shop,
   }) async {
@@ -310,7 +310,7 @@ class DocumentService {
 
   /// Aperçu PDF (ouvre dans le visualiseur natif).
   static Future<void> previewInvoice(Sale order, BuildContext context, {
-    InvoiceFormat format = InvoiceFormat.a4,
+    InvoiceFormat format = InvoiceFormat.thermal80,
     PdfPageFormat? pageFormat,
     ShopSummary? shop,
   }) async {
@@ -336,7 +336,7 @@ class DocumentService {
 
   /// Partage la facture PDF via le share sheet natif (mobile) ou sauvegarde locale (desktop).
   static Future<void> shareInvoice(Sale order, {
-    InvoiceFormat format = InvoiceFormat.a4,
+    InvoiceFormat format = InvoiceFormat.thermal80,
     PdfPageFormat? pageFormat,
     ShopSummary? shop,
   }) async {
