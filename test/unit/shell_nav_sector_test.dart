@@ -67,13 +67,15 @@ void main() {
 
     test('le menu restaurant suit la maquette de référence', () {
       final routes = labelsFor('restaurant');
-      // Service · Menu · Commandes · Analyses · Équipe · Messagerie
+      // Plan de salle · Menu · Commandes · Analyses · Équipe · Messagerie
       // (+ Paramètres et Abonnement, rendus dans le pied de la sidebar).
       //
-      // « Plan de salle » a été REMPLACÉ par « Service » (Lot C) : l'écran de
-      // service contient le plan de salle en volet gauche et la prise de
-      // commande à droite, le caissier n'ayant plus à naviguer entre les deux.
-      expect(routes, contains('/shop/shop_1/restaurant/service'));
+      // « Service » a été RETIRÉ du menu au profit de « Plan de salle » : la
+      // prise de commande est passée au Menu (panier → type de service →
+      // cuisine), l'écran de service faisait donc doublon. Le plan de salle
+      // reste le SEUL endroit où une table se crée.
+      expect(routes, contains('/shop/shop_1/restaurant/tables'));
+      expect(routes, isNot(contains('/shop/shop_1/restaurant/service')));
       expect(routes, contains('/shop/shop_1/inventaire'));   // « Menu »
       expect(routes, contains('/shop/shop_1/caisse/orders')); // « Commandes »
       expect(routes, contains('/shop/shop_1/employees'));    // « Équipe »
@@ -81,15 +83,18 @@ void main() {
       expect(routes, contains('/shop/shop_1/parametres'));
     });
 
-    test('Cuisine et À emporter SONT dans le menu restaurant', () {
+    test('ni « Préparation » ni « À emporter » ne sont au menu', () {
       final routes = labelsFor('restaurant');
-      // Ils en avaient été retirés pour coller à une maquette — mais sans
-      // entrée de menu ces deux écrans étaient INATTEIGNABLES : la Cuisine est
-      // l'écran de poste du cuisinier (et porte tout le filtrage par poste),
-      // « À emporter » est le seul endroit où l'on remet et encaisse une
-      // commande de comptoir.
-      expect(routes, contains('/shop/shop_1/restaurant/cuisine'));
-      expect(routes, contains('/shop/shop_1/restaurant/takeaway'));
+      // « Préparation » RETIRÉ (2026-08-05) : le cuisinier annonce à voix
+      // haute, l'opérateur fait avancer le bon depuis Commandes, qui porte
+      // déjà toute la chronologie du service.
+      expect(routes, isNot(contains('/shop/shop_1/restaurant/cuisine')));
+      // « À emporter » RETIRÉ : une commande de comptoir peut sortir de
+      // n'importe quel poste, elle part en préparation comme les autres et se
+      // suit depuis Commandes.
+      expect(routes, isNot(contains('/shop/shop_1/restaurant/takeaway')));
+      // Commandes reste, et reste l'unique destination du service.
+      expect(routes, contains('/shop/shop_1/caisse/orders'));
       // Caisse reste remplacée par « Commandes » en restauration.
       expect(routes, isNot(contains('/shop/shop_1/caisse')));
     });

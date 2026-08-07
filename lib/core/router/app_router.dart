@@ -44,11 +44,8 @@ import '../../features/caisse/presentation/pages/orders_page.dart';
 import '../../features/caisse/presentation/pages/payment_page.dart';
 import '../../features/inventaire/presentation/pages/inventaire_page.dart';
 import '../../features/restaurant/presentation/pages/restaurant_tables_page.dart';
-import '../../features/restaurant/presentation/pages/restaurant_order_page.dart';
-import '../../features/restaurant/presentation/pages/kitchen_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_setup_page.dart';
 import '../../features/restaurant/presentation/pages/bill_page.dart';
-import '../../features/restaurant/presentation/pages/takeaway_page.dart';
-import '../../features/restaurant/presentation/pages/menu_modifiers_page.dart';
 import '../../features/restaurant/presentation/pages/restaurant_dashboard_page.dart';
 import '../../features/restaurant/presentation/pages/restaurant_menu_page.dart';
 import '../../features/restaurant/presentation/pages/finances_hub_page.dart';
@@ -119,7 +116,6 @@ import '../../shared/widgets/adaptive_scaffold.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 import 'route_names.dart';
 import '../../shared/providers/current_shop_provider.dart';
-import '../../features/restaurant/presentation/pages/restaurant_service_page.dart';
 
 /// Transition appliquée aux 8 pages "shell" (Dashboard, Caisse, Inventaire,
 /// Clients, Finances, Commandes, Membres, Paramètres).
@@ -331,6 +327,17 @@ String? _restaurantGuard(Ref ref, GoRouterState s, {bool adminOnly = false}) {
   final id = s.pathParameters['shopId'] ?? '';
   if (id.isEmpty) return null;
   if (!isRestaurantShop(id)) return '/shop/$id/dashboard';
+  // AUCUNE REDIRECTION VERS LA CONFIGURATION.
+  //
+  // Une version précédente renvoyait tous les écrans du module vers
+  // `/restaurant/setup` tant que la mise en route n'était pas finie. C'était
+  // une contrainte : elle empêchait d'explorer l'application avant d'avoir
+  // saisi quoi que ce soit, et enfermait quiconque voulait simplement regarder.
+  //
+  // L'accompagnement subsiste, mais il PROPOSE au lieu d'imposer : l'entrée
+  // « Configuration » au menu et la bannière du tableau de bord restent
+  // visibles tant qu'il y a quelque chose à faire. Tout le reste est
+  // accessible dès la première connexion.
   if (!adminOnly) return null;
   final perms = ref.read(permissionsProvider(id));
   // On ne renvoie que si l'on SAIT que l'utilisateur est un membre non-admin.
@@ -827,24 +834,28 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           // par deeplink : la page se contente d'afficher un plan vide si la
           // boutique n'est pas un établissement de restauration (aucune donnée
           // sensible exposée).
-          // Écran de SERVICE — poste de travail du caissier (Lot C) : état du
-          // restaurant à gauche, compte en cours à droite, sans navigation.
-          GoRoute(path: '/shop/:shopId/restaurant/service',
+          // L'écran de SERVICE a été SUPPRIMÉ (2026-08-03). La prise de
+          // commande passe par le Menu (panier → « Type de commande » →
+          // cuisine), le cycle de vie des tables par le Plan de salle, et
+          // l'avancement du service par la page Commandes. Le garder aurait
+          // laissé un troisième chemin de prise de commande, divergeant en
+          // silence des deux autres.
+          // Mise en route — la seule route restaurant que la garde laisse
+          // toujours passer (elle s'exclut elle-même de la redirection).
+          GoRoute(path: '/shop/:shopId/restaurant/setup',
               redirect: (c, st) => _restaurantGuard(ref, st),
               pageBuilder: (c, s) => _shellPage(s,
-                  RestaurantServicePage(shopId: s.pathParameters['shopId']!))),
+                  RestaurantSetupPage(shopId: s.pathParameters['shopId']!))),
           GoRoute(path: '/shop/:shopId/restaurant/tables',
               redirect: (c, st) => _restaurantGuard(ref, st),
               pageBuilder: (c, s) => _shellPage(s,
                   RestaurantTablesPage(shopId: s.pathParameters['shopId']!))),
-          GoRoute(path: '/shop/:shopId/restaurant/cuisine',
-              redirect: (c, st) => _restaurantGuard(ref, st),
-              pageBuilder: (c, s) => _shellPage(s,
-                  KitchenPage(shopId: s.pathParameters['shopId']!))),
-          GoRoute(path: '/shop/:shopId/restaurant/takeaway',
-              redirect: (c, st) => _restaurantGuard(ref, st),
-              pageBuilder: (c, s) => _shellPage(s,
-                  TakeawayPage(shopId: s.pathParameters['shopId']!))),
+          // Route « Préparation » supprimée avec son entrée de menu
+          // (2026-08-05) : le cuisinier annonce à voix haute, l'opérateur
+          // fait avancer le bon depuis Commandes, qui porte déjà toute la
+          // chronologie du service.
+          // Route « À emporter » supprimée avec son entrée de menu : les
+          // commandes de comptoir se suivent depuis Commandes.
           // Finances restaurant (PR-B) — hub Ingrédients / Activités / Stock.
           GoRoute(path: '/shop/:shopId/restaurant/finances',
               redirect: (c, st) => _restaurantGuard(ref, st, adminOnly: true),
@@ -868,27 +879,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               redirect: (c, st) => _restaurantGuard(ref, st, adminOnly: true),
               pageBuilder: (c, s) => _shellPage(s,
                   RestaurantStaffPage(shopId: s.pathParameters['shopId']!))),
-          GoRoute(path: '/shop/:shopId/parametres/menu-modifiers',
-              builder: (c, s) => MenuModifiersPage(
-                    shopId: s.pathParameters['shopId']!,
-                  )),
-          // Prise de commande d'une table — sous-page (Scaffold propre, hors
-          // shell) : le serveur y entre depuis le plan de salle et en ressort
-          // par le bouton retour.
-          // `RestoBackdrop` : ces deux écrans vivent HORS du shell, ils ne
-          // reçoivent donc pas le décor du mode restaurant par héritage. On le
-          // remonte ici pour que le service garde le même fond d'un bout à
-          // l'autre — le plan de salle, l'addition et la prise de commande sont
-          // le même geste. `AppScaffold` se rend transparent quand il détecte
-          // ce décor au-dessus de lui.
-          GoRoute(path: '/shop/:shopId/restaurant/table/:tableId',
-              redirect: (c, st) => _restaurantGuard(ref, st),
-              builder: (c, s) => RestoBackdrop(
-                    child: RestaurantOrderPage(
-                      shopId:  s.pathParameters['shopId']!,
-                      tableId: s.pathParameters['tableId']!,
-                    ),
-                  )),
+          // SUPPRIMES (2026-08-03) : la page « Modificateurs de menu » et la
+          // prise de commande par table. Les accompagnements n'existent plus
+          // — chaque combinaison est un plat entier de la carte — et toute
+          // commande passe par le Menu.
+          //
+          // `RestoBackdrop` : l'addition vit HORS du shell, elle ne reçoit
+          // donc pas le décor restaurant par héritage. On le remonte ici pour
+          // que le service garde le même fond d'un bout à l'autre.
           GoRoute(path: '/shop/:shopId/restaurant/addition/:tableId',
               redirect: (c, st) => _restaurantGuard(ref, st),
               builder: (c, s) => RestoBackdrop(

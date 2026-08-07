@@ -144,17 +144,18 @@ int _webOrdersBadge(String shopId) {
   }).length;
 }
 
-/// Bons EN COURS en cuisine : envoyés, pas encore prêts. C'est le compteur que
-/// le caissier surveille du coin de l'œil pour savoir si la cuisine décroche.
-int _kitchenBadge(String shopId) {
+/// Pastille de « Commandes » en RESTAURATION : commandes web non acquittées
+/// **plus** bons en cours de préparation (envoyés, pas encore prêts).
+///
+/// Les deux comptent la même chose du point de vue du caissier — « ce qui
+/// m'attend sur cet écran » — et depuis la suppression de l'écran Préparation,
+/// « Commandes » est le seul endroit où l'un comme l'autre se traitent. Les
+/// séparer en deux pastilles supposerait deux destinations ; il n'y en a plus
+/// qu'une.
+int _restaurantOrdersBadge(String shopId) {
   if (shopId.isEmpty) return 0;
-  return RestaurantOrderService.kitchenTickets(shopId).length;
-}
-
-/// Commandes à emporter encore à remettre au client.
-int _takeawayBadge(String shopId) {
-  if (shopId.isEmpty) return 0;
-  return RestaurantOrderService.takeawayOrders(shopId).length;
+  return _webOrdersBadge(shopId) +
+      RestaurantOrderService.kitchenTickets(shopId).length;
 }
 
 /// Alertes des finances restaurant — pastille sur l'item « Finances » :
@@ -252,18 +253,21 @@ final List<ShellNavItem> kShellNavItems = [
   // (`sectorIn`). En mode boutique, cet item n'existe pas — zéro impact.
   // L'onglet Caisse reste accessible en parallèle pour la vente au comptoir.
   //
-  // Icône : `restaurant_rounded` sur les DEUX états. La variante `_outlined`
-  // n'est utilisée nulle part dans le repo — or les glyphes Material récents
-  // absents de la police bundlée s'affichent en carré vide (cf. commentaires
-  // sur `contacts_*`, `send_outlined`, `account_balance_outlined` plus bas).
+  // Icône : `table_restaurant` — une table vue du dessus, qui dit « salle »
+  // là où `restaurant` (des couverts) disait « repas ». Ses DEUX variantes sont
+  // déjà utilisées ailleurs dans le repo, donc éprouvées : c'est la précaution
+  // qui compte ici, un glyphe Material absent de la police embarquée
+  // s'affichant en carré vide (cf. `contacts_*`, `send_outlined` plus bas).
   ShellNavItem(
-    icon:         Icons.restaurant_rounded,
-    iconSelected: Icons.restaurant_rounded,
-    label:        (_) => 'Service',
+    icon:         Icons.table_restaurant_outlined,
+    iconSelected: Icons.table_restaurant_rounded,
+    label:        (_) => 'Plan de salle',
     labelMobile:  (_) => 'Salle',
-    // L'écran de service EST le plan de salle, augmenté du volet de prise de
-    // commande : le caissier n'a plus à naviguer entre les deux.
-    route:        (id) => '/shop/$id/restaurant/service',
+    // LE lieu de création des tables — et le seul. La prise de commande est
+    // passée au Menu (panier → type de service → cuisine), l'écran de service
+    // faisait donc doublon. Ce qui reste ici est le cycle de vie de la TABLE :
+    // créer, renommer, réserver, ouvrir l'addition, libérer.
+    route:        (id) => '/shop/$id/restaurant/tables',
     // Les serveurs (rôle 'user') doivent pouvoir ouvrir le plan de salle :
     // on s'aligne sur la permission caisse plutôt que sur isShopAdmin.
     visibleIf:    (p) => p.canAccessCaisse,
@@ -273,37 +277,23 @@ final List<ShellNavItem> kShellNavItems = [
   // « Commandes » — équivalent restaurant de l'item Caisse, qui pointe
   // directement sur la liste des commandes plutôt que sur l'écran de vente.
   //
-  // Cuisine et À emporter sont REVENUS dans la navigation (le commentaire
-  // précédent annonçait « 8 lignes le jour où ils reviennent » — nous y
-  // sommes). Ils avaient été retirés pour coller à une maquette, mais sans
-  // entrée de menu ces deux écrans étaient tout simplement INATTEIGNABLES :
-  //   * la Cuisine est un écran de POSTE, posé en permanence sur la tablette
-  //     du cuisinier — il ne s'atteint pas par une passerelle occasionnelle,
-  //     et tout le filtrage par poste devenait inutilisable ;
-  //   * « À emporter » est le seul endroit où l'on REMET et encaisse une
-  //     commande de comptoir (l'écran de service ne fait que la créer).
-  ShellNavItem(
-    // `soup_kitchen` est absent des polices anciennes et s'afficherait en carré
-    // vide : on reste sur des glyphes éprouvés dans ce repo.
-    icon:         Icons.outdoor_grill_outlined,
-    iconSelected: Icons.outdoor_grill_rounded,
-    label:        (_) => 'Cuisine',
-    route:        (id) => '/shop/$id/restaurant/cuisine',
-    visibleIf:    (p) => p.canAccessCaisse,
-    sectorIn:     kRestaurantSectors,
-    badge:        _kitchenBadge,
-    primary:      true,
-  ),
-  ShellNavItem(
-    icon:         Icons.takeout_dining_outlined,
-    iconSelected: Icons.takeout_dining_rounded,
-    label:        (_) => 'À emporter',
-    route:        (id) => '/shop/$id/restaurant/takeaway',
-    visibleIf:    (p) => p.canAccessCaisse,
-    sectorIn:     kRestaurantSectors,
-    badge:        _takeawayBadge,
-    primary:      true,
-  ),
+  // « PRÉPARATION » a été SUPPRIMÉ (2026-08-05) — item de menu, route et
+  // `kitchen_page.dart` effacés. L'écran était un tableau de poste, censé
+  // vivre en permanence sur une tablette au passe. L'établissement ne
+  // fonctionne pas ainsi : le cuisinier ANNONCE à voix haute que le plat est
+  // prêt, et c'est l'opérateur qui fait avancer le bon.
+  //
+  // Rien n'est perdu : « Commandes » portait DÉJÀ toute la chronologie du
+  // service, bouton par bouton (`caisse_page._buildServiceProgress`) —
+  // « Commande prête », « Marquer servie », « Repas terminé », plus le retour
+  // en arrière d'un cran. L'écran de préparation ne faisait que doubler le
+  // bouton « Commande prête » sur une autre surface.
+  //
+  // « À emporter » a été RETIRÉ du menu (2026-08-04). Une commande à emporter
+  // peut sortir de la cuisine, du chawarma ou de la glacerie : elle n'a pas de
+  // canal propre, elle part en PRÉPARATION comme les autres, puis se suit et
+  // s'encaisse depuis Commandes — qui porte désormais toute la chaîne, les
+  // emballages et les consignes.
   ShellNavItem(
     icon:         Icons.receipt_long_outlined,
     iconSelected: Icons.receipt_long_rounded,
@@ -311,7 +301,7 @@ final List<ShellNavItem> kShellNavItems = [
     route:        (id) => '/shop/$id/caisse/orders',
     visibleIf:    (p) => p.canAccessCaisse,
     sectorIn:     kRestaurantSectors,
-    badge:        _webOrdersBadge,
+    badge:        _restaurantOrdersBadge,
     primary:      true,
   ),
   ShellNavItem(
@@ -559,6 +549,7 @@ final List<ShellNavItem> kShellNavItems = [
     group:        3,
   ),
 ];
+
 
 /// Items visibles dans le bottom nav principal (4 onglets fixes).
 ///
