@@ -639,6 +639,10 @@ class LocalStorageService {
     'app_locale',
     'onboarding_seen',
     'whatsapp_provider',
+    // Barre de navigation rétractée : préférence d'AFFICHAGE de l'appareil,
+    // au même titre que la taille du texte. La purger au logout rouvrirait la
+    // barre déployée à chaque reconnexion.
+    'nav_rail_collapsed',
   };
 
   /// Préfixes de clés settings conservés au purge (clés dynamiques par uid).

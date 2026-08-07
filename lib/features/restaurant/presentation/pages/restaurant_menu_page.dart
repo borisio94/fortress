@@ -13,10 +13,14 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../caisse/presentation/bloc/caisse_bloc.dart';
 import '../../../../features/inventaire/domain/entities/product.dart';
+import '../../../../shared/providers/cart_pane_provider.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
+import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/product_image_card.dart';
+import '../../../caisse/presentation/widgets/cart_widget.dart';
+import '../widgets/dish_details_sheet.dart';
 import '../widgets/dish_form_sheet.dart';
 import '../widgets/resto_empty_state.dart';
 
@@ -44,6 +48,12 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   /// Catégorie active. `null` = « Tout ».
   String? _category;
 
+  /// Recherche libre sur le nom et la description du plat. Purement locale :
+  /// une carte de cinquante plats devient impraticable au défilement, alors
+  /// qu'un serveur connaît le nom de ce qu'on lui commande.
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
   @override
   void initState() {
     super.initState();
@@ -68,6 +78,7 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   void dispose() {
     AppDatabase.removeListener(_listener);
     DailyMenuService.revision.removeListener(_onAvailabilityChanged);
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -85,10 +96,34 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     return used.toList()..sort();
   }
 
+  /// Vignette ronde de chaque catégorie : la photo du premier plat qui en
+  /// porte une. Les catégories sont de simples chaînes côté données — elles
+  /// n'ont pas d'image propre — et un rond gris uniforme sur toute la barre
+  /// n'apporterait rien. La photo d'un plat de la catégorie, elle, la rend
+  /// reconnaissable d'un coup d'œil.
+  Map<String, String?> get _categoryThumbs {
+    final thumbs = <String, String?>{};
+    for (final p in _products) {
+      final c = p.categoryId;
+      if (c == null || c.isEmpty) continue;
+      final url = p.mainImageUrl;
+      if (thumbs[c] == null && url != null && url.isNotEmpty) thumbs[c] = url;
+    }
+    return thumbs;
+  }
+
   List<Product> get _visible {
-    final all = _products;
-    if (_category == null) return all;
-    return all.where((p) => p.categoryId == _category).toList();
+    var all = _products;
+    if (_category != null) {
+      all = all.where((p) => p.categoryId == _category).toList();
+    }
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return all;
+    return all.where((p) {
+      if (p.name.toLowerCase().contains(q)) return true;
+      final d = p.description;
+      return d != null && d.toLowerCase().contains(q);
+    }).toList();
   }
 
   void _addToCart(Product p) {
@@ -116,7 +151,31 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
             imageUrl: p.mainImageUrl,
           ),
         ));
-    AppSnack.success(context, '${p.name} ajouté au panier');
+    // Volet replié par le bouton 🛒 de la barre du haut : on le redéploie.
+    // Sans ça, ajouter un plat ne produirait rien à l'écran et le serveur
+    // taperait une seconde fois, croyant avoir manqué son geste.
+    ref.read(cartPaneVisibleProvider.notifier).show();
+    // AUCUN message de succès : l'article apparaît dans le volet panier, à
+    // droite, à l'instant même. Le confirmer par un bandeau reviendrait à
+    // annoncer ce qui est déjà visible — et en composant une commande de dix
+    // plats, ces bandeaux se succèdent en masquant la carte. Les messages sont
+    // réservés à ce qui, lui, ne se voit pas : le refus d'ajout.
+  }
+
+  /// Tap sur une carte : la fiche s'ouvre en MODIFICATION ou en LECTURE
+  /// SEULE selon le droit de l'utilisateur.
+  ///
+  /// La page Menu est l'écran d'atterrissage d'un restaurant et celui où le
+  /// serveur prend les commandes : tout le monde y arrive. Sans cette
+  /// distinction, n'importe quel serveur ouvrait le formulaire complet et
+  /// pouvait changer un prix de vente.
+  ///
+  /// Lecture seule et non « rien du tout » : un serveur a besoin de lire la
+  /// composition d'un plat pour répondre au client qui demande ce qu'il y a
+  /// dedans.
+  Future<void> _onDishTap(Product p, bool canEdit) async {
+    if (canEdit) return _openDishForm(p);
+    await showDishDetails(context: context, shopId: widget.shopId, product: p);
   }
 
   /// Ouvre la feuille de saisie d'un plat — création si [product] est null.
@@ -134,6 +193,49 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     // La grille lit Hive à chaque build : un rebuild suffit à refléter la
     // création ou la modification.
     if (saved == true && mounted) setState(() {});
+  }
+
+  /// Retire un plat de la carte, depuis la carte elle-même.
+  ///
+  /// La fiche du plat porte déjà un bouton « Supprimer », mais il est au bas
+  /// d'un formulaire à six sections : retirer un plat obligeait à ouvrir la
+  /// fiche et à la faire défiler jusqu'en bas. Ici, deux gestes.
+  ///
+  /// Suppression DOUCE (`AppDatabase.deleteProduct`) — la même que la fiche,
+  /// avec le même motif : le plat quitte la carte mais reste restaurable
+  /// depuis l'historique, et l'historique des ventes qui le référencent n'est
+  /// pas amputé.
+  Future<void> _deleteDish(Product p) async {
+    final pid = p.id;
+    if (pid == null || pid.isEmpty) {
+      AppSnack.error(context, 'Plat non enregistré : ${p.name}');
+      return;
+    }
+    final confirmed = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.delete_outline_rounded,
+      iconColor: Theme.of(context).semantic.danger,
+      title: 'Supprimer ce plat ?',
+      body: Text('« ${p.name} » sera retiré de la carte. '
+          'Action réversible depuis l\'historique.'),
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Supprimer',
+      onConfirm: () {},
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await AppDatabase.deleteProduct(
+        pid,
+        reason: 'Plat retiré de la carte',
+        userId: LocalStorageService.getCurrentUser()?.id ?? '',
+      );
+      if (!mounted) return;
+      // `getProductsForShop` filtre les supprimés : un rebuild suffit.
+      setState(() {});
+      AppSnack.success(context, '« ${p.name} » retiré de la carte.');
+    } catch (e) {
+      if (mounted) AppSnack.error(context, 'Suppression impossible : $e');
+    }
   }
 
   /// Active / désactive un plat pour la journée (admin).
@@ -217,9 +319,20 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isAdmin =
-        ref.watch(permissionsProvider(widget.shopId)).isShopAdmin;
+    final perms = ref.watch(permissionsProvider(widget.shopId));
+    final isAdmin = perms.isShopAdmin;
+    // Permission DÉDIÉE et non `isShopAdmin` : un employé peut se voir
+    // accorder `inventoryDelete` sans être administrateur de la boutique.
+    final canDelete = perms.canDeleteProduct;
+    // Droits sur la CARTE, distincts de l'accès à l'écran : la page Menu est
+    // l'atterrissage du restaurant, tout le monde y arrive — c'est ce qu'on
+    // peut y FAIRE qui se protège, pas la porte.
+    final canEdit = perms.canEditProduct;
+    final canAdd = perms.canAddProduct;
     final products = _visible;
+    // Lu ICI et non dans le `builder` du BlocBuilder : `ref.watch` ne vaut que
+    // pendant le build de ce widget-ci, pas dans la closure d'un autre.
+    final paneVisible = ref.watch(cartPaneVisibleProvider);
 
     return AppScaffold(
       shopId: widget.shopId,
@@ -227,105 +340,310 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
       // Masqué quand la grille est vide : l'état vide porte déjà son propre
       // bouton d'ajout, et deux options d'ajout simultanées se
       // concurrenceraient à l'écran.
-      floatingActionButton: products.isEmpty
+      floatingActionButton: (products.isEmpty || !canAdd)
           ? null
           : FloatingActionButton.extended(
               onPressed: _openDishForm,
               icon: const Icon(Icons.add_rounded),
               label: const Text('Plat'),
             ),
-      body: Column(
+      // VOLET PANIER À DROITE — ouvert dès le premier article, refermé dès le
+      // dernier retiré. Il remplace la feuille modale : celle-ci recouvrait la
+      // carte, obligeant à la fermer pour ajouter le plat suivant et à la
+      // rouvrir pour vérifier. Ici la commande se compose sous les yeux.
+      //
+      // L'ouverture et la fermeture ne sont donc PAS un état à part : elles se
+      // déduisent du panier lui-même. Un état booléen se serait fatalement
+      // désynchronisé du contenu (panier vidé ailleurs, commande enregistrée).
+      body: BlocBuilder<CaisseBloc, CaisseState>(
+        buildWhen: (p, c) => p.items.length != c.items.length,
+        builder: (context, cart) {
+          // Deux conditions, pas une : il faut quelque chose à montrer ET que
+          // l'utilisateur n'ait pas replié le volet depuis le bouton 🛒.
+          final open = cart.items.isNotEmpty && paneVisible;
+          return Row(children: [
+            Expanded(child: _buildMenu(products, isAdmin,
+                canDelete: canDelete, canEdit: canEdit, canAdd: canAdd)),
+            // Animé en largeur : le volet glisse au lieu d'apparaître d'un
+            // bloc, ce qui rend visible d'où il vient.
+            // Le panier est un BLOC À PART : coins arrondis et écart avec la
+            // carte, comme la maquette. L'écart est compris DANS la largeur
+            // animée — ajouté à côté, il apparaîtrait d'un coup au premier
+            // article pendant que le panier, lui, glisse encore.
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              width: open ? _cartPaneWidth(context) + _kCartGap : 0,
+              child: open
+                  // `ClipRect` + `OverflowBox` : pendant l'animation, la
+                  // largeur imposée est inférieure à la largeur finale du
+                  // panier. Sans ces deux-là, Flutter tenterait de comprimer
+                  // sa mise en page à chaque image et lèverait un débordement.
+                  ? ClipRect(
+                      child: OverflowBox(
+                        alignment: Alignment.centerLeft,
+                        maxWidth: _cartPaneWidth(context) + _kCartGap,
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: _kCartGap),
+                          child: SizedBox(
+                            width: _cartPaneWidth(context),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(16),
+                              child: CartWidget(
+                                  shopId: widget.shopId, isEcommerce: true),
+                            ),
+                          ),
+                        ),
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ]);
+        },
+      ),
+    );
+  }
+
+  /// Écart entre la carte et le volet panier — les deux sont des blocs
+  /// distincts, pas deux moitiés d'une même surface.
+  static const double _kCartGap = 10;
+
+  /// Largeur du volet : assez pour lire une ligne d'article, jamais plus du
+  /// tiers de l'écran — la carte doit rester l'écran principal.
+  double _cartPaneWidth(BuildContext context) {
+    final w = MediaQuery.of(context).size.width;
+    return w < 720 ? w : (w / 3).clamp(320.0, 420.0);
+  }
+
+  Widget _buildMenu(
+    List<Product> products,
+    bool isAdmin, {
+    required bool canDelete,
+    required bool canEdit,
+    required bool canAdd,
+  }) {
+    final searching = _query.trim().isNotEmpty;
+    return Column(
         children: [
+          _SearchField(
+            controller: _searchCtrl,
+            onChanged: (v) => setState(() => _query = v),
+          ),
           _CategoryBar(
             categories: _categories,
+            thumbs: _categoryThumbs,
             selected: _category,
             onSelect: (c) => setState(() => _category = c),
           ),
           Expanded(
             child: products.isEmpty
                 ? RestoEmptyState(
-                    icon: Icons.restaurant_rounded,
-                    title: _category == null
-                        ? 'Carte vide'
-                        : 'Aucun plat dans « $_category »',
-                    subtitle: _category == null
-                        ? 'Ajoutez vos plats pour composer la carte de '
-                            'votre établissement.'
-                        : 'Choisissez une autre catégorie ou ajoutez un plat.',
-                    actionLabel: 'Ajouter un plat',
-                    onAction: _openDishForm,
+                    icon: searching
+                        ? Icons.search_off_rounded
+                        : Icons.restaurant_rounded,
+                    title: searching
+                        ? 'Aucun plat trouvé'
+                        : _category == null
+                            ? 'Carte vide'
+                            : 'Aucun plat dans « $_category »',
+                    subtitle: searching
+                        ? 'Aucun plat ne correspond à « ${_query.trim()} ». '
+                            'Essayez un autre mot ou changez de catégorie.'
+                        : _category == null
+                            ? 'Ajoutez vos plats pour composer la carte de '
+                                'votre établissement.'
+                            : 'Choisissez une autre catégorie ou ajoutez '
+                                'un plat.',
+                    // Sans le droit de créer, l'état vide reste informatif :
+                    // proposer un bouton qui refuserait ensuite serait pire
+                    // que ne rien proposer.
+                    actionLabel: canAdd ? 'Ajouter un plat' : null,
+                    onAction: canAdd ? _openDishForm : null,
                   )
                 : _MenuGrid(
                     products: products,
                     shopId: widget.shopId,
                     isAdmin: isAdmin,
-                    onTap: _openDishForm,
+                    canDelete: canDelete,
+                    canEdit: canEdit,
+                    onTap: (p) => _onDishTap(p, canEdit),
                     onAdd: _addToCart,
                     onToggleDispo: _toggleDispo,
                     onEditCount: _editCount,
+                    onDelete: _deleteDish,
                   ),
           ),
         ],
+    );
+  }
+}
+
+/// Champ de recherche de la carte — pilule pleine, icône loupe, croix
+/// d'effacement dès qu'il y a du texte.
+class _SearchField extends StatelessWidget {
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  const _SearchField({required this.controller, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sem = theme.semantic;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        textInputAction: TextInputAction.search,
+        style: AppTextStyles.input,
+        decoration: InputDecoration(
+          isDense: true,
+          filled: true,
+          fillColor: sem.trackMuted,
+          hintText: 'Rechercher un plat…',
+          hintStyle: AppTextStyles.inputHint,
+          prefixIcon: Icon(Icons.search_rounded,
+              size: 20, color: theme.colorScheme.onSurfaceVariant),
+          prefixIconConstraints:
+              const BoxConstraints(minWidth: 42, minHeight: 42),
+          suffixIcon: ValueListenableBuilder<TextEditingValue>(
+            valueListenable: controller,
+            builder: (_, v, __) => v.text.isEmpty
+                ? const SizedBox.shrink()
+                : IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    tooltip: 'Effacer',
+                    onPressed: () {
+                      controller.clear();
+                      onChanged('');
+                    },
+                  ),
+          ),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          // Pilule : bordure invisible au repos, teintée au focus — le champ
+          // se fond dans la barre tant qu'on ne s'en sert pas.
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(999),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(999),
+            borderSide: BorderSide(color: sem.borderSubtle),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(999),
+            borderSide: BorderSide(color: theme.colorScheme.primary, width: 2),
+          ),
+        ),
       ),
     );
   }
 }
-/// Barre de filtres par catégorie.
+/// Barre de filtres par catégorie — pilules à vignette ronde.
+///
+/// Chaque pilule porte la photo d'un plat de la catégorie, ce qui la rend
+/// identifiable sans lire. La pilule active se remplit de la couleur
+/// principale de la boutique ; les autres restent sur une surface neutre
+/// bordée, lisible en clair comme en sombre.
 class _CategoryBar extends StatelessWidget {
   final List<String> categories;
+  final Map<String, String?> thumbs;
   final String? selected;
   final ValueChanged<String?> onSelect;
 
   const _CategoryBar({
     required this.categories,
+    required this.thumbs,
     required this.selected,
     required this.onSelect,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Hauteur pilotée par le textScaler : à 200 %, une hauteur figée
+    // rognerait le libellé.
+    final h = MediaQuery.textScalerOf(context).scale(44).clamp(44.0, 76.0);
     return SizedBox(
-      height: 56,
+      height: h + 20,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
         children: [
-          _chip(context, label: 'Tout', value: null),
-          for (final c in categories) _chip(context, label: c, value: c),
+          _chip(context, label: 'Tout', value: null, height: h),
+          for (final c in categories)
+            _chip(context, label: c, value: c, height: h, thumb: thumbs[c]),
         ],
       ),
     );
   }
 
-  Widget _chip(BuildContext context,
-      {required String label, required String? value}) {
+  Widget _chip(
+    BuildContext context, {
+    required String label,
+    required String? value,
+    required double height,
+    String? thumb,
+  }) {
     final theme = Theme.of(context);
     final sem = theme.semantic;
     final sel = selected == value;
+    final radius = BorderRadius.circular(999);
+    final fg =
+        sel ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface;
+    // Vignette légèrement plus petite que la pilule → l'anneau de fond reste
+    // visible tout autour, comme sur les pastilles de la maquette.
+    final dot = height - 12;
 
     return Padding(
       padding: const EdgeInsets.only(right: 9),
       child: Material(
-        color: sel ? theme.colorScheme.primary : sem.trackMuted,
-        borderRadius: BorderRadius.circular(9),
+        color: sel ? theme.colorScheme.primary : sem.elevatedSurface,
+        borderRadius: radius,
         child: InkWell(
           onTap: () => onSelect(value),
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: radius,
           child: Container(
-            alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            height: height,
+            padding: const EdgeInsets.fromLTRB(6, 0, 18, 0),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(9),
+              borderRadius: radius,
               border: Border.all(
                   color: sel ? theme.colorScheme.primary : sem.borderSubtle),
             ),
-            child: Text(
-              label,
-              style: AppTextStyles.bodySmBold.copyWith(
-                color: sel
-                    ? theme.colorScheme.onPrimary
-                    : theme.colorScheme.onSurface,
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipOval(
+                  child: SizedBox(
+                    width: dot,
+                    height: dot,
+                    child: thumb == null || thumb.isEmpty
+                        ? ColoredBox(
+                            color: sem.trackMuted,
+                            child: Icon(
+                              value == null
+                                  ? Icons.grid_view_rounded
+                                  : Icons.restaurant_rounded,
+                              size: dot * 0.5,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          )
+                        : ProductImageCard(
+                            imageUrl: thumb,
+                            width: dot,
+                            height: dot,
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  label,
+                  style: AppTextStyles.bodySmBold.copyWith(color: fg),
+                ),
+              ],
             ),
           ),
         ),
@@ -339,78 +657,128 @@ class _MenuGrid extends StatelessWidget {
   final List<Product> products;
   final String shopId;
   final bool isAdmin;
+  final bool canDelete;
+  final bool canEdit;
   final ValueChanged<Product> onTap;
   final ValueChanged<Product> onAdd;
   final void Function(Product, bool) onToggleDispo;
   final ValueChanged<Product> onEditCount;
+  final ValueChanged<Product> onDelete;
 
   const _MenuGrid({
     required this.products,
     required this.shopId,
     required this.isAdmin,
+    required this.canDelete,
+    required this.canEdit,
     required this.onTap,
     required this.onAdd,
     required this.onToggleDispo,
     required this.onEditCount,
+    required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Bandeau de description affiché seulement si AU MOINS un plat visible en
+    // porte une : sur une carte sans descriptions, réserver deux lignes vides
+    // sous chaque nom creuserait un trou sur toute la grille.
+    final showDesc = products.any((p) {
+      final d = p.description;
+      return d != null && d.trim().isNotEmpty;
+    });
+
     return LayoutBuilder(builder: (_, c) {
-      // ~231 dp par carte (210 + 10 %) : cartes agrandies d'un dixième, donc
-      // une colonne de moins sur les largeurs limites. 2 colonnes minimum
-      // sur téléphone.
-      final cols = (c.maxWidth / 231).floor().clamp(2, 6);
+      const hPad = 16.0, gap = 14.0;
+      final inner = c.maxWidth - hPad * 2;
+      // ~231 dp par carte : 2 colonnes minimum sur téléphone.
+      final cols = (inner / 231).floor().clamp(2, 6);
+      final cardW = (inner - gap * (cols - 1)) / cols;
+
+      // Hauteur de carte CALCULÉE, pas devinée : photo à ratio fixe + bloc
+      // texte dimensionné au textScaler courant. Un `childAspectRatio` figé
+      // ferait déborder le bloc texte dès que l'utilisateur agrandit la
+      // police dans les préférences.
+      final ts = MediaQuery.textScalerOf(context);
+      final photoH = (cardW - _kPhotoInset * 2) * 0.72 + _kPhotoInset * 2;
+      final infoH = 8 // padding haut
+          + ts.scale(13) * 1.5 // nom (1 ligne)
+          + (showDesc ? 3 + ts.scale(11) * 1.35 * 2 : 0) // description
+          + 8 // respiration
+          + (ts.scale(16) * 1.35 > _kAddBtn ? ts.scale(16) * 1.35 : _kAddBtn)
+          + 10; // padding bas
+
       return GridView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
+        padding: const EdgeInsets.fromLTRB(hPad, 4, hPad, 96),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: cols,
-          mainAxisSpacing: 14,
-          crossAxisSpacing: 14,
-          // Image carrée + bloc texte de ~104 dp.
-          // Carte dominée par l'image : proportion plus proche du carré
-          // que la version photo + bloc texte.
-          childAspectRatio: 0.82,
+          mainAxisSpacing: gap,
+          crossAxisSpacing: gap,
+          childAspectRatio: cardW / (photoH + infoH),
         ),
         itemCount: products.length,
         itemBuilder: (_, i) => _DishCard(
           product: products[i],
           shopId: shopId,
           isAdmin: isAdmin,
+          canDelete: canDelete,
+          canEdit: canEdit,
+          showDescription: showDesc,
           onTap: () => onTap(products[i]),
           onAdd: () => onAdd(products[i]),
           onToggleDispo: (v) => onToggleDispo(products[i], v),
           onEditCount: () => onEditCount(products[i]),
+          onDelete: () => onDelete(products[i]),
         ),
       );
     });
   }
 }
 
-/// Carte d'un plat : la photo occupe toute la carte, les informations sont
-/// posées par-dessus sur un voile sombre plein cadre.
+/// Marge de la photo à l'intérieur de la carte (la photo est encartée, pas
+/// à fleur de bord) et diamètre du bouton rond d'ajout. Partagés entre le
+/// calcul de hauteur de la grille et le rendu de la carte — les deux DOIVENT
+/// rester d'accord, sans quoi le bloc texte déborde.
+const double _kPhotoInset = 6;
+const double _kAddBtn = 34;
+
+/// Carte d'un plat : photo encartée en haut, informations dessous sur la
+/// surface de la carte.
 ///
-/// Nom en haut centré, prix au centre, puis la ligne étoiles (gauche) /
-/// « Ajouter » (droite). Les textes sont en blanc : ils reposent sur une
-/// photo, pas sur une surface du thème — leur contraste dépend de l'image,
-/// jamais du mode clair/sombre.
+/// La photo n'est plus le fond des textes — seuls les éléments qui doivent
+/// rester collés à l'image (barre admin, étoiles, tampon « épuisé ») lui sont
+/// superposés, sur bandeau sombre. Le nom, la description et le prix sont
+/// posés sur `elevatedSurface` et suivent donc les couleurs du thème : ils
+/// restent lisibles en clair comme en sombre, quelle que soit la photo.
 class _DishCard extends StatelessWidget {
   final Product product;
   final String shopId;
   final bool isAdmin;
+  final bool canDelete;
+  final bool canEdit;
+
+  /// Réserve les deux lignes de description. Décidé au niveau de la grille
+  /// pour que toutes les cartes gardent la même hauteur de bloc texte, donc
+  /// des prix alignés d'une carte à l'autre.
+  final bool showDescription;
   final VoidCallback onTap;
   final VoidCallback onAdd;
   final ValueChanged<bool> onToggleDispo;
   final VoidCallback onEditCount;
+  final VoidCallback onDelete;
 
   const _DishCard({
     required this.product,
     required this.shopId,
     required this.isAdmin,
+    required this.canDelete,
+    required this.canEdit,
+    required this.showDescription,
     required this.onTap,
     required this.onAdd,
     required this.onToggleDispo,
     required this.onEditCount,
+    required this.onDelete,
   });
 
   @override
@@ -423,203 +791,320 @@ class _DishCard extends StatelessWidget {
     final avail = DailyMenuService.read(shopId, product.id ?? '');
     final available = avail.isAvailable;
 
+    final ts = MediaQuery.textScalerOf(context);
+    final desc = product.description?.trim() ?? '';
+
     return Material(
       color: sem.elevatedSurface,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(16),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        child: Stack(
-          fit: StackFit.expand,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            ProductImageCard(
-              imageUrl: product.mainImageUrl,
-              fillParent: true,
-              borderRadius: BorderRadius.zero,
-            ),
-            // Voile léger plein cadre : unifie la carte sans éteindre la
-            // photo. La lisibilité des textes est assurée par les bandeaux
-            // de verre dépoli ci-dessous, pas par ce voile.
-            Positioned.fill(
-              child: ColoredBox(color: Colors.black.withValues(alpha: 0.15)),
-            ),
-            // Voile RENFORCÉ quand le plat est indisponible → carte « grisée ».
-            // Placé sous le contenu : les textes/contrôles restent lisibles.
-            if (!available)
-              Positioned.fill(
-                child: ColoredBox(color: Colors.black.withValues(alpha: 0.42)),
+            // ── PHOTO ENCARTÉE ───────────────────────────────────────────
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(_kPhotoInset),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      ProductImageCard(
+                        imageUrl: product.mainImageUrl,
+                        fillParent: true,
+                        borderRadius: BorderRadius.zero,
+                      ),
+                      // Voile RENFORCÉ quand le plat est indisponible →
+                      // photo « éteinte ». Sous les contrôles, qui restent
+                      // lisibles.
+                      if (!available)
+                        Positioned.fill(
+                          child: ColoredBox(
+                              color: Colors.black.withValues(alpha: 0.45)),
+                        ),
+                      Positioned.fill(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Barre de contrôle en tête de photo : dispo du
+                            // jour (admin) et menu ⋮ (droit de suppression).
+                            // Invisible pour un serveur sans ces droits, qui
+                            // ne fait que prendre les commandes.
+                            if (isAdmin || canDelete || canEdit)
+                              _GlassPanel(
+                                padding:
+                                    const EdgeInsets.fromLTRB(6, 1, 2, 1),
+                                child: Row(
+                                  children: [
+                                    if (isAdmin) ...[
+                                      SizedBox(
+                                        height: 22,
+                                        width: 34,
+                                        child: FittedBox(
+                                          fit: BoxFit.contain,
+                                          // Couleurs pilotées par le
+                                          // switchTheme global.
+                                          child: Switch(
+                                            value: avail.enabled,
+                                            onChanged: onToggleDispo,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(avail.enabled ? 'Dispo' : 'Off',
+                                          style: AppTextStyles.micro.copyWith(
+                                              color: Colors.white,
+                                              shadows: _kTextShadow)),
+                                    ],
+                                    const Spacer(),
+                                    // Stock du jour — tap = éditer.
+                                    if (isAdmin)
+                                      InkWell(
+                                        onTap: onEditCount,
+                                        borderRadius:
+                                            BorderRadius.circular(6),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 5, vertical: 3),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(
+                                                  Icons.inventory_2_outlined,
+                                                  size: 13,
+                                                  color: Colors.white),
+                                              const SizedBox(width: 3),
+                                              Text(
+                                                avail.count == null
+                                                    ? '∞'
+                                                    : '${avail.count}',
+                                                style: AppTextStyles.microBold
+                                                    .copyWith(
+                                                        color: Colors.white,
+                                                        shadows:
+                                                            _kTextShadow),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    if (canEdit || canDelete)
+                                      _DishMenuBtn(
+                                        onEdit: canEdit ? onTap : null,
+                                        onDelete: canDelete ? onDelete : null,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            const Spacer(),
+                            // Étoiles posées en bas à gauche de la photo,
+                            // sur bandeau sombre — la note reste visible sans
+                            // manger une ligne du bloc texte.
+                            if (product.rating > 0)
+                              Align(
+                                alignment: Alignment.bottomLeft,
+                                child: _GlassPanel(
+                                  borderRadius: BorderRadius.circular(999),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 3),
+                                  child: _Stars(rating: product.rating),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      // Tampon « ÉPUISÉ / INDISPONIBLE » incliné.
+                      // `IgnorePointer` : ne bloque ni le tap carte
+                      // (édition) ni la barre admin au-dessus.
+                      if (!available)
+                        IgnorePointer(
+                          child: Center(
+                            child: Transform.rotate(
+                              angle: -0.12,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: (avail.isSoldOut
+                                          ? sem.danger
+                                          : Colors.black)
+                                      .withValues(alpha: 0.82),
+                                  borderRadius: BorderRadius.circular(7),
+                                  border: Border.all(
+                                      color: Colors.white
+                                          .withValues(alpha: 0.85),
+                                      width: 1.5),
+                                ),
+                                child: Text(
+                                  avail.isSoldOut
+                                      ? 'ÉPUISÉ'
+                                      : 'INDISPONIBLE',
+                                  style: AppTextStyles.captionBold.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 1),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
-            Positioned.fill(
+            ),
+            // ── BLOC TEXTE ───────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Barre de contrôle ADMIN (dispo du jour) : interrupteur +
-                  // stock éditable. Réservée aux admins ; invisible côté
-                  // serveur/vendeur qui ne fait que prendre les commandes.
-                  if (isAdmin)
-                    _GlassPanel(
-                      padding: const EdgeInsets.fromLTRB(6, 1, 4, 1),
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            height: 22,
-                            width: 34,
-                            child: FittedBox(
-                              fit: BoxFit.contain,
-                              // Couleurs pilotées par le switchTheme global
-                              // (thumb blanc / track primary quand actif).
-                              child: Switch(
-                                value: avail.enabled,
-                                onChanged: onToggleDispo,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Text(avail.enabled ? 'Dispo' : 'Off',
-                              style: AppTextStyles.micro.copyWith(
-                                  color: Colors.white, shadows: _kTextShadow)),
-                          const Spacer(),
-                          // Stock du jour — tap = éditer (nombre / illimité).
-                          InkWell(
-                            onTap: onEditCount,
-                            borderRadius: BorderRadius.circular(6),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 5, vertical: 3),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.inventory_2_outlined,
-                                      size: 13, color: Colors.white),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    avail.count == null
-                                        ? '∞'
-                                        : '${avail.count}',
-                                    style: AppTextStyles.microBold.copyWith(
-                                        color: Colors.white,
-                                        shadows: _kTextShadow),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
+                  Text(
+                    product.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.bodyBold,
+                  ),
+                  if (showDescription) ...[
+                    const SizedBox(height: 3),
+                    // Hauteur RÉSERVÉE à deux lignes, même quand ce plat n'a
+                    // pas de description : sans elle, les prix ne seraient
+                    // plus alignés d'une carte à l'autre.
+                    SizedBox(
+                      height: ts.scale(11) * 1.35 * 2,
+                      child: Text(
+                        desc,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.caption,
                       ),
                     ),
-                  // Nom, centré, sur un bandeau flouté. Échelon `bodyBold` =
-                  // corps par défaut : le nom suit le réglage Taille du texte.
-                  _GlassPanel(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
-                    child: Text(
-                      product.name,
-                      maxLines: 2,
-                      textAlign: TextAlign.center,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.bodyBold
-                          .copyWith(color: Colors.white, shadows: _kTextShadow),
-                    ),
-                  ),
-                  // Prix centré. Échelon `subtitle` : l'information la plus
-                  // utile de la carte. Pas de FittedBox (annulerait
-                  // l'agrandissement demandé dans les préférences).
-                  Expanded(
-                    child: Center(
-                      child: _GlassPanel(
-                        borderRadius: BorderRadius.circular(999),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 5),
-                        child: Text(
-                          CurrencyFormatter.format(product.priceSellPos),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppTextStyles.subtitle.copyWith(
-                              color: Colors.white, shadows: _kTextShadow),
-                        ),
-                      ),
-                    ),
-                  ),
-                  // Ligne du bas : étoiles à gauche, « Ajouter » à droite.
-                  _GlassPanel(
-                    padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Flexible(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerLeft,
-                            child: _Stars(rating: product.rating),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        FilledButton(
-                          // Désactivé quand le plat n'est pas disponible.
-                          onPressed: available ? onAdd : null,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: (available
-                                    ? theme.colorScheme.primary
-                                    : Colors.black)
-                                .withValues(alpha: available ? 0.7 : 0.45),
-                            foregroundColor: theme.colorScheme.onPrimary,
-                            disabledBackgroundColor:
-                                Colors.black.withValues(alpha: 0.45),
-                            disabledForegroundColor:
-                                Colors.white.withValues(alpha: 0.7),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 6),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(7)),
-                          ),
+                  ],
+                  const SizedBox(height: 8),
+                  // Prix à gauche, bouton rond d'ajout à droite.
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
                           child: Text(
-                            available ? 'Ajouter' : 'Indispo',
-                            style: AppTextStyles.label.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700),
+                            CurrencyFormatter.format(product.priceSellPos),
+                            maxLines: 1,
+                            style: AppTextStyles.subtitleBold,
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 8),
+                      _AddButton(
+                        enabled: available,
+                        onAdd: onAdd,
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            // Tampon « ÉPUISÉ / INDISPONIBLE » centré, légèrement incliné.
-            // `IgnorePointer` : ne bloque ni le tap carte (édition) ni la
-            // barre admin au-dessus.
-            if (!available)
-              IgnorePointer(
-                child: Center(
-                  child: Transform.rotate(
-                    angle: -0.12,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: (avail.isSoldOut
-                                ? sem.danger
-                                : Colors.black)
-                            .withValues(alpha: 0.82),
-                        borderRadius: BorderRadius.circular(7),
-                        border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.85),
-                            width: 1.5),
-                      ),
-                      child: Text(
-                        avail.isSoldOut ? 'ÉPUISÉ' : 'INDISPONIBLE',
-                        style: AppTextStyles.captionBold.copyWith(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Menu ⋮ posé sur la photo du plat : modifier · supprimer.
+///
+/// Même parti pris que le Plan de salle : un seul point d'entrée discret pour
+/// les actions qui touchent à la fiche, à l'écart des gestes de service (tap =
+/// ouvrir, bouton rond = ajouter au panier). Sans lui, retirer un plat
+/// obligeait à ouvrir la fiche et à la faire défiler jusqu'à son dernier
+/// bouton.
+class _DishMenuBtn extends StatelessWidget {
+  /// `null` = droit absent → l'entrée n'est pas proposée. Un menu qui montre
+  /// une option grisée invite à demander pourquoi ; un menu qui ne la montre
+  /// pas ne pose pas la question.
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+
+  const _DishMenuBtn({required this.onEdit, required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return PopupMenuButton<int>(
+      tooltip: 'Actions sur le plat',
+      padding: EdgeInsets.zero,
+      splashRadius: 16,
+      iconSize: 16,
+      constraints: const BoxConstraints(minWidth: 168),
+      icon: const Icon(Icons.more_vert_rounded,
+          size: 16, color: Colors.white, shadows: _kTextShadow),
+      onSelected: (v) => v == 0 ? onEdit?.call() : onDelete?.call(),
+      itemBuilder: (_) => [
+        if (onEdit != null)
+          const PopupMenuItem<int>(
+            value: 0,
+            height: 40,
+            child: Row(children: [
+              Icon(Icons.edit_outlined, size: 16),
+              SizedBox(width: 10),
+              Text('Modifier', style: AppTextStyles.bodySm),
+            ]),
+          ),
+        if (onDelete != null)
+          PopupMenuItem<int>(
+            value: 1,
+            height: 40,
+            child: Row(children: [
+              Icon(Icons.delete_outline_rounded, size: 16, color: sem.danger),
+              const SizedBox(width: 10),
+              Text('Supprimer',
+                  style: AppTextStyles.bodySm.copyWith(color: sem.danger)),
+            ]),
+          ),
+      ],
+    );
+  }
+}
+
+/// Bouton rond « ajouter au panier » — pastille pleine à la couleur de la
+/// boutique, éteinte sur surface neutre quand le plat n'est pas disponible.
+class _AddButton extends StatelessWidget {
+  final bool enabled;
+  final VoidCallback onAdd;
+
+  const _AddButton({required this.enabled, required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sem = theme.semantic;
+
+    return Tooltip(
+      message: enabled ? 'Ajouter au panier' : 'Plat indisponible',
+      child: Material(
+        color: enabled ? theme.colorScheme.primary : sem.trackMuted,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: enabled ? onAdd : null,
+          child: SizedBox(
+            width: _kAddBtn,
+            height: _kAddBtn,
+            child: Icon(
+              enabled
+                  ? Icons.shopping_cart_rounded
+                  : Icons.remove_shopping_cart_rounded,
+              size: _kAddBtn * 0.48,
+              color: enabled
+                  ? theme.colorScheme.onPrimary
+                  : theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
         ),
       ),
     );

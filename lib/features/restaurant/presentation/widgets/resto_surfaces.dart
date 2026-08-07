@@ -240,3 +240,110 @@ Color restoGlassInner(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
         ? Colors.white.withValues(alpha: 0.07)
         : Colors.white.withValues(alpha: 0.72);
+
+/// Décoration en RELIEF d'un panneau du tableau de bord.
+///
+/// Quatre effets qui, ensemble, donnent l'impression d'une plaque BISEAUTÉE
+/// posée sur le fond — aucun ne suffit seul :
+///
+///   1. un LISERÉ LUMINEUX sur les premiers pour cent de la hauteur : c'est le
+///      chanfrein, la tranche vive du bord supérieur. C'est lui qui fait le
+///      plus pour la sensation d'épaisseur, bien plus qu'un dégradé long ;
+///   2. un DÉGRADÉ vertical, clair en haut et nettement plus sombre en bas.
+///      Notre œil suppose une lumière venue d'en haut : une surface uniforme
+///      se lit comme un aplat quoi qu'on mette autour ;
+///   3. des ARÊTES contrastées — le haut clair, le bas sombre et plus épais,
+///      comme l'ombre propre sous une plaque ;
+///   4. TROIS OMBRES portées : une de contact, très proche et nette, qui pose
+///      la carte ; une principale, décalée, qui la soulève ; une ambiante,
+///      large et diffuse, qui l'ancre dans la scène. Une ombre unique donne
+///      un halo, jamais du volume.
+///
+/// Intensité RÉGLÉE EN DEUX TEMPS : une première version trop discrète — le
+/// fond photographique du mode restaurant mange les nuances faibles —, puis
+/// une seconde trop appuyée, où la tranche devenait un trait dessiné et où les
+/// ombres de deux cartes voisines se recouvraient. Le réglage actuel se tient
+/// entre les deux.
+///
+/// Tout se règle ici : les cartes de tout le tableau de bord suivent. Si le
+/// relief doit encore bouger, ce sont les TROIS OMBRES et le premier arrêt du
+/// dégradé qu'il faut toucher, dans cet ordre — les bordures ne font que
+/// souligner ce qu'ils ont déjà posé.
+///
+/// [radius] doit être celui de la carte, sinon l'ombre déborde des angles.
+/// [accent] teinte l'arête supérieure — un panneau peut ainsi s'annoncer par
+/// sa tranche (vert, orange ou rouge sur la carte Food cost).
+BoxDecoration restoReliefDecoration(
+  BuildContext context, {
+  double radius = 16,
+  Color? accent,
+}) {
+  final dark = Theme.of(context).brightness == Brightness.dark;
+  final base = restoGlassFill(context);
+
+  Color lighten(double a) =>
+      Color.alphaBlend(Colors.white.withValues(alpha: a), base);
+  Color darken(double a) =>
+      Color.alphaBlend(Colors.black.withValues(alpha: a), base);
+
+  return BoxDecoration(
+    borderRadius: BorderRadius.circular(radius),
+    // Le dégradé part du remplissage habituel : les cartes gardent la
+    // translucidité du mode restaurant, elles ne deviennent pas opaques.
+    //
+    // Trois arrêts, pas deux : le premier segment est très court et très
+    // clair — c'est le chanfrein. Un dégradé linéaire simple étale cette
+    // lumière sur toute la hauteur et la dilue jusqu'à l'invisible.
+    gradient: LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      stops: const [0.0, 0.10, 1.0],
+      colors: [
+        lighten(dark ? 0.16 : 0.80),
+        lighten(dark ? 0.08 : 0.62),
+        darken(dark ? 0.16 : 0.06),
+      ],
+    ),
+    border: Border(
+      // Tranche supérieure à peine épaissie : c'est le bord qu'on voit d'une
+      // plaque regardée d'un peu au-dessus, la position réelle d'un écran de
+      // salle. À 1,6 px et plein blanc, elle devenait un trait dessiné.
+      top: BorderSide(
+          color: accent ??
+              Colors.white.withValues(alpha: dark ? 0.28 : 0.80),
+          width: 1.2),
+      left: BorderSide(
+          color: Colors.white.withValues(alpha: dark ? 0.11 : 0.45)),
+      right: BorderSide(
+          color: Colors.black.withValues(alpha: dark ? 0.18 : 0.05)),
+      bottom: BorderSide(
+          color: Colors.black.withValues(alpha: dark ? 0.40 : 0.13),
+          width: 1.2),
+    ),
+    boxShadow: [
+      // Contact — proche et peu floue : elle POSE la carte. Sans elle, tout
+      // flotte. C'est la dernière qu'il faudrait retirer.
+      BoxShadow(
+        color: Colors.black.withValues(alpha: dark ? 0.30 : 0.08),
+        blurRadius: 3,
+        offset: const Offset(0, 2),
+      ),
+      // Principale — c'est elle qui donne la hauteur.
+      BoxShadow(
+        color: Colors.black.withValues(alpha: dark ? 0.38 : 0.11),
+        blurRadius: 15,
+        offset: const Offset(0, 6),
+      ),
+      // Ambiante — large et très diffuse, elle ancre la carte dans la scène
+      // au lieu de la découper au ciseau. Raccourcie : à 18 px de décalage,
+      // les ombres de deux cartes voisines se recouvraient et l'ensemble
+      // paraissait sale.
+      BoxShadow(
+        color: Colors.black.withValues(alpha: dark ? 0.20 : 0.05),
+        blurRadius: 26,
+        spreadRadius: -4,
+        offset: const Offset(0, 10),
+      ),
+    ],
+  );
+}

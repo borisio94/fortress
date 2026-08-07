@@ -38,6 +38,8 @@ import 'alerts/scheduled_alerts_banner_host.dart';
 import '../providers/scheduled_alerts_provider.dart';
 import '../providers/new_web_orders_provider.dart';
 import '../navigation/page_titles.dart';
+import '../../core/providers/nav_collapsed_provider.dart';
+import '../providers/cart_pane_provider.dart';
 import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
 
 /// Largeur minimale en logical pixels pour activer le layout desktop
@@ -46,6 +48,31 @@ import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
 /// hamburger). Critère unique = largeur de fenêtre — s'applique à toutes
 /// les plateformes (web, desktop natif, mobile).
 const double _kDesktopWidthBreakpoint = 900;
+
+/// Taille des icônes de la barre latérale RÉTRACTÉE.
+///
+/// Nettement plus grosses que les 16 dp du mode déployé, et c'est voulu : sans
+/// libellé à côté, l'icône porte à elle seule l'identité de la page. Elle ne
+/// peut pas rester à la taille d'un ornement posé devant du texte.
+///
+/// Le mode déployé, lui, garde 16 dp — il est partagé avec l'e-commerce, dont
+/// l'aspect ne doit pas bouger.
+const double _kRailIconSize = 24;
+
+/// Hauteur de la zone tappable d'une icône de la barre rétractée.
+const double _kRailTapHeight = 46;
+
+/// Largeur de la barre latérale RÉTRACTÉE : l'icône centrée dans sa zone de
+/// survol, plus 12 dp de marge de chaque côté.
+const double _kSidebarCollapsedWidth = 76;
+
+/// Écart entre les blocs du shell restaurant, et marge autour d'eux. Une seule
+/// valeur pour les deux : les blocs doivent être aussi détachés du bord de
+/// l'écran que les uns des autres, sinon le cadrage penche.
+const double _kRestoBlockGap = 10;
+
+/// Rayon des blocs du shell restaurant.
+const double _kRestoBlockRadius = 20;
 
 /// True si la fenêtre est assez large pour le layout desktop, peu importe
 /// la plateforme. Garantit qu'un Chrome desktop plein écran ou un Windows
@@ -1029,12 +1056,26 @@ class _MobileDrawerRow extends StatelessWidget {
 /// Tuile « Déconnexion » du footer sidebar desktop. Pour le drawer mobile,
 /// le bouton est inliné dans le sheet `_showOverflowSheet`.
 class _LogoutTile extends StatelessWidget {
-  const _LogoutTile();
+  final bool collapsed;
+  const _LogoutTile({this.collapsed = false});
 
   @override
   Widget build(BuildContext context) {
     final l     = context.l10n;
     final theme = Theme.of(context);
+    if (collapsed) {
+      return Tooltip(
+        message: l.navLogout,
+        child: InkWell(
+          onTap: () => _confirmLogout(context),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Icon(Icons.logout_rounded,
+                size: _kRailIconSize, color: theme.colorScheme.error),
+          ),
+        ),
+      );
+    }
     return InkWell(
       onTap: () => _confirmLogout(context),
       // Métriques calquées sur `_SidebarRow` (icône 16, gap 8, bodySm,
@@ -1117,41 +1158,105 @@ class _DesktopShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final resto = isRestaurantShop(shopId);
+
+    final sidebar = _DesktopSidebar(
+      shopId:        shopId,
+      perms:         perms,
+      selectedIndex: selectedIndex,
+    );
+    final topbar = _DesktopTopbar(
+      shopId:        shopId,
+      selectedIndex: selectedIndex,
+      extraActions:  extraActions,
+      perms:         perms,
+    );
+    // Bandeaux d'alerte — chacun se réduit à rien quand il n'a rien à dire,
+    // donc les empiler ne coûte aucune hauteur en temps normal.
+    const banners = [
+      PinLockBanner(),
+      SyncStatusBanner(),
+      SubscriptionBanner(),
+      // Banner alertes commandes programmées (sprint 2B) — cf. mobile.
+      ScheduledAlertsBannerHost(),
+      // Bannière commandes web non acquittées — alertes "nouvelle
+      // commande arrivée via lien catalogue". Persiste jusqu'au clic
+      // sur "Vu". Distincte de ScheduledAlertsBannerHost qui escalade
+      // selon la proximité de l'heure de livraison.
+      NewWebOrderBanner(),
+    ];
+
+    // ── RESTAURATION : trois blocs détachés ─────────────────────────────
+    // Barre de navigation, barre supérieure et contenu deviennent trois
+    // panneaux à coins arrondis, séparés par du vide qui laisse voir le décor.
+    // Ailleurs, les trois zones restent jointives : c'est le shell historique
+    // de l'e-commerce, et le détacher changerait l'aspect de toutes ses pages.
+    if (resto) {
+      return Scaffold(
+        // Transparent : le fond photographique est monté SOUS ce Scaffold,
+        // un fond opaque ici le masquerait entièrement.
+        backgroundColor: Colors.transparent,
+        floatingActionButton: fab,
+        body: Padding(
+          padding: const EdgeInsets.all(_kRestoBlockGap),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _RestoShellBlock(child: sidebar),
+            const SizedBox(width: _kRestoBlockGap),
+            Expanded(child: Column(children: [
+              _RestoShellBlock(child: topbar),
+              const SizedBox(height: _kRestoBlockGap),
+              ...banners,
+              Expanded(
+                child: _RestoShellBlock(fill: true, child: body),
+              ),
+            ])),
+          ]),
+        ),
+      );
+    }
+
     return Scaffold(
-      // Transparent en restauration : le fond photographique est monté SOUS ce
-      // Scaffold, un fond opaque ici le masquerait entièrement.
-      backgroundColor:
-          resto ? Colors.transparent : theme.scaffoldBackgroundColor,
+      backgroundColor: theme.scaffoldBackgroundColor,
       floatingActionButton: fab,
       body: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _DesktopSidebar(
-          shopId:        shopId,
-          perms:         perms,
-          selectedIndex: selectedIndex,
-        ),
+        sidebar,
         Expanded(child: Column(children: [
-          _DesktopTopbar(
-            shopId:        shopId,
-            selectedIndex: selectedIndex,
-            extraActions:  extraActions,
-            perms:         perms,
-          ),
-          const PinLockBanner(),
-          const SyncStatusBanner(),
-          const SubscriptionBanner(),
-          // Banner alertes commandes programmées (sprint 2B) — cf. mobile.
-          const ScheduledAlertsBannerHost(),
-        // Bannière commandes web non acquittées — alertes "nouvelle
-        // commande arrivée via lien catalogue". Persiste jusqu'au clic
-        // sur "Vu". Distincte de ScheduledAlertsBannerHost qui escalade
-        // selon la proximité de l'heure de livraison.
-        const NewWebOrderBanner(),
+          topbar,
+          ...banners,
           // StockNavChips supprimés round 13 — doublon avec la sidebar
           // (Inventaire → Produits / Emplacements / Incidents). La nav
           // passe uniquement par la sidebar pour éviter la redondance.
           Expanded(child: body),
         ])),
       ]),
+    );
+  }
+}
+
+/// Panneau du shell restaurant : coins arrondis, et un fond quand le contenu
+/// n'en peint pas lui-même.
+///
+/// La barre de navigation et la barre supérieure portent déjà leur teinte
+/// (`restoChromeFill`) — les envelopper d'un second fond les rendrait plus
+/// opaques que voulu. Le contenu, lui, est transparent : sans `fill`, la photo
+/// de salle passerait à travers la grille des plats.
+class _RestoShellBlock extends StatelessWidget {
+  final Widget child;
+  final bool fill;
+
+  const _RestoShellBlock({required this.child, this.fill = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(_kRestoBlockRadius);
+    final clipped = ClipRRect(borderRadius: radius, child: child);
+    if (!fill) return clipped;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: restoGlassFill(context),
+        borderRadius: radius,
+        border: Border.all(color: restoGlassBorder(context)),
+      ),
+      child: clipped,
     );
   }
 }
@@ -1201,12 +1306,25 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
     }
   }
 
+  /// Bascule rétracté / déployé. Le choix est PERSISTÉ : sur web la page est
+  /// rechargée à chaque déploiement, un état en mémoire seule obligerait à
+  /// re-rétracter la barre plusieurs fois par jour.
+  void _toggleCollapsed() {
+    final resto = isRestaurantShop(widget.shopId);
+    final current =
+        navCollapsedFor(ref.read(navCollapsedProvider), isRestaurant: resto);
+    ref.read(navCollapsedProvider.notifier).set(!current);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l       = context.l10n;
     final theme   = Theme.of(context);
     final palette = ref.watch(themePaletteProvider);
     final shop    = ref.watch(currentShopProvider);
+    final resto   = isRestaurantShop(widget.shopId);
+    final collapsed = navCollapsedFor(ref.watch(navCollapsedProvider),
+        isRestaurant: resto);
     final items   = shellAllItems(widget.perms,
         sector: shopSector(widget.shopId));
     final loc     = GoRouterState.of(context).matchedLocation;
@@ -1242,6 +1360,7 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
           expanded: _expanded.contains(kShellNavItems.indexOf(item)),
           currentLocation: loc,
           palette:  palette,
+          collapsed: collapsed,
           onToggle: () => setState(() {
             final idx = kShellNavItems.indexOf(item);
             _expanded.contains(idx)
@@ -1255,53 +1374,96 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
         shopId:   widget.shopId,
         selected: _isActive(item),
         palette:  palette,
+        collapsed: collapsed,
       );
     }
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
       // Largeur sidebar desktop : 190 → 247 (+30%) pour libellés longs
       // (« Bénéfice net », « Campagnes marketing »…) sans troncature.
-      width: 247,
+      // Rétractée : 68 dp, juste la place d'une icône centrée et de son halo
+      // de survol.
+      width: collapsed ? _kSidebarCollapsedWidth : 247,
       decoration: BoxDecoration(
         color: navBg,
-        border: Border(
-            right: BorderSide(color: navDivider, width: 0.5)),
+        // Le liseré droit ne sert qu'à séparer la barre du contenu quand les
+        // deux se touchent. En restauration ils sont désormais deux blocs
+        // détachés à coins arrondis : le liseré y dessinerait un trait qui
+        // dépasse de l'arrondi.
+        border: resto
+            ? null
+            : Border(right: BorderSide(color: navDivider, width: 0.5)),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        // ── Header : avatar boutique (logo, fallback Fortress) + nom
-        //            + sous-titre Fortress + actions Nouvelle/Changer
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 16, 12, 12),
+      // Pendant l'animation de largeur, la contrainte passe par toutes les
+      // valeurs entre 68 et 247. `OverflowBox` force le contenu à se mettre en
+      // page à sa largeur CIBLE tout du long, et `ClipRect` coupe ce qui
+      // dépasse : sans les deux, le bandeau boutique et les libellés se
+      // feraient comprimer image par image et Flutter signalerait un
+      // débordement à chacune.
+      child: ClipRect(
+        child: OverflowBox(
+          alignment: Alignment.topLeft,
+          minWidth: collapsed ? _kSidebarCollapsedWidth : 247,
+          maxWidth: collapsed ? _kSidebarCollapsedWidth : 247,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(children: [
-                ShopLogoAvatar(logoUrl: shop?.logoUrl, size: 36),
-                const SizedBox(width: 10),
-                Expanded(child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(shop?.name ?? l.hubBrand,
-                        maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.bodyBold.copyWith(
-                            color: theme.colorScheme.onSurface)),
-                    Text(l.hubBrand,
-                        maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.micro.copyWith(
-                            letterSpacing: 0.6,
-                            color: theme.colorScheme.onSurface
-                                .withValues(alpha: 0.5))),
-                  ],
-                )),
-              ]),
-              const SizedBox(height: 10),
-              _DrawerShopActions(
-                onSwitch: () => context.go(RouteNames.shopSelector),
+        // ── Header : avatar boutique (logo, fallback Fortress) + nom
+        //            + sous-titre Fortress + actions Nouvelle/Changer
+        if (collapsed)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(0, 14, 0, 10),
+            child: Column(children: [
+              // L'avatar devient l'accès « changer de boutique » : les deux
+              // boutons du bloc actions ne tiennent pas dans 68 dp.
+              Tooltip(
+                message: shop?.name ?? l.hubBrand,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: () => context.go(RouteNames.shopSelector),
+                  child: ShopLogoAvatar(logoUrl: shop?.logoUrl, size: 34),
+                ),
               ),
-            ],
+              const SizedBox(height: 8),
+              _NavCollapseBtn(collapsed: true, onTap: _toggleCollapsed),
+            ]),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 16, 12, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(children: [
+                  ShopLogoAvatar(logoUrl: shop?.logoUrl, size: 36),
+                  const SizedBox(width: 10),
+                  Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(shop?.name ?? l.hubBrand,
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.bodyBold.copyWith(
+                              color: theme.colorScheme.onSurface)),
+                      Text(l.hubBrand,
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.micro.copyWith(
+                              letterSpacing: 0.6,
+                              color: theme.colorScheme.onSurface
+                                  .withValues(alpha: 0.5))),
+                    ],
+                  )),
+                  _NavCollapseBtn(collapsed: false, onTap: _toggleCollapsed),
+                ]),
+                const SizedBox(height: 10),
+                _DrawerShopActions(
+                  onSwitch: () => context.go(RouteNames.shopSelector),
+                ),
+              ],
+            ),
           ),
-        ),
         Divider(height: 1, color: navDivider),
         // ── Items groupés (G1 · G2 · G3, séparés par dividers) ───────
         Expanded(child: ListView(
@@ -1311,8 +1473,8 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
               for (final item in groups[gi]) buildNavItem(item),
               if (gi < groups.length - 1)
                 Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: EdgeInsets.symmetric(
+                      horizontal: collapsed ? 16 : 12, vertical: 6),
                   child: Divider(height: 0.5, color: navDivider),
                 ),
             ],
@@ -1321,9 +1483,14 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
         // ── Footer : Paramètres · Abonnement (owner) · Déconnexion ────
         Divider(height: 1, color: navDivider),
         for (final item in footerItems) buildNavItem(item),
-        if (widget.perms.isOwner) const _SubscriptionTile(),
-        const _LogoutTile(),
-      ]),
+        // Carte d'abonnement masquée en rétracté : c'est un bloc à deux lignes
+        // de texte, illisible dans 68 dp. Elle revient au déploiement, et
+        // reste atteignable par Paramètres.
+        if (widget.perms.isOwner && !collapsed) const _SubscriptionTile(),
+        _LogoutTile(collapsed: collapsed),
+          ]),
+        ),
+      ),
     );
   }
 
@@ -1339,12 +1506,14 @@ class _SidebarLeafTile extends StatelessWidget {
   final String        shopId;
   final bool          selected;
   final ThemePalette  palette;
+  final bool          collapsed;
 
   const _SidebarLeafTile({
     required this.item,
     required this.shopId,
     required this.selected,
     required this.palette,
+    this.collapsed = false,
   });
 
   @override
@@ -1356,8 +1525,40 @@ class _SidebarLeafTile extends StatelessWidget {
       selected:    selected,
       palette:     palette,
       indent:      0,
+      collapsed:   collapsed,
       onTap:       selected ? null : () => context.go(item.route(shopId)),
       badgeCount:  item.badge?.call(shopId) ?? 0,
+    );
+  }
+}
+
+/// Bouton de bascule rétracté / déployé de la barre de navigation.
+class _NavCollapseBtn extends StatelessWidget {
+  final bool collapsed;
+  final VoidCallback onTap;
+
+  const _NavCollapseBtn({required this.collapsed, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55);
+    return Tooltip(
+      message: collapsed ? 'Déployer le menu' : 'Réduire le menu',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(
+              collapsed
+                  ? Icons.keyboard_double_arrow_right_rounded
+                  : Icons.keyboard_double_arrow_left_rounded,
+              // Rétracté, il est seul dans la colonne d'icônes et doit s'y
+              // accorder ; déployé, il n'est qu'un ornement en bout de ligne.
+              size: collapsed ? 20 : 18,
+              color: fg),
+        ),
+      ),
     );
   }
 }
@@ -1371,6 +1572,7 @@ class _SidebarGroup extends StatelessWidget {
   final bool          expanded;
   final String        currentLocation;
   final ThemePalette  palette;
+  final bool          collapsed;
   final VoidCallback  onToggle;
 
   const _SidebarGroup({
@@ -1382,6 +1584,7 @@ class _SidebarGroup extends StatelessWidget {
     required this.currentLocation,
     required this.palette,
     required this.onToggle,
+    this.collapsed = false,
   });
 
   @override
@@ -1391,6 +1594,65 @@ class _SidebarGroup extends StatelessWidget {
         tabQuery: GoRouterState.of(context).uri.queryParameters['tab']);
     // Filtrés par secteur : « Menu » n'a pas de sous-items en restauration.
     final visibleChildren = parent.childrenFor(shopSector(shopId));
+
+    // RÉTRACTÉ — les enfants ne peuvent pas se déplier sous l'icône : dans
+    // 68 dp ils seraient une colonne d'icônes anonymes, impossible de savoir
+    // à quel parent elles appartiennent. Ils sortent donc en menu contextuel,
+    // titré par le nom du parent.
+    if (collapsed) {
+      return PopupMenuButton<int>(
+        // Vide = PAS d'infobulle propre : `_SidebarRow` en pose déjà une avec
+        // le même libellé, et les deux se seraient superposées.
+        tooltip: '',
+        position: PopupMenuPosition.under,
+        onSelected: (i) => context.go(visibleChildren[i].route(shopId)),
+        itemBuilder: (_) => [
+          PopupMenuItem<int>(
+            enabled: false,
+            height: 32,
+            child: Text(parent.label(l), style: AppTextStyles.captionBold),
+          ),
+          for (var i = 0; i < visibleChildren.length; i++)
+            PopupMenuItem<int>(
+              value: i,
+              height: 40,
+              child: Row(children: [
+                Icon(
+                    i == activeChild
+                        ? visibleChildren[i].iconSelected
+                        : visibleChildren[i].icon,
+                    size: 16,
+                    color: i == activeChild
+                        ? Theme.of(context).colorScheme.primary
+                        : null),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(visibleChildren[i].label(l),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySm.copyWith(
+                          fontWeight: i == activeChild
+                              ? FontWeight.w700
+                              : FontWeight.w500)),
+                ),
+              ]),
+            ),
+        ],
+        // `onTap: null` : c'est le PopupMenuButton parent qui reçoit le tap,
+        // la ligne n'est ici qu'un habillage.
+        child: _SidebarRow(
+          icon:       active ? parent.iconSelected : parent.icon,
+          label:      parent.label(l),
+          selected:   active,
+          palette:    palette,
+          indent:     0,
+          collapsed:  true,
+          onTap:      null,
+          badgeCount: parent.badge?.call(shopId) ?? 0,
+        ),
+      );
+    }
+
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       _SidebarRow(
         icon:        active ? parent.iconSelected : parent.icon,
@@ -1440,6 +1702,9 @@ class _SidebarRow extends StatelessWidget {
   final VoidCallback?  onTap;
   final int            badgeCount;
   final Widget?        trailing;
+  /// Rendu icône seule : le libellé passe en infobulle, le compteur devient
+  /// une pastille posée sur le coin de l'icône.
+  final bool           collapsed;
 
   const _SidebarRow({
     required this.icon,
@@ -1450,6 +1715,7 @@ class _SidebarRow extends StatelessWidget {
     required this.onTap,
     required this.badgeCount,
     this.trailing,
+    this.collapsed = false,
   });
 
   @override
@@ -1469,6 +1735,60 @@ class _SidebarRow extends StatelessWidget {
     // la couleur d'accent + gras du texte/icône (cf. `fg`). Le fond reste
     // transparent dans tous les états.
     const bg = Colors.transparent;
+    // ── RÉTRACTÉ : icône centrée, libellé en infobulle ────────────────
+    // L'icône ACTIVE prend un fond teinté : sans libellé, la seule couleur du
+    // glyphe ne suffisait plus à repérer la page courante d'un coup d'œil.
+    if (collapsed) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        child: Tooltip(
+          message: label,
+          waitDuration: const Duration(milliseconds: 350),
+          child: Material(
+            color: selected ? accent.withValues(alpha: 0.14) : bg,
+            borderRadius: BorderRadius.circular(10),
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(10),
+              hoverColor: isDark
+                  ? Colors.white.withValues(alpha: 0.05)
+                  : accent.withValues(alpha: 0.05),
+              child: SizedBox(
+                height: _kRailTapHeight,
+                child: Stack(
+                  alignment: Alignment.center,
+                  clipBehavior: Clip.none,
+                  children: [
+                    Icon(icon, size: _kRailIconSize, color: fg),
+                    if (badgeCount > 0)
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.error,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          constraints: const BoxConstraints(minWidth: 14),
+                          child: Text(
+                              badgeCount > 99 ? '99+' : '$badgeCount',
+                              textAlign: TextAlign.center,
+                              style: AppTextStyles.micro.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: theme.colorScheme.onError)),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     // Pill : container arrondi (radius 8) + padding 8×10, gap 8, icône 16,
     // label bodySm. Actif = bg accent 12 % ; hover = accent 5 %. Identique
     // au drawer mobile (cohérence sidebar/drawer).
@@ -1552,9 +1872,15 @@ class _DesktopTopbar extends StatelessWidget {
         color: isRestaurantShop(shopId)
             ? restoChromeFill(context)
             : theme.colorScheme.surface,
-        border: Border(
-            bottom: BorderSide(
-                color: theme.colorScheme.onSurface.withValues(alpha:0.08))),
+        // Le liseré du bas sépare la barre du contenu quand les deux se
+        // touchent. En restauration ils sont deux blocs détachés : le liseré
+        // y couperait le bord arrondi d'un trait droit.
+        border: isRestaurantShop(shopId)
+            ? null
+            : Border(
+                bottom: BorderSide(
+                    color:
+                        theme.colorScheme.onSurface.withValues(alpha: 0.08))),
       ),
       padding: const EdgeInsets.fromLTRB(8, 8, 12, 8),
       child: Row(children: [
@@ -1571,19 +1897,18 @@ class _DesktopTopbar extends StatelessWidget {
         else
           const SizedBox(width: 12),
         // ── Variante RESTAURANT sur page racine ────────────────────────
-        // Salutation + recherche, comme une console de restaurant. Limitée
-        // aux pages racine : sur une sous-page, le fil d'ariane et le retour
-        // priment sur l'accueil. L'e-commerce garde le fil d'ariane partout.
+        // Salutation seule. Limitée aux pages racine : sur une sous-page, le
+        // fil d'ariane et le retour priment sur l'accueil. L'e-commerce garde
+        // le fil d'ariane partout.
+        //
+        // La RECHERCHE a été retirée de cette barre (2026-08-07) : elle ne
+        // cherchait que des PLATS, et s'affichait pourtant sur Commandes, sur
+        // le Plan de salle et sur Finances, où elle n'avait rien à trouver.
+        // Sur Commandes, elle surmontait même une seconde barre — celle des
+        // commandes — et c'est la mauvaise qu'on visait. Le Menu a la sienne,
+        // à l'endroit où elle sert.
         if (isRestaurantShop(shopId) && !isSubPage) ...[
           const Flexible(child: RestoGreeting()),
-          const SizedBox(width: 20),
-          Flexible(
-            flex: 2,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: RestoSearchField(shopId: shopId),
-            ),
-          ),
           const SizedBox(width: 12),
         ] else ...[
           // Breadcrumb FORTRESS › <module>
@@ -1658,6 +1983,25 @@ class _CartBadgeBtn extends ConsumerWidget {
   /// le rendu du `CartWidget` dans CaissePage (mode e-commerce active des
   /// champs livraison/expédition supplémentaires).
   void _openCart(BuildContext context, WidgetRef ref) {
+    // ── RESTAURATION : le panier est un VOLET, plus une feuille modale ──
+    // La page Menu affiche le panier à demeure sur sa droite. Ouvrir en plus
+    // une feuille par-dessus revenait à empiler un second panier sur le
+    // premier, déjà visible. Le bouton pilote donc ce volet :
+    //   * on est sur le Menu  → il le replie / le redéploie ;
+    //   * on est ailleurs     → il ramène au Menu, volet ouvert, puisque
+    //                           c'est le seul écran qui le porte.
+    if (isRestaurantShop(shopId)) {
+      final menuRoute = '/shop/$shopId/inventaire';
+      final onMenu = GoRouterState.of(context).matchedLocation == menuRoute;
+      final pane = ref.read(cartPaneVisibleProvider.notifier);
+      if (onMenu) {
+        pane.toggle();
+      } else {
+        pane.show();
+        context.go(menuRoute);
+      }
+      return;
+    }
     // DÉTERMINISTE par `shopId` (pas la boutique « courante » du provider qui
     // peut être null/différente à l'ouverture) → évite le bug critique où le
     // panier affichait « Encaisser » (vente immédiate, décrément stock) au lieu
@@ -1678,18 +2022,14 @@ class _CartBadgeBtn extends ConsumerWidget {
     }
     final theme    = Theme.of(context);
     final bloc     = context.read<CaisseBloc>();
-    // En restauration, la feuille elle-même doit être transparente : le panier
-    // a un fond translucide, mais il reposait jusqu'ici sur la surface PLEINE
-    // de la feuille modale, qui masquait entièrement le décor.
-    final resto = isRestaurantShop(shopId);
+    // À partir d'ici, la boutique n'est JAMAIS un restaurant : la branche du
+    // haut est sortie avant. Le traitement particulier qu'avait la feuille en
+    // restauration (fond transparent, voile allégé pour laisser voir le décor)
+    // a donc été retiré — il ne pouvait plus s'appliquer.
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor:
-          resto ? Colors.transparent : theme.colorScheme.surface,
-      // Voile de la modale allégé : à 0,54 (défaut Material) la salle derrière
-      // était écrasée, et rendre le panier translucide n'aurait rien donné.
-      barrierColor: resto ? Colors.black.withValues(alpha: 0.30) : null,
+      backgroundColor: theme.colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (sheetCtx) => BlocProvider.value(
@@ -1716,7 +2056,20 @@ class _CartBadgeBtn extends ConsumerWidget {
             builder: (_, __) => ClipRRect(
               borderRadius:
                   const BorderRadius.vertical(top: Radius.circular(20)),
-              child: CartWidget(shopId: shopId, isEcommerce: isEcom),
+              child: CartWidget(
+                shopId: shopId,
+                isEcommerce: isEcom,
+                // Commande de restaurant créée : elle ne passe pas par
+                // `SaveOrder`, donc `orderSaved` reste faux et le listener
+                // ci-dessus ne se déclenche pas. Sans ce rappel, l'opérateur
+                // resterait devant un panier vidé, sans savoir si sa commande
+                // est partie.
+                onOrderPlaced: () {
+                  if (Navigator.of(sheetCtx).canPop()) {
+                    Navigator.of(sheetCtx).pop();
+                  }
+                },
+              ),
             ),
           ),
         ),
@@ -1842,6 +2195,7 @@ class _NotificationsSheet extends StatelessWidget {
       case NotifKind.orderCompleted:  return Icons.task_alt_rounded;
       case NotifKind.orderCancelled:  return Icons.cancel_outlined;
       case NotifKind.orderRejected:   return Icons.block_rounded;
+      case NotifKind.kitchenReady:    return Icons.room_service_rounded;
       case NotifKind.ticketNew:       return Icons.forum_rounded;
       case NotifKind.ticketEscalated: return Icons.upgrade_rounded;
       case NotifKind.ticketReply:     return Icons.reply_rounded;
@@ -1858,6 +2212,7 @@ class _NotificationsSheet extends StatelessWidget {
       case NotifKind.orderCompleted:  return sem.success;
       case NotifKind.orderCancelled:  return sem.warning;
       case NotifKind.orderRejected:   return theme.colorScheme.error;
+      case NotifKind.kitchenReady:    return sem.warning;
       case NotifKind.ticketNew:       return sem.info;
       case NotifKind.ticketEscalated: return sem.warning;
       case NotifKind.ticketReply:     return theme.colorScheme.primary;
