@@ -338,7 +338,8 @@
       "Bash(sed -i \"/import '..\\\\/..\\\\/features\\\\/restaurant\\\\/presentation\\\\/pages\\\\/restaurant_service_page.dart';/d\" lib/core/router/app_router.dart)",
       "Bash(rm lib/features/restaurant/presentation/pages/restaurant_service_page.dart)",
       "Bash(firebase help *)",
-      "Bash(awk 'NR>=735 && NR<=830' lib/features/caisse/data/repositories/sale_local_datasource.dart)"
+      "Bash(awk 'NR>=735 && NR<=830' lib/features/caisse/data/repositories/sale_local_datasource.dart)",
+      "Bash(existin)"
     ]
   }
 }

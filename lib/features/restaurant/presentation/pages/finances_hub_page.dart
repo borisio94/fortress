@@ -246,14 +246,25 @@ class _IngredientsTabState extends _TabState<_IngredientsTab> {
           busy: _backfilling,
           onRun: _backfill,
         ),
-        headerButton('Ingrédient', () => _edit(null)),
+        // PAS de bouton « + Ingrédient » ici, à dessein.
+        //
+        // Un ingrédient ne s'invente pas : il existe parce qu'un plat le
+        // contient. Le créer depuis cet écran produisait des ingrédients
+        // orphelins, rattachés à aucune recette et souvent sans montant —
+        // exactement ceux qui minorent le coût matières sans qu'on le voie.
+        // La création vit désormais dans la fiche du plat, au moment où l'on
+        // sait à quoi l'ingrédient sert. Cet onglet garde ce qui lui revient :
+        // réapprovisionner, corriger, supprimer.
+        const SizedBox(height: 4),
         Expanded(
           child: items.isEmpty
               ? const RestoEmptyState(
                   icon: Icons.eco_outlined,
                   title: 'Aucun ingrédient',
                   subtitle:
-                      'Créez vos ingrédients pour les utiliser dans les recettes.',
+                      'Les ingrédients se créent depuis la fiche d\'un plat, '
+                      'au moment de composer sa recette. Ils apparaîtront ici '
+                      'pour être réapprovisionnés et suivis.',
                 )
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
@@ -326,7 +337,8 @@ class _IngredientsTabState extends _TabState<_IngredientsTab> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _edit(Ingredient? ing) async {
+  /// MODIFICATION seulement — la création est passée dans la fiche du plat.
+  Future<void> _edit(Ingredient ing) async {
     await showAdaptiveFormSheet<bool>(
       context: context,
       builder: (_) => _IngredientEditor(shopId: widget.shopId, existing: ing),
@@ -455,20 +467,26 @@ class _IngredientRow extends StatelessWidget {
 }
 
 /// Éditeur ingrédient (création / modification / suppression).
+/// MODIFICATION d'un ingrédient existant — cet éditeur ne crée plus rien.
+///
+/// La création est passée dans la fiche du plat : un ingrédient existe parce
+/// qu'une recette le contient. Le créer hors de ce contexte produisait des
+/// ingrédients orphelins, rattachés à aucun plat et souvent sans montant —
+/// exactement ceux qui minorent le coût matières sans qu'on le voie.
 class _IngredientEditor extends StatefulWidget {
   final String shopId;
-  final Ingredient? existing;
-  const _IngredientEditor({required this.shopId, this.existing});
+  final Ingredient existing;
+  const _IngredientEditor({required this.shopId, required this.existing});
   @override
   State<_IngredientEditor> createState() => _IngredientEditorState();
 }
 
 class _IngredientEditorState extends State<_IngredientEditor> {
-  late final _name = TextEditingController(text: widget.existing?.name ?? '');
+  late final _name = TextEditingController(text: widget.existing.name);
 
   /// Quantité achetée — c'est aussi le stock de l'ingrédient.
   late final _qty = TextEditingController(
-      text: widget.existing == null ? '' : _fmt(widget.existing!.quantity));
+      text: _fmt(widget.existing.quantity));
 
   /// PRIX TOTAL payé pour [_qty] (pas le prix unitaire) : on saisit ce qui est
   /// écrit sur le reçu, l'app en dérive le coût unitaire.
@@ -477,9 +495,7 @@ class _IngredientEditorState extends State<_IngredientEditor> {
   /// quantité affichée, de sorte que rouvrir puis enregistrer sans rien changer
   /// retombe sur le même coût unitaire, au franc près.
   late final _price = TextEditingController(
-      text: widget.existing == null
-          ? ''
-          : '${_initialPrice(widget.existing!)}');
+      text: '${_initialPrice(widget.existing)}');
 
   /// Total à afficher pour un ingrédient existant.
   ///
@@ -496,8 +512,8 @@ class _IngredientEditorState extends State<_IngredientEditor> {
   /// « non précisée » par défaut à la CRÉATION : forcer « kg » étiquetait au
   /// kilo des ingrédients qu'on n'avait jamais pesés, et ce faux
   /// conditionnement se retrouvait ensuite sur chaque ligne de la liste.
-  late String _unit = widget.existing?.unit.trim().isNotEmpty == true
-      ? widget.existing!.unit.trim()
+  late String _unit = widget.existing.unit.trim().isNotEmpty
+      ? widget.existing.unit.trim()
       : _kUnitUnknown;
 
   /// Unité réellement enregistrée : la sentinelle redevient une chaîne vide.
@@ -511,10 +527,9 @@ class _IngredientEditorState extends State<_IngredientEditor> {
   /// Date d'achat — informative. Pré-remplie à aujourd'hui pour une création :
   /// on saisit un ingrédient le jour où on l'achète.
   late DateTime? _purchase =
-      widget.existing == null ? DateTime.now() : widget.existing!.purchaseDate;
+      widget.existing.purchaseDate;
 
   String? _err;
-  bool get _isEdit => widget.existing != null;
 
   double get _qtyValue =>
       double.tryParse(_qty.text.trim().replaceAll(',', '.')) ?? 0;
@@ -544,88 +559,25 @@ class _IngredientEditorState extends State<_IngredientEditor> {
       return;
     }
     // MONTANT ABSENT À LA CRÉATION — on demande confirmation, on ne bloque pas.
+    // `alertThreshold` n'est PAS passé : le seuil d'alerte n'est plus dans ce
+    // formulaire, et copyWith le préserve. Le repasser à 0 ici effacerait en
+    // silence les seuils déjà configurés.
     //
-    // Interdire empêcherait de saisir sa carte un dimanche sans ses factures.
-    // Mais laisser passer en silence est le défaut le plus coûteux du module :
-    // un ingrédient sans dépense ne pèse RIEN dans la répartition, donc les
-    // plats qui le contiennent affichent une marge flatteuse — et personne ne
-    // remarque un chiffre qui fait plaisir. On le dit donc au moment où c'est
-    // encore réparable.
-    if (!_isEdit && !_recordsPurchase) {
-      final ok = await AppConfirmDialog.show(
-        context: context,
-        icon: Icons.report_problem_outlined,
-        iconColor: Theme.of(context).semantic.warning,
-        title: 'Enregistrer sans montant ?',
-        body: const Text(
-            'Sans quantité ET montant payé, aucune dépense n\'est rattachée à '
-            'cet ingrédient. Les plats qui le contiennent seront chiffrés '
-            'comme s\'il était gratuit, et leur marge paraîtra meilleure '
-            'qu\'elle ne l\'est.\n\n'
-            'Vous pourrez le régulariser plus tard via Réception.'),
-        cancelLabel: 'Compléter',
-        confirmLabel: 'Enregistrer quand même',
-        onConfirm: () {},
-      );
-      if (ok != true || !mounted) return;
-    }
-
-    if (_isEdit) {
-      // `alertThreshold` n'est PAS passé : le seuil d'alerte n'est plus dans ce
-      // formulaire, et copyWith le préserve. Le repasser à 0 ici effacerait en
-      // silence les seuils déjà configurés.
-      await IngredientService.update(widget.existing!.copyWith(
-          name: name,
-          unit: _unitValue,
-          costPerUnit: _derivedUnitCost,
-          quantity: _qtyValue,
-          purchaseDate: _purchase,
-          // Date effacée par l'utilisateur : `null` seul voudrait dire
-          // « inchangée », il faut le dire explicitement.
-          clearPurchaseDate: _purchase == null));
-    } else {
-      final ing = await IngredientService.create(
-          shopId: widget.shopId,
-          name: name,
-          unit: _unitValue,
-          costPerUnit: _derivedUnitCost,
-          quantity: _qtyValue,
-          purchaseDate: _purchase);
-
-      // CRÉER un ingrédient avec un prix payé, C'EST UN ACHAT — la dépense
-      // correspondante est écrite et rattachée à l'ingrédient.
-      //
-      // Sans elle, le formulaire demandait « le montant du reçu » et n'en
-      // faisait rien : l'ingrédient affichait un prix au kilo, mais aucun
-      // franc n'était imputé aux plats qui le contiennent, qui restaient donc
-      // à 0 F de coût matières.
-      //
-      // UNIQUEMENT à la création. Une modification est une CORRECTION, pas un
-      // achat : y écrire une dépense gonflerait les charges à chaque passage
-      // dans le formulaire (cf. la branche `_isEdit` ci-dessus).
-      if (_recordsPurchase) {
-        await DailyExpenseService.record(
-          shopId: widget.shopId,
-          description: _qtyValue > 0
-              ? '$name — ${_fmt(_qtyValue)} $_unitValue'.trim()
-              : name,
-          amount: _priceValue,
-          kind: ExpenseKind.achatMarche,
-          ingredientId: ing.id,
-          date: _purchase,
-        );
-      }
-    }
+    // AUCUNE DÉPENSE n'est écrite ici. Une modification est une CORRECTION,
+    // pas un achat : y écrire une dépense gonflerait les charges à chaque
+    // passage dans le formulaire. Pour enregistrer un vrai achat, c'est
+    // « Réception » — ou la création, qui vit désormais dans la fiche du plat.
+    await IngredientService.update(widget.existing.copyWith(
+        name: name,
+        unit: _unitValue,
+        costPerUnit: _derivedUnitCost,
+        quantity: _qtyValue,
+        purchaseDate: _purchase,
+        // Date effacée par l'utilisateur : `null` seul voudrait dire
+        // « inchangée », il faut le dire explicitement.
+        clearPurchaseDate: _purchase == null));
     if (mounted) Navigator.of(context).pop(true);
   }
-
-  /// L'enregistrement va-t-il produire une dépense ?
-  ///
-  /// Il faut les DEUX : un montant (sinon il n'y a rien à dépenser) et une
-  /// quantité (sinon on déclare un achat sans marchandise, et le stock reste à
-  /// zéro alors que l'argent est sorti).
-  bool get _recordsPurchase =>
-      !_isEdit && _priceValue > 0 && _qtyValue > 0;
 
   Future<void> _pickPurchaseDate() async {
     final d = await showDatePicker(
@@ -643,14 +595,14 @@ class _IngredientEditorState extends State<_IngredientEditor> {
       icon: Icons.delete_outline_rounded,
       iconColor: Theme.of(context).semantic.danger,
       title: 'Supprimer cet ingrédient ?',
-      body: Text('« ${widget.existing!.name} » sera retiré. Les recettes qui '
+      body: Text('« ${widget.existing.name} » sera retiré. Les recettes qui '
           'l\'utilisent afficheront « ingrédient supprimé ».'),
       cancelLabel: 'Annuler',
       confirmLabel: 'Supprimer',
       onConfirm: () {},
     );
     if (ok != true || !mounted) return;
-    await IngredientService.delete(widget.existing!.id, widget.shopId);
+    await IngredientService.delete(widget.existing.id, widget.shopId);
     if (mounted) Navigator.of(context).pop(true);
   }
 
@@ -658,7 +610,7 @@ class _IngredientEditorState extends State<_IngredientEditor> {
   Widget build(BuildContext context) {
     final sem = Theme.of(context).semantic;
     return AdaptiveFormFrame(
-      title: _isEdit ? 'Modifier l\'ingrédient' : 'Nouvel ingrédient',
+      title: 'Modifier l\'ingrédient',
       icon: Icons.eco_outlined,
       body: Padding(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
@@ -668,7 +620,7 @@ class _IngredientEditorState extends State<_IngredientEditor> {
           children: [
             TextField(
                 controller: _name,
-                autofocus: !_isEdit,
+                autofocus: false,
                 textCapitalization: TextCapitalization.sentences,
                 decoration: const InputDecoration(labelText: 'Nom')),
             const SizedBox(height: 10),
@@ -730,12 +682,10 @@ class _IngredientEditorState extends State<_IngredientEditor> {
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               onChanged: (_) => setState(() {}),
-              decoration: InputDecoration(
-                labelText:
-                    _isEdit ? 'Valeur du stock (F)' : 'Montant payé (F)',
-                helperText: _isEdit
-                    ? 'Sert à valoriser la réserve — aucune dépense créée'
-                    : 'Le montant du reçu, pour toute la quantité',
+              decoration: const InputDecoration(
+                labelText: 'Valeur du stock (F)',
+                helperText:
+                    'Sert à valoriser la réserve — aucune dépense créée',
               ),
             ),
             if (_priceValue > 0) ...[
@@ -750,24 +700,14 @@ class _IngredientEditorState extends State<_IngredientEditor> {
                               'compte tel quel dans la répartition.',
                   style: AppTextStyles.caption),
             ],
-            // Ce que l'enregistrement va RÉELLEMENT écrire. Le dire avant est
-            // la seule façon d'éviter la surprise dans les deux sens : une
-            // dépense qu'on n'attendait pas, ou celle qu'on attendait en vain.
-            if (!_isEdit) ...[
-              const SizedBox(height: 6),
-              Text(
-                  _recordsPurchase
-                      ? 'Une dépense de $_priceValue F sera enregistrée et '
-                          'rattachée à cet ingrédient : c\'est elle qui '
-                          'donnera son coût aux plats qui le contiennent.'
-                      : _priceValue > 0
-                          ? 'Renseignez la quantité pour que cet achat soit '
-                              'enregistré en dépense.'
-                          : 'Sans montant, aucune dépense n\'est créée et '
-                              'aucun coût ne sera imputé aux plats. Vous '
-                              'pourrez le faire plus tard via Réception.',
-                  style: AppTextStyles.captionHint),
-            ],
+            // Cet écran ne crée AUCUNE dépense — le dire, sinon on croirait
+            // enregistrer un achat en corrigeant une valeur de stock.
+            const SizedBox(height: 6),
+            Text(
+                'Corriger ces valeurs n\'enregistre aucun achat. Pour un vrai '
+                'réapprovisionnement, utilisez « Réception » sur la ligne de '
+                'l\'ingrédient.',
+                style: AppTextStyles.captionHint),
             const SizedBox(height: 10),
 
             // ── Date d'achat (informative) ───────────────────────────────
@@ -803,11 +743,11 @@ class _IngredientEditorState extends State<_IngredientEditor> {
             ],
             const SizedBox(height: 18),
             AppPrimaryButton(
-                label: _isEdit ? 'Enregistrer' : 'Créer',
+                label: 'Enregistrer',
                 icon: Icons.check_rounded,
                 fullWidth: true,
                 onTap: _save),
-            if (_isEdit) ...[
+            ...[
               const SizedBox(height: 6),
               Center(
                 child: TextButton.icon(

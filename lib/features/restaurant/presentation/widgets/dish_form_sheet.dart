@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/activity_service.dart';
+import '../../../../core/services/daily_expense_service.dart';
 import '../../../../core/services/dish_cost_service.dart';
 import '../../../../core/services/ingredient_allocation_service.dart';
 import '../../../../core/services/ingredient_service.dart';
@@ -24,6 +25,7 @@ import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/product_image_card.dart';
+import '../../domain/entities/daily_expense.dart';
 import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/recipe_ingredient.dart';
 import '../../domain/entities/restaurant_activity.dart';
@@ -1267,7 +1269,10 @@ class _QuickIngredientSheet extends StatefulWidget {
 
 class _QuickIngredientSheetState extends State<_QuickIngredientSheet> {
   final _nameCtrl = TextEditingController();
+  final _qtyCtrl = TextEditingController();
+  final _priceCtrl = TextEditingController();
   String _unit = 'kg';
+  DateTime? _purchase;
   String? _err;
   bool _saving = false;
 
@@ -1276,7 +1281,34 @@ class _QuickIngredientSheetState extends State<_QuickIngredientSheet> {
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _qtyCtrl.dispose();
+    _priceCtrl.dispose();
     super.dispose();
+  }
+
+  double get _qtyValue =>
+      double.tryParse(_qtyCtrl.text.trim().replaceAll(',', '.')) ?? 0;
+
+  int get _priceValue => int.tryParse(_priceCtrl.text.trim()) ?? 0;
+
+  /// Le coût unitaire est DÉDUIT, jamais saisi : sur un reçu on lit un total
+  /// et une quantité, pas un prix au kilo.
+  int get _derivedUnitCost =>
+      _qtyValue <= 0 ? _priceValue : (_priceValue / _qtyValue).round();
+
+  /// L'enregistrement va-t-il produire une dépense ? Il faut les DEUX : un
+  /// montant (sinon il n'y a rien à dépenser) et une quantité (sinon on
+  /// déclare un achat sans marchandise, l'argent sort et le stock reste nul).
+  bool get _recordsPurchase => _priceValue > 0 && _qtyValue > 0;
+
+  Future<void> _pickPurchaseDate() async {
+    final d = await showDatePicker(
+      context: context,
+      initialDate: _purchase ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+    );
+    if (d != null && mounted) setState(() => _purchase = d);
   }
 
   Future<void> _submit() async {
@@ -1285,13 +1317,53 @@ class _QuickIngredientSheetState extends State<_QuickIngredientSheet> {
       setState(() => _err = 'Nom requis');
       return;
     }
+    // MONTANT ABSENT — on demande confirmation, on ne bloque pas. Interdire
+    // empêcherait de composer une carte sans avoir ses factures sous la main.
+    // Mais laisser passer en silence est le défaut le plus coûteux du module :
+    // un ingrédient sans dépense ne pèse RIEN, donc les plats qui le
+    // contiennent affichent une marge flatteuse — et un chiffre qui fait
+    // plaisir ne se remet jamais en cause.
+    if (!_recordsPurchase) {
+      final ok = await AppConfirmDialog.show(
+        context: context,
+        icon: Icons.report_problem_outlined,
+        iconColor: Theme.of(context).semantic.warning,
+        title: 'Créer sans montant ?',
+        body: const Text(
+            'Sans quantité ET montant payé, aucune dépense n\'est rattachée à '
+            'cet ingrédient. Ce plat sera chiffré comme s\'il était gratuit, '
+            'et sa marge paraîtra meilleure qu\'elle ne l\'est.\n\n'
+            'Vous pourrez régulariser plus tard depuis Finances → Réception.'),
+        cancelLabel: 'Compléter',
+        confirmLabel: 'Créer quand même',
+        onConfirm: () {},
+      );
+      if (ok != true || !mounted) return;
+    }
+
     setState(() => _saving = true);
     try {
       final ing = await IngredientService.create(
         shopId: widget.shopId,
         name: name,
         unit: _unit,
+        costPerUnit: _derivedUnitCost,
+        quantity: _qtyValue,
+        purchaseDate: _purchase,
       );
+      // CRÉER un ingrédient avec un prix payé, C'EST UN ACHAT : la dépense
+      // correspondante est écrite et rattachée. C'est elle, et elle seule, qui
+      // donnera un coût aux plats qui contiennent cet ingrédient.
+      if (_recordsPurchase) {
+        await DailyExpenseService.record(
+          shopId: widget.shopId,
+          description: '$name — ${_fmtQty(_qtyValue)} $_unit',
+          amount: _priceValue,
+          kind: ExpenseKind.achatMarche,
+          ingredientId: ing.id,
+          date: _purchase,
+        );
+      }
       if (mounted) Navigator.of(context).pop(ing);
     } catch (e) {
       if (mounted) {
@@ -1302,6 +1374,15 @@ class _QuickIngredientSheetState extends State<_QuickIngredientSheet> {
       }
     }
   }
+
+  static String _fmtQty(double v) {
+    final s = v.toStringAsFixed(3);
+    return s.contains('.') ? s.replaceFirst(RegExp(r'\.?0+$'), '') : s;
+  }
+
+  String _dayLabel(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/'
+      '${d.month.toString().padLeft(2, '0')}/${d.year}';
 
   @override
   Widget build(BuildContext context) {
@@ -1337,11 +1418,80 @@ class _QuickIngredientSheetState extends State<_QuickIngredientSheet> {
                   ),
               ],
             ),
+            const SizedBox(height: 14),
+            // ── L'ACHAT, saisi ici et pas ailleurs ─────────────────────────
+            // On demande ce qui est écrit sur le reçu — une quantité et un
+            // total — et non un coût unitaire que personne ne lit nulle part.
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: _qtyCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    labelText: 'Quantité achetée',
+                    suffixText: ' $_unit',
+                    suffixStyle: AppTextStyles.caption,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _priceCtrl,
+                  keyboardType: TextInputType.number,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                    labelText: 'Montant payé (F)',
+                    helperText: 'Le total du reçu',
+                  ),
+                ),
+              ),
+            ]),
+            if (_priceValue > 0) ...[
+              const SizedBox(height: 6),
+              Text(
+                  _qtyValue > 0
+                      ? '→ soit $_derivedUnitCost F / $_unit'
+                      : '→ retenu comme coût unitaire. Sans quantité, aucune '
+                          'dépense n\'est créée.',
+                  style: AppTextStyles.caption),
+            ],
+            const SizedBox(height: 10),
+            InkWell(
+              onTap: _pickPurchaseDate,
+              borderRadius: BorderRadius.circular(10),
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  labelText: 'Date d\'achat',
+                  prefixIcon: const Icon(Icons.calendar_today, size: 18),
+                  suffixIcon: _purchase == null
+                      ? null
+                      : IconButton(
+                          tooltip: 'Effacer la date',
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          onPressed: () => setState(() => _purchase = null),
+                        ),
+                ),
+                child: Text(
+                    _purchase == null
+                        ? 'Aujourd\'hui'
+                        : _dayLabel(_purchase!),
+                    style: AppTextStyles.body),
+              ),
+            ),
             const SizedBox(height: 8),
+            // Ce que l'enregistrement va RÉELLEMENT écrire. Le dire avant est
+            // la seule façon d'éviter la surprise dans les deux sens : une
+            // dépense qu'on n'attendait pas, ou celle qu'on attendait en vain.
             Text(
-                'Le coût viendra de vos achats : saisissez-les dans '
-                'Finances → Dépenses en les rattachant à cet ingrédient, ou '
-                'via le bouton Réception.',
+                _recordsPurchase
+                    ? 'Une dépense de $_priceValue F sera enregistrée et '
+                        'rattachée à cet ingrédient : c\'est elle qui donnera '
+                        'son coût aux plats qui le contiennent.'
+                    : 'Sans quantité ET montant, aucun coût ne sera imputé aux '
+                        'plats. Régularisable depuis Finances → Réception.',
                 style: AppTextStyles.captionHint),
             if (_err != null) ...[
               const SizedBox(height: 8),
