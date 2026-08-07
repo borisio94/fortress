@@ -56,6 +56,38 @@ class DailyExpenseService {
       forShop(shopId, from: from, to: to, kind: ExpenseKind.achatMarche)
           .fold(0, (s, e) => s + e.amount);
 
+  /// CE QUE CHAQUE INGRÉDIENT A COÛTÉ sur la période — `ingredientId → FCFA`.
+  ///
+  /// C'est l'entrée du calcul de coût par plat : sans peser quoi que ce soit,
+  /// on sait ce que le poulet a coûté ce mois-ci, et on le répartit entre les
+  /// plats qui en contiennent (cf. `IngredientAllocationService`).
+  ///
+  /// Les dépenses sans ingrédient rattaché sont ignorées : elles restent dans
+  /// le food cost global, mais rien ne dit à quel plat les imputer.
+  static Map<String, int> spendByIngredient(
+    String shopId, {
+    DateTime? from,
+    DateTime? to,
+  }) {
+    final out = <String, int>{};
+    for (final e in forShop(shopId, from: from, to: to)) {
+      final id = e.ingredientId;
+      if (id == null || id.isEmpty) continue;
+      // `ingredient_id` sert aussi de lien vers une FOURNITURE (`si_…`) :
+      // emballages, gaz, entretien. Une colonne dédiée aurait exigé une
+      // migration pour le même service, les identifiants étant déjà préfixés
+      // par nature — c'est la convention du projet.
+      //
+      // Mais ces achats-là n'ont RIEN à faire dans la répartition du coût
+      // matières : aucun plat ne contient du gaz, leur montant partirait
+      // intégralement en « non réparti » et gonflerait un écart qui sert à
+      // détecter le gaspillage. On les écarte donc ici, à la source.
+      if (!id.startsWith('ig_')) continue;
+      out[id] = (out[id] ?? 0) + e.amount;
+    }
+    return out;
+  }
+
   /// Tout ce qui n'est PAS de la matière première — l'exploitation courante
   /// (électricité, gaz, transport…).
   ///
@@ -101,6 +133,7 @@ class DailyExpenseService {
     String? paidBy,
     bool isCash = true,
     DateTime? date,
+    String? ingredientId,
   }) async {
     final e = DailyExpense(
       id: _id(),
@@ -110,6 +143,7 @@ class DailyExpenseService {
       category: kind.key,
       paidBy: paidBy,
       isCash: isCash,
+      ingredientId: ingredientId,
       expenseDate: date ?? DateTime.now(),
       createdAt: DateTime.now(),
     );

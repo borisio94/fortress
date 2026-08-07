@@ -5,8 +5,9 @@ import '../../features/caisse/domain/entities/sale.dart';
 import '../../features/caisse/domain/entities/sale_item.dart';
 import '../../features/restaurant/domain/entities/loss.dart';
 import '../storage/local_storage_service.dart';
+import 'dish_cost_service.dart';
+import 'ingredient_allocation_service.dart';
 import 'loss_service.dart';
-import 'recipe_service.dart';
 import 'restaurant_order_service.dart';
 import 'restaurant_table_service.dart';
 
@@ -35,21 +36,41 @@ class ServiceIncidentService {
 
   /// Coût matières d'une liste d'articles.
   ///
-  /// Fiche recette si elle existe, sinon le coût matière saisi sur le plat
-  /// (`priceBuy`) — exactement la règle du reporting, pour que la perte et le
-  /// coût des ventes parlent la même langue.
+  /// Coût réparti du mois si le plat porte des ingrédients achetés, sinon le
+  /// coût matière saisi sur le plat (`priceBuy`) — exactement la règle du
+  /// reporting, pour que la perte et le coût des ventes parlent la même langue.
+  ///
+  /// La répartition est calculée UNE FOIS pour toute la liste : elle balaie
+  /// l'intégralité des commandes, des dépenses et des liens de la boutique. La
+  /// relancer par article rendait l'annulation d'une tournée de dix plats dix
+  /// fois plus lente qu'elle n'a besoin de l'être.
   static double materialCostOf(String shopId, List<SaleItem> items) {
+    if (items.isEmpty) return 0;
+    final allocation = _allocationNow(shopId);
     var total = 0.0;
     for (final item in items) {
-      total += unitMaterialCost(shopId, item) * item.quantity;
+      total += unitMaterialCost(shopId, item, allocation: allocation) *
+          item.quantity;
     }
     return total;
   }
 
   /// Coût matières d'UNE unité de l'article.
-  static double unitMaterialCost(String shopId, SaleItem item) {
+  ///
+  /// Le coût réparti est celui du MOIS EN COURS : un plat jeté aujourd'hui
+  /// vaut ce que les achats du mois lui imputent, pas ce qu'il valait en mars.
+  ///
+  /// [allocation] permet de réutiliser une répartition déjà calculée. Sans
+  /// elle, l'appel en déclenche une — acceptable pour UN article isolé, à
+  /// éviter dans une boucle.
+  static double unitMaterialCost(
+    String shopId,
+    SaleItem item, {
+    AllocationResult? allocation,
+  }) {
     try {
-      final recipe = RecipeService.recipeCost(shopId, item.productId);
+      final recipe =
+          (allocation ?? _allocationNow(shopId)).forProduct(item.productId);
       if (recipe > 0) return recipe;
       final p = LocalStorageService.getProduct(item.productId);
       return p?.priceBuy ?? item.priceBuy;
@@ -57,6 +78,13 @@ class ServiceIncidentService {
       return item.priceBuy;
     }
   }
+
+  /// Coût matières du mois courant, selon la méthode active de la boutique.
+  /// La perte constatée sur une tournée annulée doit être chiffrée avec le
+  /// même barème que la marge — sinon annuler un plat coûterait plus, ou
+  /// moins, que le vendre ne rapportait.
+  static AllocationResult _allocationNow(String shopId) =>
+      DishCostService.forMonth(shopId, DateTime.now());
 
   /// Annule une tournée DÉJÀ ENVOYÉE en cuisine et enregistre la matière
   /// perdue.

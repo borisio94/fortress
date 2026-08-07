@@ -70,6 +70,16 @@ class DailyExpense {
   /// est déduite du total attendu à la clôture de caisse.
   final bool isCash;
 
+  /// INGRÉDIENT ACHETÉ par cette dépense (`ingredients.id`), `null` si la
+  /// dépense n'en concerne aucun en particulier.
+  ///
+  /// C'est ce lien qui rend le coût par plat calculable sans jamais peser quoi
+  /// que ce soit : on sait ce que le poulet a coûté sur le mois, et on le
+  /// répartit entre les plats qui en contiennent (cf.
+  /// `IngredientAllocationService`). Référence logique, sans FK — un
+  /// ingrédient supprimé laisse un id orphelin, traité comme « non rattaché ».
+  final String? ingredientId;
+
   final DateTime expenseDate;
   final DateTime createdAt;
 
@@ -83,6 +93,7 @@ class DailyExpense {
     this.category = 'autre',
     this.paidBy,
     this.isCash = true,
+    this.ingredientId,
   });
 
   ExpenseKind get kind => ExpenseKind.fromKey(category);
@@ -105,6 +116,11 @@ class DailyExpense {
     String? paidBy,
     bool? isCash,
     DateTime? expenseDate,
+    String? ingredientId,
+
+    /// Détache la dépense de son ingrédient (`null` seul voudrait dire
+    /// « inchangé », comme pour tous les autres champs).
+    bool clearIngredient = false,
   }) =>
       DailyExpense(
         id: id,
@@ -116,6 +132,8 @@ class DailyExpense {
         paidBy: paidBy ?? this.paidBy,
         isCash: isCash ?? this.isCash,
         expenseDate: expenseDate ?? this.expenseDate,
+        ingredientId:
+            clearIngredient ? null : (ingredientId ?? this.ingredientId),
       );
 
   static const int currentSchemaVersion = 1;
@@ -133,6 +151,7 @@ class DailyExpense {
         'category': category,
         'paid_by': paidBy,
         'is_cash': isCash,
+        'ingredient_id': ingredientId,
         'expense_date': dayKey(expenseDate),
         'created_at': createdAt.toUtc().toIso8601String(),
       };
@@ -149,6 +168,7 @@ class DailyExpense {
       category: ExpenseKind.fromKey(m['category']?.toString()).key,
       paidBy: _nullIfEmpty(m['paid_by']),
       isCash: m['is_cash'] as bool? ?? true,
+      ingredientId: _nullIfEmpty(m['ingredient_id']),
       expenseDate:
           DateTime.tryParse(m['expense_date']?.toString() ?? '') ??
               DateTime.now(),

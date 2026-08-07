@@ -4,15 +4,14 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/activity_service.dart';
-import '../../../../core/services/bottle_deposit_service.dart';
 import '../../../../core/services/daily_expense_service.dart';
 import '../../../../core/services/fixed_charge_service.dart';
+import '../../../../core/services/dish_cost_service.dart';
 import '../../../../core/services/ingredient_service.dart';
 import '../../../../core/services/loss_service.dart';
 import '../../../../core/services/reconciliation_service.dart';
 import '../../../../core/services/round_routing.dart';
 import '../../../../core/services/stock_item_service.dart';
-import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -22,7 +21,6 @@ import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../widgets/resto_empty_state.dart' show RestoEmptyState;
-import '../../domain/entities/bottle_deposit.dart';
 import '../../domain/entities/daily_expense.dart';
 import '../../domain/entities/fixed_charge.dart';
 import '../../domain/entities/ingredient.dart';
@@ -86,7 +84,6 @@ class FinancesHubPage extends StatelessWidget {
                   Tab(text: 'Fournitures'),
                   Tab(text: 'Dépenses'),
                   Tab(text: 'Charges'),
-                  Tab(text: 'Consignes'),
                   Tab(text: 'Pertes'),
                 ],
               ),
@@ -100,7 +97,6 @@ class FinancesHubPage extends StatelessWidget {
                   _StockItemsTab(shopId: shopId),
                   _DailyExpensesTab(shopId: shopId),
                   _ChargesTab(shopId: shopId),
-                  _DepositsTab(shopId: shopId),
                   _LossesTab(shopId: shopId),
                 ],
               ),
@@ -170,11 +166,86 @@ class _IngredientsTabState extends _TabState<_IngredientsTab> {
   @override
   String get shopId => widget.shopId;
 
+  bool _backfilling = false;
+
+  /// Écrit les achats manquants, après confirmation chiffrée.
+  Future<void> _backfill() async {
+    final pending = IngredientService.withoutRecordedPurchase(widget.shopId);
+    if (pending.isEmpty) return;
+    final total = pending.fold<int>(
+        0, (s, i) => s + IngredientService.backfillAmountFor(i));
+
+    final ok = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.receipt_long_outlined,
+      iconColor: Theme.of(context).colorScheme.primary,
+      title: 'Enregistrer les achats manquants ?',
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+              '${pending.length} ingrédient(s) ont du stock mais aucun achat '
+              'enregistré. Une dépense sera créée pour chacun, à hauteur de la '
+              'valeur de son stock — ${CurrencyFormatter.format(total.toDouble())} '
+              'au total.',
+              style: AppTextStyles.body),
+          const SizedBox(height: 8),
+          Text(
+              'Chaque dépense est datée du jour d\'achat déclaré, et marquée '
+              'hors espèces : ces achats sont anciens, les compter comme '
+              'sorties du tiroir fausserait votre prochaine clôture de caisse.',
+              style: AppTextStyles.caption),
+        ],
+      ),
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Enregistrer',
+      onConfirm: () {},
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _backfilling = true);
+    try {
+      final r = await IngredientService.recordMissingPurchases(widget.shopId);
+      if (!mounted) return;
+      setState(() => _backfilling = false);
+      AppSnack.success(
+          context,
+          '${r.count} achat(s) enregistré(s) · '
+          '${CurrencyFormatter.format(r.total.toDouble())}');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _backfilling = false);
+      AppSnack.error(context, 'Régularisation incomplète : $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final items = IngredientService.forShop(widget.shopId);
+    // Ingrédients dont l'achat n'a jamais été enregistré en dépense — donc
+    // dont le coût n'est imputé à aucun plat.
+    final pending = IngredientService.withoutRecordedPurchase(widget.shopId);
+    // Ingrédients sans AUCUNE dépense rattachée — donc sans coût imputable.
+    // Calculé une fois pour toute la liste : le faire par ligne relirait le
+    // journal des dépenses à chaque ingrédient.
+    final noCost = IngredientService.withoutCostData(widget.shopId);
     return Column(
       children: [
+        // MÉTHODE DE COÛT — en tête de l'onglet Ingrédients parce que c'est
+        // elle qui décide de ce qu'on saisit en dessous : des quantités, ou
+        // rien du tout.
+        _CostMethodSelector(
+          shopId: widget.shopId,
+          onChanged: () => setState(() {}),
+        ),
+        if (pending.isNotEmpty) _BackfillBanner(
+          count: pending.length,
+          total: pending.fold<int>(
+              0, (s, i) => s + IngredientService.backfillAmountFor(i)),
+          busy: _backfilling,
+          onRun: _backfill,
+        ),
         headerButton('Ingrédient', () => _edit(null)),
         Expanded(
           child: items.isEmpty
@@ -190,8 +261,10 @@ class _IngredientsTabState extends _TabState<_IngredientsTab> {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, i) => _IngredientRow(
                     ing: items[i],
-                    onTap: () => _edit(items[i]),
+                    noCost: noCost.contains(items[i].id),
                     onReceive: () => _receive(items[i]),
+                    onEdit: () => _edit(items[i]),
+                    onDelete: () => _delete(items[i]),
                   ),
                 ),
         ),
@@ -200,11 +273,57 @@ class _IngredientsTabState extends _TabState<_IngredientsTab> {
   }
 
   Future<void> _receive(Ingredient ing) async {
-    final amount = await _askAmount(context, 'Réception — ${ing.name}',
-        suffix: ing.unit);
-    if (amount == null) return;
-    await IngredientService.update(
-        ing.copyWith(quantity: ing.quantity + amount));
+    final r = await showAdaptiveFormSheet<_ReceiptResult>(
+      context: context,
+      builder: (_) => _IngredientReceiptSheet(ingredient: ing),
+    );
+    if (r == null || !mounted) return;
+
+    // Le stock d'abord : c'est la correction attendue, elle ne doit pas
+    // dépendre du succès de l'écriture de la dépense. Le coût unitaire est
+    // réévalué au passage, en moyenne pondérée avec le stock existant.
+    await IngredientService.receive(
+      widget.shopId,
+      ing.id,
+      quantity: r.quantity,
+      amountPaid: r.amount,
+    );
+
+    // La dépense RATTACHÉE à l'ingrédient : c'est elle qui rendra le coût du
+    // plat calculable. Sans ce lien, l'argent sort de la caisse mais aucune
+    // assiette ne sait qu'elle l'a consommé.
+    if (r.amount > 0) {
+      await DailyExpenseService.record(
+        shopId: widget.shopId,
+        description: '${ing.name} — ${_fmt(r.quantity)} ${ing.unit}',
+        amount: r.amount,
+        kind: ExpenseKind.achatMarche,
+        ingredientId: ing.id,
+        date: r.date,
+      );
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// Suppression depuis la liste — même confirmation et même avertissement que
+  /// depuis l'éditeur : c'est la MÊME action, elle ne doit pas être plus légère
+  /// parce qu'elle est plus accessible.
+  Future<void> _delete(Ingredient ing) async {
+    final ok = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.delete_outline_rounded,
+      iconColor: Theme.of(context).semantic.danger,
+      title: 'Supprimer cet ingrédient ?',
+      body: Text('« ${ing.name} » sera retiré. Les plats qui le contiennent '
+          'perdront leur lien vers lui, et sa part de coût ne leur sera plus '
+          'imputée.'),
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Supprimer',
+      onConfirm: () {},
+    );
+    if (ok != true || !mounted) return;
+    await IngredientService.delete(ing.id, widget.shopId);
+    if (mounted) setState(() {});
   }
 
   Future<void> _edit(Ingredient? ing) async {
@@ -216,12 +335,29 @@ class _IngredientsTabState extends _TabState<_IngredientsTab> {
   }
 }
 
+/// Une ligne d'ingrédient : trois boutons explicites, et une carte INERTE.
+///
+/// La carte ne réagit plus au toucher. Elle ouvrait l'éditeur, ce qui faisait
+/// basculer vers un formulaire de modification chaque fois qu'on visait le
+/// bouton de réception et qu'on le manquait de quelques pixels. Une action qui
+/// change des données ne doit pas être déclenchée par un geste imprécis.
 class _IngredientRow extends StatelessWidget {
   final Ingredient ing;
-  final VoidCallback onTap;
+
+  /// Aucune dépense rattachée : cet ingrédient ne coûte rien aux plats qui le
+  /// contiennent, et leur marge est donc surévaluée.
+  final bool noCost;
   final VoidCallback onReceive;
-  const _IngredientRow(
-      {required this.ing, required this.onTap, required this.onReceive});
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _IngredientRow({
+    required this.ing,
+    required this.onReceive,
+    required this.onEdit,
+    required this.onDelete,
+    this.noCost = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -229,7 +365,11 @@ class _IngredientRow extends StatelessWidget {
     final sem = Theme.of(context).semantic;
     final q = _fmt(ing.quantity);
     return _Card(
-      onTap: onTap,
+      // Signalement ORANGE, pas rouge : rien n'est cassé, il manque une
+      // information. Le rouge est déjà pris par le stock bas, qui appelle une
+      // action immédiate — mélanger les deux les banaliserait tous les deux.
+      borderColor: noCost ? sem.warning : null,
+      background: noCost ? sem.warning.withValues(alpha: 0.07) : null,
       child: Row(children: [
         Expanded(
           child: Column(
@@ -251,19 +391,63 @@ class _IngredientRow extends StatelessWidget {
                   const SizedBox(width: 6),
                   _Pill('stock bas', sem.danger),
                 ],
+                if (noCost) ...[
+                  const SizedBox(width: 6),
+                  _Pill('coût manquant', sem.warning),
+                ],
               ]),
               Text(
-                  '${ing.costPerUnit} F/${ing.unit} · stock $q ${ing.unit}'
-                  '${ing.alertThreshold > 0 ? ' · seuil ${_fmt(ing.alertThreshold)}' : ''}'
-                  '${ing.purchaseDate == null ? '' : ' · acheté le ${_dayLabel(ing.purchaseDate!)}'}',
+                  // Unité et quantité sont FACULTATIVES : un ingrédient saisi
+                  // au nom et au prix afficherait sinon « 0 F/ · stock 0 »,
+                  // une ligne de bruit qui laisse croire à une donnée perdue.
+                  [
+                    ing.unit.trim().isEmpty
+                        ? '${ing.costPerUnit} F'
+                        : '${ing.costPerUnit} F/${ing.unit}',
+                    if (ing.quantity > 0)
+                      'stock $q ${ing.unit}'.trim(),
+                    if (ing.alertThreshold > 0)
+                      'seuil ${_fmt(ing.alertThreshold)}',
+                    if (ing.purchaseDate != null)
+                      'acheté le ${_dayLabel(ing.purchaseDate!)}',
+                  ].join(' · '),
                   style: AppTextStyles.caption),
+              // Une couleur seule laisse deviner ; on dit ce qui manque et où
+              // le corriger. Sans cette ligne, l'orange n'est qu'une énigme.
+              if (noCost)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Text(
+                      'Aucun achat enregistré — les plats qui le contiennent '
+                      'paraissent plus rentables qu\'ils ne le sont. '
+                      'Utilisez Réception pour saisir quantité et montant.',
+                      style: AppTextStyles.caption
+                          .copyWith(color: sem.warning)),
+                ),
             ],
           ),
         ),
+        // Réception · Modifier · Supprimer — dans cet ordre : du geste le plus
+        // fréquent au plus rare, et le destructif en bout de rangée, le plus
+        // loin possible de celui qu'on vise tous les jours.
         IconButton(
           onPressed: onReceive,
           tooltip: 'Réception',
+          visualDensity: VisualDensity.compact,
           icon: Icon(Icons.add_box_outlined, size: 20, color: cs.primary),
+        ),
+        IconButton(
+          onPressed: onEdit,
+          tooltip: 'Modifier',
+          visualDensity: VisualDensity.compact,
+          icon: Icon(Icons.edit_outlined,
+              size: 19, color: cs.onSurface.withValues(alpha: 0.7)),
+        ),
+        IconButton(
+          onPressed: onDelete,
+          tooltip: 'Supprimer',
+          visualDensity: VisualDensity.compact,
+          icon: Icon(Icons.delete_outline_rounded, size: 19, color: sem.danger),
         ),
       ]),
     );
@@ -309,9 +493,15 @@ class _IngredientEditorState extends State<_IngredientEditor> {
   /// Unité choisie dans la liste. Une unité déjà en base qui n'y figure pas
   /// (saisie libre d'avant, « 10kg »…) est ajoutée à la liste pour ne pas être
   /// silencieusement remplacée à l'enregistrement.
+  /// « non précisée » par défaut à la CRÉATION : forcer « kg » étiquetait au
+  /// kilo des ingrédients qu'on n'avait jamais pesés, et ce faux
+  /// conditionnement se retrouvait ensuite sur chaque ligne de la liste.
   late String _unit = widget.existing?.unit.trim().isNotEmpty == true
       ? widget.existing!.unit.trim()
-      : 'kg';
+      : _kUnitUnknown;
+
+  /// Unité réellement enregistrée : la sentinelle redevient une chaîne vide.
+  String get _unitValue => _unit == _kUnitUnknown ? '' : _unit;
 
   List<String> get _units => [
         if (!_kIngredientUnits.contains(_unit)) _unit,
@@ -353,13 +543,40 @@ class _IngredientEditorState extends State<_IngredientEditor> {
       setState(() => _err = 'Nom requis');
       return;
     }
+    // MONTANT ABSENT À LA CRÉATION — on demande confirmation, on ne bloque pas.
+    //
+    // Interdire empêcherait de saisir sa carte un dimanche sans ses factures.
+    // Mais laisser passer en silence est le défaut le plus coûteux du module :
+    // un ingrédient sans dépense ne pèse RIEN dans la répartition, donc les
+    // plats qui le contiennent affichent une marge flatteuse — et personne ne
+    // remarque un chiffre qui fait plaisir. On le dit donc au moment où c'est
+    // encore réparable.
+    if (!_isEdit && !_recordsPurchase) {
+      final ok = await AppConfirmDialog.show(
+        context: context,
+        icon: Icons.report_problem_outlined,
+        iconColor: Theme.of(context).semantic.warning,
+        title: 'Enregistrer sans montant ?',
+        body: const Text(
+            'Sans quantité ET montant payé, aucune dépense n\'est rattachée à '
+            'cet ingrédient. Les plats qui le contiennent seront chiffrés '
+            'comme s\'il était gratuit, et leur marge paraîtra meilleure '
+            'qu\'elle ne l\'est.\n\n'
+            'Vous pourrez le régulariser plus tard via Réception.'),
+        cancelLabel: 'Compléter',
+        confirmLabel: 'Enregistrer quand même',
+        onConfirm: () {},
+      );
+      if (ok != true || !mounted) return;
+    }
+
     if (_isEdit) {
       // `alertThreshold` n'est PAS passé : le seuil d'alerte n'est plus dans ce
       // formulaire, et copyWith le préserve. Le repasser à 0 ici effacerait en
       // silence les seuils déjà configurés.
       await IngredientService.update(widget.existing!.copyWith(
           name: name,
-          unit: _unit,
+          unit: _unitValue,
           costPerUnit: _derivedUnitCost,
           quantity: _qtyValue,
           purchaseDate: _purchase,
@@ -367,16 +584,48 @@ class _IngredientEditorState extends State<_IngredientEditor> {
           // « inchangée », il faut le dire explicitement.
           clearPurchaseDate: _purchase == null));
     } else {
-      await IngredientService.create(
+      final ing = await IngredientService.create(
           shopId: widget.shopId,
           name: name,
-          unit: _unit,
+          unit: _unitValue,
           costPerUnit: _derivedUnitCost,
           quantity: _qtyValue,
           purchaseDate: _purchase);
+
+      // CRÉER un ingrédient avec un prix payé, C'EST UN ACHAT — la dépense
+      // correspondante est écrite et rattachée à l'ingrédient.
+      //
+      // Sans elle, le formulaire demandait « le montant du reçu » et n'en
+      // faisait rien : l'ingrédient affichait un prix au kilo, mais aucun
+      // franc n'était imputé aux plats qui le contiennent, qui restaient donc
+      // à 0 F de coût matières.
+      //
+      // UNIQUEMENT à la création. Une modification est une CORRECTION, pas un
+      // achat : y écrire une dépense gonflerait les charges à chaque passage
+      // dans le formulaire (cf. la branche `_isEdit` ci-dessus).
+      if (_recordsPurchase) {
+        await DailyExpenseService.record(
+          shopId: widget.shopId,
+          description: _qtyValue > 0
+              ? '$name — ${_fmt(_qtyValue)} $_unitValue'.trim()
+              : name,
+          amount: _priceValue,
+          kind: ExpenseKind.achatMarche,
+          ingredientId: ing.id,
+          date: _purchase,
+        );
+      }
     }
     if (mounted) Navigator.of(context).pop(true);
   }
+
+  /// L'enregistrement va-t-il produire une dépense ?
+  ///
+  /// Il faut les DEUX : un montant (sinon il n'y a rien à dépenser) et une
+  /// quantité (sinon on déclare un achat sans marchandise, et le stock reste à
+  /// zéro alors que l'argent est sorti).
+  bool get _recordsPurchase =>
+      !_isEdit && _priceValue > 0 && _qtyValue > 0;
 
   Future<void> _pickPurchaseDate() async {
     final d = await showDatePicker(
@@ -437,7 +686,9 @@ class _IngredientEditorState extends State<_IngredientEditor> {
                   // Le coût unitaire dérivé dépend de la quantité : il doit se
                   // recalculer à chaque frappe, pas seulement à la validation.
                   onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(labelText: 'Quantité'),
+                  decoration: const InputDecoration(
+                      labelText: 'Quantité',
+                      helperText: 'facultative'),
                 ),
               ),
               const SizedBox(width: 10),
@@ -469,24 +720,53 @@ class _IngredientEditorState extends State<_IngredientEditor> {
             const SizedBox(height: 10),
 
             // ── Prix total payé, coût unitaire dérivé sous le champ ──────
+            //
+            // À la CRÉATION, ce montant devient une vraie dépense rattachée à
+            // l'ingrédient. À la MODIFICATION, il ne sert qu'à valoriser le
+            // stock — le libellé et l'aide le disent, sans quoi on croit
+            // saisir un achat à chaque correction.
             TextField(
               controller: _price,
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Prix payé (F)',
-                helperText: 'Le montant du reçu, pour toute la quantité',
+              decoration: InputDecoration(
+                labelText:
+                    _isEdit ? 'Valeur du stock (F)' : 'Montant payé (F)',
+                helperText: _isEdit
+                    ? 'Sert à valoriser la réserve — aucune dépense créée'
+                    : 'Le montant du reçu, pour toute la quantité',
               ),
             ),
             if (_priceValue > 0) ...[
               const SizedBox(height: 6),
               Text(
-                  _qtyValue > 0
-                      ? '→ soit $_derivedUnitCost F / $_unit'
-                      : '→ pris pour $_derivedUnitCost F / $_unit '
-                          '(renseignez la quantité pour un calcul exact)',
+                  _qtyValue > 0 && _unitValue.isNotEmpty
+                      ? '→ soit $_derivedUnitCost F / $_unitValue'
+                      : _qtyValue > 0
+                          ? '→ soit $_derivedUnitCost F par unité'
+                          : '→ retenu comme coût unitaire. Quantité et unité '
+                              'restent facultatives : sans elles, ce montant '
+                              'compte tel quel dans la répartition.',
                   style: AppTextStyles.caption),
+            ],
+            // Ce que l'enregistrement va RÉELLEMENT écrire. Le dire avant est
+            // la seule façon d'éviter la surprise dans les deux sens : une
+            // dépense qu'on n'attendait pas, ou celle qu'on attendait en vain.
+            if (!_isEdit) ...[
+              const SizedBox(height: 6),
+              Text(
+                  _recordsPurchase
+                      ? 'Une dépense de $_priceValue F sera enregistrée et '
+                          'rattachée à cet ingrédient : c\'est elle qui '
+                          'donnera son coût aux plats qui le contiennent.'
+                      : _priceValue > 0
+                          ? 'Renseignez la quantité pour que cet achat soit '
+                              'enregistré en dépense.'
+                          : 'Sans montant, aucune dépense n\'est créée et '
+                              'aucun coût ne sera imputé aux plats. Vous '
+                              'pourrez le faire plus tard via Réception.',
+                  style: AppTextStyles.captionHint),
             ],
             const SizedBox(height: 10),
 
@@ -809,13 +1089,65 @@ class _StockItemsTabState extends _TabState<_StockItemsTab> {
   @override
   String get shopId => widget.shopId;
 
+  bool _backfilling = false;
+
+  /// Régularise les fournitures achetées avant que le formulaire n'écrive
+  /// leur dépense. Même geste que pour les ingrédients, et même garde-fou :
+  /// la liste ne retient que celles SANS dépense rattachée, donc relancer
+  /// l'opération ne double aucun montant.
+  Future<void> _backfill() async {
+    final pending = StockItemService.withoutRecordedPurchase(widget.shopId);
+    if (pending.isEmpty) return;
+    final total = pending.fold<int>(
+        0, (s, i) => s + StockItemService.backfillAmountFor(i));
+
+    final ok = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.receipt_long_outlined,
+      iconColor: Theme.of(context).colorScheme.primary,
+      title: 'Enregistrer les achats manquants ?',
+      body: Text(
+          '${pending.length} fourniture(s) ont un coût mais aucun achat '
+          'enregistré. ${CurrencyFormatter.format(total.toDouble())} seront '
+          'ajoutés aux dépenses, en catégorie « Autre » et à la date de '
+          'création de chaque article.\n\n'
+          'Ces écritures sont marquées hors espèces : elles ne toucheront '
+          'pas votre clôture de caisse.'),
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Enregistrer',
+      onConfirm: () {},
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _backfilling = true);
+    final r = await StockItemService.recordMissingPurchases(widget.shopId);
+    if (!mounted) return;
+    setState(() => _backfilling = false);
+    AppSnack.success(
+        context,
+        '${r.count} achat(s) enregistré(s) — '
+        '${CurrencyFormatter.format(r.total.toDouble())}');
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final sem = Theme.of(context).semantic;
     final items = StockItemService.forShop(widget.shopId);
+    // Fournitures dont l'achat n'a jamais été enregistré en dépense — leur
+    // montant n'apparaît donc ni dans les charges, ni dans le bénéfice.
+    final pending = StockItemService.withoutRecordedPurchase(widget.shopId);
     return Column(
       children: [
+        if (pending.isNotEmpty)
+          _BackfillBanner(
+            count: pending.length,
+            total: pending.fold<int>(
+                0, (s, i) => s + StockItemService.backfillAmountFor(i)),
+            busy: _backfilling,
+            onRun: _backfill,
+            label: 'fourniture',
+          ),
         // Orientation explicite : c'est LA confusion du module. Une boisson
         // saisie ici ne se décrémenterait jamais à la vente, et son stock
         // divergerait dès le premier service.
@@ -843,8 +1175,10 @@ class _StockItemsTabState extends _TabState<_StockItemsTab> {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, i) {
                     final s = items[i];
+                    // Carte INERTE : elle ouvrait l'éditeur, ce qui faisait
+                    // basculer vers un formulaire chaque fois qu'on visait la
+                    // réception et qu'on la manquait de quelques pixels.
                     return _Card(
-                      onTap: () => _edit(s),
                       child: Row(children: [
                         Expanded(
                           child: Column(
@@ -871,11 +1205,30 @@ class _StockItemsTabState extends _TabState<_StockItemsTab> {
                             ],
                           ),
                         ),
+                        // Réception · Modifier · Supprimer — du geste le plus
+                        // fréquent au plus rare, le destructif en bout de
+                        // rangée.
                         IconButton(
                           onPressed: () => _receive(s),
                           tooltip: 'Réception',
+                          visualDensity: VisualDensity.compact,
                           icon: Icon(Icons.add_box_outlined,
                               size: 20, color: cs.primary),
+                        ),
+                        IconButton(
+                          onPressed: () => _edit(s),
+                          tooltip: 'Modifier',
+                          visualDensity: VisualDensity.compact,
+                          icon: Icon(Icons.edit_outlined,
+                              size: 19,
+                              color: cs.onSurface.withValues(alpha: 0.7)),
+                        ),
+                        IconButton(
+                          onPressed: () => _delete(s),
+                          tooltip: 'Supprimer',
+                          visualDensity: VisualDensity.compact,
+                          icon: Icon(Icons.delete_outline_rounded,
+                              size: 19, color: sem.danger),
                         ),
                       ]),
                     );
@@ -891,6 +1244,42 @@ class _StockItemsTabState extends _TabState<_StockItemsTab> {
         await _askAmount(context, 'Réception — ${s.name}', suffix: s.unit);
     if (amount == null) return;
     await StockItemService.receive(widget.shopId, s.id, amount);
+    // Réapprovisionner, c'est acheter : la dépense suit, valorisée au coût
+    // unitaire connu de l'article. Sans elle, un réassort hebdomadaire de
+    // barquettes n'apparaissait nulle part dans les comptes — même trou que
+    // sur la création, et plus insidieux parce qu'il se répète.
+    final spent = (s.costPerUnit * amount).round();
+    if (spent > 0) {
+      await DailyExpenseService.record(
+        shopId: widget.shopId,
+        description: '${s.name} — ${_fmt(amount)} ${s.unit}',
+        amount: spent,
+        kind: ExpenseKind.autre,
+        date: DateTime.now(),
+        ingredientId: s.id,
+      );
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// Suppression depuis la liste — même confirmation que depuis l'éditeur :
+  /// c'est la MÊME action, elle ne doit pas être plus légère parce qu'elle est
+  /// plus accessible.
+  Future<void> _delete(StockItem s) async {
+    final ok = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.delete_outline_rounded,
+      iconColor: Theme.of(context).semantic.danger,
+      title: 'Supprimer cette fourniture ?',
+      body: Text('« ${s.name} » sera retirée de votre réserve. Son stock et '
+          'sa valeur ne compteront plus dans vos inventaires.'),
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Supprimer',
+      onConfirm: () {},
+    );
+    if (ok != true || !mounted) return;
+    await StockItemService.delete(s.id, widget.shopId);
+    if (mounted) setState(() {});
   }
 
   Future<void> _edit(StockItem? s) async {
@@ -960,7 +1349,7 @@ class _StockItemEditorState extends State<_StockItemEditor> {
         clearActivity: _activityId == null,
       ));
     } else {
-      await StockItemService.create(
+      final created = await StockItemService.create(
         shopId: widget.shopId,
         name: name,
         unit: unit,
@@ -970,6 +1359,39 @@ class _StockItemEditorState extends State<_StockItemEditor> {
         sellingPrice: price,
         activityId: _activityId,
       );
+      // LA DÉPENSE CORRESPONDANTE — elle manquait.
+      //
+      // Acheter du gaz, des barquettes ou du charbon sort de l'argent de la
+      // caisse. Sans cette écriture, ce montant n'existait nulle part : ni
+      // dans l'onglet Dépenses, ni dans le bénéfice, ni dans le P&L. Les
+      // ingrédients écrivaient déjà la leur ; les fournitures, non — d'où
+      // l'impression, justifiée, que cet onglet doublonne Dépenses sans rien
+      // apporter aux comptes.
+      //
+      // Catégorie `autre`, PAS `achatMarche` : le food cost ne compte que la
+      // matière première. Y verser le gaz et l'eau de javel gonflerait un
+      // ratio qui sert précisément à juger la carte. Et pas une nouvelle
+      // catégorie « fourniture » non plus — la colonne `kind` est susceptible
+      // de porter une contrainte CHECK en base, et une clé inconnue ferait
+      // rejeter l'écriture puis disparaître la ligne à la synchronisation.
+      // `autre` compte comme charge d'exploitation, c'est ce qu'on veut.
+      //
+      // Seulement à la CRÉATION : une modification corrige une fiche, elle ne
+      // rachète rien. Sans ça, chaque correction de prix créerait une dépense.
+      final spent = (cost * (stock <= 0 ? 1 : stock)).round();
+      if (spent > 0) {
+        await DailyExpenseService.record(
+          shopId: widget.shopId,
+          description: stock > 0 ? '$name — ${_fmt(stock)} $unit' : name,
+          amount: spent,
+          kind: ExpenseKind.autre,
+          date: DateTime.now(),
+          // LIEN vers la fourniture — c'est lui qui rend la régularisation
+          // idempotente : sans lui, la bannière reproposerait éternellement
+          // cet article et doublerait son montant à chaque passage.
+          ingredientId: created.id,
+        );
+      }
     }
     if (mounted) Navigator.of(context).pop(true);
   }
@@ -1540,6 +1962,20 @@ class _DailyExpenseEditorState extends State<_DailyExpenseEditor> {
   late ExpenseKind _kind = widget.existing?.kind ?? ExpenseKind.achatMarche;
   late bool _isCash = widget.existing?.isCash ?? true;
   late DateTime _date = widget.existing?.expenseDate ?? DateTime.now();
+
+  /// Catalogue d'ingrédients, pour rattacher l'achat à l'un d'eux.
+  late final List<Ingredient> _ingredients =
+      IngredientService.forShop(widget.shopId);
+
+  /// Ingrédient acheté par cette dépense — `null` = non rattachée.
+  ///
+  /// Vérifié contre le catalogue : un ingrédient supprimé depuis la saisie
+  /// laisserait un id orphelin que le formulaire réenregistrerait en silence.
+  late String? _ingredientId = _ingredients
+          .any((i) => i.id == widget.existing?.ingredientId)
+      ? widget.existing!.ingredientId
+      : null;
+
   String? _err;
 
   bool get _isEdit => widget.existing != null;
@@ -1571,6 +2007,9 @@ class _DailyExpenseEditorState extends State<_DailyExpenseEditor> {
         paidBy: _paidBy.text.trim(),
         isCash: _isCash,
         expenseDate: _date,
+        ingredientId: _ingredientId,
+        // Détachement explicite : un `null` seul voudrait dire « inchangé ».
+        clearIngredient: _ingredientId == null,
       ));
     } else {
       await DailyExpenseService.record(
@@ -1581,6 +2020,7 @@ class _DailyExpenseEditorState extends State<_DailyExpenseEditor> {
         paidBy: _paidBy.text.trim(),
         isCash: _isCash,
         date: _date,
+        ingredientId: _ingredientId,
       );
     }
     if (mounted) Navigator.of(context).pop(true);
@@ -1638,11 +2078,40 @@ class _DailyExpenseEditorState extends State<_DailyExpenseEditor> {
                   ),
               ],
             ),
-            if (_kind.isFoodCost) ...[
+            // ── Rattachement à un ingrédient ─────────────────────────────
+            // C'est ce lien qui rend le coût par plat calculable : sans lui,
+            // l'argent sort de la caisse mais aucune assiette ne sait qu'elle
+            // l'a consommé. Proposé uniquement sur un achat de matières — gaz
+            // et électricité n'ont pas d'ingrédient.
+            if (_kind.isFoodCost && _ingredients.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text('Ingrédient acheté', style: AppTextStyles.caption),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  ChoiceChip(
+                    label: const Text('Aucun'),
+                    selected: _ingredientId == null,
+                    onSelected: (_) => setState(() => _ingredientId = null),
+                  ),
+                  for (final i in _ingredients)
+                    ChoiceChip(
+                      label: Text(i.name),
+                      selected: _ingredientId == i.id,
+                      onSelected: (_) => setState(() => _ingredientId = i.id),
+                    ),
+                ],
+              ),
               const SizedBox(height: 6),
               Text(
-                  'Les achats de matières composent le « food cost réel », '
-                  'comparé à ce que vos fiches recettes prévoient.',
+                  _ingredientId == null
+                      ? 'Sans ingrédient, cette dépense compte dans le food '
+                          'cost global mais n\'est imputée à aucun plat.'
+                      : 'Ce montant sera réparti entre les plats qui '
+                          'contiennent cet ingrédient, au prorata des ventes '
+                          'du mois.',
                   style: AppTextStyles.captionHint),
             ],
             const SizedBox(height: 10),
@@ -1742,208 +2211,10 @@ class _MiniStat extends StatelessWidget {
     );
   }
 }
-
-// ═══════════════════════════════════════════════════════════════════════
-//  Onglet CONSIGNES (Lot B — emballages remis aux clients)
-// ═══════════════════════════════════════════════════════════════════════
-class _DepositsTab extends StatefulWidget {
-  final String shopId;
-  const _DepositsTab({required this.shopId});
-  @override
-  State<_DepositsTab> createState() => _DepositsTabState();
-}
-
-class _DepositsTabState extends _TabState<_DepositsTab> {
-  @override
-  String get table => 'bottle_deposits';
-  @override
-  String get shopId => widget.shopId;
-
-  /// Par défaut, seules les consignes ENCORE DUES : c'est la liste de travail
-  /// (« qui doit me rapporter des bouteilles ? »). L'historique complet ne sert
-  /// qu'à vérifier un cas précis.
-  bool _onlyOpen = true;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final sem = Theme.of(context).semantic;
-    final items = BottleDepositService.forShop(widget.shopId,
-        onlyOpen: _onlyOpen);
-    final out = BottleDepositService.outstanding(widget.shopId);
-
-    return Column(
-      children: [
-        // Ce que la boutique doit encore rendre, et le nombre d'emballages
-        // qu'elle doit récupérer : les deux chiffres du jour.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: _Card(
-            onTap: () {},
-            child: Row(children: [
-              Icon(Icons.liquor_outlined, size: 18, color: cs.primary),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                    out.bottles == 0
-                        ? 'Aucun emballage dehors'
-                        : '${out.bottles} emballage'
-                            '${out.bottles > 1 ? 's' : ''} à récupérer',
-                    style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
-              ),
-              Text(CurrencyFormatter.format(out.amount.toDouble()),
-                  style: AppTextStyles.bodyBold.copyWith(color: cs.primary)),
-            ]),
-          ),
-        ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-            child: TextButton.icon(
-              onPressed: () => setState(() => _onlyOpen = !_onlyOpen),
-              icon: Icon(
-                  _onlyOpen
-                      ? Icons.history_rounded
-                      : Icons.filter_alt_off_rounded,
-                  size: 18),
-              label: Text(_onlyOpen ? 'Voir l\'historique' : 'En attente seulement'),
-            ),
-          ),
-        ),
-        Expanded(
-          child: items.isEmpty
-              ? RestoEmptyState(
-                  icon: Icons.liquor_outlined,
-                  title: _onlyOpen
-                      ? 'Aucune consigne en attente'
-                      : 'Aucune consigne',
-                  subtitle: 'Les consignes se prennent depuis l\'addition '
-                      'ou une commande à emporter.',
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                  itemCount: items.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) {
-                    final d = items[i];
-                    return _Card(
-                      onTap: d.isClosed ? () {} : () => _actions(d),
-                      child: Row(children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(d.label,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppTextStyles.bodyBold
-                                      .copyWith(color: cs.onSurface)),
-                              Text(
-                                  '${d.returnedQuantity}/${d.quantity} rendu'
-                                  '${d.quantity > 1 ? 's' : ''} · '
-                                  '${_dayLabel(d.createdAt)}'
-                                  '${(d.holder ?? '').isEmpty ? '' : ' · ${d.holder}'}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppTextStyles.caption),
-                            ],
-                          ),
-                        ),
-                        Text(
-                            CurrencyFormatter.format(
-                                d.outstandingAmount.toDouble()),
-                            style: AppTextStyles.bodyBold.copyWith(
-                                color: d.isClosed ? null : cs.primary)),
-                        const SizedBox(width: 8),
-                        _Pill(
-                          d.isLost
-                              ? 'perdue'
-                              : (d.outstanding == 0 ? 'rendue' : 'due'),
-                          d.isLost
-                              ? sem.danger
-                              : (d.outstanding == 0 ? sem.success : sem.warning),
-                        ),
-                      ]),
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _actions(BottleDeposit d) async {
-    final choice = await showAdaptiveFormSheet<String>(
-      context: context,
-      builder: (_) => AdaptiveFormFrame(
-        title: d.label,
-        subtitle: '${d.outstanding} emballage'
-            '${d.outstanding > 1 ? 's' : ''} · '
-            '${CurrencyFormatter.format(d.outstandingAmount.toDouble())}',
-        icon: Icons.liquor_outlined,
-        body: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            ListTile(
-              leading: const Icon(Icons.assignment_return_outlined),
-              title: const Text('Emballages rendus'),
-              subtitle: const Text('Rembourse la caution au client'),
-              onTap: () => Navigator.of(context).pop('return'),
-            ),
-            ListTile(
-              leading: Icon(Icons.report_gmailerrorred_outlined,
-                  color: Theme.of(context).semantic.danger),
-              title: const Text('Consigne perdue'),
-              subtitle:
-                  const Text('Les emballages ne reviendront pas → perte'),
-              onTap: () => Navigator.of(context).pop('lost'),
-            ),
-          ]),
-        ),
-      ),
-    );
-    if (choice == null || !mounted) return;
-
-    if (choice == 'return') {
-      final qty = await _askAmount(context, 'Emballages rendus',
-          suffix: '/ ${d.outstanding}');
-      if (qty == null || !mounted) return;
-      await BottleDepositService.registerReturn(d, qty.round());
-      if (!mounted) return;
-      AppSnack.success(context, 'Retour enregistré.');
-      setState(() {});
-      return;
-    }
-
-    final ok = await AppConfirmDialog.show(
-      context: context,
-      icon: Icons.report_gmailerrorred_outlined,
-      iconColor: Theme.of(context).semantic.danger,
-      title: 'Consigne perdue ?',
-      body: Text(
-          '${d.outstanding} emballage${d.outstanding > 1 ? 's' : ''} '
-          '(${CurrencyFormatter.format(d.outstandingAmount.toDouble())}) '
-          'seront enregistrés en perte : c\'est la boutique qui rachètera '
-          'les emballages au fournisseur.'),
-      cancelLabel: 'Annuler',
-      confirmLabel: 'Déclarer la perte',
-      onConfirm: () {},
-    );
-    if (ok != true || !mounted) return;
-    await BottleDepositService.declareLost(
-      d,
-      declaredBy: LocalStorageService.getCurrentUser()?.id,
-    );
-    if (!mounted) return;
-    AppSnack.success(context, 'Perte enregistrée.');
-    setState(() {});
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-//  Onglet PERTES
-// ═══════════════════════════════════════════════════════════════════════
+// L'onglet « Consignes » a été SUPPRIMÉ (2026-08-05) : l'établissement ne
+// prête aucun contenant. Le service `BottleDepositService` et la table
+// `bottle_deposits` subsistent, inertes — rien n'écrit plus de consigne, et
+// rétablir l'onglet ne demanderait que de recréer cet écran.
 class _LossesTab extends StatefulWidget {
   final String shopId;
   const _LossesTab({required this.shopId});
@@ -2260,7 +2531,14 @@ String _dayLabel(DateTime d) =>
 /// Unités proposées pour un ingrédient — volontairement courte et concrète :
 /// ce qu'un cuisinier achète réellement. Une unité déjà en base qui n'y figure
 /// pas est conservée et ajoutée à la liste par l'éditeur.
+/// Unité INCONNUE — le cas le plus fréquent à la saisie rapide : on connaît
+/// le nom et ce qu'on a payé, pas le conditionnement. Stockée comme chaîne
+/// vide sur l'ingrédient ; c'est cette sentinelle qui la représente dans la
+/// liste déroulante, où une entrée vide serait invisible.
+const String _kUnitUnknown = 'non précisée';
+
 const List<String> _kIngredientUnits = [
+  _kUnitUnknown,
   'g', 'kg', 'mL', 'L',
   'pièce', 'sachet', 'paquet', 'boîte',
   // Le casier et la bouteille sont les unités d'achat réelles des boissons
@@ -2328,14 +2606,34 @@ Future<double?> _askAmount(BuildContext context, String title,
 /// Carte de liste standard (surface + bordure douce).
 class _Card extends StatelessWidget {
   final Widget child;
-  final VoidCallback onTap;
-  const _Card({required this.child, required this.onTap});
+
+  /// `null` = carte INERTE, sans effet au toucher.
+  ///
+  /// Une carte qui ouvre un formulaire au moindre contact déclenche des
+  /// modifications non voulues quand on vise un bouton et qu'on le manque.
+  /// Les listes dont chaque action a son propre bouton n'en passent donc pas.
+  final VoidCallback? onTap;
+
+  /// Bordure d'accentuation — sert à signaler une ligne qui demande
+  /// l'attention. `null` = bordure discrète habituelle.
+  final Color? borderColor;
+
+  /// Teinte de fond superposée au verre. Volontairement séparée de
+  /// [borderColor] : une bordure seule passe inaperçue dans une longue liste,
+  /// un fond seul ne dit pas où s'arrête la ligne.
+  final Color? background;
+
+  const _Card({
+    required this.child,
+    this.onTap,
+    this.borderColor,
+    this.background,
+  });
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     final sem = Theme.of(context).semantic;
     return Material(
-      color: restoGlassFill(context),
+      color: background ?? restoGlassFill(context),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
@@ -2344,7 +2642,9 @@ class _Card extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: sem.borderSubtle),
+            border: Border.all(
+                color: borderColor ?? sem.borderSubtle,
+                width: borderColor == null ? 1 : 1.5),
           ),
           child: child,
         ),
@@ -2369,4 +2669,372 @@ class _Pill extends StatelessWidget {
             style: AppTextStyles.micro
                 .copyWith(color: color, fontWeight: FontWeight.w700)),
       );
+}
+
+/// Ce qu'une réception d'ingrédient produit.
+class _ReceiptResult {
+  /// Quantité entrée en stock, dans l'unité de l'ingrédient.
+  final double quantity;
+
+  /// Montant payé (FCFA). 0 = don, prélèvement sur un autre stock, ou montant
+  /// inconnu — la quantité entre quand même, mais rien ne sera imputé aux plats.
+  final int amount;
+
+  final DateTime date;
+
+  const _ReceiptResult(this.quantity, this.amount, this.date);
+}
+
+/// RÉCEPTION D'UN INGRÉDIENT : ce qui entre en réserve, et ce que ça a coûté.
+///
+/// Les deux vont ensemble et se saisissent ensemble. C'est LE geste qui
+/// alimente tout le calcul de marge : le montant payé, rattaché à cet
+/// ingrédient, est ce que la répartition imputera aux plats qui le contiennent.
+/// Séparer les deux saisies (« j'ajoute 3 kg » ici, « j'ai payé 21 000 F »
+/// ailleurs) garantissait que la seconde serait oubliée.
+class _IngredientReceiptSheet extends StatefulWidget {
+  final Ingredient ingredient;
+  const _IngredientReceiptSheet({required this.ingredient});
+  @override
+  State<_IngredientReceiptSheet> createState() =>
+      _IngredientReceiptSheetState();
+}
+
+class _IngredientReceiptSheetState extends State<_IngredientReceiptSheet> {
+  final _qtyCtrl = TextEditingController();
+  final _amountCtrl = TextEditingController();
+  DateTime _date = DateTime.now();
+  String? _err;
+
+  @override
+  void dispose() {
+    _qtyCtrl.dispose();
+    _amountCtrl.dispose();
+    super.dispose();
+  }
+
+  double get _qty =>
+      double.tryParse(_qtyCtrl.text.trim().replaceAll(',', '.')) ?? 0;
+
+  int get _amount => int.tryParse(_amountCtrl.text.trim()) ?? 0;
+
+  /// Coût unitaire de CETTE réception — un repère de vraisemblance : un prix
+  /// au kilo dix fois trop élevé se voit ici, pas dans le total.
+  double? get _unitCost => (_qty > 0 && _amount > 0) ? _amount / _qty : null;
+
+  /// Coût moyen du stock APRÈS cette réception — la valeur qui sera écrite.
+  int? get _newUnitCost => (_qty <= 0 || _amount <= 0)
+      ? null
+      : IngredientService.weightedUnitCost(
+          currentQty: widget.ingredient.quantity,
+          currentUnitCost: widget.ingredient.costPerUnit,
+          receivedQty: _qty,
+          amountPaid: _amount,
+        );
+
+  void _submit() {
+    if (_qty <= 0) {
+      setState(() => _err = 'Quantité invalide');
+      return;
+    }
+    Navigator.of(context).pop(_ReceiptResult(_qty, _amount, _date));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    final ing = widget.ingredient;
+    return AdaptiveFormFrame(
+      title: 'Réception — ${ing.name}',
+      icon: Icons.add_box_outlined,
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: _qtyCtrl,
+                  autofocus: true,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                  ],
+                  onChanged: (_) => setState(() => _err = null),
+                  decoration: InputDecoration(
+                      labelText: 'Quantité reçue', suffixText: ing.unit),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _amountCtrl,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  onChanged: (_) => setState(() {}),
+                  decoration:
+                      const InputDecoration(labelText: 'Montant payé (F)'),
+                ),
+              ),
+            ]),
+            if (_unitCost != null) ...[
+              const SizedBox(height: 6),
+              Text('soit ${_unitCost!.round()} F / ${ing.unit} sur cet achat',
+                  style: AppTextStyles.caption),
+            ],
+            // Nouveau coût unitaire après moyenne avec le stock existant.
+            // Affiché AVANT validation : c'est cette valeur qui chiffrera vos
+            // pertes d'inventaire, elle ne doit pas changer à votre insu.
+            if (_newUnitCost != null && _newUnitCost != ing.costPerUnit) ...[
+              const SizedBox(height: 2),
+              Text(
+                  'Coût moyen du stock : ${ing.costPerUnit} → '
+                  '$_newUnitCost F / ${ing.unit}',
+                  style: AppTextStyles.caption
+                      .copyWith(color: Theme.of(context).colorScheme.primary)),
+            ],
+            const SizedBox(height: 10),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.event_outlined),
+              title: Text(_dayLabel(_date), style: AppTextStyles.bodySm),
+              trailing: const Text('Modifier'),
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: _date,
+                  firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                  lastDate: DateTime.now(),
+                );
+                if (picked != null && mounted) setState(() => _date = picked);
+              },
+            ),
+            Text(
+                _amount > 0
+                    ? 'Une dépense sera enregistrée et rattachée à cet '
+                        'ingrédient : c\'est elle qui donnera son coût aux '
+                        'plats qui le contiennent.'
+                    : 'Sans montant, la quantité entre en stock mais aucun '
+                        'coût ne sera imputé aux plats.',
+                style: AppTextStyles.captionHint),
+            if (_err != null) ...[
+              const SizedBox(height: 8),
+              Text(_err!,
+                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+            ],
+            const SizedBox(height: 18),
+            AppPrimaryButton(
+              label: 'Enregistrer la réception',
+              icon: Icons.check_rounded,
+              fullWidth: true,
+              onTap: _submit,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Bandeau de régularisation des achats non enregistrés.
+///
+/// Il n'apparaît que s'il y a réellement quelque chose à rattraper, et il
+/// disparaît de lui-même une fois le travail fait. Il existe parce qu'un achat
+/// jamais enregistré est de l'argent sorti que l'application ignore : un
+/// ingrédient sans achat rend GRATUITS les plats qui le contiennent, une
+/// fourniture sans achat disparaît des charges. Dans les deux cas le bénéfice
+/// affiché est flatteur et faux, sans que rien à l'écran ne le signale.
+///
+/// [label] adapte le mot compté — le bandeau sert les deux onglets.
+/// Choix de la MÉTHODE DE COÛT MATIÈRES de la boutique.
+///
+/// Les deux méthodes sont exclusives — on en active une. Le sélecteur affiche
+/// en clair ce que chacune implique, parce que basculer change tous les
+/// chiffres de marge de l'établissement : ce n'est pas une préférence
+/// d'affichage.
+class _CostMethodSelector extends StatelessWidget {
+  final String shopId;
+  final VoidCallback onChanged;
+
+  const _CostMethodSelector({required this.shopId, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sem = theme.semantic;
+    final current = DishCostSettings.forShop(shopId);
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      decoration: BoxDecoration(
+        color: sem.elevatedSurface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: sem.borderSubtle),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(Icons.calculate_outlined,
+                size: 16, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Text('Méthode de calcul du coût matières',
+                style: AppTextStyles.captionBold),
+          ]),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              for (final m in DishCostMethod.values) ...[
+                Expanded(
+                  child: _MethodChip(
+                    label: m.label,
+                    selected: m == current,
+                    onTap: () async {
+                      if (m == current) return;
+                      await DishCostSettings.setForShop(shopId, m);
+                      onChanged();
+                    },
+                  ),
+                ),
+                if (m != DishCostMethod.values.last)
+                  const SizedBox(width: 8),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(current.description, style: AppTextStyles.captionHint),
+          const SizedBox(height: 6),
+          // Le réglage vit dans la box `settings`, attachée à l'appareil.
+          // Le taire ferait chercher longtemps pourquoi la tablette du passe
+          // n'affiche pas les mêmes marges que le poste du gérant.
+          Text(
+              'Réglage propre à cet appareil : à répéter sur chaque poste de '
+              'la boutique.',
+              style: AppTextStyles.micro),
+        ],
+      ),
+    );
+  }
+}
+
+class _MethodChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _MethodChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sem = theme.semantic;
+    return Material(
+      color: selected ? theme.colorScheme.primary : sem.trackMuted,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: selected
+                    ? theme.colorScheme.primary
+                    : sem.borderSubtle),
+          ),
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: AppTextStyles.bodySmBold.copyWith(
+                color: selected
+                    ? theme.colorScheme.onPrimary
+                    : theme.colorScheme.onSurface),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BackfillBanner extends StatelessWidget {
+  final int count;
+  final int total;
+  final bool busy;
+  final VoidCallback onRun;
+  final String label;
+
+  const _BackfillBanner({
+    required this.count,
+    required this.total,
+    required this.busy,
+    required this.onRun,
+    this.label = 'ingrédient',
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final sem = Theme.of(context).semantic;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: sem.warning.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: sem.warning.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(Icons.info_outline_rounded, size: 18, color: sem.warning),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('$count $label(s) sans achat enregistré',
+                  style: AppTextStyles.bodySmBold
+                      .copyWith(color: cs.onSurface)),
+            ),
+          ]),
+          const SizedBox(height: 4),
+          Text(
+              'Ils ont du stock, mais aucune dépense ne leur est rattachée : '
+              'les plats qui les contiennent affichent donc 0 F de coût '
+              'matières. Enregistrer leurs achats '
+              '(${CurrencyFormatter.format(total.toDouble())}) corrige vos '
+              'marges.',
+              style: AppTextStyles.caption),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: busy ? null : onRun,
+              icon: busy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.receipt_long_outlined, size: 18),
+              label: Text(busy
+                  ? 'Enregistrement…'
+                  : 'Enregistrer les achats manquants'),
+              style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

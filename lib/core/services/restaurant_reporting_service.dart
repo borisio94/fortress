@@ -6,8 +6,8 @@ import '../storage/local_storage_service.dart';
 import 'activity_service.dart';
 import 'daily_expense_service.dart';
 import 'fixed_charge_service.dart';
+import 'dish_cost_service.dart';
 import 'loss_service.dart';
-import 'recipe_service.dart';
 import 'staff_service.dart';
 
 /// Résultat par secteur d'activité (`restaurant_activities`).
@@ -225,38 +225,38 @@ class RestaurantReportingService {
     final chargeSeries = List<double>.filled(n, 0);
     final lossSeries = List<double>.filled(n, 0);
 
-    // Coût matières et secteur, par produit — calculés UNE fois : les lire
-    // dans la boucle des commandes rescannerait la boîte des recettes à
-    // chaque ligne vendue.
-    final unitCost = <String, double>{};
+    // Secteur par produit — lu UNE fois : le chercher dans la boucle des
+    // commandes rescannerait le catalogue à chaque ligne vendue.
     final sectorOf = <String, String?>{};
+    final catalogCost = <String, double>{};
     try {
       for (final p in LocalStorageService.getProductsForShop(shopId)) {
         final id = p.id;
         if (id == null) continue;
-        // Fiche recette si elle existe, sinon le coût matière saisi à la main
-        // sur le plat (`priceBuy`) — un plat sans recette n'est pas gratuit.
-        final recipe = RecipeService.recipeCost(shopId, id);
-        unitCost[id] = recipe > 0 ? recipe : p.priceBuy;
         sectorOf[id] = p.activityId;
+        catalogCost[id] = p.priceBuy;
       }
     } catch (e) {
       debugPrint('[RestoReport] catalogue err: $e');
     }
 
     final sectorRevenue = <String, double>{};
-    final sectorCost = <String, double>{};
     final sectorRevenueSeries = <String, List<double>>{};
-    final sectorCostSeries = <String, List<double>>{};
 
-    void addToSector(String key, int bucket, double rev, double cost) {
-      sectorRevenue[key] = (sectorRevenue[key] ?? 0) + rev;
-      sectorCost[key] = (sectorCost[key] ?? 0) + cost;
-      (sectorRevenueSeries[key] ??= List<double>.filled(n, 0))[bucket] += rev;
-      (sectorCostSeries[key] ??= List<double>.filled(n, 0))[bucket] += cost;
-    }
+    // ── Ventes encaissées — PASSE UNIQUE ───────────────────────────────
+    //
+    // Le chiffre d'affaires se calcule ligne par ligne, mais PAS le coût :
+    // celui-ci dépend de la répartition des achats, qui a elle-même besoin du
+    // total vendu de la période. On ne peut donc pas tout faire dans le même
+    // geste — mais on peut ne PARCOURIR les commandes qu'une seule fois, en
+    // mémorisant les quantités vendues par produit et par bucket. Le coût est
+    // chiffré juste après, sur ce décompte.
+    final soldByProduct = <String, double>{};
+    final soldByProductBucket = <String, List<double>>{};
+    // Prix d'achat figé dans la ligne : le seul repli quand le produit a été
+    // supprimé du catalogue depuis la vente.
+    final frozenCost = <String, double>{};
 
-    // ── Ventes encaissées ──────────────────────────────────────────────
     try {
       for (final raw in HiveBoxes.ordersBox.values) {
         final o = Map<String, dynamic>.from(raw);
@@ -291,20 +291,76 @@ class RestaurantReportingService {
           final lineRevenue = (custom ?? unit) * qty * (1 - discount / 100);
 
           final pid = it['product_id']?.toString() ?? '';
-          // Repli sur le prix d'achat figé dans la ligne quand le produit a
-          // été supprimé du catalogue depuis la vente.
-          final cost = (unitCost[pid] ??
-                  (it['price_buy'] as num?)?.toDouble() ??
-                  0) *
-              qty;
+          final key = sectorOf[pid] ?? '';
 
           revenueSeries[b] += lineRevenue;
-          materialSeries[b] += cost;
-          addToSector(sectorOf[pid] ?? '', b, lineRevenue, cost);
+          sectorRevenue[key] = (sectorRevenue[key] ?? 0) + lineRevenue;
+          (sectorRevenueSeries[key] ??=
+              List<double>.filled(n, 0))[b] += lineRevenue;
+
+          soldByProduct[pid] = (soldByProduct[pid] ?? 0) + qty;
+          (soldByProductBucket[pid] ??= List<double>.filled(n, 0))[b] += qty;
+          final frozen = (it['price_buy'] as num?)?.toDouble();
+          if (frozen != null && !frozenCost.containsKey(pid)) {
+            frozenCost[pid] = frozen;
+          }
+
+          // ACCOMPAGNEMENTS — l'option adossée à un plat a été cuisinée autant
+          // de fois que la ligne vendue. Son coût s'ajoute donc au coût
+          // matières, alors que son PRIX est déjà compris dans le chiffre
+          // d'affaires de la ligne (`priceWithModifiers` l'y a matérialisé) :
+          // le compter en recette une seconde fois le doublerait.
+          //
+          // Le secteur suit l'accompagnement lui-même. Donnez à vos sauces et
+          // à vos viandes le MÊME secteur qu'au plat qu'elles accompagnent,
+          // sans quoi leur coût pèsera sur un secteur dont la recette est
+          // enregistrée ailleurs.
+          for (final rawMod in (it['modifiers'] as List? ?? [])) {
+            if (rawMod is! Map) continue;
+            final mid = rawMod['product_id']?.toString() ?? '';
+            if (mid.isEmpty) continue;
+            soldByProduct[mid] = (soldByProduct[mid] ?? 0) + qty;
+            (soldByProductBucket[mid] ??= List<double>.filled(n, 0))[b] += qty;
+          }
         }
       }
     } catch (e) {
       debugPrint('[RestoReport] ventes err: $e');
+    }
+
+    // ── Coût matières, à partir du décompte ci-dessus ───────────────────
+    // La répartition réutilise les ventes déjà comptées : aucun second
+    // balayage de la boîte des commandes.
+    // Façade : la méthode active (répartition ou fiche technique) est choisie
+    // par la boutique, le reporting n'a pas à la connaître.
+    final allocation = DishCostService.forSales(shopId,
+        from: range.from, to: range.to, soldByProduct: soldByProduct);
+
+    final sectorCost = <String, double>{};
+    final sectorCostSeries = <String, List<double>>{};
+
+    for (final entry in soldByProductBucket.entries) {
+      final pid = entry.key;
+      // Coût réparti si le plat porte des ingrédients achetés sur la période,
+      // sinon le coût matière saisi à la main sur le plat (`priceBuy`), sinon
+      // le prix d'achat figé dans la ligne — un plat sans ingrédient coché
+      // n'est pas gratuit pour autant.
+      final allocated = allocation.forProduct(pid);
+      final unitCost = allocated > 0
+          ? allocated
+          : (catalogCost[pid] ?? frozenCost[pid] ?? 0);
+      if (unitCost <= 0) continue;
+
+      final key = sectorOf[pid] ?? '';
+      final costSeries = sectorCostSeries[key] ??= List<double>.filled(n, 0);
+      for (var i = 0; i < n; i++) {
+        final qty = entry.value[i];
+        if (qty <= 0) continue;
+        final cost = qty * unitCost;
+        materialSeries[i] += cost;
+        costSeries[i] += cost;
+        sectorCost[key] = (sectorCost[key] ?? 0) + cost;
+      }
     }
 
     // ── Charges fixes imputables à la période ──────────────────────────
