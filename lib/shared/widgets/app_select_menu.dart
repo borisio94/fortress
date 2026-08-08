@@ -65,7 +65,7 @@ class AppSelectField extends StatelessWidget {
               hasValue ? value! : placeholder,
               style: AppTextStyles.body.copyWith(
                 color: hasValue
-                    ? const Color(0xFF1A1D2E)
+                    ? Theme.of(context).colorScheme.onSurface
                     : AppColors.textHint,
               ),
               maxLines: 1,
@@ -295,10 +295,16 @@ class _MenuContainerState extends State<_MenuContainer> {
                   final isSelected = widget.multi
                       ? _sel.contains(item)
                       : (widget.selected == item);
-                  // Alternance de fond : pair = blanc, impair = très léger violet
+                  // Alternance de fond, DÉRIVÉE DU THÈME et non d'une teinte
+                  // fixe : `primarySurface` est un violet pâle conçu pour le
+                  // mode clair, il produisait en sombre des bandes claires qui
+                  // écrasaient le texte. Un voile de 4 % de la couleur de
+                  // texte se lit comme une rayure discrète dans les deux modes.
+                  final cs = Theme.of(context).colorScheme;
                   final bg = idx.isEven
-                      ? Theme.of(context).colorScheme.surface
-                      : AppColors.primarySurface.withValues(alpha:0.5);
+                      ? cs.surface
+                      : Color.alphaBlend(
+                          cs.onSurface.withValues(alpha: 0.04), cs.surface);
                   return _MenuItem(
                     key: _keyFor(idx),
                     label: item,
@@ -411,14 +417,20 @@ class _MenuItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return InkWell(
       onTap: onTap,
       child: Container(
         width: double.infinity,
         margin: highlighted ? const EdgeInsets.all(4) : EdgeInsets.zero,
         decoration: BoxDecoration(
+          // Surlignage composé SUR la surface plutôt qu'une teinte claire
+          // fixe : en sombre, `primarySurface` donnait une bande pâle sur
+          // laquelle le texte disparaissait.
           color: highlighted
-              ? AppColors.primarySurface.withValues(alpha:0.6)
+              ? Color.alphaBlend(
+                  AppColors.primary.withValues(alpha: 0.16),
+                  theme.colorScheme.surface)
               : background,
           borderRadius: highlighted ? BorderRadius.circular(8) : null,
           border: highlighted
@@ -437,7 +449,7 @@ class _MenuItem extends StatelessWidget {
                 border: Border.all(
                   color: isSelected
                       ? AppColors.primary
-                      : const Color(0xFFD1D5DB),
+                      : Theme.of(context).semantic.borderSubtle,
                   width: 1.5,
                 ),
               ),
@@ -456,7 +468,7 @@ class _MenuItem extends StatelessWidget {
                     ? FontWeight.w600 : FontWeight.w400,
                 color: isSelected
                     ? AppColors.primary
-                    : const Color(0xFF1A1D2E),
+                    : Theme.of(context).colorScheme.onSurface,
               ),
             ),
           ),
@@ -662,7 +674,7 @@ class _AppSelectWidgetState extends State<AppSelectWidget> {
                     controller: ctrl,
                     autofocus: true,
                     style: AppTextStyles.body.copyWith(
-                        color: const Color(0xFF1A1D2E)),
+                        color: Theme.of(context).colorScheme.onSurface),
                     decoration: InputDecoration(
                       hintStyle: AppTextStyles.bodySm.copyWith(
                           color: AppColors.textHint),
@@ -866,7 +878,7 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
                           border: Border.all(
                             color: sel
                                 ? AppColors.primary
-                                : const Color(0xFFD1D5DB),
+                                : Theme.of(context).semantic.borderSubtle,
                             width: 1.5,
                           ),
                         ),
@@ -883,7 +895,7 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
                                   : FontWeight.w400,
                               color: sel
                                   ? AppColors.primary
-                                  : const Color(0xFF1A1D2E))),
+                                  : Theme.of(context).colorScheme.onSurface)),
                     ]),
                   ),
                 );
