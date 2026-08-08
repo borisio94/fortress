@@ -29,6 +29,24 @@ class Ingredient {
   /// 'specialized' (un seul plat) ou 'shared' (plusieurs plats).
   final String type;
 
+  /// MÉTHODE DE CHIFFRAGE DE CET INGRÉDIENT — `'repartition'` ou `'fiche'`.
+  ///
+  /// Le choix est porté par l'ingrédient et non par la boutique, parce que
+  /// deux familles coexistent dans une cuisine et ne se mesurent pas pareil :
+  ///
+  ///   * le riz, l'huile, la viande s'achètent au kilo et se pèsent dans
+  ///     l'assiette → `'fiche'`, seule méthode capable de détecter un
+  ///     sur-dosage ;
+  ///   * le piment, les cubes, les épices s'achètent en tas → `'repartition'`,
+  ///     parce que personne ne pèsera jamais 3 g de piment par assiette.
+  ///
+  /// Un réglage unique pour toute la boutique imposait le mauvais compromis
+  /// dans les deux sens : aucun contrôle sur le poste qui coûte cher, ou une
+  /// fiche jamais remplie faute d'une quantité d'épice.
+  ///
+  /// Défaut `'repartition'` : le parc existant garde son comportement.
+  final String costMethod;
+
   /// Date d'achat (date seule, sans heure) — INFORMATIF (hotfix_142).
   ///
   /// N'entre pas dans le calcul du bénéfice : le coût matières est compté à la
@@ -47,8 +65,26 @@ class Ingredient {
     this.alertThreshold = 0,
     this.costPerUnit = 0,
     this.type = 'specialized',
+    this.costMethod = costRepartition,
     this.purchaseDate,
   });
+
+  /// Les deux méthodes de chiffrage. Les chaînes sont les valeurs persistées
+  /// (`ingredients.cost_method`, contrainte CHECK côté Postgres) : ne pas les
+  /// renommer sans migration.
+  static const String costRepartition = 'repartition';
+  static const String costSheet = 'fiche';
+
+  /// Cet ingrédient est-il chiffré à la fiche technique ?
+  ///
+  /// Toute valeur inconnue retombe sur la répartition : une donnée abîmée ne
+  /// doit pas rendre un plat non chiffrable, elle doit le ramener au
+  /// comportement par défaut.
+  bool get usesTechnicalSheet => costMethod == costSheet;
+
+  /// Libellé court pour la pastille de la liste.
+  String get costMethodLabel =>
+      usesTechnicalSheet ? 'Fiche' : 'Répartition';
 
   /// Clé `yyyy-MM-dd` d'une date (stockage DATE sans heure).
   static String dayKey(DateTime d) =>
@@ -68,6 +104,7 @@ class Ingredient {
     double? alertThreshold,
     int? costPerUnit,
     String? type,
+    String? costMethod,
     DateTime? purchaseDate,
     /// Efface la date d'achat (un `null` passé à [purchaseDate] signifie
     /// « inchangée », comme pour tous les autres champs).
@@ -83,16 +120,24 @@ class Ingredient {
         alertThreshold: alertThreshold ?? this.alertThreshold,
         costPerUnit: costPerUnit ?? this.costPerUnit,
         type: type ?? this.type,
+        costMethod: costMethod ?? this.costMethod,
         purchaseDate: clearPurchaseDate
             ? null
             : (purchaseDate ?? this.purchaseDate),
       );
 
-  static const int currentSchemaVersion = 1;
+  static const int currentSchemaVersion = 2;
   static const SchemaMigrator _migrator = SchemaMigrator(
     currentVersion: currentSchemaVersion,
-    steps: {},
+    // v2 — méthode de chiffrage par ingrédient (hotfix_157). Tout l'existant
+    // était chiffré à la répartition : on le déclare explicitement plutôt que
+    // de s'en remettre au défaut du constructeur, pour que la valeur soit
+    // écrite en base au premier réenregistrement. Pure et idempotente.
+    steps: {2: _defaultCostMethod},
   );
+
+  static Map<String, dynamic> _defaultCostMethod(Map<String, dynamic> m) =>
+      {...m, 'cost_method': m['cost_method'] ?? costRepartition};
 
   Map<String, dynamic> toMap() => {
         'schema_version': currentSchemaVersion,
@@ -104,6 +149,7 @@ class Ingredient {
         'alert_threshold': alertThreshold,
         'cost_per_unit': costPerUnit,
         'type': type,
+        'cost_method': costMethod,
         'purchase_date':
             purchaseDate == null ? null : dayKey(purchaseDate!),
         'created_at': createdAt.toUtc().toIso8601String(),
@@ -120,6 +166,10 @@ class Ingredient {
       alertThreshold: (m['alert_threshold'] as num?)?.toDouble() ?? 0,
       costPerUnit: (m['cost_per_unit'] as num?)?.toInt() ?? 0,
       type: (m['type'] ?? 'specialized').toString(),
+      // Toute valeur inattendue retombe sur la répartition : une donnée abîmée
+      // ne doit pas rendre un plat non chiffrable, elle doit le ramener au
+      // comportement par défaut.
+      costMethod: m['cost_method'] == costSheet ? costSheet : costRepartition,
       // Absente des ingrédients antérieurs à hotfix_142 → non renseignée.
       purchaseDate: m['purchase_date'] == null ||
               m['purchase_date'].toString().isEmpty

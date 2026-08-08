@@ -11,6 +11,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fortress/core/services/dish_cost_service.dart';
+import 'package:fortress/features/restaurant/domain/entities/ingredient.dart';
 import 'package:fortress/features/restaurant/domain/entities/recipe_ingredient.dart';
 
 RecipeIngredient _line({
@@ -150,15 +151,59 @@ void main() {
     });
   });
 
-  group('DishCostMethod — les deux méthodes sont séparées', () {
+  group('Ingredient.costMethod — le choix vit sur l\'ingrédient', () {
+    Ingredient ing(String method) => Ingredient(
+          id: 'ig_1',
+          shopId: 'shop_1',
+          name: 'Riz',
+          createdAt: DateTime(2026, 1, 1),
+          costMethod: method,
+        );
+
     test('la répartition reste le défaut', () {
-      expect(DishCostMethod.fromKey(null), DishCostMethod.repartition);
-      expect(DishCostMethod.fromKey('inconnu'), DishCostMethod.repartition);
+      expect(
+          Ingredient(
+                  id: 'ig_1',
+                  shopId: 'shop_1',
+                  name: 'Piment',
+                  createdAt: DateTime(2026, 1, 1))
+              .usesTechnicalSheet,
+          isFalse);
     });
 
-    test('les clés persistées font l\'aller-retour', () {
-      for (final m in DishCostMethod.values) {
-        expect(DishCostMethod.fromKey(m.key), m);
+    test('seule la valeur exacte active la fiche', () {
+      expect(ing(Ingredient.costSheet).usesTechnicalSheet, isTrue);
+      expect(ing(Ingredient.costRepartition).usesTechnicalSheet, isFalse);
+    });
+
+    test('une valeur abîmée retombe sur la répartition, pas sur une erreur',
+        () {
+      // Une donnée corrompue ne doit pas rendre un plat non chiffrable : elle
+      // doit le ramener au comportement par défaut.
+      final parsed = Ingredient.fromMap({
+        'id': 'ig_1',
+        'shop_id': 'shop_1',
+        'name': 'Riz',
+        'cost_method': 'n_importe_quoi',
+        'created_at': '2026-01-01T00:00:00.000Z',
+      });
+      expect(parsed.usesTechnicalSheet, isFalse);
+      expect(parsed.costMethod, Ingredient.costRepartition);
+    });
+
+    test('migration v2 — un ingrédient antérieur est en répartition', () {
+      final legacy = Ingredient.fromMap({
+        'id': 'ig_old',
+        'shop_id': 'shop_1',
+        'name': 'Huile',
+        'created_at': '2026-01-01T00:00:00.000Z',
+      });
+      expect(legacy.costMethod, Ingredient.costRepartition);
+    });
+
+    test('la méthode fait l\'aller-retour par la carte', () {
+      for (final m in [Ingredient.costRepartition, Ingredient.costSheet]) {
+        expect(Ingredient.fromMap(ing(m).toMap()).costMethod, m);
       }
     });
   });

@@ -22,6 +22,7 @@ import '../../../../features/inventaire/domain/entities/product.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
+import '../../../../shared/widgets/app_select_menu.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/product_image_card.dart';
@@ -122,11 +123,11 @@ class _DishFormSheetState extends State<DishFormSheet> {
   late final AllocationResult _allocation =
       DishCostService.forMonth(widget.shopId, DateTime.now());
 
-  /// Méthode active — pilote l'affichage de la colonne des quantités dans
-  /// l'éditeur de recette : demander une quantité que rien ne lit serait une
-  /// saisie pour rien.
-  late final DishCostMethod _costMethod =
-      DishCostService.methodFor(widget.shopId);
+  /// Y a-t-il au moins un ingrédient chiffré à la FICHE TECHNIQUE dans cette
+  /// recette ? Pilote le titre de la section. La colonne des quantités, elle,
+  /// s'affiche ligne par ligne : demander une quantité pour un ingrédient
+  /// réparti serait une saisie que rien ne lit.
+  bool get _hasSheetLine => _recipe.any((d) => d.usesSheet);
 
   int _rating = 0;
   // Décoché par défaut, à l'inverse du défaut global : un plat est produit à
@@ -172,6 +173,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
             name: ing?.name ?? '(ingrédient supprimé)',
             portionWeight: line.portionWeight,
             unit: ing?.unit ?? '',
+            usesSheet: ing?.usesTechnicalSheet ?? false,
             initialQty: line.quantity,
             // Quantité héritée d'avant le retour de la fiche technique :
             // pré-remplie comme suggestion, mais signalée tant qu'elle n'est
@@ -354,22 +356,21 @@ class _DishFormSheetState extends State<DishFormSheet> {
         await RecipeService.removeLine(line);
       }
     }
-    final sheetMode = _costMethod == DishCostMethod.technicalSheet;
     for (final d in _recipe) {
       await RecipeService.addLink(
         shopId: widget.shopId,
         productId: productId,
         ingredientId: d.ingredientId,
         portionWeight: d.portionWeight,
-        // Quantités écrites SEULEMENT quand la fiche technique est active :
-        // en répartition le champ n'est pas affiché, et passer 0 effacerait
-        // les fiches déjà pesées de quelqu'un qui bascule un instant de
-        // méthode. `null` = « ne touche pas ».
-        quantity: sheetMode ? d.qtyValue : null,
-        unit: sheetMode ? d.unit : null,
-        // Passer par le formulaire en mode fiche VAUT confirmation : la
-        // valeur a été affichée, relue, et validée par l'enregistrement.
-        quantityConfirmed: sheetMode ? d.qtyValue > 0 : null,
+        // Quantités écrites SEULEMENT pour les ingrédients chiffrés à la
+        // fiche : pour les autres le champ n'est pas affiché, et passer 0
+        // effacerait une quantité déjà pesée si l'ingrédient repassait un
+        // instant en répartition. `null` = « ne touche pas ».
+        quantity: d.usesSheet ? d.qtyValue : null,
+        unit: d.usesSheet ? d.unit : null,
+        // Passer par le formulaire VAUT confirmation : la valeur a été
+        // affichée, relue, et validée par l'enregistrement.
+        quantityConfirmed: d.usesSheet ? d.qtyValue > 0 : null,
       );
     }
   }
@@ -401,6 +402,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
           name: ing.name,
           portionWeight: RecipeIngredient.normalPortion,
           unit: ing.unit,
+          usesSheet: ing.usesTechnicalSheet,
         ));
       }
     });
@@ -421,6 +423,8 @@ class _DishFormSheetState extends State<DishFormSheet> {
         ingredientId: ing.id,
         name: ing.name,
         portionWeight: RecipeIngredient.normalPortion,
+        unit: ing.unit,
+        usesSheet: ing.usesTechnicalSheet,
       ));
     });
   }
@@ -820,17 +824,18 @@ class _DishFormSheetState extends State<DishFormSheet> {
             if (_recipe.isNotEmpty) ...[
               const SizedBox(height: 14),
               Text(
-                  _costMethod == DishCostMethod.technicalSheet
-                      ? 'Quantités par portion'
+                  _hasSheetLine
+                      ? 'Portions et quantités'
                       : 'Générosité des portions',
                   style: AppTextStyles.caption),
               const SizedBox(height: 2),
               Text(
-                  _costMethod == DishCostMethod.technicalSheet
-                      ? 'Ce que contient UNE assiette, dans l\'unité de '
-                          'chaque ingrédient. Une seule quantité manquante et '
-                          'le plat sort du calcul théorique — mieux vaut ça '
-                          'qu\'un coût sous-évalué et crédible.'
+                  _hasSheetLine
+                      ? 'Les ingrédients en fiche technique demandent la '
+                          'quantité contenue dans UNE assiette. Une seule '
+                          'manquante et le plat perd son coût — mieux vaut ça '
+                          'qu\'un chiffre sous-évalué et crédible. Les autres '
+                          'gardent leur générosité de portion.'
                       : 'Laissez « Normale » sauf si ce plat en contient '
                           'nettement plus ou moins que vos autres plats.',
                   style: AppTextStyles.captionHint),
@@ -838,7 +843,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
               for (final d in _recipe)
                 _PortionRow(
                   draft: d,
-                  sheetMode: _costMethod == DishCostMethod.technicalSheet,
+                  sheetMode: d.usesSheet,
                   onChanged: (w) =>
                       setState(() => d.portionWeight = w),
                   // Toucher au champ vaut relecture : l'avertissement de
@@ -1028,6 +1033,10 @@ class _RecipeDraft {
   final String name;
   double portionWeight;
 
+  /// Cet ingrédient est-il chiffré à la FICHE TECHNIQUE ? Décide, ligne par
+  /// ligne, si l'on demande une quantité par portion ou une générosité.
+  final bool usesSheet;
+
   /// Unité de l'INGRÉDIENT — jamais choisie ici. Le module ne convertit pas
   /// les unités : la quantité de recette s'exprime forcément dans celle de
   /// l'ingrédient, et l'écran l'affiche en dur à côté du champ.
@@ -1046,6 +1055,7 @@ class _RecipeDraft {
     required this.name,
     required this.portionWeight,
     this.unit = '',
+    this.usesSheet = false,
     double initialQty = 0,
     this.inheritedUnconfirmed = false,
   }) : qty = TextEditingController(
@@ -1260,6 +1270,159 @@ class _RecipeSummary extends StatelessWidget {
 /// Volontairement minimale : nom et unité. Le coût ne se saisit PAS ici — il
 /// vient des achats rattachés à l'ingrédient, pas d'un prix théorique tapé une
 /// fois pour toutes.
+/// Sélecteur de la méthode de chiffrage d'UN ingrédient.
+///
+/// Groupe de deux boutons radio. L'explication de chaque méthode n'est PAS
+/// affichée en permanence : elle tient en quatre lignes chacune, et deux
+/// pavés de texte au-dessus d'un formulaire de six champs se sautent au lieu
+/// de se lire. Elle est derrière une icône d'information, à portée de doigt de
+/// qui hésite, invisible pour qui sait déjà.
+class _CostMethodPicker extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  const _CostMethodPicker({required this.value, required this.onChanged});
+
+  static const _explanations = <String, ({String what, String note})>{
+    Ingredient.costRepartition: (
+      what: 'Les achats du mois se répartissent entre les plats vendus qui '
+          'contiennent l\'ingrédient. Aucune quantité à peser. Le coût suit '
+          'la trésorerie et varie d\'un mois à l\'autre.',
+      note: 'Convient à ce qui s\'achète en tas et ne se pèse pas : piment, '
+          'cubes, épices.',
+    ),
+    Ingredient.costSheet: (
+      what: 'La quantité utilisée par portion est définie dans la fiche '
+          'technique du plat. Le coût est calculé sur la quantité réelle '
+          'consommée à chaque vente.',
+      note: 'Nécessite de renseigner les quantités par portion dans chaque '
+          'fiche recette, et la quantité achetée à la création.',
+    ),
+  };
+
+  void _explain(BuildContext context, String method, String label) {
+    final e = _explanations[method]!;
+    showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        icon: const Icon(Icons.info_outline_rounded),
+        title: Text(label, style: AppTextStyles.subtitle),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(e.what, style: AppTextStyles.body.copyWith(height: 1.55)),
+            const SizedBox(height: 10),
+            Text(e.note, style: AppTextStyles.caption),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Compris'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: sem.borderSubtle, width: 0.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Méthode de calcul du coût matières',
+              style:
+                  AppTextStyles.caption.copyWith(fontWeight: FontWeight.w500)),
+          const SizedBox(height: 4),
+          for (final entry in const [
+            (Ingredient.costRepartition, 'Répartition des achats'),
+            (Ingredient.costSheet, 'Fiche technique'),
+          ])
+            _MethodRadio(
+              label: entry.$2,
+              selected: value == entry.$1,
+              onSelect: () => onChanged(entry.$1),
+              onInfo: () => _explain(context, entry.$1, entry.$2),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Une ligne du groupe : `ⓘ  ◉  libellé`.
+///
+/// L'icône d'information est DEVANT le bouton radio et porte sa propre zone
+/// tactile : la toucher explique, elle ne sélectionne pas. Sans cette
+/// séparation, on changerait de méthode en cherchant simplement à comprendre
+/// laquelle choisir.
+class _MethodRadio extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onSelect;
+  final VoidCallback onInfo;
+
+  const _MethodRadio({
+    required this.label,
+    required this.selected,
+    required this.onSelect,
+    required this.onInfo,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(children: [
+      IconButton(
+        onPressed: onInfo,
+        tooltip: 'À quoi sert « $label » ?',
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+        padding: EdgeInsets.zero,
+        icon: Icon(Icons.info_outline_rounded,
+            size: 18, color: theme.colorScheme.onSurfaceVariant),
+      ),
+      Expanded(
+        child: InkWell(
+          onTap: onSelect,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+            child: Row(children: [
+              Icon(
+                  selected
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.radio_button_off_rounded,
+                  size: 20,
+                  color: selected
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.onSurfaceVariant),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: (selected
+                            ? AppTextStyles.bodySmBold
+                            : AppTextStyles.bodySm)
+                        .copyWith(color: theme.colorScheme.onSurface)),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    ]);
+  }
+}
+
 class _QuickIngredientSheet extends StatefulWidget {
   final String shopId;
   const _QuickIngredientSheet({required this.shopId});
@@ -1273,10 +1436,51 @@ class _QuickIngredientSheetState extends State<_QuickIngredientSheet> {
   final _priceCtrl = TextEditingController();
   String _unit = 'kg';
   DateTime? _purchase;
+
+  /// Unités PROPOSÉES par défaut à un restaurant — celles dans lesquelles on
+  /// achète réellement au marché ou chez le grossiste.
+  ///
+  /// Ce n'est qu'une amorce : la liste effective est celle de la boutique
+  /// (`LocalStorageService.getUnits`), à laquelle celles-ci s'ajoutent tant
+  /// qu'elles n'y sont pas. Une boutique qui achète « au régime » ou « au
+  /// panier » ajoute son unité depuis le menu, et elle est partagée avec le
+  /// reste de l'application.
+  static const _defaultUnits = [
+    'kg', 'g', 'L', 'cL', 'pièce', 'boîte',
+    'sachet', 'sac', 'tas', 'botte', 'casier', 'bouteille',
+  ];
+
+  /// Unités de la boutique, amorcées par [_defaultUnits]. Mutable : en ajouter
+  /// une depuis le menu la rend disponible sans rouvrir la feuille.
+  late final List<String> _units = _mergedUnits();
+
+  List<String> _mergedUnits() {
+    final saved = LocalStorageService.getUnits(widget.shopId);
+    final out = <String>[...saved];
+    for (final u in _defaultUnits) {
+      if (!out.contains(u)) out.add(u);
+    }
+    return out;
+  }
+
+  /// Méthode de chiffrage de CET ingrédient. Répartition par défaut : c'est le
+  /// comportement de tout le parc, et le seul qui ne demande rien de plus.
+  String _costMethod = Ingredient.costRepartition;
+
   String? _err;
   bool _saving = false;
 
-  static const _units = ['kg', 'g', 'L', 'pièce', 'boîte', 'sac', 'tas'];
+  bool get _isSheet => _costMethod == Ingredient.costSheet;
+
+  /// La quantité achetée est OBLIGATOIRE en fiche technique.
+  ///
+  /// Le coût unitaire est déduit du total divisé par la quantité. Sans
+  /// quantité, l'app retiendrait le montant du reçu ENTIER comme coût
+  /// unitaire — puis le multiplierait par les grammes de la recette. Un sac de
+  /// riz à 35 000 F donnerait 5,25 millions pour une portion de 150 g. La
+  /// répartition, elle, ne divise jamais : la quantité peut y rester vide.
+  bool get _qtyRequired => _isSheet;
+
 
   @override
   void dispose() {
@@ -1311,10 +1515,70 @@ class _QuickIngredientSheetState extends State<_QuickIngredientSheet> {
     if (d != null && mounted) setState(() => _purchase = d);
   }
 
+  /// Saisie d'une nouvelle unité, depuis le « + Ajouter » du menu.
+  ///
+  /// L'unité créée est enregistrée au niveau de la BOUTIQUE
+  /// (`AppDatabase.saveUnit`, synchronisé) et non de l'ingrédient : une
+  /// boutique qui achète « au régime » le fait pour plusieurs ingrédients, et
+  /// devoir le ressaisir à chaque fiche serait une invitation aux fautes de
+  /// frappe — « régime », « Régime », « regime » deviendraient trois unités.
+  Future<String?> _addUnit(BuildContext ctx) async {
+    final ctrl = TextEditingController();
+    final value = await showAdaptiveFormSheet<String>(
+      context: ctx,
+      builder: (sheetCtx) => AdaptiveFormFrame(
+        title: 'Nouvelle unité',
+        subtitle: 'Elle rejoindra la liste de la boutique',
+        icon: Icons.straighten_rounded,
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                    labelText: 'Unité',
+                    hintText: 'régime, panier, cuvette… *'),
+                onSubmitted: (v) =>
+                    Navigator.of(sheetCtx).pop(v.trim()),
+              ),
+              const SizedBox(height: 18),
+              AppPrimaryButton(
+                label: 'Ajouter',
+                icon: Icons.check_rounded,
+                fullWidth: true,
+                onTap: () =>
+                    Navigator.of(sheetCtx).pop(ctrl.text.trim()),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    ctrl.dispose();
+    final v = value?.trim() ?? '';
+    if (v.isEmpty) return null;
+    await AppDatabase.saveUnit(widget.shopId, v);
+    if (mounted) setState(() => _units.add(v));
+    return v;
+  }
+
   Future<void> _submit() async {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
       setState(() => _err = 'Nom requis');
+      return;
+    }
+    // QUANTITÉ OBLIGATOIRE EN FICHE TECHNIQUE — refus net, pas une
+    // confirmation : ce n'est pas une information « qu'on complétera plus
+    // tard », c'est le diviseur sans lequel le coût unitaire est absurde.
+    if (_qtyRequired && _qtyValue <= 0) {
+      setState(() => _err =
+          'La fiche technique exige la quantité achetée : le coût unitaire '
+          'se déduit du montant divisé par cette quantité.');
       return;
     }
     // MONTANT ABSENT — on demande confirmation, on ne bloque pas. Interdire
@@ -1350,6 +1614,7 @@ class _QuickIngredientSheetState extends State<_QuickIngredientSheet> {
         costPerUnit: _derivedUnitCost,
         quantity: _qtyValue,
         purchaseDate: _purchase,
+        costMethod: _costMethod,
       );
       // CRÉER un ingrédient avec un prix payé, C'EST UN ACHAT : la dépense
       // correspondante est écrite et rattachée. C'est elle, et elle seule, qui
@@ -1396,27 +1661,36 @@ class _QuickIngredientSheetState extends State<_QuickIngredientSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // ── LA MÉTHODE D'ABORD ─────────────────────────────────────────
+            // Elle décide de ce qui est demandé en dessous : en fiche
+            // technique la quantité devient obligatoire. La poser en tête,
+            // c'est répondre à la question avant qu'elle ne se pose.
+            _CostMethodPicker(
+              value: _costMethod,
+              onChanged: (m) => setState(() {
+                _costMethod = m;
+                // L'erreur affichée pouvait porter sur la quantité, qui n'est
+                // plus obligatoire après un retour en répartition.
+                _err = null;
+              }),
+            ),
+            const SizedBox(height: 16),
             TextField(
               controller: _nameCtrl,
               autofocus: true,
               textCapitalization: TextCapitalization.sentences,
               decoration: const InputDecoration(
-                  labelText: 'Nom', hintText: 'Poulet, huile rouge, riz…'),
+                  labelText: 'Nom', hintText: 'Poulet, huile rouge, riz… *'),
             ),
             const SizedBox(height: 12),
-            Text('Unité d\'achat', style: AppTextStyles.caption),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final u in _units)
-                  _Chip(
-                    label: u,
-                    selected: _unit == u,
-                    onTap: () => setState(() => _unit = u),
-                  ),
-              ],
+            AppSelectWidget(
+              label: 'Unité d\'achat',
+              items: _units,
+              value: _unit,
+              icon: Icons.straighten_rounded,
+              addLabel: 'Ajouter une unité',
+              onAdd: _addUnit,
+              onChanged: (v) => setState(() => _unit = v),
             ),
             const SizedBox(height: 14),
             // ── L'ACHAT, saisi ici et pas ailleurs ─────────────────────────
@@ -1431,6 +1705,10 @@ class _QuickIngredientSheetState extends State<_QuickIngredientSheet> {
                   onChanged: (_) => setState(() {}),
                   decoration: InputDecoration(
                     labelText: 'Quantité achetée',
+                    // L'astérisque n'apparaît qu'en fiche technique : la
+                    // répartition ne divise jamais, la quantité peut y rester
+                    // vide sans rien fausser.
+                    hintText: _qtyRequired ? 'ex. 25 *' : 'ex. 25',
                     suffixText: ' $_unit',
                     suffixStyle: AppTextStyles.caption,
                   ),
@@ -1444,7 +1722,7 @@ class _QuickIngredientSheetState extends State<_QuickIngredientSheet> {
                   onChanged: (_) => setState(() {}),
                   decoration: const InputDecoration(
                     labelText: 'Montant payé (F)',
-                    helperText: 'Le total du reçu',
+                    hintText: 'ex. 35000',
                   ),
                 ),
               ),
@@ -1481,7 +1759,7 @@ class _QuickIngredientSheetState extends State<_QuickIngredientSheet> {
                     style: AppTextStyles.body),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             // Ce que l'enregistrement va RÉELLEMENT écrire. Le dire avant est
             // la seule façon d'éviter la surprise dans les deux sens : une
             // dépense qu'on n'attendait pas, ou celle qu'on attendait en vain.

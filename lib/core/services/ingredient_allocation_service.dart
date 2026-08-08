@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
+import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../../features/restaurant/domain/entities/recipe_ingredient.dart';
 import '../storage/hive_boxes.dart';
@@ -135,13 +135,16 @@ class IngredientAllocationService {
 
   /// LA RÈGLE, sous forme PURE — aucun accès Hive, donc vérifiable directement.
   ///
+  /// Publique (et non `@visibleForTesting`) depuis que `DishCostService`
+  /// l'appelle avec des cartes FILTRÉES : seuls les ingrédients chiffrés à la
+  /// répartition y entrent, ceux en fiche technique sont écartés en amont.
+  ///
   /// Pour chaque ingrédient : son coût est divisé par la somme des parts
   /// vendues (quantité × poids de portion), puis chaque plat en reçoit sa part.
   ///
   /// Un ingrédient dont aucun plat n'a été vendu ne peut rien financer : son
   /// coût part dans [AllocationResult.unallocated] plutôt que d'être écrasé sur
   /// un plat au hasard ou de disparaître.
-  @visibleForTesting
   static AllocationResult allocate({
     required Map<String, int> spendByIngredient,
     required Map<String, List<DishLink>> linksByIngredient,

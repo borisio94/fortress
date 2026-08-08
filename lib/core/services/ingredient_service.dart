@@ -63,6 +63,7 @@ class IngredientService {
     double quantity = 0,
     double alertThreshold = 0,
     DateTime? purchaseDate,
+    String costMethod = Ingredient.costRepartition,
   }) async {
     final ing = Ingredient(
       id: _id(),
@@ -72,6 +73,7 @@ class IngredientService {
       costPerUnit: costPerUnit,
       quantity: quantity,
       alertThreshold: alertThreshold,
+      costMethod: costMethod,
       purchaseDate: purchaseDate,
       createdAt: DateTime.now(),
     );

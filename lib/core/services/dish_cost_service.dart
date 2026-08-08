@@ -1,131 +1,53 @@
-import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
-import '../storage/hive_boxes.dart';
 import 'daily_expense_service.dart';
 import 'ingredient_allocation_service.dart';
 import 'ingredient_service.dart';
 import 'recipe_service.dart';
 
-/// Les deux façons de chiffrer le coût matières d'un plat.
-///
-/// Elles sont SÉPARÉES et exclusives : une boutique en active une, jamais les
-/// deux à la fois. Elles ne mesurent pas la même chose, et les additionner ou
-/// les mélanger plat par plat donnerait un chiffre qui n'aurait de sens dans
-/// aucune des deux logiques.
-enum DishCostMethod {
-  /// RÉPARTITION AU PRORATA (défaut, méthode historique).
-  ///
-  /// Les achats de la période se répartissent entre les plats vendus qui
-  /// portent l'ingrédient. Aucune quantité n'est demandée. Fidèle à la
-  /// TRÉSORERIE : le coût d'un plat bouge d'un mois à l'autre au gré des
-  /// achats, et rien ne détecte un sur-dosage.
-  repartition,
-
-  /// FICHE TECHNIQUE.
-  ///
-  /// Coût d'un plat = somme des (quantité par portion × coût unitaire moyen
-  /// pondéré de l'ingrédient). Fidèle à la RECETTE : stable d'une période à
-  /// l'autre, indépendante du rythme des achats. Exige que chaque ligne de la
-  /// fiche porte une quantité confirmée.
-  technicalSheet;
-
-  String get key => switch (this) {
-        DishCostMethod.repartition => 'repartition',
-        DishCostMethod.technicalSheet => 'technical_sheet',
-      };
-
-  String get label => switch (this) {
-        DishCostMethod.repartition => 'Répartition des achats',
-        DishCostMethod.technicalSheet => 'Fiche technique',
-      };
-
-  String get description => switch (this) {
-        DishCostMethod.repartition =>
-          'Les achats du mois se répartissent entre les plats vendus qui '
-              'contiennent l\'ingrédient. Aucune quantité à peser. Le coût '
-              'suit la trésorerie et varie d\'un mois à l\'autre.',
-        DishCostMethod.technicalSheet =>
-          'Chaque plat est chiffré sur les quantités de sa fiche. Le coût est '
-              'stable et indépendant du rythme des achats, mais chaque ligne '
-              'de recette doit porter une quantité.',
-      };
-
-  static DishCostMethod fromKey(String? s) => switch (s) {
-        'technical_sheet' => DishCostMethod.technicalSheet,
-        _ => DishCostMethod.repartition,
-      };
-}
-
-/// Méthode retenue par boutique.
-///
-/// Rangée dans la box `settings` sous `dish_cost_method_<shopId>`, comme les
-/// catégories et les unités — c'est la convention du projet pour un réglage
-/// attaché à une boutique. Conséquence à connaître : le réglage est LOCAL À
-/// L'APPAREIL. Deux tablettes de la même boutique peuvent afficher des coûts
-/// différents tant que la méthode n'y est pas réglée pareil.
-class DishCostSettings {
-  DishCostSettings._();
-
-  static String _key(String shopId) => 'dish_cost_method_$shopId';
-
-  static DishCostMethod forShop(String shopId) {
-    if (shopId.isEmpty) return DishCostMethod.repartition;
-    try {
-      return DishCostMethod.fromKey(
-          HiveBoxes.settingsBox.get(_key(shopId))?.toString());
-    } catch (e) {
-      debugPrint('[DishCost] lecture méthode err: $e');
-      return DishCostMethod.repartition;
-    }
-  }
-
-  static Future<void> setForShop(String shopId, DishCostMethod m) async {
-    if (shopId.isEmpty) return;
-    try {
-      await HiveBoxes.settingsBox.put(_key(shopId), m.key);
-    } catch (e) {
-      debugPrint('[DishCost] écriture méthode err: $e');
-    }
-  }
-}
-
-/// État d'une fiche technique — ce que l'écran doit dire à l'utilisateur.
+/// État de la part « fiche technique » du coût d'un plat.
 class SheetStatus {
-  /// Coût théorique d'une portion, `null` si la fiche n'est pas chiffrable.
+  /// Coût des ingrédients chiffrés à la fiche, pour UNE portion.
+  /// `null` = au moins une ligne « fiche » est incomplète, le plat n'est donc
+  /// pas chiffrable.
   final double? cost;
 
-  /// Noms des ingrédients dont la quantité manque ou n'est pas confirmée.
+  /// Noms des ingrédients « fiche » dont la quantité manque, n'est pas
+  /// confirmée, ou dont le coût unitaire est inconnu.
   final List<String> missing;
 
-  /// La fiche ne porte aucun ingrédient — cas distinct de « il en manque » :
-  /// ici il n'y a rien à compléter, le plat n'a simplement pas de recette.
-  final bool empty;
+  /// Le plat ne porte AUCUN ingrédient chiffré à la fiche — cas normal et
+  /// distinct de « il en manque » : tout son coût vient de la répartition.
+  final bool noSheetLines;
 
-  const SheetStatus({this.cost, this.missing = const [], this.empty = false});
+  const SheetStatus({
+    this.cost,
+    this.missing = const [],
+    this.noSheetLines = false,
+  });
 
-  bool get isPriceable => cost != null;
+  bool get isComplete => missing.isEmpty;
 }
 
-/// COÛT D'UN PLAT PAR SA FICHE TECHNIQUE.
+/// COÛT DES INGRÉDIENTS CHIFFRÉS À LA FICHE TECHNIQUE.
 ///
-/// Calcul volontairement trivial — `Σ quantité × coût unitaire` — mais isolé
-/// dans un service pur pour être vérifiable sans Hive, comme l'est déjà
-/// `IngredientAllocationService.allocate`.
+/// Ne regarde QUE les lignes de recette dont l'ingrédient porte
+/// `cost_method = 'fiche'`. Les autres relèvent de la répartition et sont
+/// traitées ailleurs — les deux parts s'additionnent dans [DishCostService].
 ///
 /// LE COÛT UNITAIRE RETENU est le coût moyen pondéré COURANT de l'ingrédient
-/// (`Ingredient.costPerUnit`), pas celui du jour de la vente. C'est ce dont on
-/// se sert pour fixer un prix de vente : on veut savoir ce que le plat coûte
-/// AUJOURD'HUI, pas ce qu'il coûtait le mois dernier. Corollaire assumé : un
-/// réapprovisionnement plus cher renchérit rétroactivement le coût affiché des
-/// ventes passées.
+/// (`Ingredient.costPerUnit`), pas celui du jour de la vente : on veut savoir
+/// ce que le plat coûte AUJOURD'HUI, c'est ce qui sert à fixer un prix.
+/// Corollaire assumé — un réapprovisionnement plus cher renchérit
+/// rétroactivement le coût affiché des ventes passées.
 class TechnicalSheetService {
   TechnicalSheetService._();
 
   /// LA RÈGLE, sous forme PURE.
   ///
-  /// Rend `null` dès qu'UNE ligne n'est pas chiffrable : une fiche trouée
-  /// donnerait un coût sous-évalué et parfaitement crédible, ce qui est pire
-  /// qu'un coût absent. Mieux vaut dire « je ne sais pas » que mentir.
+  /// Rend `null` dès qu'UNE ligne n'est pas chiffrable : un coût partiel
+  /// serait sous-évalué et parfaitement crédible, c'est-à-dire indétectable.
+  /// Mieux vaut dire « je ne sais pas » que mentir sur une marge.
   @visibleForTesting
   static double? computeCost(List<({double quantity, int costPerUnit})> lines) {
     if (lines.isEmpty) return null;
@@ -138,101 +60,77 @@ class TechnicalSheetService {
     return total;
   }
 
-  /// État de la fiche d'un plat : coût si chiffrable, sinon ce qui manque.
+  /// État de la part « fiche » d'un plat.
   static SheetStatus statusFor(String shopId, String productId) {
     final lines = RecipeService.forProduct(shopId, productId);
-    if (lines.isEmpty) return const SheetStatus(empty: true);
-
     final missing = <String>[];
     final priceable = <({double quantity, int costPerUnit})>[];
+
     for (final line in lines) {
       final ing = IngredientService.byId(shopId, line.ingredientId);
       // Ingrédient supprimé depuis : la ligne est orpheline (références
-      // logiques, sans FK — cf. hotfix_140). On la signale au lieu de
-      // l'ignorer, sinon le plat paraîtrait chiffrable en oubliant un poste.
-      if (ing == null) {
-        missing.add('ingrédient supprimé');
-        continue;
-      }
+      // logiques, sans FK — cf. hotfix_140). On l'ignore plutôt que de la
+      // signaler : elle ne relève d'aucune méthode, son ingrédient n'existe
+      // plus, et bloquer le plat pour ça punirait une suppression légitime.
+      if (ing == null) continue;
+      if (!ing.usesTechnicalSheet) continue; // → répartition
       if (!line.isPriceable || ing.costPerUnit <= 0) {
         missing.add(ing.name);
         continue;
       }
       priceable.add((quantity: line.quantity, costPerUnit: ing.costPerUnit));
     }
+
     if (missing.isNotEmpty) return SheetStatus(missing: missing);
+    if (priceable.isEmpty) return const SheetStatus(cost: 0, noSheetLines: true);
     return SheetStatus(cost: computeCost(priceable));
   }
 
-  /// Coût théorique par plat, pour les plats DONT LA FICHE EST COMPLÈTE.
-  ///
-  /// Les autres sont volontairement absents de la map : le consommateur
-  /// retombe alors sur le coût matière saisi à la main sur le plat
-  /// (`Product.priceBuy`), qui est déjà son repli habituel. Rien n'est
-  /// « mélangé » avec la répartition — c'est le même repli qu'un plat sans
-  /// ingrédient coché a toujours eu.
+  /// Part « fiche » du coût, par plat. Un plat dont une ligne « fiche » est
+  /// incomplète est ABSENT de la map : son coût total est inconnu.
   static Map<String, double> costByProduct(
     String shopId,
     Iterable<String> productIds,
   ) {
     final out = <String, double>{};
     for (final pid in productIds) {
-      final s = statusFor(shopId, pid);
-      final c = s.cost;
-      if (c != null && c > 0) out[pid] = c;
+      final c = statusFor(shopId, pid).cost;
+      if (c != null) out[pid] = c;
     }
     return out;
   }
 }
 
-/// FAÇADE — le seul point d'entrée du coût matières.
+/// FAÇADE — le seul point d'entrée du coût matières d'un plat.
 ///
-/// Le tableau de bord, le reporting, la fiche plat et le hub Finances appellent
-/// ceci et rien d'autre : ils n'ont pas à savoir quelle méthode est active. Le
-/// jour où l'on en ajoute une troisième, ils ne bougent pas.
+/// Le coût d'un plat est la SOMME de deux parts, chacune calculée par la règle
+/// qui sait la mesurer :
 ///
-/// La sortie garde la forme d'[AllocationResult] dans les deux méthodes — même
-/// `costPerDish`, même `forProduct`. En fiche technique, `spendByIngredient`
-/// reste renseigné (les achats réels restent une information utile), mais
-/// `unallocated` vaut 0 : cette méthode ne répartit rien, elle consomme. Ce que
-/// l'on achète sans le consommer reste en stock, ce qui est le comportement
-/// correct d'une méthode fondée sur la recette.
+/// ```
+/// coût du plat = part répartie (ingrédients 'repartition')
+///              + part fiche    (ingrédients 'fiche')
+/// ```
+///
+/// Ce n'est pas un compromis mou entre deux méthodes : c'est donner à chaque
+/// ligne de coût la règle applicable. On pèse le riz ; on ne pèsera jamais
+/// 3 g de piment par assiette, et prétendre le contraire ne produirait qu'une
+/// fiche jamais remplie.
+///
+/// Le reporting, les incidents de service et la fiche plat appellent ceci et
+/// rien d'autre.
 class DishCostService {
   DishCostService._();
-
-  static DishCostMethod methodFor(String shopId) =>
-      DishCostSettings.forShop(shopId);
 
   static AllocationResult forPeriod(
     String shopId, {
     required DateTime from,
     required DateTime to,
-  }) {
-    if (methodFor(shopId) == DishCostMethod.repartition) {
-      return IngredientAllocationService.forPeriod(shopId, from: from, to: to);
-    }
-    return _technical(
-      shopId,
-      from: from,
-      to: to,
-      soldByProduct:
-          IngredientAllocationService.soldByProduct(shopId, from, to),
-    );
-  }
-
-  static AllocationResult forSales(
-    String shopId, {
-    required DateTime from,
-    required DateTime to,
-    required Map<String, double> soldByProduct,
-  }) {
-    if (methodFor(shopId) == DishCostMethod.repartition) {
-      return IngredientAllocationService.forSales(shopId,
-          from: from, to: to, soldByProduct: soldByProduct);
-    }
-    return _technical(shopId,
-        from: from, to: to, soldByProduct: soldByProduct);
-  }
+  }) =>
+      forSales(shopId,
+          from: from,
+          to: to,
+          soldByProduct:
+              IngredientAllocationService.soldByProduct(shopId, from, to));
 
   static AllocationResult forMonth(String shopId, DateTime day) => forPeriod(
         shopId,
@@ -240,20 +138,80 @@ class DishCostService {
         to: DateTime(day.year, day.month + 1, 0, 23, 59, 59),
       );
 
-  static AllocationResult _technical(
+  static AllocationResult forSales(
     String shopId, {
     required DateTime from,
     required DateTime to,
     required Map<String, double> soldByProduct,
-  }) =>
-      AllocationResult(
-        costPerDish:
-            TechnicalSheetService.costByProduct(shopId, soldByProduct.keys),
-        // Les achats réels restent affichés même en fiche technique : c'est
-        // eux qu'on compare aux quantités théoriques pour voir si la fiche
-        // colle à la réalité du marché.
-        spendByIngredient:
-            DailyExpenseService.spendByIngredient(shopId, from: from, to: to),
-        soldByProduct: soldByProduct,
-      );
+  }) {
+    final sheetIds = _sheetIngredientIds(shopId);
+
+    // ── Part RÉPARTIE ────────────────────────────────────────────────────
+    // Achats et liens des ingrédients « fiche » ÉCARTÉS des deux côtés. Ne
+    // filtrer que les achats laisserait leurs liens diluer les parts des
+    // autres ; ne filtrer que les liens enverrait leurs achats en « non
+    // réparti », gonflant un écart qui sert à détecter le gaspillage.
+    final spend = DailyExpenseService.spendByIngredient(shopId,
+        from: from, to: to);
+    final repSpend = <String, int>{
+      for (final e in spend.entries)
+        if (!sheetIds.contains(e.key)) e.key: e.value,
+    };
+    final allLinks = IngredientAllocationService.linksByIngredient(shopId);
+    final repLinks = <String, List<DishLink>>{
+      for (final e in allLinks.entries)
+        if (!sheetIds.contains(e.key)) e.key: e.value,
+    };
+    final repartition = IngredientAllocationService.allocate(
+      spendByIngredient: repSpend,
+      linksByIngredient: repLinks,
+      soldByProduct: soldByProduct,
+    );
+
+    // ── Part FICHE ───────────────────────────────────────────────────────
+    final sheet = TechnicalSheetService.costByProduct(
+        shopId, soldByProduct.keys);
+
+    // ── Somme ────────────────────────────────────────────────────────────
+    // Un plat dont la part fiche est INCONNUE est retiré entièrement : rendre
+    // sa seule part répartie afficherait un coût amputé de ses ingrédients
+    // pesés, plus crédible et plus faux que pas de coût du tout. Il retombe
+    // alors sur le coût matière saisi à la main, comme un plat sans recette.
+    final costPerDish = <String, double>{};
+    for (final pid in soldByProduct.keys) {
+      final sheetPart = sheet[pid];
+      if (sheetPart == null) continue;
+      final repPart = repartition.costPerDish[pid] ?? 0;
+      final total = repPart + sheetPart;
+      if (total > 0) costPerDish[pid] = total;
+    }
+
+    return AllocationResult(
+      costPerDish: costPerDish,
+      // Achats RÉELS de la période, toutes méthodes confondues : c'est le
+      // chiffre de trésorerie, il ne dépend pas de la façon dont on l'impute.
+      spendByIngredient: spend,
+      unallocated: repartition.unallocated,
+      soldByProduct: soldByProduct,
+    );
+  }
+
+  /// Plats dont la part « fiche » est incomplète, avec ce qui leur manque.
+  /// Sert aux écrans à dire POURQUOI un plat n'affiche pas de coût.
+  static Map<String, List<String>> incompleteSheets(
+    String shopId,
+    Iterable<String> productIds,
+  ) {
+    final out = <String, List<String>>{};
+    for (final pid in productIds) {
+      final s = TechnicalSheetService.statusFor(shopId, pid);
+      if (!s.isComplete) out[pid] = s.missing;
+    }
+    return out;
+  }
+
+  static Set<String> _sheetIngredientIds(String shopId) => {
+        for (final i in IngredientService.forShop(shopId))
+          if (i.usesTechnicalSheet) i.id,
+      };
 }

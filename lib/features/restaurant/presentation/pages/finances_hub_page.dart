@@ -6,7 +6,6 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/services/activity_service.dart';
 import '../../../../core/services/daily_expense_service.dart';
 import '../../../../core/services/fixed_charge_service.dart';
-import '../../../../core/services/dish_cost_service.dart';
 import '../../../../core/services/ingredient_service.dart';
 import '../../../../core/services/loss_service.dart';
 import '../../../../core/services/reconciliation_service.dart';
@@ -232,13 +231,6 @@ class _IngredientsTabState extends _TabState<_IngredientsTab> {
     final noCost = IngredientService.withoutCostData(widget.shopId);
     return Column(
       children: [
-        // MÉTHODE DE COÛT — en tête de l'onglet Ingrédients parce que c'est
-        // elle qui décide de ce qu'on saisit en dessous : des quantités, ou
-        // rien du tout.
-        _CostMethodSelector(
-          shopId: widget.shopId,
-          onChanged: () => setState(() {}),
-        ),
         if (pending.isNotEmpty) _BackfillBanner(
           count: pending.length,
           total: pending.fold<int>(
@@ -395,6 +387,13 @@ class _IngredientRow extends StatelessWidget {
                       style: AppTextStyles.bodyBold
                           .copyWith(color: cs.onSurface)),
                 ),
+                // Méthode de chiffrage — l'information la plus structurante
+                // de la ligne : elle dit si cet ingrédient se pèse ou se
+                // répartit, donc ce qu'on attend de l'utilisateur dans les
+                // fiches recette.
+                const SizedBox(width: 6),
+                _Pill(ing.costMethodLabel,
+                    ing.usesTechnicalSheet ? cs.primary : sem.warning),
                 if (ing.isShared) ...[
                   const SizedBox(width: 6),
                   _Pill('partagé', cs.primary),
@@ -2789,125 +2788,6 @@ class _IngredientReceiptSheetState extends State<_IngredientReceiptSheet> {
 /// affiché est flatteur et faux, sans que rien à l'écran ne le signale.
 ///
 /// [label] adapte le mot compté — le bandeau sert les deux onglets.
-/// Choix de la MÉTHODE DE COÛT MATIÈRES de la boutique.
-///
-/// Les deux méthodes sont exclusives — on en active une. Le sélecteur affiche
-/// en clair ce que chacune implique, parce que basculer change tous les
-/// chiffres de marge de l'établissement : ce n'est pas une préférence
-/// d'affichage.
-class _CostMethodSelector extends StatelessWidget {
-  final String shopId;
-  final VoidCallback onChanged;
-
-  const _CostMethodSelector({required this.shopId, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final sem = theme.semantic;
-    final current = DishCostSettings.forShop(shopId);
-
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      decoration: BoxDecoration(
-        color: sem.elevatedSurface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: sem.borderSubtle),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            Icon(Icons.calculate_outlined,
-                size: 16, color: theme.colorScheme.onSurfaceVariant),
-            const SizedBox(width: 8),
-            Text('Méthode de calcul du coût matières',
-                style: AppTextStyles.captionBold),
-          ]),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              for (final m in DishCostMethod.values) ...[
-                Expanded(
-                  child: _MethodChip(
-                    label: m.label,
-                    selected: m == current,
-                    onTap: () async {
-                      if (m == current) return;
-                      await DishCostSettings.setForShop(shopId, m);
-                      onChanged();
-                    },
-                  ),
-                ),
-                if (m != DishCostMethod.values.last)
-                  const SizedBox(width: 8),
-              ],
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(current.description, style: AppTextStyles.captionHint),
-          const SizedBox(height: 6),
-          // Le réglage vit dans la box `settings`, attachée à l'appareil.
-          // Le taire ferait chercher longtemps pourquoi la tablette du passe
-          // n'affiche pas les mêmes marges que le poste du gérant.
-          Text(
-              'Réglage propre à cet appareil : à répéter sur chaque poste de '
-              'la boutique.',
-              style: AppTextStyles.micro),
-        ],
-      ),
-    );
-  }
-}
-
-class _MethodChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _MethodChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final sem = theme.semantic;
-    return Material(
-      color: selected ? theme.colorScheme.primary : sem.trackMuted,
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: Container(
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-                color: selected
-                    ? theme.colorScheme.primary
-                    : sem.borderSubtle),
-          ),
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: AppTextStyles.bodySmBold.copyWith(
-                color: selected
-                    ? theme.colorScheme.onPrimary
-                    : theme.colorScheme.onSurface),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _BackfillBanner extends StatelessWidget {
   final int count;
   final int total;
