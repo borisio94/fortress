@@ -382,22 +382,29 @@ class _StaffEditorState extends State<_StaffEditor> {
                 shopId: widget.shopId,
                 selected: _name.text,
                 taken: _alreadyStaffNames,
-                onSelect: (name) => setState(() => _name.text = name),
+                onSelect: (name, jobTitle) => setState(() {
+                  _name.text = name;
+                  _role.text = jobTitle;
+                }),
               ),
             const SizedBox(height: 10),
-            // FONCTION — liste déroulante et non plus champ libre + onze
-            // pastilles. Elle reste sur la fiche Personnel parce que le compte
-            // « Accès à l'app » n'en porte AUCUNE : il ne connaît que
-            // `admin`/`user`. Sans elle, « Livreur » ne pourrait plus être
-            // attribué, et la feuille d'assignation d'un livreur
-            // (`StaffMember.isCourierRole`) ne proposerait plus personne.
-            AppSelectWidget(
-              label: 'Fonction',
-              items: StaffMember.suggestedRoles,
-              value: _role.text.isEmpty ? null : _role.text,
-              icon: Icons.work_outline_rounded,
-              onChanged: (v) => setState(() => _role.text = v),
-            ),
+            // FONCTION — HÉRITÉE du compte, plus choisie ici.
+            //
+            // Elle est saisie une seule fois, à la création du compte
+            // (`shop_memberships.job_title`, hotfix_159), et recopiée sur la
+            // fiche au moment de la sélection. La choisir une seconde fois
+            // laissait les deux valeurs diverger, sans qu'aucune ne fasse
+            // autorité.
+            //
+            // Recopiée et non lue à la volée : `StaffMember.role` alimente la
+            // feuille d'assignation d'un livreur et les états de paie, qui
+            // doivent rester stables même si le compte est modifié ou supprimé
+            // plus tard.
+            _ReadOnlyField(
+                label: 'Fonction',
+                value: _role.text.isEmpty
+                    ? 'Aucune — à définir sur le compte'
+                    : _role.text),
             const SizedBox(height: 10),
             Row(children: [
               Expanded(
@@ -1251,7 +1258,9 @@ class _AccountPicker extends ConsumerWidget {
   final String shopId;
   final String selected;
   final Set<String> taken;
-  final ValueChanged<String> onSelect;
+  /// `(nom, fonction)` — la fonction vient du compte et est recopiée sur
+  /// la fiche : elle n'est plus choisie deux fois.
+  final void Function(String name, String jobTitle) onSelect;
 
   const _AccountPicker({
     required this.shopId,
@@ -1270,6 +1279,14 @@ class _AccountPicker extends ConsumerWidget {
             !taken.contains(e.fullName.trim().toLowerCase()))
           e.fullName.trim(),
     ]..sort();
+    // Retrouver la fonction du compte à partir du nom choisi : la liste
+    // déroulante ne sait rendre qu'une chaîne.
+    String titleFor(String name) {
+      for (final e in all) {
+        if (e.fullName.trim() == name) return e.jobTitle.trim();
+      }
+      return '';
+    }
 
     if (async.isLoading && all.isEmpty) {
       return const _ReadOnlyField(
@@ -1300,7 +1317,7 @@ class _AccountPicker extends ConsumerWidget {
       items: names,
       value: selected.isEmpty ? null : selected,
       icon: Icons.person_outline_rounded,
-      onChanged: onSelect,
+      onChanged: (name) => onSelect(name, titleFor(name)),
     );
   }
 }

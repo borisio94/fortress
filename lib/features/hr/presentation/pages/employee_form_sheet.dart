@@ -15,6 +15,8 @@ import '../../../../core/config/restaurant_mode.dart';
 import '../../domain/models/employee.dart';
 import '../../domain/models/employee_permission.dart';
 import '../../domain/models/member_role.dart';
+import '../../../../shared/widgets/app_select_menu.dart';
+import '../../../restaurant/domain/entities/staff_member.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // EmployeeFormSheet — création + édition.
@@ -59,6 +61,11 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
   /// directe avec mot de passe défini par l'admin.
   bool                 _inviteMode  = true;
 
+  /// MÉTIER de la personne (Serveur, Cuisinier, Livreur…), distinct du rôle
+  /// admin/user. Restauration seulement : c'est la fiche Personnel qui en a
+  /// besoin, et l'e-commerce n'a pas de notion de poste.
+  late String _jobTitle = widget.existing?.jobTitle ?? '';
+
   bool get _isEdit => widget.existing != null;
 
   /// Permissions données par défaut au rôle courant (sans grants/denies).
@@ -100,6 +107,24 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
     _passwordCtrl.dispose();
     _passwordCConfirmCtrl.dispose();
     super.dispose();
+  }
+
+  /// Pose la fonction métier sur un compte fraîchement créé.
+  ///
+  /// Sans effet si aucune fonction n'a été choisie, ou si le compte est
+  /// introuvable — la création du compte, elle, a réussi, et l'échec d'un
+  /// libellé ne doit pas la faire paraître ratée.
+  Future<void> _applyJobTitleByEmail(EmployeesNotifier notifier) async {
+    if (_jobTitle.trim().isEmpty) return;
+    final email = _emailCtrl.text.trim().toLowerCase();
+    final list = ref.read(employeesProvider(widget.shopId)).valueOrNull
+        ?? const <Employee>[];
+    for (final e in list) {
+      if (e.email.toLowerCase() == email) {
+        await notifier.setJobTitle(e.userId, _jobTitle);
+        return;
+      }
+    }
   }
 
   Future<void> _submit() async {
@@ -199,6 +224,12 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
             widget.existing!.userId, grants, denies: denies);
         await notifier.updateProfile(widget.existing!.userId,
             fullName: _nameCtrl.text.trim(), role: effectiveRole);
+        // Fonction métier : écrite à part, sur la table. La RPC de profil
+        // garde sa signature — la changer imposerait un DROP FUNCTION, donc
+        // une fenêtre où la gestion des comptes serait cassée pour tous.
+        if (_jobTitle != (widget.existing!.jobTitle)) {
+          await notifier.setJobTitle(widget.existing!.userId, _jobTitle);
+        }
         if (_status != widget.existing!.status) {
           await notifier.setStatus(widget.existing!.userId, _status);
         }
@@ -226,6 +257,9 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
           denies:      denies,
           status:      _status,
         );
+        // La RPC ne rend pas l'id du compte créé : on le retrouve dans la
+        // liste rafraîchie, par son email — seul identifiant unique connu ici.
+        await _applyJobTitleByEmail(notifier);
       }
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
@@ -397,6 +431,23 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
                       'passe et rejoint la boutique.'
                     : 'Tu définis le mot de passe ; communique-le à l\'employé.',
                 style: AppTextStyles.caption,
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // ── FONCTION MÉTIER (restauration) ───────────────────────
+            // Serveur, Cuisinier, Livreur… — distinct du rôle admin/user, qui
+            // est un niveau de DROITS. Saisie ICI et une seule fois : la fiche
+            // Personnel en hérite au lieu de la redemander.
+            if (isRestaurantShop(widget.shopId)) ...[
+              const _FieldLabel(text: 'Fonction'),
+              const SizedBox(height: 6),
+              AppSelectWidget(
+                label: '',
+                items: StaffMember.suggestedRoles,
+                value: _jobTitle.isEmpty ? null : _jobTitle,
+                icon: Icons.work_outline_rounded,
+                onChanged: (v) => setState(() => _jobTitle = v),
               ),
               const SizedBox(height: 12),
             ],
