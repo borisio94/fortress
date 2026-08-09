@@ -17,6 +17,9 @@ import '../../domain/models/employee_permission.dart';
 import '../../domain/models/member_role.dart';
 import '../../../../shared/widgets/app_select_menu.dart';
 import '../../../restaurant/domain/entities/staff_member.dart';
+import '../../../../core/storage/hive_boxes.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
+import '../../../../shared/widgets/app_primary_button.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // EmployeeFormSheet — création + édition.
@@ -114,6 +117,94 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
   /// Sans effet si aucune fonction n'a été choisie, ou si le compte est
   /// introuvable — la création du compte, elle, a réussi, et l'échec d'un
   /// libellé ne doit pas la faire paraître ratée.
+  /// Fonctions PROPOSÉES dans la liste, de trois sources cumulées :
+  ///   * le socle métier livré avec l'app ([StaffMember.suggestedRoles]) ;
+  ///   * celles ajoutées à la main sur cet appareil ;
+  ///   * celles DÉJÀ portées par les comptes de la boutique.
+  ///
+  /// La troisième source est ce qui rend la liste partagée sans backend : une
+  /// fonction créée sur un poste puis attribuée à quelqu'un revient d'elle-même
+  /// sur les autres appareils, puisqu'elle voyage avec le compte.
+  List<String> get _jobTitles {
+    final out = <String>[...StaffMember.suggestedRoles];
+    for (final t in _customJobTitles) {
+      if (!out.contains(t)) out.add(t);
+    }
+    for (final e in (ref.read(employeesProvider(widget.shopId)).valueOrNull
+        ?? const <Employee>[])) {
+      final t = e.jobTitle.trim();
+      if (t.isNotEmpty && !out.contains(t)) out.add(t);
+    }
+    return out;
+  }
+
+  static String _titlesKey(String shopId) => 'job_titles_$shopId';
+
+  List<String> get _customJobTitles {
+    try {
+      final raw = HiveBoxes.settingsBox.get(_titlesKey(widget.shopId));
+      return raw is List ? raw.map((e) => e.toString()).toList() : const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Ajoute une fonction à la liste proposée.
+  ///
+  /// Rangée dans les préférences de l'APPAREIL : il n'existe pas de table de
+  /// métiers côté serveur, et en créer une pour une liste de suggestions
+  /// coûterait plus que ça ne rapporte. La fonction, elle, est bien
+  /// synchronisée — c'est le compte qui la porte.
+  Future<String?> _addJobTitle(BuildContext ctx) async {
+    final ctrl = TextEditingController();
+    final value = await showAdaptiveFormSheet<String>(
+      context: ctx,
+      builder: (sheetCtx) => AdaptiveFormFrame(
+        title: 'Nouvelle fonction',
+        subtitle: 'Elle rejoindra la liste proposée',
+        icon: Icons.work_outline_rounded,
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                    labelText: 'Fonction',
+                    hintText: 'Pâtissier, veilleur, gérant adjoint… *'),
+                onSubmitted: (v) => Navigator.of(sheetCtx).pop(v.trim()),
+              ),
+              const SizedBox(height: 18),
+              AppPrimaryButton(
+                label: 'Ajouter',
+                icon: Icons.check_rounded,
+                fullWidth: true,
+                onTap: () => Navigator.of(sheetCtx).pop(ctrl.text.trim()),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    ctrl.dispose();
+    final v = value?.trim() ?? '';
+    if (v.isEmpty) return null;
+    if (!_jobTitles.contains(v)) {
+      try {
+        await HiveBoxes.settingsBox
+            .put(_titlesKey(widget.shopId), [..._customJobTitles, v]);
+      } catch (e) {
+        debugPrint('[RH] ajout fonction err: $e');
+      }
+    }
+    if (mounted) setState(() {});
+    return v;
+  }
+
   Future<void> _applyJobTitleByEmail(EmployeesNotifier notifier) async {
     if (_jobTitle.trim().isEmpty) return;
     final email = _emailCtrl.text.trim().toLowerCase();
@@ -444,9 +535,11 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
               const SizedBox(height: 6),
               AppSelectWidget(
                 label: '',
-                items: StaffMember.suggestedRoles,
+                items: _jobTitles,
                 value: _jobTitle.isEmpty ? null : _jobTitle,
                 icon: Icons.work_outline_rounded,
+                addLabel: 'Ajouter une fonction',
+                onAdd: _addJobTitle,
                 onChanged: (v) => setState(() => _jobTitle = v),
               ),
               const SizedBox(height: 12),
@@ -890,17 +983,14 @@ class _PresetSelector extends StatelessWidget {
           EmployeePermissionPresets.admin),
       _PresetSpec(l.hrPresetEmployee,   Icons.badge_outlined,
           EmployeePermissionPresets.employee),
-      // Postes de SALLE — proposés à la place des préréglages de commerce sur
-      // une boutique de restauration. Les mélanger tous ferait six choix dont
-      // la moitié n'a aucun sens pour l'établissement, et c'est en cochant au
-      // hasard dans une liste trop longue qu'on accorde un droit de trop.
+      // AUCUN préréglage portant un nom de MÉTIER en restauration.
+      //
+      // « Serveur », « Caissier », « Cuisinier » étaient des profils de
+      // PERMISSIONS, mais leur nom les faisait passer pour la fonction de la
+      // personne — laquelle a désormais son propre champ, juste au-dessus et
+      // toujours visible. Deux endroits qui semblent désigner le métier, dont
+      // un seul est enregistré comme tel, ne pouvaient que se contredire.
       if (isRestaurantShop(shopId)) ...[
-        _PresetSpec('Serveur',            Icons.room_service_outlined,
-            EmployeePermissionPresets.waiter),
-        _PresetSpec('Caissier restaurant', Icons.point_of_sale_rounded,
-            EmployeePermissionPresets.restaurantCashier),
-        _PresetSpec('Cuisinier',          Icons.outdoor_grill_outlined,
-            EmployeePermissionPresets.cook),
       ] else ...[
         _PresetSpec(l.hrPresetCashier,    Icons.point_of_sale_rounded,
             EmployeePermissionPresets.cashier),
