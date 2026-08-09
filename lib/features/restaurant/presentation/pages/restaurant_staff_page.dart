@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show FilteringTextInputFormatter, LengthLimitingTextInputFormatter;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/database/app_database.dart';
@@ -12,7 +13,10 @@ import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
+import '../../../../shared/widgets/app_select_menu.dart';
 import '../../../../shared/widgets/app_snack.dart';
+import '../../../hr/data/providers/employees_provider.dart';
+import '../../../hr/domain/models/employee.dart';
 import '../../domain/entities/payslip.dart';
 import '../../domain/entities/salary_advance.dart';
 import '../../domain/entities/staff_member.dart';
@@ -261,6 +265,16 @@ class _StaffEditorState extends State<_StaffEditor> {
 
   bool get _isEdit => widget.existing != null;
 
+  /// Noms déjà inscrits au personnel, en minuscules — sert à retirer de la
+  /// liste les comptes qui ont déjà leur fiche. Le rapprochement se fait sur
+  /// le NOM faute de lien stocké entre les deux notions : c'est imparfait
+  /// (deux homonymes seraient confondus) mais c'est exactement ce que la
+  /// sélection vient supprimer comme risque, puisque le nom ne se tape plus.
+  late final Set<String> _alreadyStaffNames = {
+    for (final s in StaffService.forShop(widget.shopId))
+      if (s.id != widget.existing?.id) s.fullName.trim().toLowerCase(),
+  };
+
   @override
   void dispose() {
     _name.dispose();
@@ -275,7 +289,11 @@ class _StaffEditorState extends State<_StaffEditor> {
   Future<void> _save() async {
     final name = _name.text.trim();
     if (name.isEmpty) {
-      setState(() => _err = 'Nom requis');
+      // Le nom ne se tape plus : il vient du compte choisi. Un nom vide veut
+      // donc dire « aucune personne sélectionnée ».
+      setState(() => _err = _isEdit
+          ? 'Nom requis'
+          : 'Choisissez la personne parmi les comptes de la boutique.');
       return;
     }
     final pin = _pin.text.trim();
@@ -349,28 +367,36 @@ class _StaffEditorState extends State<_StaffEditor> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            TextField(
-              controller: _name,
-              autofocus: !_isEdit,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(labelText: 'Nom complet'),
-            ),
+            // IDENTITÉ — choisie, plus saisie.
+            //
+            // À la création, la personne est prise parmi les comptes « Accès à
+            // l'app » de la boutique : la saisir une seconde fois au clavier
+            // faisait diverger les deux listes (« Awa Ndiaye » ici, « Awa
+            // ndiaye » là) et interdisait tout rapprochement.
+            //
+            // En modification, le nom est figé : c'est le compte qui le porte.
+            if (_isEdit)
+              _ReadOnlyField(label: 'Nom complet', value: m!.fullName)
+            else
+              _AccountPicker(
+                shopId: widget.shopId,
+                selected: _name.text,
+                taken: _alreadyStaffNames,
+                onSelect: (name) => setState(() => _name.text = name),
+              ),
             const SizedBox(height: 10),
-            TextField(
-              controller: _role,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                  labelText: 'Fonction', hintText: 'Serveur, cuisinier…'),
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 6,
-              children: [
-                for (final r in StaffMember.suggestedRoles)
-                  ActionChip(
-                      label: Text(r, style: AppTextStyles.micro),
-                      onPressed: () => setState(() => _role.text = r)),
-              ],
+            // FONCTION — liste déroulante et non plus champ libre + onze
+            // pastilles. Elle reste sur la fiche Personnel parce que le compte
+            // « Accès à l'app » n'en porte AUCUNE : il ne connaît que
+            // `admin`/`user`. Sans elle, « Livreur » ne pourrait plus être
+            // attribué, et la feuille d'assignation d'un livreur
+            // (`StaffMember.isCourierRole`) ne proposerait plus personne.
+            AppSelectWidget(
+              label: 'Fonction',
+              items: StaffMember.suggestedRoles,
+              value: _role.text.isEmpty ? null : _role.text,
+              icon: Icons.work_outline_rounded,
+              onChanged: (v) => setState(() => _role.text = v),
             ),
             const SizedBox(height: 10),
             Row(children: [
@@ -1194,6 +1220,87 @@ class _Row extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Champ en lecture seule — même gabarit qu'un `TextField`, sans la saisie.
+class _ReadOnlyField extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _ReadOnlyField({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) => InputDecorator(
+        decoration: InputDecoration(labelText: label),
+        child: Text(value, style: AppTextStyles.body),
+      );
+}
+
+/// Choix de la personne parmi les comptes « Accès à l'app » de la boutique.
+///
+/// Les comptes DÉJÀ inscrits au personnel sont retirés de la liste : les
+/// proposer laisserait créer deux fiches pour la même personne, donc deux
+/// codes de badge et deux bulletins de paie.
+///
+/// Un `Consumer` local plutôt qu'une page entière convertie à Riverpod : seule
+/// cette portion dépend du provider, et la remonter obligerait à toucher la
+/// page, ses trois onglets et leurs états.
+class _AccountPicker extends ConsumerWidget {
+  final String shopId;
+  final String selected;
+  final Set<String> taken;
+  final ValueChanged<String> onSelect;
+
+  const _AccountPicker({
+    required this.shopId,
+    required this.selected,
+    required this.taken,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(employeesProvider(shopId));
+    final all = async.valueOrNull ?? const <Employee>[];
+    final names = [
+      for (final e in all)
+        if (e.fullName.trim().isNotEmpty &&
+            !taken.contains(e.fullName.trim().toLowerCase()))
+          e.fullName.trim(),
+    ]..sort();
+
+    if (async.isLoading && all.isEmpty) {
+      return const _ReadOnlyField(
+          label: 'Personne', value: 'Chargement des comptes…');
+    }
+    if (names.isEmpty) {
+      // Dire QUOI faire, et où. Une liste vide sans explication ressemble à
+      // une panne alors que c'est un état de départ parfaitement normal.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const _ReadOnlyField(
+              label: 'Personne', value: 'Aucun compte disponible'),
+          const SizedBox(height: 6),
+          Text(
+              all.isEmpty
+                  ? 'Créez d\'abord le compte de cette personne dans '
+                      '« Accès à l\'app ».'
+                  : 'Tous les comptes de la boutique sont déjà inscrits au '
+                      'personnel.',
+              style: AppTextStyles.captionHint),
+        ],
+      );
+    }
+    return AppSelectWidget(
+      label: 'Personne',
+      required: true,
+      items: names,
+      value: selected.isEmpty ? null : selected,
+      icon: Icons.person_outline_rounded,
+      onChanged: onSelect,
     );
   }
 }
