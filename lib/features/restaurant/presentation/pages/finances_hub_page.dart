@@ -7,6 +7,7 @@ import '../../../../core/services/activity_service.dart';
 import '../../../../core/services/daily_expense_service.dart';
 import '../../../../core/services/fixed_charge_service.dart';
 import '../../../../core/services/ingredient_service.dart';
+import '../widgets/cost_method_picker.dart';
 import '../../../../core/services/loss_service.dart';
 import '../../../../core/services/reconciliation_service.dart';
 import '../../../../core/services/round_routing.dart';
@@ -483,6 +484,16 @@ class _IngredientEditor extends StatefulWidget {
 class _IngredientEditorState extends State<_IngredientEditor> {
   late final _name = TextEditingController(text: widget.existing.name);
 
+  /// Méthode de chiffrage — MODIFIABLE ici.
+  ///
+  /// Elle n'était réglable qu'à la création : on découvre pourtant après coup
+  /// qu'on pèse finalement son riz, ou qu'on ne pèsera jamais son piment.
+  /// Sans ce champ, la seule issue était de supprimer l'ingrédient et de le
+  /// recréer — en perdant son historique d'achats.
+  late String _costMethod = widget.existing.costMethod;
+
+  bool get _qtyRequired => _costMethod == Ingredient.costSheet;
+
   /// Quantité achetée — c'est aussi le stock de l'ingrédient.
   late final _qty = TextEditingController(
       text: _fmt(widget.existing.quantity));
@@ -557,7 +568,16 @@ class _IngredientEditorState extends State<_IngredientEditor> {
       setState(() => _err = 'Nom requis');
       return;
     }
-    // MONTANT ABSENT À LA CRÉATION — on demande confirmation, on ne bloque pas.
+    // Basculer en fiche technique sans quantité rendrait le coût unitaire
+    // absurde : il se déduit du montant DIVISÉ par la quantité, et sans
+    // diviseur c'est le total du reçu qui serait multiplié par les grammes de
+    // la recette. Même refus qu'à la création.
+    if (_qtyRequired && _qtyValue <= 0) {
+      setState(() => _err =
+          'La fiche technique exige une quantité : le coût unitaire se déduit '
+          'du montant divisé par elle.');
+      return;
+    }
     // `alertThreshold` n'est PAS passé : le seuil d'alerte n'est plus dans ce
     // formulaire, et copyWith le préserve. Le repasser à 0 ici effacerait en
     // silence les seuils déjà configurés.
@@ -571,6 +591,7 @@ class _IngredientEditorState extends State<_IngredientEditor> {
         unit: _unitValue,
         costPerUnit: _derivedUnitCost,
         quantity: _qtyValue,
+        costMethod: _costMethod,
         purchaseDate: _purchase,
         // Date effacée par l'utilisateur : `null` seul voudrait dire
         // « inchangée », il faut le dire explicitement.
@@ -617,6 +638,16 @@ class _IngredientEditorState extends State<_IngredientEditor> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Même ordre qu'à la création : la méthode d'abord, puisqu'elle
+            // décide de ce qui est exigé en dessous.
+            CostMethodPicker(
+              value: _costMethod,
+              onChanged: (m) => setState(() {
+                _costMethod = m;
+                _err = null;
+              }),
+            ),
+            const SizedBox(height: 14),
             TextField(
                 controller: _name,
                 autofocus: false,
