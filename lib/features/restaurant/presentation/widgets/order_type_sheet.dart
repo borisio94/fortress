@@ -302,6 +302,25 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
     setState(() => _courier = choice);
   }
 
+  /// Le bon peut-il partir en préparation ?
+  ///
+  /// SUR PLACE, il faut une table — et pas seulement « des tables existent » :
+  /// il faut qu'une soit CHOISIE. Sans elle, la commande partirait en cuisine
+  /// sans que personne sache où servir, et l'addition n'aurait aucune table à
+  /// rattacher. Le bouton est donc grisé plutôt que de laisser cliquer pour
+  /// répondre « choisis la table » — un refus qu'on peut annoncer avant le
+  /// geste ne doit pas attendre le geste.
+  ///
+  /// Un établissement qui n'a encore AUCUNE table tombe dans le même cas : la
+  /// section propose alors « Ouvrir le plan de salle », seul endroit où une
+  /// table se crée.
+  ///
+  /// Les autres canaux gardent leurs contrôles dans [_confirm] : le nom, le
+  /// téléphone et l'adresse d'une livraison se saisissent au clavier, et griser
+  /// le bouton pendant la frappe le ferait clignoter à chaque caractère.
+  bool get _canConfirm =>
+      _type != _ServiceType.dineIn || _table != null;
+
   Future<void> _confirm() async {
     if (_saving) return;
     setState(() => _error = null);
@@ -464,8 +483,20 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
                 icon: Icons.local_fire_department_rounded,
                 fullWidth: true,
                 isLoading: _saving,
+                enabled: _canConfirm,
                 onTap: _confirm,
               ),
+              // Un bouton grisé sans raison affichée se lit comme une panne.
+              // Le message n'apparaît QUE si la salle a des tables : quand il
+              // n'y en a aucune, la section a déjà expliqué qu'il faut passer
+              // par le plan de salle, et le répéter ici ferait deux fois la
+              // même phrase à trois lignes d'écart.
+              if (!_canConfirm && _availableTables.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text('Choisissez la table du client pour continuer.',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.captionHint),
+              ],
             ],
           ],
         ),
