@@ -883,17 +883,19 @@ class _CartItemRow extends StatelessWidget {
     // les `fontSize` en dur, et des valeurs sur mesure (9/10/11/12/13) rendaient
     // ce panier incohérent avec le reste de l'application.
     final isCompact = MediaQuery.of(context).size.width < 900;
-    final imageSize = isCompact ? 36.0 : 44.0;
 
-    return Padding(
+    // Hauteur minimale 64 px : ligne confortable à toucher, même sans variante.
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 64),
+      child: Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-        // Image produit — ratio carré 1:1 unifié.
+        // Image produit — 40×40 sur toutes les tailles d'écran.
         ProductImageCard(
           imageUrl: item.imageUrl,
-          width:    imageSize,
-          height:   imageSize,
-          borderRadius: BorderRadius.circular(8),
+          width:    40,
+          height:   40,
+          borderRadius: BorderRadius.circular(10),
         ),
         const SizedBox(width: 10),
         // Infos produit
@@ -903,14 +905,9 @@ class _CartItemRow extends StatelessWidget {
                 Text(item.productName,
                     style: AppTextStyles.bodyBold,
                     maxLines: 1, overflow: TextOverflow.ellipsis),
-                if (item.variantName != null)
-                  Text(item.variantName!,
-                      style: AppTextStyles.micro.copyWith(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w500),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 2),
-                // Prix + bouton édition prix (arrondi, fond teinté primary)
+                // Prix (+ variante) + bouton édition prix (arrondi, fond
+                // teinté primary)
                 GestureDetector(
                   onTap: onEditPrice,
                   child: Wrap(
@@ -931,6 +928,13 @@ class _CartItemRow extends StatelessWidget {
                         Text(CurrencyFormatter.format(item.unitPrice),
                             style: AppTextStyles.captionBold
                                 .copyWith(color: AppColors.primary)),
+                      // Variante sur la ligne du prix : « 12 500 FCFA · Rouge
+                      // XL ». Même échelon `micro` (10) qu'avant, en gris.
+                      if (item.variantName != null)
+                        Text('· ${item.variantName}',
+                            maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: AppTextStyles.micro
+                                .copyWith(color: AppColors.textSecondary)),
                       // Bouton arrondi avec fond teinté du primary actif —
                       // visible (vs l'ancienne icône 10px à 50% opacity).
                       // Tailles adaptées au breakpoint 900 (mobile/desktop).
@@ -986,7 +990,7 @@ class _CartItemRow extends StatelessWidget {
           ),
         ]),
       ]),
-    );
+    ));
   }
 }
 
@@ -1478,11 +1482,12 @@ class _TotalBand extends StatelessWidget {
       FittedBox(
         fit: BoxFit.scaleDown,
         alignment: Alignment.centerLeft,
-        // `title` (18), la taille de l'ancien bloc TOTAL : `display` (24)
-        // détonnait avec le reste de l'app.
+        // `bodyBold` (13) : aucun texte de l'écran caisse ne dépasse 13 —
+        // `title` (18) puis `display` (24) paraissaient hors d'échelle. Le
+        // montant ressort par la couleur, pas par la taille.
         child: Text(CurrencyFormatter.format(total),
             maxLines: 1,
-            style: AppTextStyles.title.copyWith(color: AppColors.textPrimary)),
+            style: AppTextStyles.bodyBold.copyWith(color: AppColors.primary)),
       ),
     ]),
   );
@@ -1843,7 +1848,11 @@ class _CartFooter extends StatelessWidget {
                             ? 'Mettre à jour la commande'
                             : 'Enregistrer la commande')),
                     onPressed: buildOnPressed(),
-                    style: buttonStyle,
+                    // Libellé en `bodyBold` (13) : le thème global des boutons
+                    // (16) le rendait plus gros que tout le reste du panier.
+                    style: buttonStyle.copyWith(
+                        textStyle: const WidgetStatePropertyAll(
+                            AppTextStyles.bodyBold)),
                   )
                 : ElevatedButton.icon(
                     icon: Icon(Icons.point_of_sale_rounded, size: iconSize),
