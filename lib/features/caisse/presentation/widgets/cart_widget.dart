@@ -94,6 +94,11 @@ class _CartWidgetState extends ConsumerState<CartWidget> {
                 onServiceType: (t) => setState(() => _serviceType = t),
               ),
 
+              // ── Total visible en permanence (e-commerce) ─────────────
+              // Même quand la liste d'articles défile.
+              if (!isRestaurantShop(shopId))
+                _TotalBand(total: state.total),
+
               // ── Alerte prix ───────────────────────────────────────────
               if (state.priceAlerts.isNotEmpty)
                 _PriceAlertBanner(alerts: state.priceAlerts),
@@ -385,9 +390,28 @@ class _CartHeader extends StatelessWidget {
                 ),
               )
             else
-              Expanded(child: Text(l.caisseCartTitle,
-                  style: AppTextStyles.bodyBold)),
-            if (state.itemCount > 0)
+              // E-commerce : titre « Caisse express » + décompte en sous-titre.
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // `bodyBold` (13), la taille de l'ancien titre du panier :
+                    // en `subtitleBold` (16) il paraissait plus gros que le
+                    // reste de l'app.
+                    Text('Caisse express',
+                        style: AppTextStyles.bodyBold
+                            .copyWith(color: AppColors.textPrimary)),
+                    Text('${state.itemCount} article'
+                        '${state.itemCount > 1 ? 's' : ''} · Tap pour ajouter',
+                        style: AppTextStyles.caption
+                            .copyWith(color: AppColors.textSecondary)),
+                  ],
+                ),
+              ),
+            // Pastille chiffrée : restauration seule (en e-commerce le
+            // décompte est déjà dans le sous-titre).
+            if (state.itemCount > 0 && isRestaurantShop(shopId))
               Container(
                 padding: EdgeInsets.symmetric(
                     horizontal: isCompact ? 7 : 8,
@@ -411,7 +435,8 @@ class _CartHeader extends StatelessWidget {
                   padding: EdgeInsets.symmetric(
                       horizontal: isCompact ? 6 : 8,
                       vertical: isCompact ? 2 : 4),
-                  minimumSize: Size.zero,
+                  // Zone tactile 48 px (standard Android).
+                  minimumSize: const Size(48, 48),
                 ),
                 child: Text(l.caisseClear,
                     style: AppTextStyles.caption
@@ -1429,6 +1454,40 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
 }
 
 // ─── Footer récap ─────────────────────────────────────────────────────────────
+/// Bande « TOTAL À PAYER » en tête du panier (e-commerce) : le montant reste
+/// lisible en permanence, même quand la liste d'articles défile.
+class _TotalBand extends StatelessWidget {
+  final double total;
+  const _TotalBand({required this.total});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+    decoration: BoxDecoration(
+      color: AppColors.primarySurface,
+      border: Border(bottom: BorderSide(
+          color: AppColors.primary.withValues(alpha: 0.2))),
+    ),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('TOTAL À PAYER',
+          style: AppTextStyles.captionBold.copyWith(
+              color: AppColors.primary, letterSpacing: 0.8)),
+      const SizedBox(height: 2),
+      // Se réduit au lieu de déborder sur un écran de 360 px.
+      FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        // `title` (18), la taille de l'ancien bloc TOTAL : `display` (24)
+        // détonnait avec le reste de l'app.
+        child: Text(CurrencyFormatter.format(total),
+            maxLines: 1,
+            style: AppTextStyles.title.copyWith(color: AppColors.textPrimary)),
+      ),
+    ]),
+  );
+}
+
 class _CartFooter extends StatelessWidget {
   final String shopId;
   final CaisseState state;
@@ -1517,29 +1576,9 @@ class _CartFooter extends StatelessWidget {
                           .copyWith(color: AppColors.primary)),
                 ),
               ]),
-        )
-      else
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-          decoration: BoxDecoration(
-            color: AppColors.primarySurface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-                color: AppColors.primary.withValues(alpha: 0.20)),
-          ),
-          child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.center, children: [
-            Text(l.total.toUpperCase(),
-                style: AppTextStyles.subtitleBold.copyWith(
-                    fontWeight: FontWeight.w800, color: AppColors.primary)),
-            Flexible(
-              child: Text(CurrencyFormatter.format(state.total),
-                  textAlign: TextAlign.end,
-                  maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.title.copyWith(color: AppColors.primary)),
-            ),
-          ]),
         ),
+      // E-commerce : plus de bloc TOTAL ici — il est affiché en permanence
+      // dans la bande `_TotalBand` en tête du panier (sinon doublon).
       const SizedBox(height: 12),
       // Date de livraison déplacée vers le sheet "Enregistrer la commande"
       // qui s'ouvre au clic sur le bouton du panier (allège l'UI panier).

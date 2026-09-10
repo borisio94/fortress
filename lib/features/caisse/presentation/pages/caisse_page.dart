@@ -321,16 +321,104 @@ class _PrincipalTab extends StatelessWidget {
         ),
       ]);
     }
+    // Restauration : mise en page mobile inchangée.
+    if (isRestaurantShop(shopId)) {
+      return Column(children: [
+        tooltip,
+        Expanded(
+          child: ColoredBox(
+            color: bg,
+            child: PosProductPanel(shopId: shopId),
+          ),
+        ),
+      ]);
+    }
     return Column(children: [
       tooltip,
-      Expanded(
-        child: ColoredBox(
-          color: bg,
-          child: PosProductPanel(shopId: shopId),
-        ),
-      ),
+      Expanded(child: _MobileCaisseTabs(
+          shopId: shopId, isEcommerce: isEcommerce, background: bg)),
     ]);
   }
+}
+
+enum _CaisseTab { panier, produits }
+
+/// Caisse mobile (e-commerce) : bascule Panier / Produits sans quitter l'écran.
+/// `IndexedStack` garde les deux vivants : la recherche et le défilement de la
+/// grille produits survivent à un aller-retour sur le panier.
+class _MobileCaisseTabs extends StatefulWidget {
+  final String shopId;
+  final bool   isEcommerce;
+  final Color  background;
+  const _MobileCaisseTabs({required this.shopId,
+    required this.isEcommerce, required this.background});
+
+  @override
+  State<_MobileCaisseTabs> createState() => _MobileCaisseTabsState();
+}
+
+class _MobileCaisseTabsState extends State<_MobileCaisseTabs> {
+  // Produits par défaut : c'est là que la vente commence.
+  _CaisseTab _tab = _CaisseTab.produits;
+
+  @override
+  Widget build(BuildContext context) => Column(children: [
+    Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: BlocBuilder<CaisseBloc, CaisseState>(
+        buildWhen: (p, c) => p.itemCount != c.itemCount,
+        builder: (context, state) => Row(children: [
+          _PillTab(label: 'Panier (${state.itemCount})',
+              active: _tab == _CaisseTab.panier,
+              onTap: () => setState(() => _tab = _CaisseTab.panier)),
+          const SizedBox(width: 6),
+          _PillTab(label: 'Produits',
+              active: _tab == _CaisseTab.produits,
+              onTap: () => setState(() => _tab = _CaisseTab.produits)),
+        ]),
+      ),
+    ),
+    Expanded(
+      child: IndexedStack(index: _tab.index, children: [
+        CartWidget(shopId: widget.shopId, isEcommerce: widget.isEcommerce),
+        ColoredBox(color: widget.background,
+            child: PosProductPanel(shopId: widget.shopId)),
+      ]),
+    ),
+  ]);
+}
+
+/// Onglet en pilule. Sans état : l'onglet actif est décidé par le parent.
+class _PillTab extends StatelessWidget {
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+  const _PillTab({required this.label, required this.active,
+    required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onTap: onTap,
+    child: Container(
+      // Zone tactile : sans hauteur minimale la pilule ne ferait que ~25 px.
+      constraints: const BoxConstraints(minHeight: 32),
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: active
+            ? AppColors.primary.withValues(alpha: 0.15)
+            : AppColors.inputFill,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: active
+            ? AppColors.primary.withValues(alpha: 0.4)
+            : Theme.of(context).semantic.borderSubtle),
+      ),
+      child: Text(label,
+          style: AppTextStyles.captionBold.copyWith(
+              color: active ? AppColors.primary : AppColors.textSecondary)),
+    ),
+  );
 }
 
 // ─── Page Commandes (anciennement _OrdersTab) ────────────────────────────────
