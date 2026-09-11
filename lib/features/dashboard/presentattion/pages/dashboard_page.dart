@@ -169,44 +169,67 @@ class _DashBodyState extends ConsumerState<_DashBody> {
   Widget _buildContent(BuildContext context) {
     final l = context.l10n;
     final data = ref.watch(dashDataProvider(widget.shopId));
+    final perms = ref.watch(permissionsProvider(widget.shopId));
+    final fr    = Localizations.localeOf(context).languageCode == 'fr';
 
-    // KPIs prioritaires — strictement les 4 demandés par la spec dashboard
-    // (CA Total, Transactions, Clients, Bénéfice net) — affichés en grille
-    // 2×2 sur mobile / 4 colonnes sur desktop via _PriorityKpiGrid.
+    // Tendance du CA vs la période précédente de même durée (« hier » quand la
+    // période est « Aujourd'hui »). Le calcul de la période précédente ne
+    // filtre pas « mes ventes » : pour un vendeur, la comparaison serait
+    // fausse → tendance masquée. Admin / propriétaire : même périmètre des
+    // deux côtés.
+    final sameScope = perms.isAdmin || perms.isOwner;
+    final prevSales = sameScope
+        ? ref.watch(financesPreviousSnapshotProvider(widget.shopId)).totalSales
+        : 0.0;
+    final caTrend = prevSales > 0
+        ? (data.totalSales - prevSales) / prevSales * 100
+        : null;
+    final lowStockCount = data.lowStock.length;
+
+    // KPIs prioritaires : CA · Ventes · Stock en alerte · Clients servis —
+    // grille 2×2 sur mobile / 4 colonnes sur desktop via _PriorityKpiGrid.
+    // Le bénéfice net reste dans le résumé financier plus bas.
     final shopId = widget.shopId;
     final priorityKpis = <shared_kpi.KpiData>[
       shared_kpi.KpiData(
-        label: l.dashTotalSales,
+        label: fr ? 'CA' : 'Revenue',
         value: _fmtNum(data.totalSales), unit: CurrencyFormatter.currentSymbol,
         icon: Icons.trending_up,
         color: AppColors.secondary,
+        delta: caTrend == null ? ''
+            : '${caTrend >= 0 ? '+' : ''}${caTrend.toStringAsFixed(0)}%',
+        positive: (caTrend ?? 0) >= 0,
+        subtext: caTrend == null ? ''
+            : (_period == 'today'
+                ? (fr ? 'vs hier' : 'vs yesterday')
+                : (fr ? 'vs période préc.' : 'vs prev. period')),
         onTap: () => context.push('/shop/$shopId/finances'),
       ),
       shared_kpi.KpiData(
-        label: l.dashTransactions,
+        label: fr ? 'Ventes' : 'Sales',
         value: data.orderCount.toString(),
         icon: Icons.receipt_long_rounded,
         color: AppColors.info,
         onTap: () => context.push('/shop/$shopId/caisse'),
       ),
       shared_kpi.KpiData(
-        // « Clients servis » (pas le total CRM) : c'est le nb de clients
-        // distincts sur la période sélectionnée → lever l'ambiguïté.
-        label: 'Clients servis',
+        label: fr ? 'Stock en alerte' : 'Low stock',
+        value: lowStockCount.toString(),
+        icon: Icons.inventory_2_rounded,
+        color: lowStockCount > 0 ? AppColors.warning : AppColors.secondary,
+        // Stock réservé aux admins (même règle que le menu) : pas de lien
+        // vers un écran que le compte ne peut pas ouvrir.
+        onTap: (perms.isShopAdmin && perms.canViewProducts)
+            ? () => context.push('/shop/$shopId/inventaire')
+            : null,
+      ),
+      shared_kpi.KpiData(
+        // Clients distincts servis sur la période (pas le total CRM).
+        label: fr ? 'Clients servis' : 'Clients served',
         value: data.clientCount.toString(),
         icon: Icons.people_rounded,
         color: AppColors.warning,
         onTap: () => context.push('/shop/$shopId/crm'),
-      ),
-      shared_kpi.KpiData(
-        label: l.dashNetProfit,
-        value: _fmtNum(data.netProfit), unit: CurrencyFormatter.currentSymbol,
-        icon: Icons.account_balance_wallet_rounded,
-        color: data.netProfit >= 0
-            ? AppColors.primary
-            : AppColors.error,
-        positive: data.netProfit >= 0,
-        onTap: () => context.push('/shop/$shopId/finances'),
       ),
     ];
 
@@ -280,7 +303,6 @@ class _DashBodyState extends ConsumerState<_DashBody> {
         ),
     ];
 
-    final perms    = ref.watch(permissionsProvider(shopId));
     final curShop  = ref.watch(currentShopProvider);
     final shopName = ((curShop != null && curShop.id == shopId)
         ? curShop : LocalStorageService.getShop(shopId))?.name ?? '';
@@ -314,6 +336,10 @@ class _DashBodyState extends ConsumerState<_DashBody> {
 
         // ── 5. Accès rapides ──────────────────────────────────────────────
         _DashboardHeader(shopId: widget.shopId),
+        const SizedBox(height: 14),
+
+        // ── 6. Ventes récentes (5 dernières, toutes dates) ────────────────
+        _RecentTxCard(transactions: data.recentTx, shopId: widget.shopId),
         const SizedBox(height: 14),
 
         // ── Blocs existants, inchangés, SOUS les nouveaux modules ─────────
@@ -380,15 +406,10 @@ class _DashBodyState extends ConsumerState<_DashBody> {
           const SizedBox(height: 14),
         ],
 
-        // ── Transactions + Alertes ────────────────────────────────────────
-        _TwoColWrap(
-          minSecondWidth: 220,
-          first: _RecentTxCard(
-              transactions: data.recentTx, shopId: widget.shopId),
-          second: _InventoryAlertsCard(
-              alerts: data.lowStock, shopId: widget.shopId),
-          firstFlex: 3, secondFlex: 2,
-        ),
+        // ── Alertes stock (bloc existant, inchangé) ───────────────────────
+        // Les ventes récentes, qui partageaient cette rangée, sont remontées
+        // en module 6.
+        _InventoryAlertsCard(alerts: data.lowStock, shopId: widget.shopId),
         const SizedBox(height: 20),
       ],
     );
@@ -1459,9 +1480,19 @@ class _RecentTxCard extends StatelessWidget {
     return '${d.day.toString().padLeft(2,'0')}/${d.month.toString().padLeft(2,'0')}';
   }
 
+  /// Libellé lisible du moyen de paiement (valeurs réelles de PaymentMethod).
+  String _paymentLabel(String m, bool fr) => switch (m) {
+    'cash'        => 'Cash',
+    'mobileMoney' => 'Mobile Money',
+    'card'        => fr ? 'Carte' : 'Card',
+    'credit'      => fr ? 'Crédit' : 'Credit',
+    _             => m,
+  };
+
   @override
   Widget build(BuildContext context) {
-    final l = context.l10n;
+    final l  = context.l10n;
+    final fr = Localizations.localeOf(context).languageCode == 'fr';
     return _DashCard(child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1474,78 +1505,99 @@ class _RecentTxCard extends StatelessWidget {
             label: l.dashNoSalesYet,
           )
         else
-          ...transactions.map((t) {
-            final s = _statusOf(l, t.status);
-            final isLoss = t.status == 'refunded' ||
-                t.status == 'cancelled' ||
-                t.status == 'refused';
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 7),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                // ── Avatar initiales client ─────────────────────────
-                Container(
-                  width: 36, height: 36,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha:0.12),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(_initials(t.clientName),
-                      style: AppTextStyles.bodySmBold.copyWith(
-                          color: AppColors.primary)),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Nom client + badge statut
-                      Row(children: [
-                        Expanded(child: Text(
-                            t.clientName ?? l.dashUnknownClient,
-                            maxLines: 1, overflow: TextOverflow.ellipsis,
-                            style: AppTextStyles.bodySmBold)),
-                        const SizedBox(width: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: s.color.withValues(alpha:0.12),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(s.label,
-                              style: AppTextStyles.microBold.copyWith(
-                                  color: s.color)),
-                        ),
-                      ]),
-                      // Produit principal + qty · temps écoulé
-                      const SizedBox(height: 1),
-                      Text(
-                        t.mainProduct != null
-                            ? (t.itemCount > 1
-                                ? '${t.mainProduct} ×${t.mainQty} '
-                                    '+${t.itemCount - 1} · ${_timeAgo(t.createdAt)}'
-                                : '${t.mainProduct} ×${t.mainQty} '
-                                    '· ${_timeAgo(t.createdAt)}')
-                            : _timeAgo(t.createdAt),
-                        maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.micro,
-                      ),
-                    ],
-                  ),
-                ),
-                // Montant à droite
-                Text('${t.amount.toStringAsFixed(0)} ${CurrencyFormatter.currentSymbol}',
-                    style: AppTextStyles.bodySmBold.copyWith(
-                        color: isLoss
-                            ? AppColors.error
-                            : AppColors.primary)),
-              ]),
-            );
-          }),
+          for (var i = 0; i < transactions.length; i++) ...[
+            if (i > 0)
+              Divider(height: 1,
+                  color: Theme.of(context).semantic.borderSubtle),
+            _row(l, transactions[i], fr),
+          ],
       ],
     ));
+  }
+
+  /// Une vente : avatar initiales · client + statut · articles et paiement ·
+  /// montant et heure. Hauteur minimale 56 px (zone confortable au doigt).
+  Widget _row(AppLocalizations l, RecentTx t, bool fr) {
+    final s = _statusOf(l, t.status);
+    final isLoss = t.status == 'refunded' ||
+        t.status == 'cancelled' ||
+        t.status == 'refused';
+    final isDone = t.status == 'completed';
+    // Encaissée → vert avec « + » ; annulée / remboursée → rouge ;
+    // en attente → violet.
+    final amountColor = isLoss
+        ? AppColors.error
+        : (isDone ? AppColors.secondary : AppColors.primary);
+    final n = t.itemCount;
+    final items = fr
+        ? '$n article${n > 1 ? 's' : ''}'
+        : '$n item${n > 1 ? 's' : ''}';
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 56),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(children: [
+          // ── Avatar initiales client ─────────────────────────
+          Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha:0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            alignment: Alignment.center,
+            child: Text(_initials(t.clientName),
+                style: AppTextStyles.bodySmBold.copyWith(
+                    color: AppColors.primary)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Nom client + badge statut
+                Row(children: [
+                  Flexible(child: Text(
+                      t.clientName ?? l.dashUnknownClient,
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySmBold)),
+                  const SizedBox(width: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: s.color.withValues(alpha:0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(s.label,
+                        style: AppTextStyles.microBold.copyWith(
+                            color: s.color)),
+                  ),
+                ]),
+                const SizedBox(height: 2),
+                // Articles · moyen de paiement
+                Text('$items · ${_paymentLabel(t.paymentMethod, fr)}',
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.micro),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Montant + heure
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('${isDone ? '+' : ''}${CurrencyFormatter.format(t.amount)}',
+                  style: AppTextStyles.bodySmBold.copyWith(
+                      color: amountColor)),
+              const SizedBox(height: 2),
+              Text(_timeAgo(t.createdAt), style: AppTextStyles.micro),
+            ],
+          ),
+        ]),
+      ),
+    );
   }
 }
 
