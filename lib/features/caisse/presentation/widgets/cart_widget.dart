@@ -1506,6 +1506,13 @@ class _CartFooter extends StatelessWidget {
     required this.l, this.isEcommerce = false, this.onOrderPlaced,
     this.serviceType});
 
+  /// Vrai quand le sous-total DIFFÈRE du total (taxe, frais, remise ou
+  /// livraison). Sinon, en e-commerce, la ligne « Sous-total » ne faisait que
+  /// répéter le montant déjà lu dans la bande `_TotalBand`.
+  bool get _hasAdjustments =>
+      state.taxRate > 0 || state.totalFees > 0 ||
+      state.discountAmount > 0 || state.deliveryPrice > 0;
+
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(14),
@@ -1526,7 +1533,10 @@ class _CartFooter extends StatelessWidget {
       // repoussaient les articles hors de vue. Le repère du compte se saisit
       // désormais là où il sert — la feuille « Type de commande », qui demande
       // déjà la table ou le numéro de retrait.
-      _Line(l.caisseSubtotal, CurrencyFormatter.format(state.subtotal)),
+      // E-commerce : sous-total affiché seulement s'il diffère du total — le
+      // montant n'apparaît ainsi qu'une fois (bande en tête du panier).
+      if (isRestaurantShop(shopId) || _hasAdjustments)
+        _Line(l.caisseSubtotal, CurrencyFormatter.format(state.subtotal)),
       // Ligne de taxe : affichée dès qu'un taux est configuré sur la vente.
       // Elle existait déjà dans le calcul du total (`state.taxAmount`) mais
       // n'apparaissait nulle part — le client voyait un total supérieur à la
@@ -1553,7 +1563,7 @@ class _CartFooter extends StatelessWidget {
         const SizedBox(height: 10),
         const _DashedDivider(),
         const SizedBox(height: 8),
-      ] else
+      ] else if (_hasAdjustments)
         const SizedBox(height: 10),
       // Bloc TOTAL mis en relief : fond teinté primaire + bordure + montant
       // agrandi (échelon `title`). Donne le relief qui manquait pour que le
@@ -1583,8 +1593,10 @@ class _CartFooter extends StatelessWidget {
               ]),
         ),
       // E-commerce : plus de bloc TOTAL ici — il est affiché en permanence
-      // dans la bande `_TotalBand` en tête du panier (sinon doublon).
-      const SizedBox(height: 12),
+      // dans la bande `_TotalBand` en tête du panier (sinon doublon). Sans
+      // ligne de détail au-dessus, pas d'espace vide avant le bouton.
+      if (isRestaurantShop(shopId) || _hasAdjustments)
+        const SizedBox(height: 12),
       // Date de livraison déplacée vers le sheet "Enregistrer la commande"
       // qui s'ouvre au clic sur le bouton du panier (allège l'UI panier).
       SizedBox(
@@ -1846,9 +1858,11 @@ class _CartFooter extends StatelessWidget {
                             : 'Commande enregistrée ✓')
                         : state.items.isEmpty
                             ? 'Panier vide'
-                            // Montant sur le bouton : relu au moment de valider.
-                            : '${state.editingOrderId != null ? 'Mettre à jour' : 'Enregistrer la commande'}'
-                              ' · ${CurrencyFormatter.format(state.total)}',
+                            // Pas de montant sur le bouton : le total se lit
+                            // une seule fois, dans la bande en tête du panier.
+                            : (state.editingOrderId != null
+                                ? 'Mettre à jour la commande'
+                                : 'Enregistrer la commande'),
                         // Écran 360 px : se tronque au lieu de déborder.
                         maxLines: 1, overflow: TextOverflow.ellipsis),
                     onPressed: buildOnPressed(),
