@@ -53,7 +53,10 @@
 
   /* ---- Bandeau de confiance ---- */
   .trust{max-width:1100px;margin:0 auto;padding:10px 16px 0;display:flex;gap:8px;flex-wrap:wrap}
-  .tpill{display:inline-flex;align-items:center;gap:6px;background:var(--okS);color:#0B7A43;
+  /* Vert CLAIR sur fond vert très sombre. L'ancien #0B7A43 était un vert
+     moyen hérité de la version claire : sur --okS (#15321F) il tombait à
+     ~1,8:1, très en dessous du minimum WCAG AA (4,5:1). */
+  .tpill{display:inline-flex;align-items:center;gap:6px;background:var(--okS);color:#4ADE80;
     font-size:12.5px;font-weight:700;padding:7px 12px;border-radius:20px;line-height:1.1}
   .tpill.pay{background:#ECFDF3;color:#067647}
   .tpill svg{width:15px;height:15px;flex:0 0 auto}
@@ -103,8 +106,27 @@
   body.resto .promo-tag,body.resto .new-tag{z-index:2}
   .promo-tag{position:absolute;top:8px;left:8px;background:#E11D48;color:#fff;font-size:11px;
     font-weight:700;padding:3px 8px;border-radius:7px}
+  /* .new-tag reste défini : le mode livreur s'en sert pour le compteur
+     « xN ». Seule la carte catalogue ne l'utilise plus pour « Nouveau ». */
   .new-tag{position:absolute;top:8px;right:8px;background:var(--brand);color:#fff;font-size:11px;
     font-weight:700;padding:3px 8px;border-radius:7px}
+  /* « Nouveau » descend sous le nom : le coin haut-droit de l'image est
+     désormais pris par le bouton de partage. */
+  .new-pill{align-self:flex-start;background:var(--brand-s);color:var(--brand-l);
+    font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;margin-top:3px}
+  /* Stock bas — signal d'urgence, affiché de 1 à 5 pièces seulement.
+     NOM DISTINCT de `.stock-pill` : celle-ci existe déjà pour la fiche
+     produit (l. ~199, en flux avec margin-left:auto). Réutiliser le nom
+     lui aurait imposé `position:absolute` et l'aurait fait flotter par
+     dessus la feuille.
+     z-index:2 car en secteur restauration `.card-img::after` (z-index:1)
+     passerait son voile chaud par-dessus. */
+  .stock-left{position:absolute;bottom:8px;left:8px;z-index:2;
+    background:rgba(15,23,42,.82);backdrop-filter:blur(4px);color:#FBBF24;
+    font-size:10px;font-weight:600;padding:3px 8px;border-radius:20px;
+    pointer-events:none}
+  .discount-badge{font-size:10px;font-weight:700;background:#1A2A14;color:#4ADE80;
+    padding:1px 5px;border-radius:4px;vertical-align:middle;margin-left:2px}
   .card-b{padding:10px 11px 12px;display:flex;flex-direction:column;gap:2px;flex:1}
   .card-name{font-size:13.5px;font-weight:600;line-height:1.25;
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:34px}
@@ -112,9 +134,25 @@
   .price-row{display:flex;align-items:baseline;gap:7px;margin-top:4px}
   .price{font-size:16px;font-weight:800;color:var(--brand)}
   .price-old{font-size:12px;color:var(--hint);text-decoration:line-through}
-  .card-cta{margin-top:9px;background:var(--brand);color:#fff;font-weight:700;font-size:13.5px;
-    border-radius:10px;padding:9px;text-align:center}
+  .card-cta{background:var(--brand);color:#fff;font-weight:700;font-size:13.5px;
+    border-radius:10px;padding:9px;text-align:center;flex:1;min-width:0}
   .card-cta:active{background:var(--brand-d)}
+  /* CRITIQUE : `bindCards` délègue le clic sur la carte et teste
+     `e.target.getAttribute("data-add")`. Sans ce `pointer-events:none`,
+     cliquer l'icône ferait de `<svg>` la cible — sans l'attribut — et le
+     clic ouvrirait la fiche au lieu d'ajouter au panier. */
+  .card-cta svg{pointer-events:none}
+  /* Rangée d'actions : « Ajouter » élastique + partage WhatsApp fixe. */
+  .card-actions{display:flex;gap:6px;margin-top:9px;align-items:stretch}
+  .btn-share-wa{width:34px;background:#15803D;color:#fff;border:none;border-radius:10px;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;flex:0 0 auto}
+  .btn-share-wa:hover{background:#166534}
+  /* Partage discret sur l'image — coin libéré par le déplacement de
+     « Nouveau » sous le nom. */
+  .share-icon-btn{position:absolute;top:8px;right:8px;width:28px;height:28px;
+    border-radius:50%;background:rgba(15,23,42,.72);border:none;display:flex;
+    align-items:center;justify-content:center;cursor:pointer;color:#CBD5E1;z-index:2}
+  .share-icon-btn:hover{background:rgba(15,23,42,.9)}
 
   /* ---- States ---- */
   .center{min-height:60vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -178,7 +216,7 @@
   .d-var{font-size:13px;color:var(--ink2);margin-top:2px}
   .d-price-row{display:flex;align-items:center;gap:10px;margin-top:12px}
   .d-price{font-size:22px;font-weight:800;color:var(--brand)}
-  .stock-pill{margin-left:auto;background:var(--okS);color:#0F7A37;font-size:12px;font-weight:700;
+  .stock-pill{margin-left:auto;background:var(--okS);color:#4ADE80;font-size:12px;font-weight:700;
     padding:5px 10px;border-radius:20px}
   .d-desc{font-size:13.5px;color:var(--ink2);margin-top:14px;white-space:pre-wrap}
   .qty{display:flex;align-items:center;gap:14px;margin-top:18px}
@@ -434,6 +472,15 @@
     return p;
   }
 
+  // Prix web : saisi par le commerçant quand « visible web » est actif. Il
+  // prime sur le prix POS dès qu'il est > 0, sinon on garde le prix POS.
+  // E-commerce uniquement : un restaurant garde le prix de sa carte.
+  function webPrice(src, fallback){
+    if(IS_RESTAURANT || !src) return fallback;
+    var w = +src.price_sell_web;
+    return w>0 ? w : fallback;
+  }
+
   // ───────── Flatten products → items (réplique la logique Flutter) ─────────
   function buildItems(products){
     var out=[];
@@ -442,7 +489,12 @@
         var base = p.name||"";
         var variants = Array.isArray(p.variants)? p.variants : [];
         var real = variants.filter(function(v){ return v && v.name && String(v.name).trim(); });
-        var basePrice = +(p.price_sell_pos)||0;
+        var posPrice = +(p.price_sell_pos)||0;
+        // Produit simple : le prix web est aussi lu sur la variante de base,
+        // où le formulaire l'enregistre. La RPC ne l'expose au niveau
+        // produit qu'après hotfix_167.
+        var baseV = (real.length<=1 && variants.length)? variants[0] : null;
+        var basePrice = webPrice(p, webPrice(baseV, posPrice));
         var ov = STOCK_OV;
         if(real.length<=1){
           var firstV = variants.length? variants[0] : null;
@@ -452,6 +504,7 @@
             productId:p.id, variantId:null, name:base, baseName:base, variantName:null,
             sku:p.sku||null, price:price,
             stock: snap!=null? snap : (+(p.stock_qty)||0),
+            onDemand: p.track_stock===false,
             imageUrl:p.image_url||null, isMain:false,
             categoryId:(p.category_id||"").trim()||null, description:p.description||null,
             createdAt:p.created_at||null,
@@ -465,12 +518,13 @@
             var snapI = ov? ov[p.id+"|"+i] : undefined;
             var snapV = ov? ov[p.id+"|"+vid] : undefined;
             if(ov && snapI==null && snapV==null) continue;
-            var vBase = (+(v.price_sell_pos)|| basePrice);
+            var vBase = webPrice(v, (+(v.price_sell_pos)|| basePrice));
             var vPrice = effPrice(v, vBase);
             out.push({
               productId:p.id, variantId:vid, name:base+" — "+vn, baseName:base, variantName:vn,
               sku:v.sku||p.sku||null, price:vPrice,
               stock:(snapI!=null?snapI:(snapV!=null?snapV:(+(v.stock_available!=null?v.stock_available:v.stock_qty)||0))),
+              onDemand: p.track_stock===false,
               imageUrl:v.image_url||p.image_url||null, isMain:v.is_main===true,
               categoryId:(p.category_id||"").trim()||null, description:p.description||null,
               createdAt:p.created_at||null,
@@ -480,8 +534,10 @@
         }
       }catch(e){}
     });
-    // Jamais exposer une rupture
-    return out.filter(function(it){ return it.stock>0; });
+    // Jamais exposer une rupture. Un article SUR COMMANDE (track_stock =
+    // false) n'en est pas une : il se vend sans stock, il reste donc au
+    // catalogue quel que soit son compteur.
+    return out.filter(function(it){ return it.onDemand || it.stock>0; });
   }
 
   function keyOf(it){ return it.variantId==null? it.productId : it.productId+"|"+it.variantId; }
@@ -509,22 +565,103 @@
       return true;
     });
   }
-  // Carte d'un article, partagée par la grille et le mode menu.
+  // ───────── Partage produit ─────────
+  // Icônes inline : le fichier n'embarque aucune librairie et reste
+  // autonome (aucune requête réseau hors Supabase).
+  var SVG_CART = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' "
+    + "stroke='currentColor' stroke-width='2' stroke-linecap='round' "
+    + "stroke-linejoin='round' style='vertical-align:-2px;margin-right:5px' "
+    + "aria-hidden='true'><circle cx='9' cy='21' r='1'/><circle cx='20' cy='21' r='1'/>"
+    + "<path d='M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6'/></svg>";
+  var SVG_SHARE = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' "
+    + "stroke='currentColor' stroke-width='2' stroke-linecap='round' "
+    + "stroke-linejoin='round' aria-hidden='true'><circle cx='18' cy='5' r='3'/>"
+    + "<circle cx='6' cy='12' r='3'/><circle cx='18' cy='19' r='3'/>"
+    + "<line x1='8.59' y1='13.51' x2='15.42' y2='17.49'/>"
+    + "<line x1='15.41' y1='6.51' x2='8.59' y2='10.49'/></svg>";
+  var SVG_WA = "<svg width='16' height='16' viewBox='0 0 24 24' fill='currentColor' "
+    + "aria-hidden='true'><path d='M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z'/></svg>";
+
+  // Ouvre WhatsApp avec un message pré-rempli pointant sur la FICHE du
+  // produit. `?product=` était déjà géré au chargement (cf. deep-link en
+  // bas de fichier) mais aucune UI ne fabriquait ce lien — c'est ce que
+  // ces boutons comblent.
+  //
+  // `SHOP` est réutilisé plutôt que re-découpé depuis `location.pathname` :
+  // il est déjà parsé plus haut et gère les slashs de fin.
+  function shareProduct(productId, productName){
+    var url = location.origin + "/catalogue/" + encodeURIComponent(SHOP)
+      + "?product=" + encodeURIComponent(productId);
+    var shopName = (SHOP_INFO && SHOP_INFO.name) || "notre boutique";
+    var msg = "Bonjour ! Découvrez ce produit chez " + shopName
+      + " :\n\n*" + productName + "*\n" + url;
+    window.open("https://wa.me/?text=" + encodeURIComponent(msg), "_blank");
+  }
+
+  // Bouton vert à côté de « Ajouter » : écrit DIRECTEMENT à la boutique, sur
+  // son numéro WhatsApp dédié (`whatsapp_phone`), sinon le téléphone saisi à
+  // la création (`phone`) — même priorité que la confirmation de commande.
+  // Sans aucun numéro exploitable, on retombe sur le partage libre plutôt que
+  // d'ouvrir un WhatsApp sans destinataire.
+  function contactShopWa(productId, productName, productPrice){
+    var phone = normPhone((SHOP_INFO && (SHOP_INFO.whatsapp_phone || SHOP_INFO.phone)) || "");
+    if(!phone){ shareProduct(productId, productName); return; }
+    var url = location.origin + "/catalogue/" + encodeURIComponent(SHOP)
+      + "?product=" + encodeURIComponent(productId);
+    var msg = "Bonjour, je suis intéressé(e) par ce produit :\n\n*" + productName + "*"
+      + (productPrice ? "\n" + productPrice : "") + "\n" + url;
+    window.open("https://wa.me/" + phone + "?text=" + encodeURIComponent(msg), "_blank");
+  }
+
+  // Remise en pourcentage d'un article en promo. `null` dès qu'il n'y a
+  // rien d'exploitable (pas de prix de référence, ou remise qui s'arrondit
+  // à 0 %) — l'appelant n'affiche alors aucun badge chiffré.
+  function pctOff(it){
+    if(!it.promoBase || !(it.promoBase>it.price)) return null;
+    var p = Math.round((1 - it.price/it.promoBase)*100);
+    return p>0? p : null;
+  }
+
+  // Carte d'un article — SOURCE UNIQUE, partagée par la grille plate et le
+  // mode menu. Les deux rendus produisaient auparavant le même markup en
+  // double, ce qui les aurait fait diverger au premier changement.
   function cardHtml(it, idx){
     var promo = it.promoBase && it.promoBase>it.price;
+    var pct   = pctOff(it);
+    // Stock bas : de 1 à 5 pièces. Un article sur commande n'a pas de stock
+    // à montrer, et 0 n'arrive jamais ici (carte déjà exclue par
+    // `buildItems`) — la pill est purement cosmétique.
+    var low   = !it.onDemand && it.stock>=1 && it.stock<=5;
     return "<div class='card' data-i='"+idx+"'>"
       + "<div class='card-img'>"
       + (it.imageUrl?"<img loading='lazy' src='"+img(it.imageUrl,300)+"' onerror=\"this.onerror=null;this.src='"+esc(it.imageUrl)+"'\">":"")
-      + (promo?"<span class='promo-tag'>PROMO</span>":"")
-      + (isRecent(it)?"<span class='new-tag'>Nouveau</span>":"")
+      + (pct?"<span class='promo-tag'>-"+pct+"%</span>":"")
+      + (low?"<span class='stock-left'>"+it.stock+" restant"+(it.stock>1?"s":"")+"</span>":"")
+      + shareBtn("share-icon-btn", SVG_SHARE, it, "Partager ce produit")
       + "</div>"
       + "<div class='card-b'>"
       + "<div class='card-name'>"+esc(it.baseName)+"</div>"
       + (it.variantName?"<div class='card-var'>"+esc(it.variantName)+"</div>":"")
+      + (isRecent(it)?"<span class='new-pill'>Nouveau</span>":"")
       + "<div class='price-row'><span class='price'>"+money(it.price)+"</span>"
-      + (promo?"<span class='price-old'>"+money(it.promoBase)+"</span>":"")+"</div>"
-      + "<div class='card-cta' data-add='"+idx+"'>Ajouter</div>"
+      + (promo?"<span class='price-old'>"+money(it.promoBase)+"</span>":"")
+      + (pct?"<span class='discount-badge'>-"+pct+"%</span>":"")+"</div>"
+      + "<div class='card-actions'>"
+      + "<div class='card-cta' data-add='"+idx+"'>"+SVG_CART+"Ajouter</div>"
+      + "<button class='btn-share-wa' data-wa='"+esc(it.productId)+"'"
+      + " data-sname='"+esc(it.name)+"' data-sprice='"+esc(money(it.price))+"'"
+      + " aria-label='Contacter la boutique sur WhatsApp' type='button'>"+SVG_WA+"</button>"
+      + "</div>"
       + "</div></div>";
+  }
+
+  // Balise d'un bouton de partage. Le nom envoyé est le nom COMPLET
+  // (`it.name`, variante incluse) : partager « Chemise » quand le lien
+  // pointe sur « Chemise — Bleu L » induirait le destinataire en erreur.
+  function shareBtn(cls, svg, it, label){
+    return "<button class='"+cls+"' data-share='"+esc(it.productId)+"'"
+      + " data-sname='"+esc(it.name)+"'"
+      + " aria-label='"+esc(label)+"' type='button'>"+svg+"</button>";
   }
 
   // Rend la carte d'un restaurant : sections par catégorie, dans l'ordre
@@ -567,24 +704,11 @@
     g.innerHTML = list.map(function(it,idx){
       if(DELIVERY_VIEW){
         return "<div class='card' data-i='"+idx+"'><div class='card-img'>"
-          + (it.imageUrl?"<img loading='lazy' src='"+img(it.imageUrl,300)+"'>":"")
+          + (it.imageUrl?"<img loading='lazy' src='"+img(it.imageUrl,300)+"' onerror=\"this.onerror=null;this.src='"+esc(it.imageUrl)+"'\">":"")
           + "<span class='new-tag'>x"+it.stock+"</span></div>"
           + "<div class='card-b'><div class='card-name'>"+esc(it.name)+"</div></div></div>";
       }
-      var promo = it.promoBase && it.promoBase>it.price;
-      return "<div class='card' data-i='"+idx+"'>"
-        + "<div class='card-img'>"
-        + (it.imageUrl?"<img loading='lazy' src='"+img(it.imageUrl,300)+"' onerror=\"this.onerror=null;this.src='"+esc(it.imageUrl)+"'\">":"")
-        + (promo?"<span class='promo-tag'>PROMO</span>":"")
-        + (isRecent(it)?"<span class='new-tag'>Nouveau</span>":"")
-        + "</div>"
-        + "<div class='card-b'>"
-        + "<div class='card-name'>"+esc(it.baseName)+"</div>"
-        + (it.variantName?"<div class='card-var'>"+esc(it.variantName)+"</div>":"")
-        + "<div class='price-row'><span class='price'>"+money(it.price)+"</span>"
-        + (promo?"<span class='price-old'>"+money(it.promoBase)+"</span>":"")+"</div>"
-        + "<div class='card-cta' data-add='"+idx+"'>Ajouter</div>"
-        + "</div></div>";
+      return cardHtml(it, idx);
     }).join("");
     bindCards(g, list);
   }
@@ -598,6 +722,24 @@
         if(DELIVERY_VIEW) return;
         if(e.target&&e.target.getAttribute("data-add")!=null){ e.stopPropagation(); addToCart(list[idx],1); }
         else openDetail(list[idx]);
+      });
+    });
+    // Boutons de partage — listener PROPRE à chaque bouton, donc déclenché
+    // avant celui de la carte pendant la remontée. `stopPropagation` empêche
+    // ensuite l'ouverture de la fiche. Ils sont exclus du mode livreur, qui
+    // n'a ni fiche ni partage.
+    if(DELIVERY_VIEW) return;
+    g.querySelectorAll("[data-share]").forEach(function(b){
+      b.addEventListener("click",function(e){
+        e.stopPropagation(); e.preventDefault();
+        shareProduct(b.getAttribute("data-share"), b.getAttribute("data-sname"));
+      });
+    });
+    g.querySelectorAll("[data-wa]").forEach(function(b){
+      b.addEventListener("click",function(e){
+        e.stopPropagation(); e.preventDefault();
+        contactShopWa(b.getAttribute("data-wa"), b.getAttribute("data-sname"),
+          b.getAttribute("data-sprice"));
       });
     });
   }
@@ -629,12 +771,12 @@
       sheet.innerHTML =
         "<div class='sheet-h'><b>Détails</b><button class='x' data-close>×</button></div>"
         + "<div class='sheet-c'>"
-        + "<div class='big-img'>"+(active.imageUrl?"<img src='"+img(active.imageUrl,800)+"'>":"")+"</div>"
+        + "<div class='big-img'>"+(active.imageUrl?"<img src='"+img(active.imageUrl,800)+"' onerror=\"this.onerror=null;this.src='"+esc(active.imageUrl)+"'\">":"")+"</div>"
         + (hasGallery? "<div class='vlabel'>Choix</div><div class='thumbs'>"
             + sibs.map(function(s){
-                var out=s.stock<=0, on=keyOf(s)===keyOf(active), feat=keyOf(s)===featKey;
+                var out=!s.onDemand && s.stock<=0, on=keyOf(s)===keyOf(active), feat=keyOf(s)===featKey;
                 return "<div class='thumb"+(on?" on":"")+(out?" out":"")+"' data-k='"+esc(keyOf(s))+"'>"
-                  + "<div class='tb'>"+(s.imageUrl?"<img src='"+img(s.imageUrl,200)+"'>":"")
+                  + "<div class='tb'>"+(s.imageUrl?"<img src='"+img(s.imageUrl,200)+"' onerror=\"this.onerror=null;this.src='"+esc(s.imageUrl)+"'\">":"")
                   + (feat?"<span class='star'><svg viewBox='0 0 24 24' fill='currentColor'><path d='M12 2l3 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.9 21l1.2-6.8-5-4.9 6.9-1z'/></svg></span>":"")
                   + (on?"<span class='tick'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3'><path d='M5 12l5 5L20 6'/></svg></span>":"")
                   + (out?"<span class='soldlbl'><span>Épuisé</span></span>":"")
@@ -645,7 +787,7 @@
         + (active.variantName?"<div class='d-var'>"+esc(active.variantName)+"</div>":"")
         + "<div class='d-price-row'><span class='d-price'>"+money(active.price)+"</span>"
         + (promo?"<span class='price-old'>"+money(active.promoBase)+"</span>":"")
-        + "<span class='stock-pill'>"+(active.stock<=5?active.stock+" dispo":"En stock")+"</span></div>"
+        + "<span class='stock-pill'>"+(active.onDemand?"Sur commande":(active.stock<=5?active.stock+" dispo":"En stock"))+"</span></div>"
         + (active.description?"<div class='d-desc'>"+esc(active.description)+"</div>":"")
         + "<div class='qty'><span class='lab'>Quantité</span>"
         + "<div class='stepper'><button data-m>−</button><b id='dq'>1</b><button data-p>+</button></div></div>"
@@ -654,7 +796,8 @@
         + "<small>Paiement à la réception</small></button></div>";
 
       var qty=1;
-      var max=active.stock<1?1:active.stock;
+      // Article sur commande : aucun stock à épuiser → pas de plafond.
+      var max=active.onDemand? 999 : (active.stock<1?1:active.stock);
       function setq(n){ qty=Math.max(1,Math.min(max,n)); sheet.querySelector("#dq").textContent=qty;
         sheet.querySelector("#dtot").textContent=money(active.price*qty); }
       sheet.querySelector("[data-m]").onclick=function(){ setq(qty-1); };
@@ -664,7 +807,7 @@
       sheet.querySelectorAll(".thumb").forEach(function(t){
         t.onclick=function(){ var k=t.getAttribute("data-k");
           var s=sibs.filter(function(x){return keyOf(x)===k;})[0];
-          if(s && s.stock>0 && keyOf(s)!==keyOf(active)){ active=s; draw(); } };
+          if(s && (s.onDemand || s.stock>0) && keyOf(s)!==keyOf(active)){ active=s; draw(); } };
       });
     }
     draw();
@@ -686,14 +829,14 @@
     clearTimeout(_toastT); _toastT=setTimeout(function(){ t.className="toast"; },1600);
   }
   function addToCart(it, qty){
-    qty=qty||1; var k=keyOf(it), max=it.stock<1?1:it.stock;
+    qty=qty||1; var k=keyOf(it), max=it.onDemand? 999 : (it.stock<1?1:it.stock);
     if(CART_Q[k]) CART_Q[k]=Math.min(max, CART_Q[k]+qty);
     else { CART.push(it); CART_Q[k]=Math.min(max,qty); }
     updateCartBtn(); toast("Ajouté au panier · "+cartCount()+" article(s)");
   }
   function setCartQty(k,n){
     var it=CART.filter(function(x){return keyOf(x)===k;})[0]; if(!it) return;
-    var max=it.stock<1?1:it.stock; n=Math.max(0,Math.min(max,n));
+    var max=it.onDemand? 999 : (it.stock<1?1:it.stock); n=Math.max(0,Math.min(max,n));
     if(n<=0){ delete CART_Q[k]; CART=CART.filter(function(x){return keyOf(x)!==k;}); }
     else CART_Q[k]=n;
     updateCartBtn();
@@ -714,7 +857,7 @@
         +"<div class='sheet-c'>"
         + CART.map(function(it){ var k=keyOf(it), q=CART_Q[k]||0;
             return "<div class='cart-row' data-k='"+esc(k)+"'>"
-              +"<div class='cart-img'>"+(it.imageUrl?"<img src='"+img(it.imageUrl,120)+"'>":"")+"</div>"
+              +"<div class='cart-img'>"+(it.imageUrl?"<img src='"+img(it.imageUrl,120)+"' onerror=\"this.onerror=null;this.src='"+esc(it.imageUrl)+"'\">":"")+"</div>"
               +"<div class='cart-info'><div class='cart-nm'>"+esc(it.name)+"</div>"
               +"<div class='cart-pr'>"+money(it.price)+"</div></div>"
               +"<div class='stepper sm'><button data-m>−</button><b>"+q+"</b><button data-p>+</button></div>"
@@ -949,8 +1092,22 @@
   }
   if(!SHOP){ fail("Lien invalide."); return; }
 
-  rpc("get_public_shop_info",{p_shop_id:SHOP}).then(function(shop){
-    if(!shop || (Array.isArray(shop)&&!shop.length)){ fail("Boutique introuvable ou indisponible."); return Promise.reject(); }
+  // Les deux RPC sont INDÉPENDANTES : `get_public_catalogue_products` n'a
+  // besoin que de SHOP, connu dès le parsing de l'URL. Les enchaîner
+  // ajoutait un aller-retour complet au chemin critique du premier rendu.
+  //
+  // Contrepartie assumée : sur une boutique introuvable, l'appel produits
+  // part quand même — il n'est plus conditionné au retour du premier. Une
+  // requête perdue dans le cas d'erreur, contre un aller-retour gagné à
+  // chaque chargement réussi.
+  Promise.all([
+    rpc("get_public_shop_info",{p_shop_id:SHOP}),
+    P_IDS.length
+      ? rpc("get_delivery_products",{p_shop_id:SHOP,p_product_ids:P_IDS})
+      : rpc("get_public_catalogue_products",{p_shop_id:SHOP,p_category:P_CAT})
+  ]).then(function(res){
+    var shop = res[0], products = res[1];
+    if(!shop || (Array.isArray(shop)&&!shop.length)){ fail("Boutique introuvable ou indisponible."); return; }
     SHOP_INFO = Array.isArray(shop)? shop[0] : shop;
     // `sector` est exposé par get_public_shop_info depuis hotfix_139. Sur une
     // base non encore migrée le champ est absent → false → présentation
@@ -964,11 +1121,8 @@
     document.getElementById("hdr").classList.remove("hide");
     initPixel(SHOP_INFO.facebook_pixel_id);
 
-    var prodCall = P_IDS.length
-      ? rpc("get_delivery_products",{p_shop_id:SHOP,p_product_ids:P_IDS})
-      : rpc("get_public_catalogue_products",{p_shop_id:SHOP,p_category:P_CAT});
-    return prodCall;
-  }).then(function(products){
+    // ORDRE PRÉSERVÉ : l'en-tête et `IS_RESTAURANT` sont posés AVANT le
+    // rendu — `renderGrid` bascule en mode menu selon ce drapeau.
     if(!products) return;
     ITEMS = buildItems(Array.isArray(products)?products:[]);
     CATS = Array.from(new Set(ITEMS.map(function(i){return i.categoryId;}).filter(Boolean))).sort();
