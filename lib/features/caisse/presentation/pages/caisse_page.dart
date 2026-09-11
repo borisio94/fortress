@@ -219,10 +219,14 @@ class _CaissePageState extends ConsumerState<CaissePage> {
             context.read<CaisseBloc>().add(ClearCart());
             final bloc = context.read<CaisseBloc>();
             final isEdit = bloc.state.editingOrderId != null;
+            // Montant repris de `state`, l'instantané immuable reçu par
+            // l'écouteur : le ClearCart ci-dessus ne le modifie pas.
             AppSnack.success(context,
                 isEdit
-                    ? 'Commande mise à jour !'
-                    : 'Commande enregistrée et programmée !');
+                    ? 'Commande mise à jour · '
+                      '${CurrencyFormatter.format(state.total)}'
+                    : 'Commande enregistrée et programmée · '
+                      '${CurrencyFormatter.format(state.total)}');
             // Bascule vers la page Commandes (anciennement onglet,
             // désormais route shell dédiée /caisse/orders).
             Future.microtask(() {

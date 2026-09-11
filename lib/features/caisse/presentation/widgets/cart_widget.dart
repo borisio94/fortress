@@ -1844,9 +1844,13 @@ class _CartFooter extends StatelessWidget {
                         ? (state.editingOrderId != null
                             ? 'Modifications enregistrées ✓'
                             : 'Commande enregistrée ✓')
-                        : (state.editingOrderId != null
-                            ? 'Mettre à jour la commande'
-                            : 'Enregistrer la commande')),
+                        : state.items.isEmpty
+                            ? 'Panier vide'
+                            // Montant sur le bouton : relu au moment de valider.
+                            : '${state.editingOrderId != null ? 'Mettre à jour' : 'Enregistrer la commande'}'
+                              ' · ${CurrencyFormatter.format(state.total)}',
+                        // Écran 360 px : se tronque au lieu de déborder.
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
                     onPressed: buildOnPressed(),
                     // Libellé en `bodyBold` (13) : le thème global des boutons
                     // (16) le rendait plus gros que tout le reste du panier.
