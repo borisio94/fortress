@@ -205,6 +205,8 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
     final tabQuery     = goState.uri.queryParameters['tab'];
     final selectedIdx  = shellSelectedIndex(loc, widget.shopId,
         tabQuery: tabQuery, sector: shopSector(widget.shopId));
+    final fab = widget.floatingActionButton
+        ?? _newOrderFab(context, widget.shopId, loc, perms);
     // Layout desktop ssi OS desktop + fenêtre ≥ 900px de large. Sur fenêtre
     // étroite (utilisateur qui split-screen, ou OS mobile), on bascule
     // automatiquement sur le layout mobile.
@@ -212,7 +214,7 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
         ? _DesktopShell(
             shopId:        widget.shopId,
             body:          widget.body,
-            fab:           widget.floatingActionButton,
+            fab:           fab,
             extraActions:  widget.extraActions,
             perms:         perms,
             selectedIndex: selectedIdx,
@@ -220,7 +222,7 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
         : _MobileShell(
             shopId:        widget.shopId,
             body:          widget.body,
-            fab:           widget.floatingActionButton,
+            fab:           fab,
             extraActions:  widget.extraActions,
             perms:         perms,
             selectedIndex: selectedIdx,
@@ -240,6 +242,51 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
     if (!restoDecorActive) return shell;
     return RestoBackdrop(child: shell);
   }
+}
+
+// ─── FAB « Nouvelle commande » ────────────────────────────────────────────────
+
+/// Écrans de module dont la page porte DÉJÀ son propre bouton flottant au
+/// même coin : le FAB du shell s'effacerait derrière (ou par-dessus).
+const _kRoutesWithOwnFab = {
+  '/tickets',
+  '/parametres/whatsapp-templates',
+  '/campaigns',
+};
+
+/// FAB « Nouvelle commande » : la caisse en 1 tap depuis les écrans de module.
+///
+/// E-commerce uniquement : le restaurant n'a pas de caisse dans son menu.
+/// Affiché sur les écrans listés dans le menu (stock, CRM, finances…),
+/// JAMAIS sur les sous-pages (formulaires, fiches), où il masquerait les
+/// boutons d'enregistrement. Masqué sur la caisse et sa liste de commandes,
+/// ainsi que sur l'accueil, qui porte son propre bouton intégré.
+Widget? _newOrderFab(BuildContext context, String shopId, String loc,
+    AppPermissions perms) {
+  if (isRestaurantShop(shopId) || !perms.canAccessCaisse) return null;
+  final base = '/shop/$shopId';
+  if (!loc.startsWith(base)) return null;
+  final rest = loc.substring(base.length);
+  if (rest == '/caisse' || rest.startsWith('/caisse/')) return null;
+  // Accueil : la page porte son propre bouton « Nouvelle commande » intégré
+  // au défilement — le FAB flottant ferait doublon (masqué, pas supprimé).
+  if (rest == '/dashboard') return null;
+  if (_kRoutesWithOwnFab.contains(rest)) return null;
+  final sector = shopSector(shopId);
+  final isModuleScreen = kShellNavItems
+      .where((i) => i.matchesSector(sector))
+      .expand((i) => [i, ...i.childrenFor(sector)])
+      .any((i) => Uri.parse(i.route(shopId)).path == loc);
+  if (!isModuleScreen) return null;
+  final cs = Theme.of(context).colorScheme;
+  return FloatingActionButton(
+    heroTag:         'shell_new_order_fab',
+    tooltip:         'Nouvelle commande',
+    backgroundColor: cs.primary,
+    foregroundColor: cs.onPrimary,
+    onPressed:       () => context.go('$base/caisse'),
+    child:           const Icon(Icons.add_rounded),
+  );
 }
 
 // ─── Layout mobile ────────────────────────────────────────────────────────────

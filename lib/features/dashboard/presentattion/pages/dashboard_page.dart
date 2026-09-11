@@ -31,6 +31,9 @@ import '../../../onboarding/presentation/widgets/j1_resume_banner.dart';
 import '../../../onboarding/presentation/widgets/trial_end_banner.dart';
 import '../../../onboarding/presentation/widgets/trial_status_banner.dart';
 import '../../../../shared/widgets/broadcast_banner.dart';
+import 'package:intl/intl.dart';
+import '../../../../shared/providers/current_shop_provider.dart';
+import '../../../../shared/widgets/offline_banner_widget.dart' show isOfflineProvider;
 
 
 // ─── Page principale ──────────────────────────────────────────────────────────
@@ -277,9 +280,44 @@ class _DashBodyState extends ConsumerState<_DashBody> {
         ),
     ];
 
+    final perms    = ref.watch(permissionsProvider(shopId));
+    final curShop  = ref.watch(currentShopProvider);
+    final shopName = ((curShop != null && curShop.id == shopId)
+        ? curShop : LocalStorageService.getShop(shopId))?.name ?? '';
+    // Même source que la puce hors-ligne de la barre du haut.
+    final isOnline = !ref.watch(isOfflineProvider)
+        .maybeWhen(data: (v) => v, orElse: () => false);
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // ── 1. Identité boutique ──────────────────────────────────────────
+        _ShopIdentityCard(name: shopName, isOnline: isOnline),
+        const SizedBox(height: 12),
+
+        // ── 2. Salutation + date + période (sélecteur existant déplacé) ───
+        _WelcomeBar(
+          periodLabel: _periodLabel(l),
+          onPeriodTap: () => _showPeriodPicker(context),
+        ),
+        const SizedBox(height: 12),
+
+        // ── 3. Nouvelle commande en 1 tap ─────────────────────────────────
+        if (perms.canAccessCaisse) ...[
+          _NewOrderButton(onTap: () => context.go('/shop/$shopId/caisse')),
+          const SizedBox(height: 14),
+        ],
+
+        // ── 4. KPI Cards prioritaires (2×2 mobile / 4 cols desktop) ───────
+        _PriorityKpiGrid(kpis: priorityKpis),
+        const SizedBox(height: 14),
+
+        // ── 5. Accès rapides ──────────────────────────────────────────────
+        _DashboardHeader(shopId: widget.shopId),
+        const SizedBox(height: 14),
+
+        // ── Blocs existants, inchangés, SOUS les nouveaux modules ─────────
+
         // ── Onboarding bannières (PR-1 / PR-2 / PR-3) ────────────────────
         // Toutes les widgets sont self-gated (SizedBox.shrink() s'ils ne
         // doivent pas s'afficher) → safe à inclure inconditionnellement.
@@ -303,18 +341,6 @@ class _DashBodyState extends ConsumerState<_DashBody> {
         // périmètre à l'intérieur de la boutique courante.
         ViewFilterChipBar(shopId: widget.shopId, useTabs: true),
         const SizedBox(height: 12),
-
-        // ── Header : titre + accès rapide + filtre période ────────────────
-        _DashboardHeader(
-          shopId: widget.shopId,
-          periodLabel: _periodLabel(l),
-          onPeriodTap: () => _showPeriodPicker(context),
-        ),
-        const SizedBox(height: 14),
-
-        // ── KPI Cards prioritaires (2×2 mobile / 4 cols desktop) ──────────
-        _PriorityKpiGrid(kpis: priorityKpis),
-        const SizedBox(height: 14),
 
         // ── Section Alertes (visible seulement si non-vide) ───────────────
         if (alertKpis.isNotEmpty) ...[
@@ -466,40 +492,14 @@ class _AlertsSection extends StatelessWidget {
 
 class _DashboardHeader extends StatelessWidget {
   final String shopId;
-  final String periodLabel;
-  final VoidCallback onPeriodTap;
 
-  const _DashboardHeader({
-    required this.shopId,
-    required this.periodLabel,
-    required this.onPeriodTap,
-  });
+  const _DashboardHeader({required this.shopId});
 
   @override
   Widget build(BuildContext context) {
     final l       = context.l10n;
     final theme   = Theme.of(context);
     final isMobile = MediaQuery.of(context).size.width < 600;
-    // Prénom = premier mot du `name` du user courant. Avant cette fix le
-    // dashboard affichait "James" en dur (placeholder oublié), ce qui
-    // saluait *tous* les utilisateurs sous le même prénom. Si le profil
-    // n'a pas de nom (sync pas encore terminée, fallback Supabase vide),
-    // on tombe sur un message générique sans virgule.
-    final fullName = LocalStorageService.getCurrentUser()?.name.trim() ?? '';
-    final firstName = fullName.isEmpty
-        ? ''
-        : fullName.split(RegExp(r'\s+')).first;
-    final greeting = firstName.isEmpty
-        ? '${l.dashWelcome}.'
-        : '${l.dashWelcome}, $firstName.';
-
-    // Sur mobile : greeting 12px w500 + sous-titre "Aujourd'hui" 10px,
-    // subtitle muted (spec round 9). Sur desktop : 17px w800 + sous-titre
-    // long inchangé pour préserver la densité informationnelle.
-    final greetSize    = isMobile ? 12.0 : 17.0;
-    final greetWeight  = isMobile ? FontWeight.w500 : FontWeight.w800;
-    final subSize      = isMobile ? 10.0 : 11.0;
-    final subText      = isMobile ? l.periodToday : l.dashSubtitle;
 
     return Container(
       padding: EdgeInsets.fromLTRB(16, isMobile ? 10 : 14, 16, isMobile ? 10 : 14),
@@ -514,66 +514,16 @@ class _DashboardHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
 
-          // ── Ligne 1 : Titre + filtre période ───────────────────────
-          Row(children: [
-            Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(greeting,
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: AppTextStyles.body.copyWith(fontSize: greetSize,
-                        fontWeight: greetWeight)),
-                const SizedBox(height: 2),
-                Text(subText,
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: AppTextStyles.caption.copyWith(fontSize: subSize)),
-              ],
-            )),
-            const SizedBox(width: 10),
-            // Pill période
-            GestureDetector(
-              onTap: onPeriodTap,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.primarySurface,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppColors.primary.withValues(alpha:0.3)),
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.calendar_today_rounded, size: 12,
-                      color: AppColors.primary),
-                  const SizedBox(width: 5),
-                  Text(periodLabel,
-                      style: AppTextStyles.captionBold.copyWith(
-                          color: AppColors.primary)),
-                  const SizedBox(width: 3),
-                  Icon(Icons.keyboard_arrow_down_rounded, size: 14,
-                      color: AppColors.primary),
-                ]),
-              ),
-            ),
-          ]),
-
-          SizedBox(height: isMobile ? 10 : 14),
-          Divider(height: 1, color: theme.semantic.borderSubtle),
-          SizedBox(height: isMobile ? 8 : 12),
-
-          // ── Ligne 2 : Accès rapide ────────────────────────────────
+          // ── Accès rapide ──────────────────────────────────────────
           // Wrap content-sized (mobile + desktop) — chaque bouton à la
           // largeur de son contenu, padding horizontal 10 (cf. _HeaderQuickBtn).
           // Wrap retourne automatiquement à la ligne quand l'écran est étroit.
+          // La salutation et la période sont passées dans `_WelcomeBar`, et
+          // « Nouvelle vente » est devenu le bouton `_NewOrderButton`.
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              _HeaderQuickBtn(
-                icon: Icons.point_of_sale_rounded,
-                label: l.dashNewSale,
-                color: AppColors.primary,
-                onTap: () => context.go('/shop/$shopId/caisse'),
-              ),
               _HeaderQuickBtn(
                 icon: Icons.add_box_outlined,
                 label: l.dashAddProduct,
@@ -595,6 +545,194 @@ class _DashboardHeader extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// En-tête boutique : initiales + nom + état de connexion. La cloche et la
+/// puce hors-ligne détaillée restent dans la barre du haut du shell — ce
+/// point n'en est qu'un rappel discret, sans second indicateur cliquable.
+class _ShopIdentityCard extends StatelessWidget {
+  final String name;
+  final bool   isOnline;
+  const _ShopIdentityCard({required this.name, required this.isOnline});
+
+  /// « Boutique Kamer » → « BK » ; « Shop » → « SH ».
+  String get _initials {
+    final parts = name.trim().split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    final w = parts.first;
+    return w.substring(0, w.length >= 2 ? 2 : 1).toUpperCase();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs    = theme.colorScheme;
+    final fr    = Localizations.localeOf(context).languageCode == 'fr';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.semantic.borderSubtle),
+      ),
+      child: Row(children: [
+        Container(
+          width: 38, height: 38,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+              color: cs.primary, borderRadius: BorderRadius.circular(10)),
+          child: Text(_initials,
+              style: AppTextStyles.bodyBold.copyWith(color: cs.onPrimary)),
+        ),
+        const SizedBox(width: 10),
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.label.copyWith(color: cs.onSurface)),
+            const SizedBox(height: 2),
+            Row(children: [
+              Container(width: 6, height: 6,
+                  decoration: BoxDecoration(shape: BoxShape.circle,
+                      color: isOnline ? AppColors.secondary : AppColors.error)),
+              const SizedBox(width: 4),
+              Text(isOnline ? (fr ? 'En ligne' : 'Online')
+                            : (fr ? 'Hors ligne' : 'Offline'),
+                  style: AppTextStyles.caption
+                      .copyWith(color: AppColors.textSecondary)),
+            ]),
+          ],
+        )),
+      ]),
+    );
+  }
+}
+
+/// Salutation selon l'heure + prénom + date du jour, sur une ligne, avec le
+/// sélecteur de période existant (déplacé de l'ancien en-tête, inchangé).
+class _WelcomeBar extends StatelessWidget {
+  final String periodLabel;
+  final VoidCallback onPeriodTap;
+  const _WelcomeBar({required this.periodLabel, required this.onPeriodTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final fr  = Localizations.localeOf(context).languageCode == 'fr';
+    final now = DateTime.now();
+    final h   = now.hour;
+    final hello = (h >= 5 && h < 12) ? (fr ? 'Bonjour' : 'Good morning')
+        : (h >= 12 && h < 18) ? (fr ? 'Bon après-midi' : 'Good afternoon')
+        : (fr ? 'Bonsoir' : 'Good evening');
+    // Prénom = premier mot du nom du compte (même règle que l'ancien en-tête :
+    // sans nom de profil, salutation seule, sans virgule).
+    final full  = LocalStorageService.getCurrentUser()?.name.trim() ?? '';
+    final first = full.isEmpty ? '' : full.split(RegExp(r'\s+')).first;
+    final raw   = DateFormat('EEEE d MMM y', fr ? 'fr_FR' : 'en_US').format(now);
+    final date  = raw.isEmpty ? raw : raw[0].toUpperCase() + raw.substring(1);
+    return Row(children: [
+      Expanded(child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(first.isEmpty ? hello : '$hello, $first',
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.label
+                  .copyWith(color: Theme.of(context).colorScheme.onSurface)),
+          const SizedBox(height: 2),
+          Row(children: [
+            Icon(Icons.calendar_today_rounded, size: 12,
+                color: AppColors.textSecondary),
+            const SizedBox(width: 4),
+            Flexible(child: Text(date, maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.caption
+                    .copyWith(color: AppColors.textSecondary))),
+          ]),
+        ],
+      )),
+      const SizedBox(width: 10),
+      // Pill période
+      GestureDetector(
+        onTap: onPeriodTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+          decoration: BoxDecoration(
+            color: AppColors.primarySurface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.primary.withValues(alpha:0.3)),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.calendar_today_rounded, size: 12,
+                color: AppColors.primary),
+            const SizedBox(width: 5),
+            Text(periodLabel,
+                style: AppTextStyles.captionBold.copyWith(
+                    color: AppColors.primary)),
+            const SizedBox(width: 3),
+            Icon(Icons.keyboard_arrow_down_rounded, size: 14,
+                color: AppColors.primary),
+          ]),
+        ),
+      ),
+    ]);
+  }
+}
+
+/// « Nouvelle commande » en 1 tap, intégré au défilement : pas de bouton
+/// flottant par-dessus le contenu (celui du shell est masqué sur l'accueil).
+/// Toute la rangée est cliquable.
+class _NewOrderButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _NewOrderButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs    = theme.colorScheme;
+    final fr    = Localizations.localeOf(context).languageCode == 'fr';
+    return Material(
+      color: cs.surface,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: theme.semantic.borderSubtle),
+          ),
+          child: Row(children: [
+            Container(
+              width: 52, height: 52,
+              decoration: BoxDecoration(
+                  color: cs.primary, borderRadius: BorderRadius.circular(14)),
+              child: Icon(Icons.add_rounded, color: cs.onPrimary, size: 24),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(fr ? 'Nouvelle commande' : 'New order',
+                    style: AppTextStyles.bodyBold
+                        .copyWith(color: cs.onSurface)),
+                Text(fr ? '1 tap · accès direct caisse'
+                        : '1 tap · straight to checkout',
+                    style: AppTextStyles.caption
+                        .copyWith(color: AppColors.textSecondary)),
+              ],
+            )),
+            Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary),
+          ]),
+        ),
       ),
     );
   }
