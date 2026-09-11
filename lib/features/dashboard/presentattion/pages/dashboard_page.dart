@@ -34,6 +34,7 @@ import '../../../../shared/widgets/broadcast_banner.dart';
 import 'package:intl/intl.dart';
 import '../../../../shared/providers/current_shop_provider.dart';
 import '../../../../shared/widgets/offline_banner_widget.dart' show isOfflineProvider;
+import '../../../../core/permisions/app_permissions.dart';
 
 
 // ─── Page principale ──────────────────────────────────────────────────────────
@@ -334,8 +335,8 @@ class _DashBodyState extends ConsumerState<_DashBody> {
         _PriorityKpiGrid(kpis: priorityKpis),
         const SizedBox(height: 14),
 
-        // ── 5. Accès rapides ──────────────────────────────────────────────
-        _DashboardHeader(shopId: widget.shopId),
+        // ── 5. Accès rapides (grille 2×2) ─────────────────────────────────
+        _QuickAccessGrid(shopId: widget.shopId, perms: perms),
         const SizedBox(height: 14),
 
         // ── 6. Ventes récentes (5 dernières, toutes dates) ────────────────
@@ -509,63 +510,112 @@ class _AlertsSection extends StatelessWidget {
   }
 }
 
-// ─── Header dashboard : titre + quick buttons + filtre ──────────────────────
+// ─── Accès rapides (grille 2×2) ──────────────────────────────────────────────
 
-class _DashboardHeader extends StatelessWidget {
+/// Accès rapides : 4 modules fréquents en 1 tap. Une carte n'apparaît que si
+/// le compte a le droit correspondant (mêmes règles que le menu).
+/// Sous-titres lus sur les données locales existantes (produits non
+/// supprimés, clients non archivés) — aucune requête nouvelle.
+class _QuickAccessGrid extends StatelessWidget {
   final String shopId;
-
-  const _DashboardHeader({required this.shopId});
+  final AppPermissions perms;
+  const _QuickAccessGrid({required this.shopId, required this.perms});
 
   @override
   Widget build(BuildContext context) {
-    final l       = context.l10n;
-    final theme   = Theme.of(context);
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final fr = Localizations.localeOf(context).languageCode == 'fr';
+    final nProducts = LocalStorageService.getProductsForShop(shopId).length;
+    final nClients  = AppDatabase.getClientsForShop(shopId).length;
+    String plural(int n, String one) => '$n $one${n > 1 ? 's' : ''}';
+    final cards = <_QuickCard>[
+      if (perms.canAccessCaisse)
+        _QuickCard(icon: Icons.shopping_cart_outlined,
+            label: fr ? 'Caisse' : 'Checkout',
+            sublabel: fr ? 'Vente rapide' : 'Quick sale',
+            color: AppColors.primary,
+            onTap: () => context.go('/shop/$shopId/caisse')),
+      if (perms.isShopAdmin && perms.canViewProducts)
+        _QuickCard(icon: Icons.inventory_2_outlined,
+            label: 'Stock',
+            sublabel: plural(nProducts, fr ? 'produit' : 'product'),
+            color: AppColors.secondary,
+            onTap: () => context.go('/shop/$shopId/inventaire')),
+      if (perms.canViewFinances)
+        _QuickCard(icon: Icons.bar_chart_rounded,
+            label: 'Finances',
+            sublabel: fr ? 'Bilan du jour' : 'Daily summary',
+            color: AppColors.warning,
+            onTap: () => context.go('/shop/$shopId/finances')),
+      if (perms.canViewClients)
+        _QuickCard(icon: Icons.people_outline_rounded,
+            label: 'Clients',
+            sublabel: plural(nClients, 'client'),
+            color: AppColors.info,
+            onTap: () => context.go('/shop/$shopId/crm')),
+    ];
+    if (cards.isEmpty) return const SizedBox.shrink();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(fr ? 'ACCÈS RAPIDES' : 'QUICK ACCESS',
+          style: AppTextStyles.captionBold.copyWith(
+              color: AppColors.textSecondary, letterSpacing: 0.8)),
+      const SizedBox(height: 8),
+      LayoutBuilder(builder: (_, c) {
+        // 2 colonnes sur mobile, 4 sur desktop (même seuil que les KPI).
+        final cols = c.maxWidth >= 600 ? 4 : 2;
+        return GridView.count(
+          crossAxisCount: cols,
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: cols == 4 ? 2.2 : 1.8,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          children: cards,
+        );
+      }),
+    ]);
+  }
+}
 
-    return Container(
-      padding: EdgeInsets.fromLTRB(16, isMobile ? 10 : 14, 16, isMobile ? 10 : 14),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: theme.semantic.borderSubtle),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
-            blurRadius: 6, offset: const Offset(0, 2))],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+class _QuickCard extends StatelessWidget {
+  final IconData icon;
+  final String label, sublabel;
+  final Color color;
+  final VoidCallback onTap;
+  const _QuickCard({required this.icon, required this.label,
+      required this.sublabel, required this.color, required this.onTap});
 
-          // ── Accès rapide ──────────────────────────────────────────
-          // Wrap content-sized (mobile + desktop) — chaque bouton à la
-          // largeur de son contenu, padding horizontal 10 (cf. _HeaderQuickBtn).
-          // Wrap retourne automatiquement à la ligne quand l'écran est étroit.
-          // La salutation et la période sont passées dans `_WelcomeBar`, et
-          // « Nouvelle vente » est devenu le bouton `_NewOrderButton`.
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _HeaderQuickBtn(
-                icon: Icons.add_box_outlined,
-                label: l.dashAddProduct,
-                color: AppColors.secondary,
-                onTap: () => context.push('/shop/$shopId/inventaire/product'),
-              ),
-              _HeaderQuickBtn(
-                icon: Icons.person_add_rounded,
-                label: l.dashAddClient,
-                color: AppColors.info,
-                onTap: () => context.go('/shop/$shopId/crm'),
-              ),
-              _HeaderQuickBtn(
-                icon: Icons.bar_chart_rounded,
-                label: l.dashViewReports,
-                color: AppColors.warning,
-                onTap: () => context.go('/shop/$shopId/finances'),
-              ),
-            ],
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surface,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: theme.semantic.borderSubtle),
           ),
-        ],
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              width: 32, height: 32,
+              decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8)),
+              child: Icon(icon, color: color, size: 16),
+            ),
+            const Spacer(),
+            Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.bodySmBold
+                    .copyWith(color: theme.colorScheme.onSurface)),
+            Text(sublabel, maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.micro
+                    .copyWith(color: AppColors.textSecondary)),
+          ]),
+        ),
       ),
     );
   }
@@ -752,66 +802,6 @@ class _NewOrderButton extends StatelessWidget {
               ],
             )),
             Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary),
-          ]),
-        ),
-      ),
-    );
-  }
-}
-
-class _HeaderQuickBtn extends StatefulWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-  const _HeaderQuickBtn({required this.icon, required this.label,
-    required this.color, required this.onTap});
-  @override
-  State<_HeaderQuickBtn> createState() => _HeaderQuickBtnState();
-}
-
-class _HeaderQuickBtnState extends State<_HeaderQuickBtn> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    // Padding différencié spec : 16h/8v desktop, 10h/8v mobile.
-    // Boutons content-sized partout (Wrap parent, mainAxisSize.min interne)
-    // — pas de SizedBox(width: infinity) ni d'Expanded, donc zéro stretch.
-    final isMobile = MediaQuery.of(context).size.width < 600;
-    final hPad = isMobile ? 10.0 : 16.0;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit:  (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 8),
-          decoration: BoxDecoration(
-            color: _hover
-                ? widget.color.withValues(alpha:0.14)
-                : widget.color.withValues(alpha:0.07),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: _hover
-                  ? widget.color.withValues(alpha:0.4)
-                  : widget.color.withValues(alpha:0.15),
-              width: 1,
-            ),
-          ),
-          // mainAxisSize.min : le Row prend la largeur de son contenu
-          // (icône + gap + label), pas plus. Combiné au Wrap parent qui
-          // n'impose aucune contrainte de largeur, chaque bouton fait
-          // exactement la taille de son contenu.
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(widget.icon, size: 15, color: widget.color),
-            const SizedBox(width: 6),
-            Text(widget.label.replaceAll('\n', ' '),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.captionBold.copyWith(
-                    color: widget.color)),
           ]),
         ),
       ),

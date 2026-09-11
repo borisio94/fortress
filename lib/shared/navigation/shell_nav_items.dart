@@ -7,6 +7,7 @@ import '../../core/services/ingredient_service.dart';
 import '../../core/services/restaurant_order_service.dart';
 import '../../core/services/stock_item_service.dart';
 import '../../core/storage/hive_boxes.dart';
+import '../../core/storage/local_storage_service.dart';
 
 /// Description d'un item de navigation shell.
 ///
@@ -50,7 +51,7 @@ class ShellNavItem {
   /// badge sur cet item.
   final int Function(String shopId)?   badge;
   /// True si l'item appartient à la rangée principale du bottom nav mobile
-  /// (Dashboard, Caisse, Inventaire, Clients). Les autres vont dans le
+  /// (e-commerce : Accueil, Caisse, Stock). Les autres vont dans le
   /// drawer « Plus ». Sur desktop, tous les items s'affichent dans le sidebar.
   final bool                           primary;
   /// Sous-éléments dépliables (sidebar desktop uniquement). Quand non-vide,
@@ -128,6 +129,16 @@ int _inventoryIncidentsBadge(String shopId) {
     return m['shop_id'] == shopId
         && (m['status'] == 'pending' || m['status'] == 'in_progress');
   }).length;
+}
+
+/// Pastille de l'item Stock : incidents en attente + produits en stock bas.
+/// Même règle que le filtre « stock bas » de la page Stock en vue globale
+/// (`Product.isLowStock`), lue sur la liste produits déjà en cache.
+int _inventoryAlertsBadge(String shopId) {
+  if (shopId.isEmpty) return 0;
+  final low = LocalStorageService.getProductsForShop(shopId)
+      .where((p) => p.isLowStock).length;
+  return _inventoryIncidentsBadge(shopId) + low;
 }
 
 /// Compte les commandes WEB encore en attente (`source='web'` + `scheduled`)
@@ -317,7 +328,7 @@ final List<ShellNavItem> kShellNavItems = [
     // Tableau de bord (même route /inventaire). En restauration cet item
     // e-commerce n'apparaît donc plus.
     sectorNotIn:  kRestaurantSectors,
-    badge:        _inventoryIncidentsBadge,
+    badge:        _inventoryAlertsBadge,
     primary:      true,
     children: [
       ShellNavItem(
@@ -360,7 +371,9 @@ final List<ShellNavItem> kShellNavItems = [
     visibleIf:    (p) => p.canViewClients,
     // Menu restaurant allégé : centré vente / commande / facturation.
     sectorNotIn:  kRestaurantSectors,
-    primary:      true,
+    // CRM passe dans « Plus » : barre du bas e-commerce = Accueil · Caisse ·
+    // Stock · Plus. L'item reste au menu (tiroir « Plus » et barre latérale).
+    primary:      false,
     children: [
       ShellNavItem(
         icon:         Icons.person_outline_rounded,
