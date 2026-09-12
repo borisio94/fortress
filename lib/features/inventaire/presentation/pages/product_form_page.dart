@@ -377,6 +377,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
   @override
   void dispose() {
     _skuDebounce?.cancel();
+    _nameDebounce?.cancel();
     for (final c in [_nameCtrl, _brandCtrl, _descCtrl, _notesCtrl,
       _taxRateCtrl, _pageCtrl]) c.dispose();
     for (final v in _variants) v.dispose();
@@ -410,6 +411,36 @@ class _ProductFormPageState extends State<ProductFormPage> {
   /// Anti-rebond du contrôle de SKU. Un seul suffit : on ne saisit que dans
   /// un champ à la fois.
   Timer? _skuDebounce;
+
+  /// Produits déjà au catalogue dont le nom ressemble à celui qu'on saisit.
+  /// Évite de recréer une fiche qui existe — un doublon se paie ensuite en
+  /// stock éclaté sur deux références.
+  List<Product> _similarProducts = [];
+  Timer? _nameDebounce;
+
+  /// Frappe dans le champ Nom : rafraîchit la complétude, puis cherche les
+  /// homonymes après une pause. Sans l'anti-rebond, on parcourrait tout le
+  /// catalogue à chaque caractère.
+  void _onNameChanged(String value) {
+    setState(() {});
+    _nameDebounce?.cancel();
+    final q = value.trim();
+    if (q.length < 3) {
+      if (_similarProducts.isNotEmpty) {
+        setState(() => _similarProducts = []);
+      }
+      return;
+    }
+    _nameDebounce = Timer(const Duration(milliseconds: 500), () async {
+      final found =
+          await AppDatabase.searchProductsByName(widget.shopId, q);
+      if (!mounted) return;
+      setState(() => _similarProducts = found
+          .where((p) => p.id != _editingProduct?.id)
+          .take(3)
+          .toList());
+    });
+  }
 
   /// Empreinte du formulaire juste après le pré-remplissage. Sert à savoir
   /// s'il y a vraiment quelque chose à perdre : sans elle, on ouvrirait le
@@ -1270,11 +1301,24 @@ class _ProductFormPageState extends State<ProductFormPage> {
     children: [
       AppSectionCard(title: l.prodGeneralInfo, icon: Icons.info_outline_rounded, children: [
         _LF(l.inventaireName, req: true,
-            child: _TF(_nameCtrl, 'Ex: Coca-Cola 33cl', Icons.label_outline,
-                autofocus: true,
-                // Rafraîchit la barre de complétude à la frappe.
-                onChanged: (_) => setState(() {}),
-                validator: (v) => (v ?? '').trim().isEmpty ? 'Requis' : null)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _TF(_nameCtrl, 'Ex: Coca-Cola 33cl', Icons.label_outline,
+                    autofocus: true,
+                    onChanged: _onNameChanged,
+                    validator: (v) =>
+                        (v ?? '').trim().isEmpty ? 'Requis' : null),
+                if (_similarProducts.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  _SimilarProductsHint(
+                    products: _similarProducts,
+                    onOpen: (p) => context.push(
+                        '/shop/${widget.shopId}/inventaire/product', extra: p),
+                  ),
+                ],
+              ],
+            )),
         _gap(),
         _LF(l.prodBrand, req: _isCreating,
             child: AppSelectWidget(
@@ -3569,6 +3613,43 @@ class _BarcodeScannerPageState extends State<_BarcodeScannerPage> {
         _done = true;
         Navigator.of(context).pop(code.trim());
       },
+    ),
+  );
+}
+
+/// Signale les produits déjà au catalogue au nom voisin de celui qu'on est
+/// en train de saisir. Simple avertissement : rien n'est bloqué, deux
+/// produits peuvent légitimement porter des noms proches.
+class _SimilarProductsHint extends StatelessWidget {
+  final List<Product> products;
+  final void Function(Product) onOpen;
+  const _SimilarProductsHint({required this.products, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(8),
+    decoration: BoxDecoration(
+      color: AppColors.warning.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: AppColors.warning.withValues(alpha: 0.30)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Déjà au catalogue :',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                color: AppColors.warning)),
+        const SizedBox(height: 2),
+        ...products.map((p) => GestureDetector(
+          onTap: () => onOpen(p),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text('→ ${p.name}',
+                style: TextStyle(fontSize: 12, color: AppColors.primary,
+                    decoration: TextDecoration.underline)),
+          ),
+        )),
+      ],
     ),
   );
 }

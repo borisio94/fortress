@@ -3197,6 +3197,38 @@ end \$\$;""",
     return null;
   }
 
+  /// Produits de la boutique dont le nom contient [query] — **cache Hive
+  /// uniquement**, jamais le réseau : appelée pendant la frappe.
+  ///
+  /// Sert à prévenir les doublons au moment de nommer un produit. Portée à
+  /// la boutique pour la même raison que [findProductBySku] : la boîte est
+  /// partagée par toutes les boutiques de l'appareil. Les produits
+  /// supprimés sont ignorés.
+  static Future<List<Product>> searchProductsByName(
+      String shopId, String query, {int limit = 5}) async {
+    final needle = query.trim().toLowerCase();
+    if (needle.isEmpty) return const [];
+    final out = <Product>[];
+    for (final raw in HiveBoxes.productsBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw);
+        if (m['store_id'] != shopId) continue;
+        if (m['deleted_at'] != null) continue;
+        final name = (m['name'] as String?) ?? '';
+        if (!name.toLowerCase().contains(needle)) continue;
+        final id = m['id'] as String?;
+        if (id == null) continue;
+        final p = LocalStorageService.getProduct(id);
+        if (p != null) out.add(p);
+        if (out.length >= limit) break;
+      } catch (_) {
+        // Ligne illisible (format hérité) : ignorée — elle ne doit pas
+        // faire échouer une simple suggestion de saisie.
+      }
+    }
+    return out;
+  }
+
   static Future<void> syncProducts(String shopId) async {
     try {
       // Vérifier que la session est valide

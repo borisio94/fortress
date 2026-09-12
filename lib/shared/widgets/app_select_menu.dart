@@ -194,7 +194,27 @@ class _MenuContainerState extends State<_MenuContainer> {
   final Map<int, GlobalKey> _keys = {}; // pour ensureVisible
 
   bool get _hasAdd => widget.onAdd != null;
-  int  get _count  => widget.items.length + (_hasAdd ? 1 : 0);
+
+  /// Recherche affichée seulement au-delà de ce nombre d'entrées. En
+  /// dessous, un champ de filtre ne rend aucun service et capterait le
+  /// focus au détriment de la navigation au clavier.
+  static const int _searchThreshold = 8;
+
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _query = '';
+
+  bool get _showSearch => widget.items.length >= _searchThreshold;
+
+  /// Entrées réellement affichées. TOUTE la navigation clavier porte sur
+  /// cette liste et jamais sur `widget.items` : sinon la touche Entrée
+  /// validerait une entrée filtrée, donc invisible.
+  List<String> get _visible {
+    if (_query.trim().isEmpty) return widget.items;
+    final q = _query.trim().toLowerCase();
+    return widget.items.where((i) => i.toLowerCase().contains(q)).toList();
+  }
+
+  int  get _count  => _visible.length + (_hasAdd ? 1 : 0);
 
   @override
   void initState() {
@@ -207,6 +227,12 @@ class _MenuContainerState extends State<_MenuContainer> {
     final selIdx = widget.selected == null
         ? -1 : widget.items.indexOf(widget.selected!);
     _hi = selIdx >= 0 ? selIdx : 0;
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   GlobalKey _keyFor(int i) => _keys.putIfAbsent(i, () => GlobalKey());
@@ -225,8 +251,9 @@ class _MenuContainerState extends State<_MenuContainer> {
 
   void _activate() {
     if (_count == 0) return;
-    if (_hi < widget.items.length) {
-      final item = widget.items[_hi];
+    final visible = _visible;
+    if (_hi < visible.length) {
+      final item = visible[_hi];
       if (widget.multi) {
         setState(() {
           if (_sel.contains(item)) _sel.remove(item); else _sel.add(item);
@@ -255,7 +282,8 @@ class _MenuContainerState extends State<_MenuContainer> {
 
   @override
   Widget build(BuildContext context) {
-    final addIndex = widget.items.length;
+    final visible  = _visible;
+    final addIndex = visible.length;
     return Focus(
       autofocus: true,
       onKeyEvent: _onKey,
@@ -276,7 +304,36 @@ class _MenuContainerState extends State<_MenuContainer> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (widget.items.isEmpty)
+              if (_showSearch) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                  child: TextField(
+                    controller: _searchCtrl,
+                    autofocus: true,
+                    style: AppTextStyles.input,
+                    decoration: InputDecoration(
+                      hintText: 'Rechercher…',
+                      hintStyle: AppTextStyles.inputHint,
+                      prefixIcon: Icon(Icons.search_rounded,
+                          size: 18, color: AppColors.textHint),
+                      isDense: true,
+                      filled: true,
+                      fillColor: AppColors.inputFill,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none),
+                    ),
+                    // Le surlignage repart en tête : l'entrée visée avant
+                    // le filtre n'est probablement plus à l'écran.
+                    onChanged: (v) => setState(() { _query = v; _hi = 0; }),
+                  ),
+                ),
+                Divider(
+                    height: 1, color: Theme.of(context).semantic.borderSubtle),
+              ],
+              if (visible.isEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 16, vertical: 14),
@@ -289,7 +346,7 @@ class _MenuContainerState extends State<_MenuContainer> {
                   ]),
                 )
               else
-                ...widget.items.asMap().entries.map((e) {
+                ...visible.asMap().entries.map((e) {
                   final idx = e.key;
                   final item = e.value;
                   final isSelected = widget.multi
