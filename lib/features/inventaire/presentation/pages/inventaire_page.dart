@@ -47,6 +47,7 @@ import '../../../../shared/widgets/blocked_delete_dialog.dart';
 import '../../../parametres/presentation/widgets/transfer_form_sheet.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../subscription/presentation/widgets/subscription_guard.dart';
+import '../widgets/arrival_sheet.dart';
 
 // ─── Helpers stock par location (filtre dashboard) ──────────────────────────
 //
@@ -410,6 +411,25 @@ class _InventairePageState extends ConsumerState<InventairePage>
       }
     }
     return m;
+  }
+
+  /// Répartit une dépense (transport, douane…) sur les produits cochés.
+  /// Aucune entrée de stock : seul le prix de revient est corrigé.
+  Future<void> _openFeesForSelection() async {
+    final ok = await showArrivalSheet(
+      context,
+      shopId: widget.shopId,
+      mode: ArrivalSheetMode.costOnly,
+      preselectedIds: Set<String>.from(_selected),
+      lockMode: true,
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _selectMode = false;
+      _selected.clear();
+    });
+    _load();
+    AppSnack.success(context, 'Frais imputés — prix de revient mis à jour');
   }
 
   /// Helper : check le quota produits avant de naviguer vers le formulaire
@@ -1535,6 +1555,28 @@ class _InventairePageState extends ConsumerState<InventairePage>
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
               child: Row(children: [
+                // Bouton "Frais" — répartit une dépense (transport, douane)
+                // sur les produits cochés, au prorata de leurs pièces. Le
+                // stock ne bouge pas : seul le prix de revient est corrigé.
+                SizedBox(
+                  height: 46,
+                  child: OutlinedButton.icon(
+                    onPressed: _openFeesForSelection,
+                    icon: const Icon(Icons.receipt_long_rounded, size: 18),
+                    label: Text('Frais',
+                        style: AppTextStyles.bodyBold
+                            .copyWith(color: AppColors.primary)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primary,
+                      side: BorderSide(
+                          color: AppColors.primary.withValues(alpha: 0.4)),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 // Bouton "Catalogue WhatsApp" — génère un HTML léger,
                 // l'upload sur Supabase, raccourcit l'URL et ouvre wa.me.
                 Expanded(
