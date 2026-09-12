@@ -115,6 +115,10 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
   bool _saving = false;
   String _query = '';
 
+  /// Détail ligne par ligne, replié par défaut : il n'intéresse qu'au moment
+  /// de la relecture finale, et déplié d'office il mangerait la liste.
+  bool _detailOpen = false;
+
   /// key de [_Target] → quantité. En arrivage : ce qui entre. En frais
   /// seuls : les pièces qui se partagent les frais.
   final Map<String, int> _qty = {};
@@ -192,6 +196,100 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
   /// Invite à reprendre les frais du dernier arrivage. Visible seulement
   /// tant qu'aucun frais n'est saisi : une fois la saisie commencée, la
   /// proposition n'a plus lieu d'être — et surtout, elle n'écrase rien.
+  /// Libellé d'une ligne valorisée. Les lignes du catalogue portent la clé
+  /// de leur cible, les nouveautés celle de leur brouillon.
+  String _labelForKey(String key) {
+    final t = _targets[key];
+    if (t != null) return t.fullName;
+    for (final d in _drafts) {
+      if (d.key == key) return '${d.name} (nouveau)';
+    }
+    return 'Ligne';
+  }
+
+  /// Détail ligne par ligne du lot, repliable.
+  ///
+  /// Le récapitulatif ne donne que des totaux : il ne dit pas quelle ligne
+  /// supporte quoi. Or c'est exactement ce qu'on veut relire avant de valider
+  /// un lot de vingt références — ce qui entre, à quel prix, et combien de
+  /// frais chaque pièce a absorbé. Le recalculer de tête à partir du total
+  /// est précisément ce qu'on cherche à éviter.
+  Widget _lineDetailPanel() {
+    final c = _costing;
+    if (c.lines.isEmpty) return const SizedBox.shrink();
+    final sem = Theme.of(context).semantic;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: sem.borderSubtle),
+      ),
+      child: Column(children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: () => setState(() => _detailOpen = !_detailOpen),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(children: [
+              Icon(Icons.receipt_long_outlined, size: 14,
+                  color: AppColors.primary),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Détail par ligne (${c.lines.length})',
+                  style: AppTextStyles.bodySmBold)),
+              Icon(_detailOpen
+                      ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                  size: 18, color: AppColors.textSecondary),
+            ]),
+          ),
+        ),
+        if (_detailOpen)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: Column(children: [
+              for (final l in c.lines)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Expanded(child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      Text(_labelForKey(l.key),
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.micro),
+                      Text(
+                          _costOnly
+                              ? '${l.quantity} pièce'
+                                '${l.quantity > 1 ? 's' : ''} · '
+                                '+${CurrencyFormatter.format(l.feePerPiece)}'
+                                ' / pièce'
+                              : '${l.quantity} × '
+                                '${CurrencyFormatter.format(l.unitCost)}'
+                                '${l.feePerPiece > 0
+                                    ? ' + '
+                                      '${CurrencyFormatter.format(l.feePerPiece)}'
+                                      ' de frais'
+                                    : ''}',
+                          maxLines: 2, overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.micro
+                              .copyWith(color: AppColors.textHint)),
+                    ])),
+                    const SizedBox(width: 8),
+                    Text(
+                        CurrencyFormatter.format(
+                            _costOnly ? l.feeShare : l.lineTotal),
+                        style: AppTextStyles.microBold
+                            .copyWith(color: AppColors.primary)),
+                  ]),
+                ),
+            ]),
+          ),
+      ]),
+    );
+  }
+
   Widget _reuseFeesChip() {
     final total  = _suggestedFees.fold<double>(0, (s, f) => s + f.amount);
     final labels = _suggestedFees.map((f) => f.label).join(' · ');
@@ -759,6 +857,7 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
           ]),
         ),
         Expanded(child: _buildList(sc)),
+        _lineDetailPanel(),
         LotSummary(costing: _costing, costOnly: _costOnly),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),

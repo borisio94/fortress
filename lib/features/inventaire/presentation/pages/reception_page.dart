@@ -29,6 +29,12 @@ class ReceptionPage extends StatefulWidget {
 class _ReceptionPageState extends State<ReceptionPage> {
   List<Reception> _receptions = [];
 
+  /// Filtre de NATURE : `null` = tout, `false` = arrivages, `true` = frais
+  /// seuls. Les deux natures se mélangeaient dans une liste unique où seul
+  /// un petit badge les distinguait — chercher « quand ai-je passé les frais
+  /// de douane » revenait à faire défiler tout l'historique.
+  bool? _natureFilter;
+
   @override
   void initState() {
     super.initState();
@@ -58,8 +64,11 @@ class _ReceptionPageState extends State<ReceptionPage> {
 
   @override
   Widget build(BuildContext context) {
-    final drafts    = _receptions.where((r) => r.status == ReceptionStatus.draft).toList();
-    final validated = _receptions.where((r) => r.status == ReceptionStatus.validated).toList();
+    final shown = _natureFilter == null
+        ? _receptions
+        : _receptions.where((r) => r.costOnly == _natureFilter).toList();
+    final drafts    = shown.where((r) => r.status == ReceptionStatus.draft).toList();
+    final validated = shown.where((r) => r.status == ReceptionStatus.validated).toList();
 
     return AppScaffold(
       shopId: widget.shopId,
@@ -83,23 +92,93 @@ class _ReceptionPageState extends State<ReceptionPage> {
                         .copyWith(color: AppColors.textHint)),
               ),
             ]))
-          : ListView(padding: const EdgeInsets.all(16), children: [
-              if (drafts.isNotEmpty) ...[
-                _SectionLabel('Brouillons (${drafts.length})'),
-                ...drafts.map((r) => _ReceptionCard(
-                    reception: r, shopId: widget.shopId,
-                    onValidate: () => _validate(r),
-                    onDelete: () => _delete(r))),
-                const SizedBox(height: 16),
-              ],
-              if (validated.isNotEmpty) ...[
-                _SectionLabel('Validées (${validated.length})'),
-                ...validated.map((r) => _ReceptionCard(
-                    reception: r, shopId: widget.shopId)),
-              ],
+          : Column(children: [
+              _natureChips(),
+              Expanded(
+                child: drafts.isEmpty && validated.isEmpty
+                    ? Center(child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 32),
+                        child: Text(
+                            'Aucun arrivage de cette nature.',
+                            textAlign: TextAlign.center,
+                            style: AppTextStyles.bodySm
+                                .copyWith(color: AppColors.textHint)),
+                      ))
+                    : ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        children: [
+                        if (drafts.isNotEmpty) ...[
+                          _SectionLabel('Brouillons (${drafts.length})'),
+                          ...drafts.map((r) => _ReceptionCard(
+                              reception: r, shopId: widget.shopId,
+                              onTap: () => _showDetail(r),
+                              onValidate: () => _validate(r),
+                              onDelete: () => _delete(r))),
+                          const SizedBox(height: 16),
+                        ],
+                        if (validated.isNotEmpty) ...[
+                          _SectionLabel('Validées (${validated.length})'),
+                          ...validated.map((r) => _ReceptionCard(
+                              reception: r, shopId: widget.shopId,
+                              onTap: () => _showDetail(r))),
+                        ],
+                      ]),
+              ),
             ]),
     );
   }
+
+  /// Filtre de nature, en tête de liste. Trois choix seulement : au-delà,
+  /// une barre de filtres coûte plus d'écran qu'elle n'en fait gagner sur
+  /// un historique qu'on parcourt surtout du regard.
+  Widget _natureChips() {
+    Widget chip(String label, bool? value, int count) {
+      final on = _natureFilter == value;
+      return Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => setState(() => _natureFilter = value),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: on ? AppColors.primarySurface : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                  color: on
+                      ? AppColors.primary
+                      : Theme.of(context).semantic.borderSubtle,
+                  width: on ? 1.5 : 1),
+            ),
+            child: Text('$label ($count)',
+                style: AppTextStyles.microBold.copyWith(
+                    color: on ? AppColors.primary : AppColors.textSecondary)),
+          ),
+        ),
+      );
+    }
+
+    final arrivals = _receptions.where((r) => !r.costOnly).length;
+    final fees     = _receptions.where((r) => r.costOnly).length;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+      child: Row(children: [
+        chip('Tous', null, _receptions.length),
+        chip('Arrivages', false, arrivals),
+        chip('Frais seuls', true, fees),
+      ]),
+    );
+  }
+
+  /// Ouvre le détail d'un bon en lecture seule.
+  void _showDetail(Reception r) => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Theme.of(context).colorScheme.surface,
+    shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (_) => _ArrivalDetailSheet(reception: r),
+  );
 
   /// Frais saisis → entité, en écartant les lignes vides. Encore utilisé par
   /// la validation d'un brouillon (bon issu d'une commande fournisseur).
@@ -585,16 +664,20 @@ class _SectionLabel extends StatelessWidget {
 class _ReceptionCard extends StatelessWidget {
   final Reception reception;
   final String shopId;
+  final VoidCallback? onTap;
   final VoidCallback? onValidate;
   final VoidCallback? onDelete;
   const _ReceptionCard({required this.reception, required this.shopId,
-    this.onValidate, this.onDelete});
+    this.onTap, this.onValidate, this.onDelete});
 
   @override
   Widget build(BuildContext context) {
     final isDraft = reception.status == ReceptionStatus.draft;
     final statusColor = isDraft ? const Color(0xFFF59E0B) : const Color(0xFF10B981);
-    return Container(
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -688,6 +771,7 @@ class _ReceptionCard extends StatelessWidget {
           ]),
         ],
       ]),
+      ),
     );
   }
 
@@ -706,6 +790,130 @@ class _Chip extends StatelessWidget {
     child: Text(label, style: AppTextStyles.micro
         .copyWith(fontWeight: FontWeight.w600, color: color)),
   );
+}
+
+/// Détail d'un bon, en lecture seule.
+///
+/// La liste ne montrait que des totaux : nombre de produits, coût du lot.
+/// Retrouver CE qui était arrivé — quelles références, à quel prix, avec
+/// quels frais — était impossible sans rouvrir la base. Un bon d'arrivage est
+/// pourtant une pièce comptable : il doit pouvoir se relire des mois plus
+/// tard, tel qu'il a été validé.
+class _ArrivalDetailSheet extends StatelessWidget {
+  final Reception reception;
+  const _ArrivalDetailSheet({required this.reception});
+
+  @override
+  Widget build(BuildContext context) {
+    final r   = reception;
+    final sem = Theme.of(context).semantic;
+    return DraggableScrollableSheet(
+      initialChildSize: 0.75, minChildSize: 0.4, maxChildSize: 0.95,
+      expand: false,
+      builder: (_, sc) => Column(children: [
+        Center(child: Container(width: 36, height: 4,
+            margin: const EdgeInsets.only(top: 10, bottom: 12),
+            decoration: BoxDecoration(color: sem.borderSubtle,
+                borderRadius: BorderRadius.circular(2)))),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(children: [
+            Container(width: 34, height: 34,
+                decoration: BoxDecoration(
+                    color: AppColors.primarySurface,
+                    borderRadius: BorderRadius.circular(9)),
+                child: Icon(
+                    r.costOnly
+                        ? Icons.receipt_long_rounded
+                        : Icons.local_shipping_rounded,
+                    size: 17, color: AppColors.primary)),
+            const SizedBox(width: 10),
+            Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(r.costOnly ? 'Frais sur stock existant' : 'Arrivage',
+                  style: AppTextStyles.subtitleBold),
+              Text(
+                  '${_ReceptionCard._fmtDate(r.createdAt)}'
+                  '${(r.createdBy ?? '').isNotEmpty ? ' · ${r.createdBy}' : ''}',
+                  style: AppTextStyles.micro
+                      .copyWith(color: AppColors.textHint)),
+            ])),
+          ]),
+        ),
+        const Divider(height: 20),
+        Expanded(child: ListView(
+          controller: sc,
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+          children: [
+            _label(r.costOnly ? 'Pièces chargées' : 'Lignes reçues'),
+            ...r.items.map((i) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(i.productName, style: AppTextStyles.bodySm),
+                  Text(
+                      i.landedUnitCost > 0
+                          ? '${i.receivedQty} × coût de revient '
+                            '${CurrencyFormatter.format(i.landedUnitCost)}'
+                          : '${i.receivedQty} pièce'
+                            '${i.receivedQty > 1 ? 's' : ''}',
+                      style: AppTextStyles.micro
+                          .copyWith(color: AppColors.textHint)),
+                ])),
+                const SizedBox(width: 8),
+                if (i.landedUnitCost > 0)
+                  Text(
+                      CurrencyFormatter.format(
+                          i.receivedQty * i.landedUnitCost),
+                      style: AppTextStyles.microBold
+                          .copyWith(color: AppColors.textSecondary)),
+              ]),
+            )),
+            if (r.fees.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _label('Frais du lot'),
+              ...r.fees.map((f) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(children: [
+                  Expanded(child: Text(f.label, style: AppTextStyles.bodySm)),
+                  Text(CurrencyFormatter.format(f.amount),
+                      style: AppTextStyles.microBold
+                          .copyWith(color: AppColors.textSecondary)),
+                ]),
+              )),
+            ],
+            const Divider(height: 22),
+            _total(r.costOnly ? 'Frais imputés' : 'Coût du lot',
+                CurrencyFormatter.format(
+                    r.costOnly ? r.feesTotal : r.landedTotal)),
+            const SizedBox(height: 10),
+            Text(
+                r.costOnly
+                    ? 'Ce bon n\'a fait entrer aucune pièce : les frais ont '
+                      'été ajoutés au prix d\'achat des produits déjà en rayon.'
+                    : 'Le stock a été augmenté et le prix de revient recalculé '
+                      'en moyenne avec les pièces déjà en rayon.',
+                style: AppTextStyles.caption
+                    .copyWith(color: AppColors.textHint, height: 1.45)),
+          ],
+        )),
+      ]),
+    );
+  }
+
+  static Widget _label(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(text, style: AppTextStyles.bodySmBold
+        .copyWith(letterSpacing: 0.3, color: AppColors.textSecondary)),
+  );
+
+  static Widget _total(String label, String value) => Row(children: [
+    Expanded(child: Text(label, style: AppTextStyles.bodyBold)),
+    Text(value, style: AppTextStyles.bodyBold
+        .copyWith(color: AppColors.primary)),
+  ]);
 }
 
 class _QtyField extends StatelessWidget {
