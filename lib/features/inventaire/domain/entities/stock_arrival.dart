@@ -52,6 +52,15 @@ class StockArrival extends Equatable {
   final String? createdBy;
   final DateTime createdAt;
 
+  /// Coût d'achat TOTAL de la vague (pas unitaire) — ce que la marchandise
+  /// a coûté pour [quantity] pièces. `0` = vague jamais valorisée.
+  final double purchaseTotal;
+
+  /// Dépenses rattachées à cette vague : transport, douane, manutention.
+  /// Elles se répartissent sur les pièces, elles ne s'ajoutent pas au prix
+  /// d'une seule.
+  final double feesTotal;
+
   const StockArrival({
     required this.id,
     this.variantId,
@@ -64,10 +73,45 @@ class StockArrival extends Equatable {
     this.note,
     this.createdBy,
     required this.createdAt,
+    this.purchaseTotal = 0,
+    this.feesTotal     = 0,
   });
 
   bool get isAvailable => status == 'available';
   bool get hasIssue    => status == 'damaged' || status == 'defective' || status == 'to_inspect';
+
+  /// `true` si la vague porte un coût exploitable. Les arrivées saisies
+  /// avant l'introduction de ces champs renvoient `false` et sont donc
+  /// exclues du calcul du prix de revient — on ne leur invente pas un coût.
+  bool get isCosted => quantity > 0 && (purchaseTotal > 0 || feesTotal > 0);
+
+  /// Coût de revient unitaire de la vague : marchandise + dépenses, réparti
+  /// par pièce. C'est la valeur qui entre dans la moyenne pondérée.
+  double get landedUnitCost =>
+      quantity > 0 ? (purchaseTotal + feesTotal) / quantity : 0;
+
+  StockArrival copyWith({
+    int? quantity,
+    String? status,
+    ArrivalCause? cause,
+    String? note,
+    double? purchaseTotal,
+    double? feesTotal,
+  }) => StockArrival(
+    id:             id,
+    variantId:      variantId,
+    productId:      productId,
+    shopId:         shopId,
+    quantity:       quantity ?? this.quantity,
+    status:         status   ?? this.status,
+    cause:          cause    ?? this.cause,
+    relatedOrderId: relatedOrderId,
+    note:           note     ?? this.note,
+    createdBy:      createdBy,
+    createdAt:      createdAt,
+    purchaseTotal:  purchaseTotal ?? this.purchaseTotal,
+    feesTotal:      feesTotal     ?? this.feesTotal,
+  );
 
   String get statusLabel => switch (status) {
     'available'  => 'Disponible',
@@ -78,9 +122,22 @@ class StockArrival extends Equatable {
   };
 
   // Schema versioning — cf. lib/core/storage/schema_migrator.dart.
-  static const int currentSchemaVersion = 1;
+  // v1 → v2 : ajout de `purchase_total` / `fees_total` (valorisation de la
+  // vague). Les arrivées existantes n'ont pas de coût connu : on les pose à
+  // 0, ce qui les rend `isCosted == false` et les exclut du calcul du prix
+  // de revient. Leur inventer un coût fausserait la moyenne pondérée.
+  static const int currentSchemaVersion = 2;
   static final SchemaMigrator _migrator = SchemaMigrator(
-    currentVersion: currentSchemaVersion, steps: const {});
+    currentVersion: currentSchemaVersion,
+    steps: {
+      // Indexée par la version de DÉPART : transforme un map v1 en v2.
+      1: (m) {
+        m['purchase_total'] ??= 0;
+        m['fees_total']     ??= 0;
+        return m;
+      },
+    },
+  );
 
   Map<String, dynamic> toMap() => {
     'schema_version': currentSchemaVersion,
@@ -89,6 +146,8 @@ class StockArrival extends Equatable {
     'cause': cause.key, 'related_order_id': relatedOrderId,
     'note': note, 'created_by': createdBy,
     'created_at': createdAt.toIso8601String(),
+    'purchase_total': purchaseTotal,
+    'fees_total':     feesTotal,
   };
 
   factory StockArrival.fromMap(Map<String, dynamic> rawM) {
@@ -105,8 +164,11 @@ class StockArrival extends Equatable {
       note:           m['note'] as String?,
       createdBy:      m['created_by'] as String?,
       createdAt:      DateTime.tryParse(m['created_at']?.toString() ?? '') ?? DateTime.now(),
+      purchaseTotal:  (m['purchase_total'] as num?)?.toDouble() ?? 0,
+      feesTotal:      (m['fees_total']     as num?)?.toDouble() ?? 0,
     );
   }
 
-  @override List<Object?> get props => [id, variantId, quantity, status];
+  @override List<Object?> get props =>
+      [id, variantId, quantity, status, purchaseTotal, feesTotal];
 }
