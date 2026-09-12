@@ -1667,7 +1667,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
                           child: Text(
                             i == 0 ? l.prodBaseVariant : '${l.prodVariants} $i',
                             textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 9,
+                            style: AppTextStyles.micro.copyWith(
                                 color: Colors.white, fontWeight: FontWeight.w600),
                           ),
                         )),
@@ -1925,7 +1925,7 @@ class _VariantFullCard extends StatelessWidget {
                                       const SizedBox(height: 2),
                                       Text(l.prodChooseFile,
                                           textAlign: TextAlign.center,
-                                          style: TextStyle(fontSize: 8,
+                                          style: AppTextStyles.micro.copyWith(
                                               color: AppColors.textHint)),
                                     ])),
                       ),
@@ -2255,8 +2255,9 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
                 margin: const EdgeInsets.only(right: 6),
                 decoration: BoxDecoration(color: AppColors.primary.withValues(alpha:0.1),
                     borderRadius: BorderRadius.circular(8)),
-                child: Text('${_arrivals.length}', style: TextStyle(fontSize: 9,
-                    fontWeight: FontWeight.w700, color: AppColors.primary)),
+                child: Text('${_arrivals.length}', style: AppTextStyles.micro
+                    .copyWith(fontWeight: FontWeight.w700,
+                        color: AppColors.primary)),
               ),
             // Correction 1 : bouton centré
             GestureDetector(
@@ -2299,10 +2300,10 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
               Text('+${a.quantity} · ${a.cause.label}',
                   style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
               Text('${a.statusLabel} · ${_fmtDate(a.createdAt)}',
-                  style: TextStyle(fontSize: 9, color: AppColors.textHint)),
+                  style: AppTextStyles.micro),
               if (a.note != null && a.note!.isNotEmpty)
-                Text(a.note!, style: TextStyle(fontSize: 9,
-                    color: AppColors.textSecondary, fontStyle: FontStyle.italic),
+                Text(a.note!, style: AppTextStyles.microSecondary
+                    .copyWith(fontStyle: FontStyle.italic),
                     maxLines: 1, overflow: TextOverflow.ellipsis),
             ])),
             // Correction 2 : boutons modifier/supprimer
@@ -2918,8 +2919,7 @@ class _LocationChip extends StatelessWidget {
                         color: selected ? _color : Theme.of(context).colorScheme.onSurface)),
               ),
               Text('${data.available} dispo',
-                  style: TextStyle(fontSize: 9,
-                      color: AppColors.textHint,
+                  style: AppTextStyles.micro.copyWith(
                       fontWeight: FontWeight.w500)),
             ],
           ),
@@ -2950,8 +2950,7 @@ class _StockCell extends StatelessWidget {
       const SizedBox(height: 3),
       Text('$value', style: TextStyle(fontSize: 14,
           fontWeight: FontWeight.w800, color: color)),
-      Text(label, style: TextStyle(fontSize: 9,
-          color: AppColors.textHint)),
+      Text(label, style: AppTextStyles.micro),
     ]),
   );
 }
@@ -3107,7 +3106,7 @@ class _SecondaryImagesRow extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(context.l10n.prodChooseFile,
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 7, color: AppColors.primary)),
+                    style: AppTextStyles.micro.copyWith(color: AppColors.primary)),
               ]),
             ),
           ),
@@ -3220,7 +3219,7 @@ class _StepBar extends StatelessWidget {
           const SizedBox(height: 3),
           Text(titles[i], maxLines: 1, overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 9,
+              style: AppTextStyles.micro.copyWith(
                   fontWeight: active ? FontWeight.w700 : FontWeight.w400,
                   color: active ? AppColors.primary
                       : done ? AppColors.secondary : AppColors.textHint)),
