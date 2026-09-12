@@ -425,9 +425,49 @@ class _InventairePageState extends ConsumerState<InventairePage>
       return;
     }
     if (!mounted) return;
-    await context.push('/shop/${widget.shopId}/inventaire/product');
+    final mode = await _askCreationMode();
+    if (mode == null) return;
+    // `mounted` (celui du State) et non `context.mounted` : dans une méthode
+    // de State, c'est le garde que l'analyseur rattache au contexte — c'est
+    // aussi la forme employée par le reste du fichier.
+    if (!mounted) return;
+    await context.push(mode == 'quick'
+        ? '/shop/${widget.shopId}/inventaire/quick-add'
+        : '/shop/${widget.shopId}/inventaire/product');
     _load(); _syncFromSupabase();
   }
+
+  /// Deux façons de créer, proposées AVANT d'ouvrir quoi que ce soit :
+  /// atterrir dans un assistant en trois étapes pour saisir un nom et un
+  /// prix décourage, alors que la fiche complète reste indispensable dès
+  /// qu'il y a des variantes ou un fournisseur.
+  Future<String?> _askCreationMode() => showFormSheet<String>(
+    context: context,
+    builder: (dc) => SafeArea(
+      top: false,
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const FormSheetHeader(
+            title: 'Nouveau produit', icon: Icons.add_box_outlined),
+        Divider(height: 1, color: Theme.of(dc).semantic.borderSubtle),
+        ListTile(
+          leading: Icon(Icons.bolt_rounded, size: 22, color: AppColors.primary),
+          title: const Text('Création rapide'),
+          subtitle: Text('Nom, prix, stock, photo',
+              style: AppTextStyles.micro),
+          onTap: () => Navigator.of(dc).pop('quick'),
+        ),
+        ListTile(
+          leading: Icon(Icons.list_alt_rounded,
+              size: 22, color: AppColors.textSecondary),
+          title: const Text('Formulaire complet'),
+          subtitle: Text('Variantes, TVA, fournisseur, dépenses',
+              style: AppTextStyles.micro),
+          onTap: () => Navigator.of(dc).pop('full'),
+        ),
+        const SizedBox(height: 8),
+      ]),
+    ),
+  );
 
   /// Audit stock — Couche 3 du plan « sécurise le stock ».
   /// Lance la réconciliation manuelle, affiche un dialog récapitulatif,

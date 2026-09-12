@@ -11,6 +11,7 @@ import '../../../../core/services/storage_service.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/image_validation.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_section_card.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -556,6 +557,27 @@ class _ProductFormPageState extends State<ProductFormPage> {
 
   bool _hasUnsavedChanges() =>
       _initialSignature != null && _formSignature() != _initialSignature;
+
+  /// Complétude de la fiche, de 0 à 1. Pondère ce qui compte réellement
+  /// pour vendre : sans prix ni stock un produit n'est pas exploitable,
+  /// alors qu'une catégorie manquante ne gêne que les filtres.
+  double get _profileCompletion {
+    final v = _variants.isEmpty ? null : _variants.first;
+    var score = 0.0;
+    if (_nameCtrl.text.trim().isNotEmpty)               score += 0.20;
+    if (_category.trim().isNotEmpty)                    score += 0.10;
+    if ((double.tryParse(v?.purchasePrice.text ?? '') ?? 0) > 0) score += 0.20;
+    if ((double.tryParse(v?.salePricePos.text ?? '')  ?? 0) > 0) score += 0.20;
+    // Un article sur commande n'a pas de stock à renseigner : on ne lui
+    // reproche pas une case qu'on lui retire.
+    if (!_trackStock || (int.tryParse(v?.stock.text ?? '') ?? 0) > 0) {
+      score += 0.15;
+    }
+    if (_variants.any((x) => x.imageBytes != null || x.imageUrl != null)) {
+      score += 0.15;
+    }
+    return score.clamp(0.0, 1.0);
+  }
 
   /// Retourne `true` si la page peut se fermer.
   ///
@@ -1191,6 +1213,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
       body: Column(children: [
         _StepBar(current: _step, total: _totalSteps,
             titles: titles, icons: _stepIcons, onTap: _goTo),
+        _ProfileProgressBar(value: _profileCompletion),
         Expanded(child: PageView(
           controller: _pageCtrl,
           physics: const NeverScrollableScrollPhysics(),
@@ -1214,6 +1237,8 @@ class _ProductFormPageState extends State<ProductFormPage> {
         _LF(l.inventaireName, req: true,
             child: _TF(_nameCtrl, 'Ex: Coca-Cola 33cl', Icons.label_outline,
                 autofocus: true,
+                // Rafraîchit la barre de complétude à la frappe.
+                onChanged: (_) => setState(() {}),
                 validator: (v) => (v ?? '').trim().isEmpty ? 'Requis' : null)),
         _gap(),
         _LF(l.prodBrand, req: _isCreating,
@@ -3421,6 +3446,44 @@ class _WarnBanner extends StatelessWidget {
           color: AppColors.onSurface, height: 1.4))),
     ]),
   );
+}
+
+/// Complétude de la fiche, sous la barre d'étapes. Dit à l'utilisateur ce
+/// qu'il lui reste à renseigner sans le bloquer.
+class _ProfileProgressBar extends StatelessWidget {
+  final double value;
+  const _ProfileProgressBar({required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = (value * 100).round();
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(bottom: BorderSide(
+            color: Theme.of(context).semantic.borderSubtle)),
+      ),
+      child: Row(children: [
+        Text('Profil produit', style: AppTextStyles.caption),
+        const SizedBox(width: 10),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: value,
+              minHeight: 4,
+              backgroundColor: AppColors.inputFill,
+              valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Text('$pct %', style: AppTextStyles.caption.copyWith(
+            color: AppColors.primary, fontWeight: FontWeight.w600)),
+      ]),
+    );
+  }
 }
 
 /// État du contrôle de SKU, rendu dans le champ lui-même.
