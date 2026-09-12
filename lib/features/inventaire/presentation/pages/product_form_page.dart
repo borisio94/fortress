@@ -75,6 +75,10 @@ class _Variant {
   /// stock initial ; les variantes existantes utilisent les indicateurs +
   /// le dialogue "Corriger" à la place.
   bool    isNew      = true;
+  /// Contrôle d'unicité du SKU, évalué pendant la frappe (anti-rebond).
+  _SkuStatus skuStatus = _SkuStatus.empty;
+  /// Nom du produit qui occupe déjà ce SKU, pour pouvoir le nommer.
+  String?    skuConflictName;
 
   void dispose() {
     name.dispose(); sku.dispose(); barcode.dispose();
@@ -85,6 +89,9 @@ class _Variant {
     weight.dispose(); length.dispose(); width.dispose(); height.dispose();
   }
 }
+
+/// État du contrôle d'unicité du SKU pendant la saisie.
+enum _SkuStatus { empty, checking, available, taken }
 
 class _Expense {
   final TextEditingController description = TextEditingController();
@@ -356,6 +363,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
 
   @override
   void dispose() {
+    _skuDebounce?.cancel();
     for (final c in [_nameCtrl, _brandCtrl, _descCtrl, _notesCtrl,
       _taxRateCtrl, _pageCtrl]) c.dispose();
     for (final v in _variants) v.dispose();
@@ -385,6 +393,10 @@ class _ProductFormPageState extends State<ProductFormPage> {
       AppSnack.warning(context, context.l10n.prodStepValidError);
 
   bool _isSaving = false;
+
+  /// Anti-rebond du contrôle de SKU. Un seul suffit : on ne saisit que dans
+  /// un champ à la fois.
+  Timer? _skuDebounce;
 
   void _submit() {
     if (_isSaving) return;
@@ -437,6 +449,11 @@ class _ProductFormPageState extends State<ProductFormPage> {
       if (!seenSku.add(v.sku.text.trim().toLowerCase())) {
         return _StepError(1,
             'Le SKU « ${v.sku.text.trim()} » est utilisé par deux variantes');
+      }
+      if (v.skuStatus == _SkuStatus.taken) {
+        return _StepError(1, v.skuConflictName == null
+            ? 'Le SKU de $label est déjà utilisé par un autre produit'
+            : 'Le SKU de $label est déjà pris par « ${v.skuConflictName} »');
       }
       if (v.purchasePrice.text.trim().isEmpty) {
         return _StepError(1, 'Le prix d\'achat est requis pour $label');
@@ -506,6 +523,36 @@ class _ProductFormPageState extends State<ProductFormPage> {
     // Retrait PAR RÉFÉRENCE, pas par index : entre l'ouverture de la feuille
     // et la confirmation, la liste a pu bouger.
     setState(() { if (_variants.remove(v)) v.dispose(); });
+  }
+
+  /// Contrôle d'unicité du SKU pendant la frappe, avec anti-rebond de 800 ms :
+  /// sans lui, on parcourait le catalogue à chaque caractère. Le conflit ne se
+  /// révélait auparavant qu'à l'enregistrement, après deux minutes de saisie.
+  void _onSkuChanged(String value, _Variant v) {
+    _skuDebounce?.cancel();
+    final sku = value.trim();
+    if (sku.isEmpty) {
+      setState(() {
+        v.skuStatus       = _SkuStatus.empty;
+        v.skuConflictName = null;
+      });
+      return;
+    }
+    setState(() => v.skuStatus = _SkuStatus.checking);
+    _skuDebounce = Timer(const Duration(milliseconds: 800),
+        () => _checkSkuAvailability(sku, v));
+  }
+
+  Future<void> _checkSkuAvailability(String sku, _Variant v) async {
+    final existing = await AppDatabase.findProductBySku(widget.shopId, sku);
+    if (!mounted) return;
+    // Retrouver ce SKU sur le produit qu'on est justement en train de
+    // modifier n'est pas un conflit.
+    final taken = existing != null && existing.id != _editingProduct?.id;
+    setState(() {
+      v.skuStatus       = taken ? _SkuStatus.taken : _SkuStatus.available;
+      v.skuConflictName = taken ? existing.name : null;
+    });
   }
 
   Future<void> _saveProduct() async {
@@ -768,7 +815,37 @@ class _ProductFormPageState extends State<ProductFormPage> {
     unawaited(PendingImageUploadService.flush());
   }
 
+  /// Demande la source de l'image. Sur le web de bureau, « Prendre une
+  /// photo » retombe d'elle-même sur le sélecteur de fichiers : c'est le
+  /// comportement natif d'image_picker, on ne le contrarie pas.
+  Future<ImageSource?> _askImageSource() => showFormSheet<ImageSource>(
+    context: context,
+    builder: (dc) => SafeArea(
+      top: false,
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const FormSheetHeader(
+            title: 'Ajouter une image', icon: Icons.add_a_photo_outlined),
+        Divider(height: 1, color: Theme.of(dc).semantic.borderSubtle),
+        ListTile(
+          leading: Icon(Icons.photo_camera_outlined,
+              size: 20, color: AppColors.primary),
+          title: const Text('Prendre une photo'),
+          onTap: () => Navigator.of(dc).pop(ImageSource.camera),
+        ),
+        ListTile(
+          leading: Icon(Icons.photo_library_outlined,
+              size: 20, color: AppColors.primary),
+          title: const Text('Choisir dans la galerie'),
+          onTap: () => Navigator.of(dc).pop(ImageSource.gallery),
+        ),
+        const SizedBox(height: 8),
+      ]),
+    ),
+  );
+
   Future<void> _pickImage({int variantIdx = 0}) async {
+    final source = await _askImageSource();
+    if (source == null || !mounted) return;
     // Pas de maxWidth / imageQuality sur ImagePicker : sur web ils
     // peuvent forcer une recompression JPEG silencieuse et tuer la
     // transparence. On lit les bytes bruts puis `validateAndReadImage`
@@ -777,7 +854,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
     // `_variants[].imageBytes` sont donc DÉJÀ du PNG prêt à uploader —
     // l'upload doit passer `mimeType: 'image/png'`, sinon Supabase
     // enregistre du PNG sous extension .jpg.
-    final xFile = await ImagePicker().pickImage(source: ImageSource.gallery);
+    final xFile = await ImagePicker().pickImage(source: source);
     if (xFile == null || !mounted) return;
     final result = await validateAndReadImage(xFile, context);
     if (!mounted || !result.isValid) return;
@@ -786,7 +863,9 @@ class _ProductFormPageState extends State<ProductFormPage> {
   }
 
   Future<void> _pickSecondaryImage({int variantIdx = 0}) async {
-    final xFile = await ImagePicker().pickImage(source: ImageSource.gallery);
+    final source = await _askImageSource();
+    if (source == null || !mounted) return;
+    final xFile = await ImagePicker().pickImage(source: source);
     if (xFile == null || !mounted) return;
     final result = await validateAndReadImage(xFile, context);
     if (!mounted || !result.isValid) return;
@@ -1157,6 +1236,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
               }
               return null;
             },
+            onSkuChanged: (val) => _onSkuChanged(val, v),
           );
         }),
         _gap(h: 4),
@@ -1354,6 +1434,8 @@ class _VariantFullCard extends StatelessWidget {
   final String? shopId;
   final bool showWebPrice;
   final String? Function(String?)? skuValidator;
+  /// Remonte chaque frappe du SKU au formulaire, qui pilote l'anti-rebond.
+  final void Function(String)? onSkuChanged;
 
   const _VariantFullCard({
     super.key,
@@ -1377,6 +1459,7 @@ class _VariantFullCard extends StatelessWidget {
     this.shopId,
     this.showWebPrice = false,
     this.skuValidator,
+    this.onSkuChanged,
   });
 
   @override
@@ -1574,11 +1657,29 @@ class _VariantFullCard extends StatelessWidget {
                           validator: (v) =>
                           (v ?? '').trim().isEmpty ? 'Requis' : null)),
                   _LF(l.prodSku, req: true,
-                      child: _TF(variant.sku,
-                          isBase ? 'PROD-001' : 'PROD-001-R',
-                          Icons.tag_rounded,
-                          validator: skuValidator ?? (v) =>
-                          (v ?? '').trim().isEmpty ? 'Requis' : null)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _TF(variant.sku,
+                              isBase ? 'PROD-001' : 'PROD-001-R',
+                              Icons.tag_rounded,
+                              onChanged: onSkuChanged,
+                              suffix: _SkuStatusDot(status: variant.skuStatus),
+                              validator: skuValidator ?? (v) =>
+                              (v ?? '').trim().isEmpty ? 'Requis' : null),
+                          if (variant.skuStatus == _SkuStatus.taken)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                variant.skuConflictName == null
+                                    ? 'Ce SKU est déjà utilisé'
+                                    : 'Ce SKU est utilisé par '
+                                      '« ${variant.skuConflictName} »',
+                                style: const TextStyle(fontSize: 11,
+                                    color: AppColors.error, height: 1.3)),
+                            ),
+                        ],
+                      )),
                 ])),
               ]),
               _gap(h: 10),
@@ -3136,6 +3237,28 @@ class _WarnBanner extends StatelessWidget {
   );
 }
 
+/// État du contrôle de SKU, rendu dans le champ lui-même.
+class _SkuStatusDot extends StatelessWidget {
+  final _SkuStatus status;
+  const _SkuStatusDot({required this.status});
+
+  @override
+  Widget build(BuildContext context) => switch (status) {
+    _SkuStatus.empty     => const SizedBox.shrink(),
+    _SkuStatus.checking  => const Padding(
+        padding: EdgeInsets.only(right: 10),
+        child: SizedBox(width: 12, height: 12,
+            child: CircularProgressIndicator(strokeWidth: 1.6))),
+    _SkuStatus.available => const Padding(
+        padding: EdgeInsets.only(right: 8),
+        child: Icon(Icons.check_circle_rounded,
+            size: 18, color: AppColors.secondary)),
+    _SkuStatus.taken     => const Padding(
+        padding: EdgeInsets.only(right: 8),
+        child: Icon(Icons.error_rounded, size: 18, color: AppColors.error)),
+  };
+}
+
 class _BenefitBanner extends StatelessWidget {
   final double effectiveCost, benefit, margin, expensePerUnit;
   final AppLocalizations l;
@@ -3238,8 +3361,11 @@ class _TF extends StatefulWidget {
   final String? Function(String?)? validator;
   final ValueChanged<String>? onChanged;
   final bool autofocus;
+  /// Élément affiché à droite dans le champ (état du SKU, par exemple).
+  final Widget? suffix;
   const _TF(this.ctrl, this.hint, this.icon, {this.maxLines = 1,
-    this.keyboardType, this.validator, this.onChanged, this.autofocus = false});
+    this.keyboardType, this.validator, this.onChanged, this.autofocus = false,
+    this.suffix});
 
   @override
   State<_TF> createState() => _TFState();
@@ -3310,6 +3436,9 @@ class _TFState extends State<_TF> {
         hintText: widget.hint,
         hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 12),
         prefixIcon: Icon(widget.icon, size: 15, color: const Color(0xFFAAAAAA)),
+        suffixIcon: widget.suffix,
+        suffixIconConstraints:
+            const BoxConstraints(minWidth: 34, minHeight: 34),
         filled: true, fillColor: AppColors.inputFill, isDense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),

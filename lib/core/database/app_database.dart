@@ -3127,6 +3127,40 @@ end \$\$;""",
       LocalStorageService.getProductsForShop(shopId)
           .where((p) => p.id != null).toList();
 
+  /// Recherche un produit par SKU de variante — **cache Hive uniquement**,
+  /// jamais de requête réseau : appelée pendant la frappe (contrôle
+  /// d'unicité en direct dans la fiche produit).
+  ///
+  /// Portée à la BOUTIQUE : la boîte Hive est partagée par toutes les
+  /// boutiques du device, et un SKU identique ailleurs n'est pas un conflit.
+  /// Sans ce filtre, on signalerait de faux doublons.
+  ///
+  /// Les produits supprimés (soft-delete) sont ignorés : leur SKU est
+  /// réutilisable. On lit les Maps brutes et on ne désérialise qu'au match,
+  /// pour ne pas reconstruire tout le catalogue à chaque caractère.
+  static Future<Product?> findProductBySku(String shopId, String sku) async {
+    final needle = sku.trim().toLowerCase();
+    if (needle.isEmpty) return null;
+    for (final raw in HiveBoxes.productsBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw);
+        if (m['store_id'] != shopId) continue;
+        if (m['deleted_at'] != null) continue;
+        for (final v in (m['variants'] as List? ?? [])) {
+          final s = ((v as Map)['sku'] as String?)?.trim().toLowerCase();
+          if (s != null && s == needle) {
+            final id = m['id'] as String?;
+            return id == null ? null : LocalStorageService.getProduct(id);
+          }
+        }
+      } catch (_) {
+        // Ligne illisible (format hérité) : ignorée — elle ne doit pas
+        // faire échouer un simple contrôle de saisie.
+      }
+    }
+    return null;
+  }
+
   static Future<void> syncProducts(String shopId) async {
     try {
       // Vérifier que la session est valide
