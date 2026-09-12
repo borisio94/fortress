@@ -648,7 +648,7 @@ final dashDataProvider =
       LocalStorageService.getProductsForShop(shopId);
   final now = DateTime.now();
   final newProducts = allProducts
-      .where((p) => p.createdAt != null &&
+      .where((p) => !p.isDraft && p.createdAt != null &&
           now.difference(p.createdAt!).inHours < 72)
       .toList()
     ..sort((a, b) => b.createdAt!.compareTo(a.createdAt!));
@@ -713,6 +713,9 @@ final dashDataProvider =
 
   final lowStock = <Product>[];
   for (final p in allProducts) {
+    // Ce KPI passe par `stock_levels`, pas par `Product.isLowStock` : la
+    // garde du getter ne s'applique pas ici, il faut la répéter.
+    if (p.isDraft) continue;
     int totalAtLocations = 0;
     for (final v in p.variants) {
       if (v.id == null) continue;

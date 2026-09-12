@@ -186,7 +186,10 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
   /// pour rester cohérent avec la grille principale.
   List<Product> _productsFor(String? deliveryLocationId) {
     var list = AppDatabase.getProductsForShop(widget.shopId)
-        .where((p) => p.isActive)
+        // `isActive` suffit en théorie (un brouillon est écrit inactif),
+        // mais rien n'empêcherait un brouillon actif en base : on ne vend
+        // pas une fiche jamais terminée.
+        .where((p) => p.isActive && !p.isDraft)
         .toList();
     if (deliveryLocationId != null && deliveryLocationId.isNotEmpty) {
       list = list
@@ -217,7 +220,8 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
         widget.shopId,
         context.select<CaisseBloc, String?>((b) => b.state.deliveryLocationId));
     final products = _productsFor(deliveryLocId);
-    final all      = AppDatabase.getProductsForShop(widget.shopId).where((p) => p.isActive).toList();
+    final all      = AppDatabase.getProductsForShop(widget.shopId)
+        .where((p) => p.isActive && !p.isDraft).toList();
 
     return Column(children: [
       // ── Poignée + titre ──────────────────────────────────────────────
@@ -934,7 +938,7 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
   /// disponible chez ce partenaire, jamais celui de la boutique de base.
   List<Product> _productsFor(String? deliveryLocationId) {
     var all = AppDatabase.getProductsForShop(widget.shopId)
-        .where((p) => p.isActive)
+        .where((p) => p.isActive && !p.isDraft)
         .toList();
 
     // Vue Partenaire : on n'affiche que les produits qui existent (stock > 0)

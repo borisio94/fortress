@@ -28,6 +28,10 @@ class AppScaffold extends ConsumerStatefulWidget {
   final Widget? floatingActionButton;
   final Widget? bottomNavigationBar;
   final bool isRootPage;
+  /// Interception du bouton retour de l'AppBar. `null` (défaut) = retour
+  /// immédiat, comportement inchangé pour toutes les pages existantes.
+  /// Renvoyer `false` annule la sortie.
+  final Future<bool> Function()? onBeforeBack;
 
   const AppScaffold({
     super.key,
@@ -38,6 +42,7 @@ class AppScaffold extends ConsumerStatefulWidget {
     this.floatingActionButton,
     this.bottomNavigationBar,
     this.isRootPage = true,
+    this.onBeforeBack,
   });
 
   @override
@@ -228,7 +233,17 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
       return IconButton(
         icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
         color: Theme.of(context).colorScheme.onSurface,
-        onPressed: () {
+        onPressed: () async {
+          // `PopScope` n'intercepte PAS un `context.pop()` programmatique :
+          // sans ce point d'accroche, la flèche de l'AppBar contournerait
+          // tout garde-fou de saisie non enregistrée.
+          final guard = widget.onBeforeBack;
+          if (guard != null && !await guard()) {
+            return;
+          }
+          if (!context.mounted) {
+            return;
+          }
           if (context.canPop()) context.pop();
           else context.go('/shop/${widget.shopId}/dashboard');
         },

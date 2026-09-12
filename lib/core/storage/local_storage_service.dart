@@ -428,6 +428,7 @@ class LocalStorageService {
     'variants': p.variants.map(_variantToMap).toList(),
     'expenses': p.expenses,
     'created_at': p.createdAt?.toIso8601String(),
+    'draft_expires_at': p.draftExpiresAt?.toIso8601String(),
     // Soft-delete (hotfix_085). archived_snapshot reste null pour les
     // produits vivants — il est rempli uniquement par la RPC delete_product
     // côté serveur et redescendu via realtime.
@@ -506,6 +507,13 @@ class LocalStorageService {
           ? DateTime.tryParse(m['created_at'] as String)
           : (m['created_at'] is DateTime
               ? m['created_at'] as DateTime
+              : null),
+      // Absent de tous les produits antérieurs → null, donc non-brouillon.
+      // Lecture tolérante, comme les champs de suppression douce ci-dessous.
+      draftExpiresAt: m['draft_expires_at'] is String
+          ? DateTime.tryParse(m['draft_expires_at'] as String)
+          : (m['draft_expires_at'] is DateTime
+              ? m['draft_expires_at'] as DateTime
               : null),
       // Soft-delete (hotfix_085). Lecture tolérante : les produits legacy
       // n'ont pas ces colonnes → null par défaut.

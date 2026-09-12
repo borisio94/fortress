@@ -223,6 +223,9 @@ class _ProductFormPageState extends State<ProductFormPage> {
       final base = _Variant()..isMain = true..isExpanded = true;
       setState(() => _variants.add(base));
     }
+    // En création, `_prefillIfEdit` ne pose pas d'empreinte : on la capture
+    // ici, formulaire vide, pour que la moindre saisie soit détectée.
+    _initialSignature ??= _formSignature();
   }
 
   /// Charge les fournisseurs actifs de la boutique depuis Hive.
@@ -359,6 +362,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
       _expenses.add(ex);
     }
     setState(() => _category = cat);
+    _initialSignature = _formSignature();
   }
 
   @override
@@ -397,6 +401,15 @@ class _ProductFormPageState extends State<ProductFormPage> {
   /// Anti-rebond du contrôle de SKU. Un seul suffit : on ne saisit que dans
   /// un champ à la fois.
   Timer? _skuDebounce;
+
+  /// Empreinte du formulaire juste après le pré-remplissage. Sert à savoir
+  /// s'il y a vraiment quelque chose à perdre : sans elle, on ouvrirait le
+  /// dialogue de sortie même quand l'utilisateur n'a rien touché.
+  String? _initialSignature;
+
+  /// Id du brouillon déjà écrit, pour que deux sorties successives mettent à
+  /// jour la MÊME fiche au lieu d'en empiler une par sortie.
+  String? _draftId;
 
   void _submit() {
     if (_isSaving) return;
@@ -523,6 +536,166 @@ class _ProductFormPageState extends State<ProductFormPage> {
     // Retrait PAR RÉFÉRENCE, pas par index : entre l'ouverture de la feuille
     // et la confirmation, la liste a pu bouger.
     setState(() { if (_variants.remove(v)) v.dispose(); });
+  }
+
+  /// Concatène tout ce qui est saisissable. Volontairement grossier : on ne
+  /// cherche pas à dire QUOI a changé, seulement SI quelque chose a changé.
+  String _formSignature() => [
+    _nameCtrl.text, _brandCtrl.text, _descCtrl.text, _notesCtrl.text,
+    _supplierCtrl.text, _supplierRefCtrl.text, _taxRateCtrl.text,
+    _category, _brand, _unit,
+    '$_isActive|$_isVisibleWeb|$_trackStock|$_rating',
+    for (final v in _variants)
+      '${v.name.text}|${v.sku.text}|${v.barcode.text}|'
+      '${v.purchasePrice.text}|${v.salePricePos.text}|${v.salePriceWeb.text}|'
+      '${v.stock.text}|${v.stockAlert.text}|${v.promoEnabled}|'
+      '${v.promoPrice.text}|${v.imageBytes?.length ?? 0}|'
+      '${v.secondaryImageBytes.length}',
+    for (final e in _expenses) '${e.description.text}|${e.amount.text}',
+  ].join('¦');
+
+  bool _hasUnsavedChanges() =>
+      _initialSignature != null && _formSignature() != _initialSignature;
+
+  /// Retourne `true` si la page peut se fermer.
+  ///
+  /// « Garder le brouillon » n'est proposé QU'EN CRÉATION : appliqué à un
+  /// produit déjà publié, l'enregistrement en brouillon le dépublierait
+  /// (`isActive: false` + statut brouillon) — un effet de bord inacceptable
+  /// sur une fiche en ligne.
+  Future<bool> _confirmExit() async {
+    if (!_hasUnsavedChanges()) return true;
+    final canDraft = _isCreating;
+    final choice = await showFormSheet<String>(
+      context: context,
+      builder: (dc) => SafeArea(
+        top: false,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const FormSheetHeader(
+              title: 'Quitter sans enregistrer ?',
+              icon: Icons.help_outline_rounded),
+          Divider(height: 1, color: Theme.of(dc).semantic.borderSubtle),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+            child: Text(
+              canDraft
+                  ? 'Votre saisie n\'est pas enregistrée. Vous pouvez la '
+                    'garder en brouillon et la reprendre plus tard : le '
+                    'produit ne sera ni vendable ni visible en ligne.'
+                  : 'Vos modifications ne sont pas enregistrées et seront '
+                    'perdues.',
+              style: TextStyle(fontSize: 12, height: 1.45,
+                  color: AppColors.textSecondary)),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: Column(children: [
+              SizedBox(width: double.infinity, height: 46,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(dc).pop('stay'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white, elevation: 0,
+                    minimumSize: const Size(0, 46),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10))),
+                  child: const Text('Continuer à modifier'))),
+              if (canDraft) ...[
+                const SizedBox(height: 8),
+                SizedBox(width: double.infinity, height: 46,
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.of(dc).pop('draft'),
+                    icon: const Icon(Icons.bookmark_outline_rounded, size: 18),
+                    label: const Text('Garder le brouillon'),
+                    style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 46)))),
+              ],
+              const SizedBox(height: 8),
+              SizedBox(width: double.infinity, height: 46,
+                child: TextButton(
+                  onPressed: () => Navigator.of(dc).pop('leave'),
+                  style: TextButton.styleFrom(
+                      foregroundColor: AppColors.error,
+                      minimumSize: const Size(0, 46)),
+                  child: const Text('Quitter sans enregistrer'))),
+            ]),
+          ),
+        ]),
+      ),
+    );
+    if (choice == 'draft') return _saveDraft();
+    return choice == 'leave';
+  }
+
+  /// Écrit la saisie en cours comme brouillon. Chemin de sauvegarde normal
+  /// (`AppDatabase.saveProduct`), jamais `_doSaveProduct` — qui reste
+  /// réservé à l'enregistrement réel et n'est pas touché.
+  ///
+  /// `skipValidation` : un brouillon est par nature incomplet, son SKU peut
+  /// être vide ou déjà pris. Le refuser reviendrait à perdre la saisie,
+  /// c'est-à-dire exactement ce qu'on cherche à éviter. Les contrôles
+  /// d'unicité s'appliqueront à l'enregistrement définitif.
+  ///
+  /// Limite assumée : les images choisies mais pas encore envoyées ne sont
+  /// PAS mises en file pour un brouillon — la file est plafonnée à 50
+  /// entrées et sert les produits réels. Les images déjà en ligne restent.
+  Future<bool> _saveDraft() async {
+    try {
+      final now = DateTime.now();
+      final id  = _draftId ?? 'prod_${now.microsecondsSinceEpoch}';
+      final name = _nameCtrl.text.trim().isEmpty
+          ? 'Brouillon du ${now.day}/${now.month}'
+          : _nameCtrl.text.trim();
+
+      final variants = <ProductVariant>[];
+      for (int i = 0; i < _variants.length; i++) {
+        final v = _variants[i];
+        final qty = int.tryParse(v.stock.text.trim()) ?? 0;
+        variants.add(ProductVariant(
+          id:   v.id ?? 'var_${now.microsecondsSinceEpoch}_$i',
+          name: v.name.text.trim().isEmpty ? 'Base' : v.name.text.trim(),
+          sku:  v.sku.text.trim().isEmpty ? null : v.sku.text.trim(),
+          barcode: v.barcode.text.trim().isEmpty
+              ? null : v.barcode.text.trim(),
+          priceBuy:       double.tryParse(v.purchasePrice.text.trim()) ?? 0,
+          priceSellPos:   double.tryParse(v.salePricePos.text.trim())  ?? 0,
+          priceSellWeb:   double.tryParse(v.salePriceWeb.text.trim())  ?? 0,
+          stockAvailable: qty,
+          stockPhysical:  qty,
+          stockMinAlert:  int.tryParse(v.stockAlert.text.trim()) ?? 1,
+          imageUrl:       v.imageUrl,
+          isMain:         i == 0,
+        ));
+      }
+
+      final draft = Product(
+        id:          id,
+        storeId:     widget.shopId,
+        name:        name,
+        categoryId:  _category.isEmpty ? null : _category,
+        brand:       _brand.isEmpty ? null : _brand,
+        description: _descCtrl.text.trim().isEmpty
+            ? null : _descCtrl.text.trim(),
+        status:      ProductStatus.draft,
+        // Un brouillon n'est ni vendable ni publiable : ces deux drapeaux
+        // sont ce que la caisse et les RPC publiques regardent réellement.
+        isActive:     false,
+        isVisibleWeb: false,
+        trackStock:   _trackStock,
+        variants:     variants,
+        createdAt:    now,
+        draftExpiresAt: now.add(const Duration(days: 7)),
+      );
+
+      await AppDatabase.saveProduct(draft,
+          skipValidation: true, skipStockLog: true);
+      _draftId = id;
+      if (mounted) AppSnack.info(context, 'Brouillon conservé 7 jours');
+      return true;
+    } catch (e) {
+      if (mounted) AppSnack.error(context, 'Brouillon non enregistré : $e');
+      return false;
+    }
   }
 
   /// Contrôle d'unicité du SKU pendant la frappe, avec anti-rebond de 800 ms :
@@ -998,10 +1171,23 @@ class _ProductFormPageState extends State<ProductFormPage> {
   Widget build(BuildContext context) {
     final l      = context.l10n;
     final titles = _stepTitles(l);
-    return AppScaffold(
+    return PopScope(
+      // Retour système / geste / bouton Android. La flèche de l'AppBar, elle,
+      // passe par `onBeforeBack` : un `context.pop()` programmatique n'est
+      // pas interceptable ici.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final canLeave = await _confirmExit();
+        // `context.mounted` et non `mounted` : l'analyseur ne reconnaît pas
+        // le drapeau du State comme protégeant CE context après un `await`.
+        if (canLeave && context.mounted) context.pop();
+      },
+      child: AppScaffold(
       shopId: widget.shopId,
       title: widget.extra != null ? 'Modifier le produit' : l.inventaireAdd,
       isRootPage: false,
+      onBeforeBack: _confirmExit,
       body: Column(children: [
         _StepBar(current: _step, total: _totalSteps,
             titles: titles, icons: _stepIcons, onTap: _goTo),
@@ -1015,7 +1201,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
             onPrev: _prev, onNext: _next, onSubmit: _submit,
             isSaving: _isSaving),
       ]),
-    );
+    ));
   }
 
   // ══════════════════════════════════════════════════════════════════

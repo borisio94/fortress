@@ -204,6 +204,7 @@ enum ProductStatus {
   scrapped,      // Mis au rebut
   returned,      // Retourné
   discontinued,  // Arrêté / fin de vie
+  draft,         // Brouillon — fiche commencée, jamais publiée
 }
 
 extension ProductStatusX on ProductStatus {
@@ -217,6 +218,7 @@ extension ProductStatusX on ProductStatus {
     ProductStatus.scrapped     => 'Rebut',
     ProductStatus.returned     => 'Retourné',
     ProductStatus.discontinued => 'Arrêté',
+    ProductStatus.draft        => 'Brouillon',
   };
 
   /// Nom snake_case pour Supabase / Hive
@@ -237,9 +239,13 @@ extension ProductStatusX on ProductStatus {
     'scrapped'     => ProductStatus.scrapped,
     'returned'     => ProductStatus.returned,
     'discontinued' => ProductStatus.discontinued,
+    'draft'        => ProductStatus.draft,
     _ => ProductStatus.available,
   };
 
+  /// ⚠ Purement descriptif aujourd'hui : AUCUN appelant dans le code. Les
+  /// surfaces de vente filtrent sur `isActive`. Un brouillon est donc exclu
+  /// par `isActive: false` + les gardes `!isDraft` posées explicitement.
   bool get isSellable  => this == ProductStatus.available || this == ProductStatus.discounted;
   bool get isIncident  => this == ProductStatus.damaged || this == ProductStatus.defective
       || this == ProductStatus.inRepair || this == ProductStatus.scrapped;
@@ -307,6 +313,11 @@ class Product extends Equatable {
   /// Optionnel pour rester compatible avec les produits locaux non-sync.
   final DateTime? createdAt;
 
+  /// Échéance d'un brouillon. Non-null uniquement quand `status == draft` :
+  /// passé cette date, `AppDatabase.init` le supprime. Évite d'accumuler
+  /// indéfiniment des fiches jamais terminées.
+  final DateTime? draftExpiresAt;
+
   /// Soft-delete (hotfix_085). Quand non-null, le produit est masqué
   /// des listes membres et n'est plus visible qu'aux super-admins via
   /// l'écran « Produits supprimés ». L'UPDATE est exécuté par la RPC
@@ -349,11 +360,16 @@ class Product extends Equatable {
     this.variants      = const [],
     this.expenses      = const [],
     this.createdAt,
+    this.draftExpiresAt,
     this.deletedAt,
     this.deletedBy,
     this.deleteReason,
     this.archivedSnapshot,
   });
+
+  /// Fiche commencée puis abandonnée en cours de saisie, conservée pour être
+  /// reprise. Jamais vendable, jamais publiée, jamais comptée en alerte.
+  bool get isDraft => status == ProductStatus.draft;
 
   /// True si le produit est soft-deleted (cf. hotfix_085).
   bool get isDeleted => deletedAt != null;
@@ -433,6 +449,10 @@ class Product extends Equatable {
   /// (stockAvailable > 0 ET ≤ stockMinAlert de la variante).
   /// Sans variante (ancien format), on retombe sur le stock global du produit.
   bool get isLowStock {
+    // Un brouillon n'est pas encore au catalogue : le faire remonter en
+    // alerte de stock ferait sonner la pastille Stock pour une fiche que
+    // personne ne vend.
+    if (isDraft) return false;
     if (variants.isEmpty) {
       return stockQty > 0 && stockQty <= stockMinAlert;
     }
@@ -471,11 +491,14 @@ class Product extends Equatable {
     List<ProductVariant>? variants,
     List<Map<String, dynamic>>? expenses,
     DateTime? createdAt,
+    DateTime?              draftExpiresAt,
     DateTime?              deletedAt,
     String?                deletedBy,
     String?                deleteReason,
     Map<String, dynamic>?  archivedSnapshot,
     bool                   clearDeleted = false,
+    /// Sort un produit de l'état brouillon (`null` seul vaut « inchangé »).
+    bool                   clearDraftExpiry = false,
     /// Détache le plat de son secteur (`activityId` ne peut pas être remis
     /// à null par le passage d'un `null`, interprété comme « inchangé »).
     bool                   clearActivity = false,
@@ -505,6 +528,8 @@ class Product extends Equatable {
     variants:     variants     ?? this.variants,
     expenses:     expenses     ?? this.expenses,
     createdAt:    createdAt    ?? this.createdAt,
+    draftExpiresAt: clearDraftExpiry
+        ? null : (draftExpiresAt ?? this.draftExpiresAt),
     deletedAt:        clearDeleted ? null : (deletedAt    ?? this.deletedAt),
     deletedBy:        clearDeleted ? null : (deletedBy    ?? this.deletedBy),
     deleteReason:     clearDeleted ? null : (deleteReason ?? this.deleteReason),
@@ -519,6 +544,6 @@ class Product extends Equatable {
     priceBuy, customsFee, priceSellPos, priceSellWeb, taxRate,
     stockQty, stockMinAlert, status,
     isActive, isVisibleWeb, trackStock, activityId, rating,
-    variants, expenses,
+    variants, expenses, draftExpiresAt,
   ];
 }

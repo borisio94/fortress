@@ -362,6 +362,10 @@ class AppDatabase {
     // Recharger les marqueurs anti-stale persistants (survivent au reload)
     // et purger ceux trop vieux pour rester pertinents.
     await _bootstrapAntiStaleMarkers();
+    // Purge des brouillons périmés. Volontairement APRÈS les marqueurs
+    // anti-écho, et dans sa propre méthode : `_bootstrapAntiStaleMarkers`
+    // ne touche que `settingsBox`, pas la boîte produits.
+    await _purgeExpiredDrafts();
     // NB : l'ancien correctif `_revertErroneousRemittances` (2026-06-21) a été
     // RETIRÉ — il soft-deletait toute écriture `remittance` dont la note valait
     // « Versement reçu du partenaire », c.-à-d. la note PAR DÉFAUT de chaque
@@ -385,6 +389,38 @@ class AppDatabase {
     // de l'upload Supabase. Au prochain boot, on retente automatiquement.
     unawaited(PendingImageUploadService.flush());
     debugPrint('[DB] Init — online: ${_i._isOnline}');
+  }
+
+  /// Supprime les brouillons dont l'échéance est passée (cf. `draftExpiresAt`).
+  ///
+  /// Suppression SÈCHE et purement locale : un brouillon n'a jamais été
+  /// publié, il n'a ni vente ni mouvement de stock rattaché, et la RPC
+  /// `delete_product` (soft-delete, motif obligatoire, archivage) serait
+  /// hors de propos. La ligne distante part par la file d'écriture normale.
+  static Future<void> _purgeExpiredDrafts() async {
+    try {
+      final now = DateTime.now();
+      final expired = <String>[];
+      for (final raw in HiveBoxes.productsBox.values) {
+        final m = Map<String, dynamic>.from(raw);
+        if (m['status'] != 'draft') continue;
+        final rawExp = m['draft_expires_at'];
+        final exp = rawExp is String ? DateTime.tryParse(rawExp) : null;
+        if (exp != null && exp.isBefore(now) && m['id'] is String) {
+          expired.add(m['id'] as String);
+        }
+      }
+      if (expired.isEmpty) return;
+      LocalStorageService.invalidateProductsCache();
+      for (final id in expired) {
+        await HiveBoxes.productsBox.delete(id);
+        _bgWrite({'table': 'products', 'op': 'delete',
+                  'col': 'id', 'val': id, 'data': {'id': id}});
+      }
+      debugPrint('[DB] Brouillons périmés purgés : ${expired.length}');
+    } catch (e) {
+      debugPrint('[DB] _purgeExpiredDrafts error: $e');
+    }
   }
 
   /// Charge les tombstones de produits supprimés et les échos
@@ -5910,6 +5946,7 @@ end \$\$;""",
     'track_stock': p.trackStock,
     'activity_id': p.activityId,
     'image_url': p.imageUrl, 'rating': p.rating,
+    'draft_expires_at': p.draftExpiresAt?.toIso8601String(),
     'variants': p.variants.map(LocalStorageService.variantToMap).toList(),
     // expenses est List<Map> en local — Supabase stocke la somme en double
     'expenses': p.expenses.fold<double>(
@@ -5934,6 +5971,9 @@ end \$\$;""",
       stockQty: r['stock_qty'] as int? ?? 0,
       stockMinAlert: r['stock_min_alert'] as int? ?? 5,
       status: ProductStatusX.fromString(r['status'] as String?),
+      // Colonne absente sur une base pas encore migrée (hotfix_168) → null.
+      draftExpiresAt: r['draft_expires_at'] is String
+          ? DateTime.tryParse(r['draft_expires_at'] as String) : null,
       isActive: r['is_active'] as bool? ?? true,
       isVisibleWeb: r['is_visible_web'] as bool? ?? false,
       // Défaut true : colonne absente sur une base pas encore migrée

@@ -112,6 +112,10 @@ int _stockAtLocations(Product p, List<String>? locationIds) {
 /// Reproduit la règle `Product.isLowStock` mais sur le stock filtré par
 /// location. Renvoie `true` si stock filtré ∈ ]0, stockMinAlert].
 bool _isLowStockAt(Product p, List<String>? locationIds) {
+  // Un brouillon n'est pas au catalogue : il ne doit pas déclencher d'alerte
+  // de stock. Répété ici car la branche « emplacement filtré » ci-dessous
+  // recalcule le seuil sans repasser par `Product.isLowStock`.
+  if (p.isDraft) return false;
   if (locationIds == null) return p.isLowStock;
   final s = _stockAtLocations(p, locationIds);
   return s > 0 && s <= p.stockMinAlert;
@@ -2147,6 +2151,7 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
                     ],
                     const SizedBox(height: 4),
                     Wrap(spacing: 6, runSpacing: 4, children: [
+                      if (p.isDraft) const _DraftBadge(),
                       if (p.categoryId != null && p.categoryId!.isNotEmpty)
                         Text(p.categoryId!,
                             style: AppTextStyles.microSecondary
@@ -2314,6 +2319,24 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
       ),      // ← close IntrinsicHeight
     );
   }
+}
+
+// ─── Badge brouillon ──────────────────────────────────────────────────────────
+
+/// Marque une fiche commencée mais jamais publiée. Ambre comme les autres
+/// signaux d'attention de l'inventaire.
+class _DraftBadge extends StatelessWidget {
+  const _DraftBadge();
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: AppColors.warning.withValues(alpha: 0.15),
+      borderRadius: BorderRadius.circular(4),
+    ),
+    child: Text('Brouillon', style: AppTextStyles.micro.copyWith(
+        color: AppColors.warning, fontWeight: FontWeight.w700)),
+  );
 }
 
 // ─── Badge stock ──────────────────────────────────────────────────────────────
