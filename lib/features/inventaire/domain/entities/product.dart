@@ -112,6 +112,14 @@ class ProductVariant extends Equatable {
   final DateTime? promoStart;
   final DateTime? promoEnd;
 
+  /// Poids et dimensions du colis (grammes, centimètres). Saisis dans la
+  /// carte de variante, ils voyagent dans le JSON des variantes : il
+  /// n'existe pas de table `product_variants` en base.
+  final double? weightG;
+  final double? lengthCm;
+  final double? widthCm;
+  final double? heightCm;
+
   const ProductVariant({
     this.id,
     required this.name,
@@ -134,6 +142,10 @@ class ProductVariant extends Equatable {
     this.promoPrice,
     this.promoStart,
     this.promoEnd,
+    this.weightG,
+    this.lengthCm,
+    this.widthCm,
+    this.heightCm,
   });
 
   /// Rétrocompatibilité — ancien code qui utilise stockQty
@@ -163,6 +175,7 @@ class ProductVariant extends Equatable {
     List<String>? secondaryImageUrls,
     bool? isMain, bool? promoEnabled, double? promoPrice,
     DateTime? promoStart, DateTime? promoEnd,
+    double? weightG, double? lengthCm, double? widthCm, double? heightCm,
   }) => ProductVariant(
     id:                   id                   ?? this.id,
     name:                 name                 ?? this.name,
@@ -185,6 +198,10 @@ class ProductVariant extends Equatable {
     promoPrice:           promoPrice           ?? this.promoPrice,
     promoStart:           promoStart           ?? this.promoStart,
     promoEnd:             promoEnd             ?? this.promoEnd,
+    weightG:              weightG              ?? this.weightG,
+    lengthCm:             lengthCm             ?? this.lengthCm,
+    widthCm:              widthCm              ?? this.widthCm,
+    heightCm:             heightCm             ?? this.heightCm,
   );
 
   @override
@@ -303,6 +320,14 @@ class Product extends Equatable {
   final String? imageUrl;
   final int    rating;         // 0–5
 
+  /// Unité de mesure affichée sur la fiche (pièce, kg, litre…). Saisie
+  /// depuis toujours, elle n'était jusqu'ici jamais enregistrée.
+  final String? unit;
+
+  /// Note de gestion, à usage interne. Jamais exposée par les RPC
+  /// publiques ni par le catalogue en ligne.
+  final String? internalNotes;
+
   // Variantes
   final List<ProductVariant> variants;
 
@@ -357,6 +382,8 @@ class Product extends Equatable {
     this.activityId,
     this.imageUrl,
     this.rating        = 0,
+    this.unit,
+    this.internalNotes,
     this.variants      = const [],
     this.expenses      = const [],
     this.createdAt,
@@ -488,6 +515,7 @@ class Product extends Equatable {
     bool? isActive, bool? isVisibleWeb, bool? trackStock,
     String? activityId,
     String? imageUrl, int? rating,
+    String? unit, String? internalNotes,
     List<ProductVariant>? variants,
     List<Map<String, dynamic>>? expenses,
     DateTime? createdAt,
@@ -525,6 +553,8 @@ class Product extends Equatable {
     activityId:   clearActivity ? null : (activityId ?? this.activityId),
     imageUrl:     imageUrl     ?? this.imageUrl,
     rating:       rating       ?? this.rating,
+    unit:          unit          ?? this.unit,
+    internalNotes: internalNotes ?? this.internalNotes,
     variants:     variants     ?? this.variants,
     expenses:     expenses     ?? this.expenses,
     createdAt:    createdAt    ?? this.createdAt,
@@ -544,6 +574,6 @@ class Product extends Equatable {
     priceBuy, customsFee, priceSellPos, priceSellWeb, taxRate,
     stockQty, stockMinAlert, status,
     isActive, isVisibleWeb, trackStock, activityId, rating,
-    variants, expenses, draftExpiresAt,
+    variants, expenses, draftExpiresAt, unit, internalNotes,
   ];
 }

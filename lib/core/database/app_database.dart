@@ -5947,6 +5947,7 @@ end \$\$;""",
     'activity_id': p.activityId,
     'image_url': p.imageUrl, 'rating': p.rating,
     'draft_expires_at': p.draftExpiresAt?.toIso8601String(),
+    'unit': p.unit, 'internal_notes': p.internalNotes,
     'variants': p.variants.map(LocalStorageService.variantToMap).toList(),
     // expenses est List<Map> en local — Supabase stocke la somme en double
     'expenses': p.expenses.fold<double>(
@@ -5983,6 +5984,9 @@ end \$\$;""",
       // encore migrée → null, le plat reste simplement non rattaché.
       activityId:   r['activity_id'] as String?,
       imageUrl: r['image_url'], rating: r['rating'] as int? ?? 0,
+      // Colonnes absentes sur une base pas encore migrée (hotfix_169).
+      unit:          r['unit'] as String?,
+      internalNotes: r['internal_notes'] as String?,
       createdAt: createdRaw is String
           ? DateTime.tryParse(createdRaw)
           : (createdRaw is DateTime ? createdRaw : null),

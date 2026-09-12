@@ -429,6 +429,7 @@ class LocalStorageService {
     'expenses': p.expenses,
     'created_at': p.createdAt?.toIso8601String(),
     'draft_expires_at': p.draftExpiresAt?.toIso8601String(),
+    'unit': p.unit, 'internal_notes': p.internalNotes,
     // Soft-delete (hotfix_085). archived_snapshot reste null pour les
     // produits vivants — il est rempli uniquement par la RPC delete_product
     // côté serveur et redescendu via realtime.
@@ -515,6 +516,9 @@ class LocalStorageService {
           : (m['draft_expires_at'] is DateTime
               ? m['draft_expires_at'] as DateTime
               : null),
+      // Absents des produits antérieurs → null.
+      unit:          m['unit'] as String?,
+      internalNotes: m['internal_notes'] as String?,
       // Soft-delete (hotfix_085). Lecture tolérante : les produits legacy
       // n'ont pas ces colonnes → null par défaut.
       deletedAt: m['deleted_at'] is String
@@ -550,6 +554,12 @@ class LocalStorageService {
     'promo_price': v.promoPrice,
     'promo_start': v.promoStart?.toIso8601String(),
     'promo_end':   v.promoEnd?.toIso8601String(),
+    // Poids et dimensions : dans le JSON des variantes, sans colonne
+    // dédiée — il n'existe pas de table `product_variants`.
+    'weight_g':  v.weightG,
+    'length_cm': v.lengthCm,
+    'width_cm':  v.widthCm,
+    'height_cm': v.heightCm,
   };
 
   static ProductVariant _variantFromMap(Map<String, dynamic> m) {
@@ -580,6 +590,11 @@ class LocalStorageService {
           ? DateTime.tryParse(m['promo_start'] as String) : null,
       promoEnd:       m['promo_end'] != null
           ? DateTime.tryParse(m['promo_end'] as String) : null,
+      // Absentes des variantes antérieures → null, aucune migration.
+      weightG:  (m['weight_g']  as num?)?.toDouble(),
+      lengthCm: (m['length_cm'] as num?)?.toDouble(),
+      widthCm:  (m['width_cm']  as num?)?.toDouble(),
+      heightCm: (m['height_cm'] as num?)?.toDouble(),
     );
   }
 

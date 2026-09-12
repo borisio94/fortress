@@ -268,6 +268,8 @@ class _ProductFormPageState extends State<ProductFormPage> {
     _brandCtrl.text   = p.brand ?? '';
     if (p.brand != null && p.brand!.isNotEmpty) _brand = p.brand!;
     _descCtrl.text    = p.description ?? '';
+    _notesCtrl.text   = p.internalNotes ?? '';
+    if (p.unit != null && p.unit!.isNotEmpty) _unit = p.unit!;
     _taxRateCtrl.text = p.taxRate.toString();
     // Fournisseur global — lire depuis la première variante
     final firstVariant = p.variants.isNotEmpty ? p.variants.first : null;
@@ -313,6 +315,10 @@ class _ProductFormPageState extends State<ProductFormPage> {
         if (v.promoPrice != null) nv.promoPrice.text = v.promoPrice!.toStringAsFixed(0);
         nv.promoStart            = v.promoStart;
         nv.promoEnd              = v.promoEnd;
+        if (v.weightG  != null) nv.weight.text = v.weightG!.toStringAsFixed(0);
+        if (v.lengthCm != null) nv.length.text = v.lengthCm!.toStringAsFixed(0);
+        if (v.widthCm  != null) nv.width.text  = v.widthCm!.toStringAsFixed(0);
+        if (v.heightCm != null) nv.height.text = v.heightCm!.toStringAsFixed(0);
         _variants.add(nv);
       }
       // Si focus actif, ouvrir directement l'étape 2 (Variantes).
@@ -689,6 +695,10 @@ class _ProductFormPageState extends State<ProductFormPage> {
           stockMinAlert:  int.tryParse(v.stockAlert.text.trim()) ?? 1,
           imageUrl:       v.imageUrl,
           isMain:         i == 0,
+          weightG:        double.tryParse(v.weight.text.trim()),
+          lengthCm:       double.tryParse(v.length.text.trim()),
+          widthCm:        double.tryParse(v.width.text.trim()),
+          heightCm:       double.tryParse(v.height.text.trim()),
         ));
       }
 
@@ -706,6 +716,9 @@ class _ProductFormPageState extends State<ProductFormPage> {
         isActive:     false,
         isVisibleWeb: false,
         trackStock:   _trackStock,
+        unit:         _unit.trim().isEmpty ? null : _unit.trim(),
+        internalNotes: _notesCtrl.text.trim().isEmpty
+            ? null : _notesCtrl.text.trim(),
         variants:     variants,
         createdAt:    now,
         draftExpiresAt: now.add(const Duration(days: 7)),
@@ -844,6 +857,10 @@ class _ProductFormPageState extends State<ProductFormPage> {
         promoPrice:           double.tryParse(v.promoPrice.text),
         promoStart:           v.promoStart,
         promoEnd:             v.promoEnd,
+        weightG:              double.tryParse(v.weight.text.trim()),
+        lengthCm:             double.tryParse(v.length.text.trim()),
+        widthCm:              double.tryParse(v.width.text.trim()),
+        heightCm:             double.tryParse(v.height.text.trim()),
       ));
 
       if (!isEditing && formStock > 0) {
@@ -881,6 +898,10 @@ class _ProductFormPageState extends State<ProductFormPage> {
       trackStock:    _trackStock,
       imageUrl:      mainVariant?.imageUrl,
       rating:        _rating,
+      // Saisis depuis toujours, enregistrés depuis hotfix_169 seulement.
+      unit:          _unit.trim().isEmpty ? null : _unit.trim(),
+      internalNotes: _notesCtrl.text.trim().isEmpty
+          ? null : _notesCtrl.text.trim(),
       variants:      variants,
       expenses:      expensesList,
       createdAt:     _editingProduct?.createdAt ?? DateTime.now(),
