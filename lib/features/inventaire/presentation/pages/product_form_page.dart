@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../../core/services/pending_image_upload_service.dart';
 import '../../../../core/services/storage_service.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -1010,6 +1011,18 @@ class _ProductFormPageState extends State<ProductFormPage> {
     unawaited(PendingImageUploadService.flush());
   }
 
+  /// Lit un code-barres à la caméra et l'inscrit dans la variante.
+  ///
+  /// Recopier treize chiffres depuis une étiquette est long et se trompe :
+  /// c'est précisément ce que la caméra fait sans erreur.
+  Future<void> _scanBarcode(_Variant v) async {
+    final code = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const _BarcodeScannerPage()),
+    );
+    if (code == null || !mounted) return;
+    setState(() => v.barcode.text = code);
+  }
+
   /// Demande la source de l'image. Sur le web de bureau, « Prendre une
   /// photo » retombe d'elle-même sur le sélecteur de fichiers : c'est le
   /// comportement natif d'image_picker, on ne le contrarie pas.
@@ -1448,6 +1461,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
               return null;
             },
             onSkuChanged: (val) => _onSkuChanged(val, v),
+            onScanBarcode: () => _scanBarcode(v),
           );
         }),
         _gap(h: 4),
@@ -1647,6 +1661,8 @@ class _VariantFullCard extends StatelessWidget {
   final String? Function(String?)? skuValidator;
   /// Remonte chaque frappe du SKU au formulaire, qui pilote l'anti-rebond.
   final void Function(String)? onSkuChanged;
+  /// Ouvre le scanner de code-barres pour cette variante.
+  final VoidCallback? onScanBarcode;
 
   const _VariantFullCard({
     super.key,
@@ -1671,6 +1687,7 @@ class _VariantFullCard extends StatelessWidget {
     this.showWebPrice = false,
     this.skuValidator,
     this.onSkuChanged,
+    this.onScanBarcode,
   });
 
   @override
@@ -1934,7 +1951,17 @@ class _VariantFullCard extends StatelessWidget {
               // Barcode
               _LF(l.prodBarcode,
                   child: _TF(variant.barcode, '6009123…',
-                      Icons.qr_code_scanner_rounded)),
+                      Icons.qr_code_scanner_rounded,
+                      suffix: onScanBarcode == null ? null : IconButton(
+                        onPressed: onScanBarcode,
+                        icon: const Icon(Icons.qr_code_scanner_outlined,
+                            size: 20),
+                        color: AppColors.primary,
+                        tooltip: 'Scanner avec la caméra',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                            minWidth: 34, minHeight: 34),
+                      ))),
               _gap(h: 10),
 
               // Prix achat (obligatoire) + prix de vente (optionnel à la création)
@@ -3484,6 +3511,41 @@ class _ProfileProgressBar extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// Écran de lecture du code-barres. Se ferme en renvoyant le code lu.
+///
+/// `StatefulWidget` et non sans état : `onDetect` se déclenche sur CHAQUE
+/// image analysée, plusieurs fois par seconde. Sans le drapeau `_done`, on
+/// empilerait autant de `Navigator.pop` que d'images reconnues et l'écran
+/// précédent serait fermé à son tour.
+class _BarcodeScannerPage extends StatefulWidget {
+  const _BarcodeScannerPage();
+  @override
+  State<_BarcodeScannerPage> createState() => _BarcodeScannerPageState();
+}
+
+class _BarcodeScannerPageState extends State<_BarcodeScannerPage> {
+  bool _done = false;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: const Text('Scanner le code-barres'),
+      backgroundColor: Colors.black,
+      foregroundColor: Colors.white,
+    ),
+    backgroundColor: Colors.black,
+    body: MobileScanner(
+      onDetect: (capture) {
+        if (_done) return;
+        final code = capture.barcodes.firstOrNull?.rawValue;
+        if (code == null || code.trim().isEmpty) return;
+        _done = true;
+        Navigator.of(context).pop(code.trim());
+      },
+    ),
+  );
 }
 
 /// État du contrôle de SKU, rendu dans le champ lui-même.

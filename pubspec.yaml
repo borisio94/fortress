@@ -73,6 +73,12 @@ dependencies:
   timezone: ^0.9.4
   image_picker: ^1.1.2
 
+  # ── Scanner de code-barres (fiche produit) ───────────────────────
+  # Lecture du code-barres à la caméra, pour ne plus le recopier à la
+  # main depuis l'étiquette. Série 5.x retenue : les majeures suivantes
+  # relèvent le socle Flutter exigé.
+  mobile_scanner: ^5.2.3
+
   # ── Traitement images (validation, resize, encode PNG) ───────────
   # Utilisé runtime par lib/core/utils/image_validation.dart pour
   # ré-encoder les photos produit en PNG lossless avant upload (cf.
