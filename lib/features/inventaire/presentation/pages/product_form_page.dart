@@ -17,6 +17,7 @@ import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_section_card.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/app_switch.dart';
+import '../../../../shared/widgets/upload_status_dot.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../core/widgets/danger_confirm_dialog.dart';
@@ -1873,6 +1874,9 @@ class _VariantFullCard extends StatelessWidget {
                             child: const Icon(Icons.edit_rounded,
                                 size: 10, color: Colors.white),
                           )),
+                    // En HAUT à droite : la pastille crayon occupe déjà le bas.
+                    Positioned(top: 0, right: 0,
+                        child: UploadStatusDot(productId: productId)),
                   ]),
                 ),
                 const SizedBox(width: 12),

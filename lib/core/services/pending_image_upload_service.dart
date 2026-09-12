@@ -40,6 +40,13 @@ class PendingImageUploadService {
 
   static bool _busy = false;
 
+  /// Révision de la file, incrémentée à chaque mise en attente et à chaque
+  /// passage du worker. L'interface s'y abonne via `ValueListenableBuilder`
+  /// pour que la pastille « envoi en cours » disparaisse d'elle-même quand
+  /// l'image est partie — sans ça, elle resterait figée jusqu'au prochain
+  /// rechargement de l'écran. Même patron que `NotificationService.rev`.
+  static final ValueNotifier<int> rev = ValueNotifier<int>(0);
+
   /// Ajoute une image à la file d'attente. Retourne immédiatement.
   /// Le worker `flush()` doit être appelé séparément (ou laissé tourner
   /// au prochain démarrage / reconnexion).
@@ -82,6 +89,7 @@ class PendingImageUploadService {
     });
     debugPrint('[PendingImage] +1 Enqueued: $name '
         '(${(bytes.length / 1024).toStringAsFixed(0)} Ko)');
+    rev.value++;
   }
 
   /// Tente d'uploader toutes les entries en attente. Idempotent — un
@@ -138,6 +146,9 @@ class PendingImageUploadService {
           '$success OK · $failed retry · $abandoned abandons');
     } finally {
       _busy = false;
+      // Que le passage ait réussi, échoué ou abandonné, l'état affiché a
+      // changé : on notifie dans tous les cas.
+      rev.value++;
     }
   }
 
@@ -219,6 +230,28 @@ class PendingImageUploadService {
     if (raw is Uint8List) return raw;
     if (raw is List)      return Uint8List.fromList(List<int>.from(raw));
     return null;
+  }
+
+  /// Vrai si ce produit a au moins une image encore en file.
+  ///
+  /// Balaye les entrées (plafonnées à 50) : la file n'est pas indexée par
+  /// produit, et l'indexer coûterait plus cher que ce parcours.
+  static bool hasPendingFor(String? productId) =>
+      productId != null && _entriesFor(productId).isNotEmpty;
+
+  /// Vrai si au moins une image de ce produit a déjà échoué (`attempts`
+  /// non nul). L'envoi sera retenté, mais l'utilisateur mérite de le voir.
+  static bool hasFailedFor(String? productId) =>
+      productId != null &&
+      _entriesFor(productId).any((e) => ((e['attempts'] as int?) ?? 0) > 0);
+
+  static Iterable<Map<String, dynamic>> _entriesFor(String productId) sync* {
+    try {
+      for (final raw in HiveBoxes.pendingImageUploadsBox.values) {
+        final m = Map<String, dynamic>.from(raw);
+        if (m['product_id'] == productId) yield m;
+      }
+    } catch (_) {/* boîte fermée : rien à signaler */}
   }
 
   /// Nombre d'entries en attente. Utile pour UI badge éventuel.

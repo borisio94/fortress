@@ -28,6 +28,7 @@ import '../../../../features/dashboard/data/dashboard_providers.dart';
 import '../../domain/entities/stock_location.dart';
 import '../../domain/stock_at_location.dart' as stock_loc;
 import '../../../../core/services/activity_log_service.dart';
+import '../../../../shared/widgets/upload_status_dot.dart';
 import '../../../../core/services/stock_service.dart';
 import '../../../../features/inventaire/domain/entities/product.dart';
 import 'product_form_page.dart' show ProductFormExtra;
@@ -2115,12 +2116,16 @@ class _DesktopRowState extends ConsumerState<_DesktopRow> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           child: Row(children: [
-            ProductImageCard(
-              imageUrl: p.mainImageUrl,
-              width:  64,
-              height: 64,
-              borderRadius: BorderRadius.circular(8),
-            ),
+            Stack(children: [
+              ProductImageCard(
+                imageUrl: p.mainImageUrl,
+                width:  64,
+                height: 64,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              Positioned(bottom: 2, right: 2,
+                  child: UploadStatusDot(productId: p.id, size: 18)),
+            ]),
             const SizedBox(width: 10),
             Expanded(flex: 3, child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2268,12 +2273,16 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
               child: Padding(
                 padding: const EdgeInsets.all(10),
                 child: Row(children: [
-                  ProductImageCard(
-                    imageUrl: p.mainImageUrl,
-                    width:  34,
-                    height: 34,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
+                  Stack(children: [
+                    ProductImageCard(
+                      imageUrl: p.mainImageUrl,
+                      width:  34,
+                      height: 34,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    Positioned(bottom: -1, right: -1,
+                        child: UploadStatusDot(productId: p.id)),
+                  ]),
                   const SizedBox(width: 10),
                   Expanded(child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
