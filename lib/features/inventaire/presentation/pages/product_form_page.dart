@@ -16,6 +16,7 @@ import '../../../../shared/widgets/app_section_card.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/app_switch.dart';
 import '../../../../shared/widgets/form_sheet.dart';
+import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../core/widgets/danger_confirm_dialog.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/i18n/app_localizations.dart';
@@ -91,6 +92,14 @@ class _Expense {
   void dispose() { description.dispose(); amount.dispose(); }
 }
 
+/// Erreur de validation rattachée à l'étape qui la porte (0-indexée), pour
+/// pouvoir y ramener l'utilisateur au lieu d'échouer depuis une autre étape.
+class _StepError {
+  final int    step;
+  final String message;
+  const _StepError(this.step, this.message);
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 /// Paramètre optionnel transporté via `go_router.extra` pour ouvrir le formulaire
@@ -141,6 +150,11 @@ class _ProductFormPageState extends State<ProductFormPage> {
     if (e is ProductFormExtra) return e.product;
     return null;
   }
+
+  /// `true` en création (aucun produit transmis). Sert à n'exiger marque et
+  /// catégorie qu'à ce moment-là : un produit déjà au catalogue peut ne pas
+  /// en avoir, et on ne veut pas rendre sa modification impossible.
+  bool get _isCreating => _editingProduct == null;
 
   /// Fournisseur choisi via le picker — permet d'afficher les infos
   /// (téléphone, email, adresse) en dessous. `null` si saisie manuelle.
@@ -374,10 +388,124 @@ class _ProductFormPageState extends State<ProductFormPage> {
 
   void _submit() {
     if (_isSaving) return;
+    // Contrôle de TOUTES les étapes, pas seulement celle affichée. La barre
+    // d'étapes permet d'atterrir directement sur l'étape 3 : sans ça, on
+    // enregistre un produit dont le SKU ou le prix d'achat est vide, et rien
+    // ne le signale avant l'écriture — ou jamais.
+    final err = _validateAllSteps();
+    if (err != null) {
+      if (_step != err.step) _goTo(err.step);
+      AppSnack.error(context, err.message);
+      return;
+    }
     if (_keys[_step].currentState?.validate() == false) {
       _showValidationError(); return;
     }
     _saveProduct();
+  }
+
+  /// Renvoie la première erreur trouvée avec son étape, `null` si tout est bon.
+  ///
+  /// Reproduit exactement les règles des validateurs de champ déjà en place —
+  /// on ne durcit rien, on les rend seulement atteignables depuis n'importe
+  /// quelle étape. Seules marque et catégorie sont nouvelles, et uniquement
+  /// à la création (cf. [_isCreating]).
+  _StepError? _validateAllSteps() {
+    // ── Étape 1 ────────────────────────────────────────────────────────
+    if (_nameCtrl.text.trim().isEmpty) {
+      return const _StepError(0, 'Le nom du produit est requis');
+    }
+    if (_isCreating) {
+      if (_category.trim().isEmpty) {
+        return const _StepError(0, 'La catégorie est requise');
+      }
+      if (_brand.trim().isEmpty) {
+        return const _StepError(0, 'La marque est requise');
+      }
+    }
+
+    // ── Étape 2 ────────────────────────────────────────────────────────
+    final seenSku = <String>{};
+    for (final v in _variants) {
+      if (v.name.text.trim().isEmpty) {
+        return const _StepError(1, 'Chaque variante doit porter un nom');
+      }
+      final label = '« ${v.name.text.trim()} »';
+      if (v.sku.text.trim().isEmpty) {
+        return _StepError(1, 'Le SKU est requis pour $label');
+      }
+      if (!seenSku.add(v.sku.text.trim().toLowerCase())) {
+        return _StepError(1,
+            'Le SKU « ${v.sku.text.trim()} » est utilisé par deux variantes');
+      }
+      if (v.purchasePrice.text.trim().isEmpty) {
+        return _StepError(1, 'Le prix d\'achat est requis pour $label');
+      }
+      // Les champs de stock n'existent pas en mode « sur commande », et le
+      // stock d'une variante déjà enregistrée passe par « Corriger ».
+      if (_trackStock) {
+        if (v.stockAlert.text.trim().isEmpty) {
+          return _StepError(1, 'L\'alerte de stock est requise pour $label');
+        }
+        if (v.isNew && v.stock.text.trim().isEmpty) {
+          return _StepError(1, 'Le stock initial est requis pour $label');
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Texte du bandeau d'avertissement affiché en MODIFICATION quand marque
+  /// ou catégorie manque — non bloquant (cf. [_validateAllSteps]).
+  String _missingTaxonomyWarning() {
+    final missing = <String>[
+      if (_category.trim().isEmpty) 'de catégorie',
+      if (_brand.trim().isEmpty)    'de marque',
+    ];
+    final list = missing.join(' ni ');
+    return 'Ce produit n\'a pas $list. Vous pouvez l\'enregistrer ainsi, '
+        'mais il sera absent des filtres du catalogue en ligne et plus '
+        'difficile à retrouver en caisse.';
+  }
+
+  /// Suppression d'une variante — jamais immédiate.
+  ///
+  /// Avant, la croix retirait la variante sur-le-champ, y compris une variante
+  /// DÉJÀ ENREGISTRÉE avec du stock : la ligne disparaissait, et
+  /// l'enregistrement la retirait définitivement du produit (niveaux de stock
+  /// orphelins, lignes de commande pointant dans le vide).
+  Future<void> _confirmRemoveVariant(_Variant v) async {
+    final named = v.name.text.trim();
+    final title = named.isEmpty ? 'cette variante' : '« $named »';
+    final saved = !v.isNew;
+    final stock = int.tryParse(v.stock.text.trim()) ?? 0;
+
+    final String body;
+    if (saved && stock > 0) {
+      body = 'Cette variante est enregistrée et il lui reste $stock '
+          'unité${stock > 1 ? 's' : ''} en stock. La supprimer retire ce stock '
+          'du produit. Irréversible une fois le produit enregistré.';
+    } else if (saved) {
+      body = 'Cette variante est déjà enregistrée. Irréversible une fois le '
+          'produit enregistré.';
+    } else {
+      body = 'Cette variante n\'a pas encore été enregistrée.';
+    }
+
+    final ok = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.delete_outline_rounded,
+      title: 'Supprimer $title ?',
+      body: Text(body, style: TextStyle(fontSize: 12, height: 1.45,
+          color: AppColors.textSecondary)),
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Supprimer',
+      onConfirm: () {},
+    );
+    if (ok != true || !mounted) return;
+    // Retrait PAR RÉFÉRENCE, pas par index : entre l'ouverture de la feuille
+    // et la confirmation, la liste a pu bouger.
+    setState(() { if (_variants.remove(v)) v.dispose(); });
   }
 
   Future<void> _saveProduct() async {
@@ -823,7 +951,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
                 autofocus: true,
                 validator: (v) => (v ?? '').trim().isEmpty ? 'Requis' : null)),
         _gap(),
-        _LF(l.prodBrand, req: true,
+        _LF(l.prodBrand, req: _isCreating,
             child: AppSelectWidget(
               label: '', required: false, items: _brands,
               value: _brand.isEmpty ? null : _brand,
@@ -855,7 +983,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
               },
             )),
         _gap(),
-        _LF(l.prodCategory, req: true,
+        _LF(l.prodCategory, req: _isCreating,
             child: AppSelectWidget(
               label: '', required: false, items: _categories,
               value: _category.isEmpty ? null : _category,
@@ -887,7 +1015,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
               },
             )),
         _gap(),
-        _LF(l.prodUnitType, req: true,
+        _LF(l.prodUnitType,
             child: AppSelectWidget(
               label: '', required: false, items: _units,
               value: _unit.isEmpty ? null : _unit,
@@ -919,6 +1047,15 @@ class _ProductFormPageState extends State<ProductFormPage> {
               },
             )),
         _gap(),
+        // Avertissement non bloquant en MODIFICATION : un produit ancien peut
+        // ne pas avoir de marque/catégorie. On le signale sans empêcher
+        // l'enregistrement. Un message fugace serait écrasé par celui de
+        // succès — d'où un bandeau permanent.
+        if (!_isCreating &&
+            (_category.trim().isEmpty || _brand.trim().isEmpty)) ...[
+          _WarnBanner(_missingTaxonomyWarning()),
+          _gap(),
+        ],
         _LF(l.prodDescription,
             child: _TF(_descCtrl, 'Description visible par les clients…',
                 Icons.notes_rounded, maxLines: 3)),
@@ -988,10 +1125,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
             isBase: i == 0, isMain: v.isMain, isExpanded: v.isExpanded,
             expensePerUnit: _expensePerUnit,
             onToggleExpand: () => setState(() => v.isExpanded = !v.isExpanded),
-            onRemove: i == 0 ? null : () => setState(() {
-              _variants[i].dispose();
-              _variants.removeAt(i);
-            }),
+            onRemove: i == 0 ? null : () => _confirmRemoveVariant(v),
             onChanged:             () => setState(() {}),
             onPickImage:           () => _pickImage(variantIdx: i),
             onPickSecondaryImage:  () => _pickSecondaryImage(variantIdx: i),
@@ -2972,6 +3106,29 @@ class _InfoBanner extends StatelessWidget {
         border: Border.all(color: const Color(0xFFBAE6FD))),
     child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Icon(Icons.info_outline, size: 14, color: AppColors.primary),
+      const SizedBox(width: 8),
+      Expanded(child: Text(text, style: TextStyle(fontSize: 11,
+          color: AppColors.onSurface, height: 1.4))),
+    ]),
+  );
+}
+
+/// Pendant de [_InfoBanner] en teinte d'alerte — même gabarit, mêmes tailles.
+/// Pour les manques non bloquants (marque/catégorie absentes en modification).
+class _WarnBanner extends StatelessWidget {
+  final String text;
+  const _WarnBanner(this.text);
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: AppColors.warning.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: AppColors.warning.withValues(alpha: 0.45)),
+    ),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Icon(Icons.warning_amber_rounded, size: 14,
+          color: AppColors.warning),
       const SizedBox(width: 8),
       Expanded(child: Text(text, style: TextStyle(fontSize: 11,
           color: AppColors.onSurface, height: 1.4))),
