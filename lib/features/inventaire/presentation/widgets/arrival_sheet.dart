@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/arrival_costing_service.dart';
 import '../../../../core/services/arrival_service.dart';
+import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
@@ -12,6 +13,7 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/widgets/back_dated_picker.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/app_snack.dart';
+import '../../../../shared/widgets/barcode_scanner_page.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/reception.dart';
 import 'arrival_widgets.dart';
@@ -79,6 +81,9 @@ class _Target {
   String get key       => variant?.id ?? product.id!;
   String get label     => variant?.name ?? product.name;
   String? get sku      => variant?.sku ?? product.sku;
+  /// Code-barres de la déclinaison, à défaut celui du modèle. Sert à
+  /// retrouver la ligne au scanner, et à signaler ce qui n'en a pas.
+  String? get barcode  => variant?.barcode ?? product.barcode;
   int    get stock     => variant?.stockAvailable ?? product.stockQty;
   double get priceBuy  => variant?.priceBuy ?? product.priceBuy;
   /// Nom archivé sur le bon : le modèle seul ne suffirait pas à retrouver
@@ -118,6 +123,10 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
   final Set<String> _expanded = {};
   final List<FeeDraft> _fees = [];
 
+  /// Frais du dernier arrivage de la boutique, calculés une fois à
+  /// l'ouverture. Proposés, jamais appliqués d'office.
+  List<ReceptionFee> _suggestedFees = const [];
+
   /// Produits pas encore au catalogue, saisis pendant l'arrivage. Ils ne sont
   /// créés en base qu'à la validation — annuler la feuille ne laisse aucune
   /// fiche orpheline derrière soi. Un même bon peut donc mélanger réassort
@@ -153,6 +162,69 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
           .where((p) => _targetsOf(p).length > 1)
           .map((p) => p.id!));
     }
+    // Une seule fois : balayer la boîte des bons à chaque reconstruction du
+    // widget coûterait cher sur une boutique qui en compte des centaines.
+    _suggestedFees = _lastArrivalFees();
+  }
+
+  /// Frais du dernier bon de la boutique qui en portait.
+  ///
+  /// Le transport et la douane changent rarement d'un lot à l'autre chez un
+  /// même fournisseur : les resaisir de mémoire à chaque arrivage est la
+  /// porte ouverte à l'oubli pur et simple. On les propose donc — sans
+  /// jamais les appliquer d'office : un montant d'argent ne se pré-remplit
+  /// pas dans le dos de celui qui valide.
+  List<ReceptionFee> _lastArrivalFees() {
+    Reception? last;
+    for (final m in HiveBoxes.receptionsBox.values) {
+      try {
+        final r = Reception.fromMap(Map<String, dynamic>.from(m));
+        if (r.shopId != widget.shopId || r.fees.isEmpty) continue;
+        if (last == null || r.createdAt.isAfter(last.createdAt)) last = r;
+      } catch (_) {
+        // Bon illisible (format d'une version future, entrée corrompue) :
+        // il ne doit pas empêcher la saisie d'un arrivage.
+      }
+    }
+    return last?.fees ?? const [];
+  }
+
+  /// Invite à reprendre les frais du dernier arrivage. Visible seulement
+  /// tant qu'aucun frais n'est saisi : une fois la saisie commencée, la
+  /// proposition n'a plus lieu d'être — et surtout, elle n'écrase rien.
+  Widget _reuseFeesChip() {
+    final total  = _suggestedFees.fold<double>(0, (s, f) => s + f.amount);
+    final labels = _suggestedFees.map((f) => f.label).join(' · ');
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      child: InkWell(
+        onTap: () => setState(() {
+          for (final f in _suggestedFees) {
+            _fees.add(FeeDraft(label: f.label, amount: f.amount));
+          }
+        }),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppColors.primarySurface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+                color: AppColors.primary.withValues(alpha: 0.35)),
+          ),
+          child: Row(children: [
+            Icon(Icons.history_rounded, size: 15, color: AppColors.primary),
+            const SizedBox(width: 8),
+            Expanded(child: Text(
+                'Reprendre les frais du dernier arrivage — $labels · '
+                '${CurrencyFormatter.format(total)}',
+                maxLines: 2, overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.caption
+                    .copyWith(color: AppColors.primary))),
+          ]),
+        ),
+      ),
+    );
   }
 
   List<_Target> _targetsOf(Product p) => p.variants.isEmpty
@@ -202,11 +274,15 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
         out.add((product: p, targets: targets));
         continue;
       }
+      // Le code-barres compte comme critère : un code lu au scanner arrive
+      // dans ce même champ, et doit retrouver sa ligne sans détour.
       final productHit = p.name.toLowerCase().contains(q) ||
-          (p.sku ?? '').toLowerCase().contains(q);
+          (p.sku ?? '').toLowerCase().contains(q) ||
+          (p.barcode ?? '').toLowerCase().contains(q);
       final hits = targets.where((t) =>
           t.label.toLowerCase().contains(q) ||
-          (t.sku ?? '').toLowerCase().contains(q)).toList();
+          (t.sku ?? '').toLowerCase().contains(q) ||
+          (t.barcode ?? '').toLowerCase().contains(q)).toList();
       if (productHit) {
         out.add((product: p, targets: targets));
       } else if (hits.isNotEmpty) {
@@ -262,6 +338,22 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
 
   /// Nombre de lignes que le bouton de validation annonce.
   int get _lineCount => _qty.length + (_costOnly ? 0 : _drafts.length);
+
+  /// Lit un code-barres et le verse dans la recherche. Le code n'est pas
+  /// « appliqué » à une ligne : il devient le filtre, et la liste se réduit
+  /// d'elle-même à l'article concerné. Si rien ne sort, c'est que l'article
+  /// n'est pas au catalogue — l'invite de création est déjà là pour ça.
+  Future<void> _scanIntoSearch() async {
+    final code = await BarcodeScannerPage.open(context);
+    if (code == null || !mounted) return;
+    setState(() {
+      _query = code;
+      _searchCtrl.text = code;
+    });
+    if (_visible.isEmpty) {
+      AppSnack.info(context, 'Aucun article ne porte ce code-barres.');
+    }
+  }
 
   /// Ce qui empêche d'enregistrer, dit en clair. `null` = rien ne s'y oppose.
   ///
@@ -588,6 +680,7 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
             leading: _datePicker(),
           ),
         ),
+        if (_fees.isEmpty && _suggestedFees.isNotEmpty) _reuseFeesChip(),
         // Recherche et création de produit sur LA MÊME ligne : ajouter un
         // bouton pleine largeur aurait repris la hauteur qu'on vient de
         // rendre à la liste.
@@ -605,6 +698,19 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
                       .copyWith(color: AppColors.textHint),
                   prefixIcon: Icon(Icons.search_rounded,
                       size: 18, color: AppColors.textHint),
+                  // Le scanner vit DANS le champ de recherche : le code lu
+                  // devient le filtre. Un bouton séparé aurait repris de la
+                  // hauteur sur la liste, déjà la partie la plus serrée.
+                  suffixIcon: IconButton(
+                    onPressed: _scanIntoSearch,
+                    icon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                    tooltip: 'Scanner un code-barres',
+                    color: AppColors.primary,
+                    padding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                    constraints:
+                        const BoxConstraints(minWidth: 34, minHeight: 34),
+                  ),
                   isDense: true,
                   filled: true,
                   fillColor: Theme.of(context).colorScheme.surface,
@@ -847,8 +953,29 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
                 style: standalone
                     ? AppTextStyles.bodyBold : AppTextStyles.bodySmBold,
                 maxLines: 1, overflow: TextOverflow.ellipsis),
-            Text(_costOnly ? '$inStock en stock' : 'Stock actuel : $inStock',
-                style: AppTextStyles.micro.copyWith(color: AppColors.textHint)),
+            Row(children: [
+              Flexible(child: Text(
+                  _costOnly ? '$inStock en stock' : 'Stock actuel : $inStock',
+                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.micro
+                      .copyWith(color: AppColors.textHint))),
+              // Purement informatif : un article sans code-barres se saisit
+              // très bien au clavier. C'est au moment où l'on a l'étiquette
+              // sous les yeux qu'il est utile de savoir qu'elle manque.
+              if ((t.barcode ?? '').trim().isEmpty) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: sem.borderSubtle),
+                  ),
+                  child: Text('Sans CB', style: AppTextStyles.micro
+                      .copyWith(color: AppColors.textHint)),
+                ),
+              ],
+            ]),
           ])),
           if (_costOnly)
             Switch(
@@ -891,6 +1018,36 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
                         ? t.priceBuy.toStringAsFixed(0) : '')),
             onChanged: () => setState(() {}),
           ),
+          // Le coût final de la ligne, pendant la frappe. C'est lui qui ira
+          // dans le prix de revient — pas le prix d'achat saisi juste
+          // au-dessus. L'écart entre les deux, c'est la part de frais du
+          // lot : la voir ligne par ligne évite d'avoir à la recalculer de
+          // tête à partir du seul total du récapitulatif.
+          Builder(builder: (_) {
+            final line = _costing.lineFor(t.key);
+            if (line == null || line.landedUnitCost <= 0) {
+              return const SizedBox.shrink();
+            }
+            return Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(children: [
+                Icon(Icons.calculate_outlined, size: 12,
+                    color: AppColors.primary),
+                const SizedBox(width: 5),
+                Expanded(child: Text(
+                    'Coût final '
+                    '${CurrencyFormatter.format(line.landedUnitCost)} / pièce'
+                    '${line.feePerPiece > 0
+                        ? '  ·  dont '
+                          '${CurrencyFormatter.format(line.feePerPiece)} '
+                          'de frais'
+                        : ''}',
+                    maxLines: 2, overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.micro
+                        .copyWith(color: AppColors.primary))),
+              ]),
+            );
+          }),
         ],
         if (qty > 0 && _costOnly) ...[
           const SizedBox(height: 8),

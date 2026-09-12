@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../../core/services/pending_image_upload_service.dart';
 import '../../../../core/services/storage_service.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -17,6 +16,7 @@ import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_section_card.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/app_switch.dart';
+import '../../../../shared/widgets/barcode_scanner_page.dart';
 import '../../../../shared/widgets/upload_status_dot.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
@@ -1069,9 +1069,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
   /// Recopier treize chiffres depuis une étiquette est long et se trompe :
   /// c'est précisément ce que la caméra fait sans erreur.
   Future<void> _scanBarcode(_Variant v) async {
-    final code = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => const _BarcodeScannerPage()),
-    );
+    final code = await BarcodeScannerPage.open(context);
     if (code == null || !mounted) return;
     setState(() => v.barcode.text = code);
   }
@@ -3579,41 +3577,6 @@ class _ProfileProgressBar extends StatelessWidget {
       ]),
     );
   }
-}
-
-/// Écran de lecture du code-barres. Se ferme en renvoyant le code lu.
-///
-/// `StatefulWidget` et non sans état : `onDetect` se déclenche sur CHAQUE
-/// image analysée, plusieurs fois par seconde. Sans le drapeau `_done`, on
-/// empilerait autant de `Navigator.pop` que d'images reconnues et l'écran
-/// précédent serait fermé à son tour.
-class _BarcodeScannerPage extends StatefulWidget {
-  const _BarcodeScannerPage();
-  @override
-  State<_BarcodeScannerPage> createState() => _BarcodeScannerPageState();
-}
-
-class _BarcodeScannerPageState extends State<_BarcodeScannerPage> {
-  bool _done = false;
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('Scanner le code-barres'),
-      backgroundColor: Colors.black,
-      foregroundColor: Colors.white,
-    ),
-    backgroundColor: Colors.black,
-    body: MobileScanner(
-      onDetect: (capture) {
-        if (_done) return;
-        final code = capture.barcodes.firstOrNull?.rawValue;
-        if (code == null || code.trim().isEmpty) return;
-        _done = true;
-        Navigator.of(context).pop(code.trim());
-      },
-    ),
-  );
 }
 
 /// Signale les produits déjà au catalogue au nom voisin de celui qu'on est
