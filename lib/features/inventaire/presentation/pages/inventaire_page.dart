@@ -469,6 +469,104 @@ class _InventairePageState extends ConsumerState<InventairePage>
     ),
   );
 
+  /// Duplique un produit : même fiche, stock remis à zéro, SKU libres.
+  ///
+  /// Un catalogue contient presque toujours des articles très proches, et
+  /// il fallait jusqu'ici tout resaisir. La copie part à stock zéro —
+  /// dupliquer une fiche ne fait pas apparaître de marchandise — puis
+  /// s'ouvre aussitôt pour être ajustée.
+  Future<void> _duplicateProduct(Product original) async {
+    final container = ProviderScope.containerOf(context, listen: false);
+    final plan  = container.read(currentPlanProvider);
+    final count = LocalStorageService.getProductsForShop(widget.shopId).length;
+    // Dupliquer crée un produit : sans ce contrôle, on contournerait le
+    // quota de l'abonnement par le menu contextuel.
+    if (!plan.canAddProduct(count)) {
+      UpgradeSheet.showQuota(context,
+          label:   context.l10n.navInventaire,
+          current: count,
+          max:     plan.maxProducts);
+      return;
+    }
+
+    // SKU déjà pris dans la boutique : le contrôle d'unicité de
+    // `saveProduct` refuserait la copie. On cherche le premier suffixe
+    // LIBRE plutôt qu'un « -2 » fixe, qui échouerait dès la 2ᵉ copie.
+    final taken = <String>{};
+    for (final p in LocalStorageService.getProductsForShop(widget.shopId)) {
+      for (final v in p.variants) {
+        final s = v.sku?.trim().toLowerCase();
+        if (s != null && s.isNotEmpty) taken.add(s);
+      }
+    }
+    String freeSku(String? base) {
+      final root = (base ?? '').trim();
+      if (root.isEmpty) return '';
+      for (var n = 2; n < 100; n++) {
+        final candidate = '$root-$n';
+        if (taken.add(candidate.toLowerCase())) return candidate;
+      }
+      return '$root-${DateTime.now().millisecondsSinceEpoch}';
+    }
+
+    final now = DateTime.now();
+    final copy = Product(
+      id:            'prod_${now.microsecondsSinceEpoch}',
+      storeId:       widget.shopId,
+      categoryId:    original.categoryId,
+      brand:         original.brand,
+      name:          '${original.name} (copie)',
+      description:   original.description,
+      priceBuy:      original.priceBuy,
+      priceSellPos:  original.priceSellPos,
+      priceSellWeb:  original.priceSellWeb,
+      taxRate:       original.taxRate,
+      stockQty:      0,
+      stockMinAlert: original.stockMinAlert,
+      isActive:      original.isActive,
+      isVisibleWeb:  original.isVisibleWeb,
+      trackStock:    original.trackStock,
+      imageUrl:      original.imageUrl,
+      rating:        0,
+      createdAt:     now,
+      // Ni dépenses ni promotion : les premières se rapportent à un lot
+      // d'achat précis que la copie n'a pas (elle part à stock zéro), la
+      // seconde est une opération datée propre au produit d'origine.
+      variants: [
+        for (var i = 0; i < original.variants.length; i++)
+          ProductVariant(
+            id:      'var_${now.microsecondsSinceEpoch}_$i',
+            name:    original.variants[i].name,
+            sku:     freeSku(original.variants[i].sku),
+            // Un code-barres identifie un article unique dans le monde
+            // réel : le recopier ferait répondre deux fiches au scan.
+            supplier:      original.variants[i].supplier,
+            supplierRef:   original.variants[i].supplierRef,
+            priceBuy:      original.variants[i].priceBuy,
+            priceSellPos:  original.variants[i].priceSellPos,
+            priceSellWeb:  original.variants[i].priceSellWeb,
+            stockMinAlert: original.variants[i].stockMinAlert,
+            imageUrl:      original.variants[i].imageUrl,
+            secondaryImageUrls: original.variants[i].secondaryImageUrls,
+            isMain:        original.variants[i].isMain,
+          ),
+      ],
+    );
+
+    try {
+      await AppDatabase.saveProduct(copy);
+    } catch (e) {
+      if (!mounted) return;
+      AppSnack.error(context, e.toString().replaceAll('Exception: ', ''));
+      return;
+    }
+    if (!mounted) return;
+    AppSnack.success(context, '« ${copy.name} » créé — ajustez ce qui change');
+    await context.push('/shop/${widget.shopId}/inventaire/product',
+        extra: copy);
+    _load();
+  }
+
   /// Audit stock — Couche 3 du plan « sécurise le stock ».
   /// Lance la réconciliation manuelle, affiche un dialog récapitulatif,
   /// Ouvre le selector de scope puis exporte le catalogue selon le
@@ -1380,6 +1478,7 @@ class _InventairePageState extends ConsumerState<InventairePage>
                   onShare: () => _openSharePicker(p),
                   onShareWhatsApp: () => _shareProductOnWhatsApp(p),
                   onPromo: () => _openQuickPromo(p),
+                  onDuplicate: () => _duplicateProduct(p),
                   onEdit: () async {
                     await context.push(
                         '/shop/${widget.shopId}/inventaire/product',
@@ -1395,6 +1494,7 @@ class _InventairePageState extends ConsumerState<InventairePage>
                   onShare: () => _openSharePicker(p),
                   onShareWhatsApp: () => _shareProductOnWhatsApp(p),
                   onPromo: () => _openQuickPromo(p),
+                  onDuplicate: () => _duplicateProduct(p),
                   onEdit: () async {
                     await context.push(
                         '/shop/${widget.shopId}/inventaire/product',
@@ -1974,12 +2074,14 @@ class _DesktopRow extends ConsumerStatefulWidget {
   final ValueChanged<bool> onToggleActive, onToggleWeb;
   final VoidCallback onDelete, onEdit, onProductChanged, onTransfer, onShare,
       onShareWhatsApp, onPromo;
+  final VoidCallback onDuplicate;
   const _DesktopRow({required this.product, required this.shopId,
     required this.onToggleActive, required this.onToggleWeb,
     required this.onDelete, required this.onEdit,
     required this.onProductChanged, required this.onTransfer,
     required this.onShare,
-    required this.onShareWhatsApp, required this.onPromo});
+    required this.onShareWhatsApp, required this.onPromo,
+    required this.onDuplicate});
   @override ConsumerState<_DesktopRow> createState() => _DesktopRowState();
 }
 
@@ -2080,6 +2182,7 @@ class _DesktopRowState extends ConsumerState<_DesktopRow> {
                 onEdit: widget.onEdit,
                 onDelete: widget.onDelete,
                 onPromo: widget.onPromo,
+                onDuplicate: widget.onDuplicate,
                 iconSize: 16,
                 isPartnerView: isPartnerView,
               ),
@@ -2107,12 +2210,14 @@ class _MobileCard extends ConsumerStatefulWidget {
   final ValueChanged<bool> onToggleActive, onToggleWeb;
   final VoidCallback onDelete, onEdit, onProductChanged, onTransfer, onShare,
       onShareWhatsApp, onPromo;
+  final VoidCallback onDuplicate;
   const _MobileCard({required this.product, required this.shopId,
     required this.onToggleActive, required this.onToggleWeb,
     required this.onDelete, required this.onEdit,
     required this.onProductChanged, required this.onTransfer,
     required this.onShare,
-    required this.onShareWhatsApp, required this.onPromo});
+    required this.onShareWhatsApp, required this.onPromo,
+    required this.onDuplicate});
   @override ConsumerState<_MobileCard> createState() => _MobileCardState();
 }
 
@@ -2233,6 +2338,7 @@ class _MobileCardState extends ConsumerState<_MobileCard> {
                       onEdit: widget.onEdit,
                       onDelete: widget.onDelete,
                       onPromo: widget.onPromo,
+                      onDuplicate: widget.onDuplicate,
                       iconSize: 17,
                       isPartnerView: isPartnerView,
                     ),
@@ -3406,7 +3512,7 @@ class _ProductActionsMenu extends ConsumerWidget {
   final String shopId;
   final Product product;
   final VoidCallback onTransfer, onShare, onShareWhatsApp, onEdit, onDelete,
-      onPromo;
+      onPromo, onDuplicate;
   final double iconSize;
   /// Si vrai, on est en vue Partenaire : Modifier et Supprimer sont masqués
   /// (le produit appartient à la boutique, pas au partenaire — toute édition
@@ -3422,6 +3528,7 @@ class _ProductActionsMenu extends ConsumerWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onPromo,
+    required this.onDuplicate,
     this.iconSize = 16,
     this.isPartnerView = false,
   });
@@ -3492,6 +3599,14 @@ class _ProductActionsMenu extends ConsumerWidget {
           Text('Modifier', style: AppTextStyles.body),
         ]),
       ));
+      items.add(PopupMenuItem<String>(
+        value: 'duplicate',
+        child: Row(children: [
+          Icon(Icons.copy_outlined, size: 16, color: AppColors.textSecondary),
+          const SizedBox(width: 8),
+          const Text('Dupliquer', style: AppTextStyles.body),
+        ]),
+      ));
     }
     if (perms.canDeleteProduct && !isPartnerView) {
       items.add(PopupMenuItem<String>(
@@ -3523,6 +3638,7 @@ class _ProductActionsMenu extends ConsumerWidget {
           case 'copy_ad_link':   _copyAdLink(context); break;
           case 'promo':          onPromo();          break;
           case 'edit':           onEdit();           break;
+          case 'duplicate':      onDuplicate();      break;
           case 'delete':         onDelete();         break;
         }
       },
