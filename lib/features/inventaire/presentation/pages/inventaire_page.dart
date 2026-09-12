@@ -429,7 +429,8 @@ class _InventairePageState extends ConsumerState<InventairePage>
       _selected.clear();
     });
     _load();
-    AppSnack.success(context, 'Frais imputés — prix de revient mis à jour');
+    // Pas de message ici : la feuille annonce déjà son résultat, elle seule
+    // sait ce qui a été écrit. Le redire l'afficherait deux fois.
   }
 
   /// Helper : check le quota produits avant de naviguer vers le formulaire

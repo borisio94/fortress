@@ -8,7 +8,9 @@ import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/widgets/back_dated_picker.dart';
+import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/reception.dart';
@@ -261,8 +263,101 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
   /// Nombre de lignes que le bouton de validation annonce.
   int get _lineCount => _qty.length + (_costOnly ? 0 : _drafts.length);
 
+  /// Ce qui empêche d'enregistrer, dit en clair. `null` = rien ne s'y oppose.
+  ///
+  /// Distinct de [_canSubmit], qui ne fait que griser le bouton. Un bouton
+  /// gris sans motif laisse chercher l'oubli sur une feuille qui peut
+  /// compter cinquante lignes ; ici on nomme ce qui manque.
+  String? _blockingError() {
+    if (_qty.isEmpty && _drafts.isEmpty) {
+      return _costOnly
+          ? 'Coche au moins un produit qui se partage les frais.'
+          : 'Saisis au moins une quantité reçue.';
+    }
+    if (_costOnly) {
+      if (_feesTotal <= 0) return 'Saisis le montant des frais à répartir.';
+      if (_costing.totalPieces <= 0) {
+        return 'Aucune pièce à charger : les frais n\'iraient nulle part.';
+      }
+    }
+    // Un frais nommé mais sans montant est filtré à la construction du bon.
+    // Le dire vaut mieux que de le laisser disparaître en silence.
+    if (_fees.any((f) =>
+        f.label.text.trim().isNotEmpty && _amount(f.amount.text) <= 0)) {
+      return 'Un frais porte un libellé mais aucun montant.';
+    }
+    return null;
+  }
+
+  /// Récapitule ce que l'écriture va faire AVANT de la faire. L'arrivage est
+  /// immédiat et sans brouillon : une fois validé, le stock a bougé et les
+  /// prix de revient sont recalculés. C'est le dernier moment pour relire.
+  Future<bool> _confirmSubmit() async {
+    final c = _costing;
+    final ok = await AppConfirmDialog.show(
+      context: context,
+      icon: _costOnly
+          ? Icons.receipt_long_rounded : Icons.local_shipping_rounded,
+      iconColor: AppColors.primary,
+      confirmColor: AppColors.primary,
+      title: _costOnly ? 'Imputer les frais ?' : 'Enregistrer l\'arrivage ?',
+      body: Column(mainAxisSize: MainAxisSize.min, children: [
+        _recapRow('Lignes', '$_lineCount'),
+        _recapRow(_costOnly ? 'Pièces chargées' : 'Pièces reçues',
+            '${c.totalPieces}'),
+        if (!_costOnly)
+          _recapRow('Marchandise', CurrencyFormatter.format(c.goodsTotal)),
+        if (c.feesTotal > 0) ...[
+          _recapRow('Frais du lot', CurrencyFormatter.format(c.feesTotal)),
+          _recapRow('Par pièce', CurrencyFormatter.format(c.feePerPiece),
+              accent: true),
+        ],
+        if (!_costOnly)
+          _recapRow('Total du lot', CurrencyFormatter.format(c.grandTotal),
+              bold: true),
+        const SizedBox(height: 10),
+        Text(
+            _costOnly
+                ? 'Aucune pièce n\'entre en stock. Seul le prix d\'achat des '
+                  'produits cochés augmente de sa part de frais.'
+                : 'Le stock augmente, et le prix de revient est recalculé en '
+                  'moyenne avec les pièces déjà en rayon.',
+            style: AppTextStyles.caption
+                .copyWith(color: AppColors.textSecondary, height: 1.45)),
+      ]),
+      cancelLabel: 'Revoir',
+      confirmLabel: _costOnly ? 'Imputer' : 'Enregistrer',
+      // Le travail ne se fait PAS ici : le dialogue referme sa feuille AVANT
+      // d'appeler ce callback. C'est la valeur de retour qui commande.
+      onConfirm: () {},
+    );
+    return ok == true;
+  }
+
+  static Widget _recapRow(String label, String value,
+      {bool bold = false, bool accent = false}) => Padding(
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Row(children: [
+      Expanded(child: Text(label,
+          style: bold
+              ? AppTextStyles.bodySmBold
+              : AppTextStyles.bodySm.copyWith(
+                  color: accent
+                      ? AppColors.primary : AppColors.textSecondary))),
+      Text(value, style: AppTextStyles.bodySmBold
+          .copyWith(color: accent ? AppColors.primary : null)),
+    ]),
+  );
+
   Future<void> _submit() async {
     if (!_canSubmit) return;
+    final error = _blockingError();
+    if (error != null) {
+      AppSnack.warning(context, error);
+      return;
+    }
+    final confirmed = await _confirmSubmit();
+    if (!confirmed || !mounted) return;
     setState(() => _saving = true);
     final user = LocalStorageService.getCurrentUser();
     final now  = DateTime.now();
@@ -381,6 +476,13 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
     await ArrivalService.apply(reception);
     if (!mounted) return;
     Navigator.of(context).pop(true);
+    // La feuille annonce elle-même son résultat : elle seule sait ce qui a
+    // été écrit. Ses appelants n'ont plus à le redire.
+    AppSnack.success(
+        context,
+        _costOnly
+            ? 'Frais imputés — prix de revient mis à jour'
+            : 'Arrivage enregistré — stock et prix de revient à jour');
   }
 
   bool _isToday(DateTime d) {
@@ -471,6 +573,9 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
           ),
           const SizedBox(height: 6),
         ],
+        // Rappel PERMANENT, y compris quand le mode est verrouillé — c'est
+        // justement le cas où l'on n'a pas choisi le mode soi-même.
+        if (_costOnly) const _CostOnlyNotice(),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           // Date et « Frais du lot » PARTAGENT une ligne : deux réglages
@@ -799,4 +904,38 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
       ]),
     );
   }
+}
+
+/// Rappel permanent du mode « frais seuls ».
+///
+/// Les deux modes se ressemblent à l'écran — mêmes lignes, mêmes quantités —
+/// mais ne font pas du tout la même chose : l'un fait entrer de la
+/// marchandise, l'autre corrige un prix sur du stock déjà en rayon. Se
+/// tromper de mode fausse le stock ou le prix de revient, et plus rien ne le
+/// signale ensuite. Le pictogramme de l'en-tête ne suffisait pas à porter
+/// cette différence.
+class _CostOnlyNotice extends StatelessWidget {
+  const _CostOnlyNotice();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: AppColors.warning.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: AppColors.warning.withValues(alpha: 0.45)),
+    ),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Icon(Icons.warning_amber_rounded, size: 14,
+          color: AppColors.warning),
+      const SizedBox(width: 8),
+      Expanded(child: Text(
+          'Aucune pièce n\'entre en stock. Les quantités ci-dessous désignent '
+          'les pièces qui se partagent les frais — seul leur prix d\'achat '
+          'augmente.',
+          style: AppTextStyles.caption
+              .copyWith(color: AppColors.onSurface, height: 1.4))),
+    ]),
+  );
 }
