@@ -536,11 +536,25 @@ FinancialSnapshot _computeFinancialSnapshot(String shopId, DashRange range,
       final baseCost = productCost ?? itemBuy ?? 0.0;
       totalCost += baseCost * qty;
     }
+    // MÊMES FORMULES QUE `dashDataProvider`, et c'est impératif : cet
+    // instantané sert le comparatif de période. Si les deux moteurs ne
+    // comptent pas pareil, le CA affiché et sa propre tendance divergent
+    // sur le même écran — une incohérence d'autant plus pénible qu'elle est
+    // invisible.
+    final delivMode  = o['delivery_mode'] as String?;
+    final delivPrice = (o['delivery_price'] as num?)?.toDouble() ?? 0;
+    final delivExpense =
+        (delivMode == 'partner' || delivMode == 'shipment') ? delivPrice : 0.0;
     final orderDiscount = (o['discount_amount'] as num?)?.toDouble() ?? 0;
     final taxRate       = (o['tax_rate'] as num?)?.toDouble() ?? 0;
+    // Total facturé au client (cf. `Sale.total`) : articles − remise + TVA,
+    // PUIS livraison et frais, qui majorent la note.
     final orderTotal    = (itemsTotal - orderDiscount) *
-        (1 + taxRate / 100);
-    final orderProfit   = itemsTotal - totalCost - orderDiscount;
+            (1 + taxRate / 100)
+        + delivPrice + orderFees;
+    // Recette − coût des marchandises. Les charges sont retranchées une
+    // seule fois, par `netProfit` via `operatingExpenses`.
+    final orderProfit   = orderTotal - totalCost;
 
     final isLoss = status == 'refunded' ||
         status == 'cancelled' ||
@@ -555,6 +569,12 @@ FinancialSnapshot _computeFinancialSnapshot(String shopId, DashRange range,
     // tant que `status != completed` la dépense n'est pas réalisée.
     if (status == 'completed' && orderFees > 0) {
       operatingExpenses += orderFees;
+    }
+    // Livraison payée à un tiers — elle MANQUAIT ici alors que le moteur
+    // principal la comptait : `operatingExpenses` n'avait donc pas la même
+    // définition des deux côtés, et `netProfit` divergeait même à CA égal.
+    if (status == 'completed' && delivExpense > 0) {
+      operatingExpenses += delivExpense;
     }
   }
 
@@ -915,16 +935,41 @@ final dashDataProvider =
       }
     }
 
-    // total commande = prix de vente réel (articles) + TVA − remise globale.
-    // Les frais sont ABSORBÉS par la boutique (voir totalCost ci-dessus),
-    // ils ne sont PAS ajoutés au montant facturé au client.
+    // Livraison : lue ICI et non plus au moment de la ventilation en
+    // dépenses, parce que le total en a désormais besoin.
+    final delivMode  = o['delivery_mode'] as String?;
+    final delivPrice = (o['delivery_price'] as num?)?.toDouble() ?? 0;
+    // Livraison payée à un tiers = charge externe. Retrait ou équipe interne =
+    // recette sans charge : facturée au client, elle ne coûte rien dehors.
+    final delivExpense =
+        (delivMode == 'partner' || delivMode == 'shipment') ? delivPrice : 0.0;
+
+    // TOTAL COMMANDE — la formule de `Sale.total` (sale.dart), et rien
+    // d'autre : articles − remise + TVA + livraison + frais.
+    //
+    // Le commentaire qui tenait ici affirmait que les frais étaient
+    // « ABSORBÉS par la boutique » et « PAS ajoutés au montant facturé ».
+    // L'entité dit l'inverse depuis qu'ils majorent le total, et c'est elle
+    // qui imprime la facture. Le tableau de bord amputait donc la recette de
+    // la livraison et des frais, TOUT EN les comptant en dépenses plus bas :
+    // le bénéfice était pénalisé deux fois, et la créance client (calculée
+    // sur ce total) sous-évaluée d'autant.
     final orderDiscount = (o['discount_amount'] as num?)?.toDouble() ?? 0;
     final taxRate       = (o['tax_rate'] as num?)?.toDouble() ?? 0;
     final taxableBase   = itemsTotal - orderDiscount;
     final orderTax      = taxableBase * taxRate / 100;
-    final orderTotal    = taxableBase + orderTax;
-    // bénéfice = CA - (coûts produits + frais absorbés) - remise
-    final orderProfit   = itemsTotal - totalCost - orderDiscount;
+    final orderTotal    = taxableBase + orderTax + delivPrice + orderFees;
+    // Bénéfice = recette − coût des marchandises, et RIEN D'AUTRE ICI.
+    //
+    // Ni la remise — déjà retranchée dans `orderTotal` — ni les frais, ni la
+    // livraison : `DashData.netProfit` soustrait déjà `operatingExpenses`,
+    // qui contient les deux. Les retrancher ici AUSSI les compterait deux
+    // fois, soit le défaut même que ce commit répare, pris à l'envers.
+    //
+    // Conséquence voulue : une livraison assurée en interne reste au
+    // bénéfice (facturée au client, aucune charge au-dehors), tandis qu'une
+    // livraison partenaire s'annule contre `operatingExpenses`.
+    final orderProfit   = orderTotal - totalCost;
 
     if (isLoss) {
       totalLoss += orderTotal;
@@ -971,10 +1016,9 @@ final dashDataProvider =
     // dépense de livraison (nouveau modèle : la livraison n'est plus dans
     // `fees` mais dans `deliveryPrice`). Retrait / équipe interne = pas de coût
     // externe → non compté. Même règle « completed » que les frais.
-    final delivMode  = o['delivery_mode'] as String?;
-    final delivPrice = (o['delivery_price'] as num?)?.toDouble() ?? 0;
-    if (!feesBlocked && delivPrice > 0
-        && (delivMode == 'partner' || delivMode == 'shipment')) {
+    // `delivMode` / `delivPrice` / `delivExpense` sont lus plus haut : le
+    // total de la commande en a besoin avant ce point.
+    if (!feesBlocked && delivExpense > 0) {
       expensesSeries[bucket] += delivPrice;
       operatingExpenses += delivPrice;
       final cat = _normalizeExpenseCat('shipping');

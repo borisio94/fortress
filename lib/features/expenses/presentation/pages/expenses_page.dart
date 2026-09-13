@@ -24,11 +24,20 @@ import '../../domain/entities/expense.dart';
 // PAGE DÉPENSES — vue centralisée de toutes les sorties d'argent de la boutique.
 // Deux sources fusionnées :
 //   1. Dépenses directes (table/box `expenses`) — CRUD plein.
-//   2. Frais des commandes (orders.fees) — entrées "virtuelles", lecture seule,
-//      tap renvoie à la caisse pour modification. Pas comptées dans la KPI
-//      dashboard `operatingExpenses` (elles sont déjà intégrées au prix de
-//      revient via allocation proportionnelle), mais visibles ici pour la
-//      traçabilité.
+//   2. Frais des commandes (orders.fees + delivery_price) — entrées
+//      "virtuelles", lecture seule, tap renvoie à la caisse pour modification.
+//
+//      ⚠ Ces frais SONT comptés dans la KPI dashboard `operatingExpenses`
+//      (dashboard_providers.dart : `operatingExpenses += orderFees` puis
+//      `+= delivPrice`). Le commentaire qui tenait ici affirmait le contraire
+//      — « déjà intégrées au prix de revient via allocation proportionnelle »
+//      — ce que le code du tableau de bord dément.
+//
+//      Les deux écrans n'appliquent pas la même règle de statut, et c'est
+//      assumé : ici tout sauf `cancelled`/`refused` (la livraison a eu lieu,
+//      la charge est engagée), au tableau de bord `completed` seul (ne pas
+//      gonfler les dépenses d'une vente non encaissée). Les totaux des deux
+//      écrans diffèrent donc légitimement.
 // ═════════════════════════════════════════════════════════════════════════════
 
 enum _Period { week, month, year, all }

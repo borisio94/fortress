@@ -124,8 +124,12 @@ class OrdersExportSource {
         fees += (f['amount'] as num?)?.toDouble() ?? 0;
       }
     }
+    // Livraison COMPRISE : elle est facturée au client (cf. `Sale.total`).
+    // L'export l'omettait, si bien que la colonne « Total » ne correspondait
+    // ni à la facture, ni au tableau de bord, ni à ce qui avait été encaissé.
+    final delivery = (m['delivery_price'] as num?)?.toDouble() ?? 0;
     final taxed = (subtotal - discountAmount) * (1 + taxRate / 100);
-    return taxed + fees;
+    return taxed + fees + delivery;
   }
 
   static int _itemsCount(Map<String, dynamic> m) {
