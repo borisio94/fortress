@@ -597,9 +597,17 @@ class SaleLocalDatasource {
   /// automatiquement `payment_status` selon : 0 → unpaid, < total → partial,
   /// >= total → paid. Ne touche pas au statut de commande (qui reste
   /// scheduled/processing/completed selon le workflow).
-  Future<void> recordPayment(String orderId, double newAmountPaid) async {
+  ///
+  /// Renvoie `true` si l'encaissement a bien été écrit, `false` sinon.
+  ///
+  /// Ce retour existe parce que la méthode peut renoncer SANS rien signaler —
+  /// commande introuvable. L'appelant, lui, annonçait « Acompte enregistré »
+  /// dans tous les cas : l'opérateur encaissait de l'argent, lisait une
+  /// confirmation, et rien n'était écrit. Un échec muet sur un mouvement
+  /// d'argent est le pire des silences.
+  Future<bool> recordPayment(String orderId, double newAmountPaid) async {
     final raw = _ordersBox.get(orderId);
-    if (raw == null) return;
+    if (raw == null) return false;
     final map = Map<String, dynamic>.from(raw);
     final fresh = _mapToSaleWithStatus(map);
     final total = fresh.total;
@@ -620,6 +628,7 @@ class SaleLocalDatasource {
       'amount_paid':    map['amount_paid'],
       'payment_status': map['payment_status'],
     });
+    return true;
   }
 
   /// Fixe le prix de livraison d'une commande (cas « frais à fixer » des

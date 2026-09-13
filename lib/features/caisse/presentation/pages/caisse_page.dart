@@ -2765,7 +2765,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   Future<void> _recordAcompte(BuildContext context) async {
     final newAmount = await RecordAcompteDialog.show(context, widget.order);
     if (newAmount == null || !mounted) return;
-    await SaleLocalDatasource()
+    final ok = await SaleLocalDatasource()
         .recordPayment(widget.order.id!, newAmount);
     // Rafraîchir via le parent (relit Hive → Sale fraîche → le bandeau
     // « Reste à payer » disparaît dès que le solde est réglé). Le simple
@@ -2773,12 +2773,30 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     // `widget.order` encore périmé.
     widget.onChanged?.call();
     if (mounted) setState(() {});
-    if (mounted) {
-      AppSnack.success(context,
-          newAmount >= widget.order.total
-              ? 'Commande totalement encaissée'
-              : 'Acompte enregistré');
+    if (!mounted) return;
+    // Le succès n'est annoncé QUE s'il a eu lieu. Le message partait
+    // auparavant sans rien vérifier : quand l'enregistrement échouait, la
+    // confirmation s'affichait quand même et l'argent encaissé n'était noté
+    // nulle part.
+    //
+    // Distinguer l'échec du succès impose DEUX appels (`error` / `success`),
+    // là où le code d'origine n'en avait qu'un. L'analyseur signale donc ici
+    // une remarque `use_build_context_synchronously` de plus qu'avant —
+    // assumée : c'est un `info`, ce fichier en compte une vingtaine
+    // d'identiques, et la supprimer exigerait de choisir aussi la fonction à
+    // appeler, au prix de la lisibilité. Prévenir d'un encaissement perdu
+    // vaut mieux qu'une remarque de moins.
+    final message = !ok
+        ? 'Acompte NON enregistré — commande introuvable. '
+            'Rafraîchissez la liste et réessayez.'
+        : (newAmount >= widget.order.total
+            ? 'Commande totalement encaissée'
+            : 'Acompte enregistré');
+    if (ok) {
+      AppSnack.success(context, message);
+      return;
     }
+    AppSnack.error(context, message);
   }
 
   /// Ouvre l'éditeur de frais (livraison/emballage). Disponible à tout
