@@ -1039,6 +1039,58 @@ class _InventairePageState extends ConsumerState<InventairePage>
     }
   }
 
+  // ── Lien du catalogue public complet ────────────────────────────────────
+
+  /// Produits qui sortent réellement sur la vitrine publique.
+  /// `catalogue.html` (RPC `get_public_catalogue_products`) et
+  /// `catalogue_page` filtrent tous deux sur `isActive && isVisibleWeb` :
+  /// un produit qui ne coche pas les deux n'apparaîtra jamais dans le lien.
+  List<Product> get _publicCatalogueProducts => _products
+      .where((p) => !p.isDeleted && p.isActive && p.isVisibleWeb)
+      .toList();
+
+  /// URL de la vitrine publique, volontairement **nue** (aucun query param).
+  ///
+  /// Sans `ids=`, `catalogue.html` bascule sur `get_public_catalogue_products`
+  /// → tout le catalogue, et non le sous-ensemble figé de
+  /// `get_delivery_products`. Sans `stock=` ni raccourcisseur non plus : le
+  /// lien est donc **permanent** et **vivant** (un produit ajouté demain y
+  /// apparaît sans réenvoi), contrairement au lien de
+  /// `_createWhatsappCatalogue` (snapshot stock + short link à 90 jours).
+  /// C'est ce qu'il faut pour un statut WhatsApp, une bio ou une liste de
+  /// diffusion.
+  String get _fullCatalogueUrl {
+    final origin = Uri.base.origin.startsWith('http')
+        ? Uri.base.origin
+        : 'https://fortress-pos.web.app';
+    return '$origin/catalogue/${widget.shopId}';
+  }
+
+  /// Copie le lien du catalogue complet et rapporte combien de produits
+  /// sortiront vraiment. Le compteur est la vraie information : un catalogue
+  /// à moitié invisible ne lève aucune erreur côté client, il affiche
+  /// simplement une vitrine amputée en silence.
+  Future<void> _copyFullCatalogueLink() async {
+    final total   = _products.where((p) => !p.isDeleted).length;
+    final publics = _publicCatalogueProducts.length;
+    await Clipboard.setData(ClipboardData(text: _fullCatalogueUrl));
+    if (!mounted) return;
+    final hidden = total - publics;
+    if (publics == 0) {
+      AppSnack.warning(context,
+          'Lien copié, mais aucun produit n\'est visible sur le web : '
+          'la page s\'ouvrira vide. Activez « visible web » sur vos produits.');
+    } else if (hidden > 0) {
+      final verb = hidden > 1 ? 'n\'apparaîtront' : 'n\'apparaîtra';
+      AppSnack.warning(context,
+          'Lien copié — $publics produit${publics > 1 ? 's' : ''} sur $total. '
+          '$hidden $verb pas (« visible web » désactivé).');
+    } else {
+      AppSnack.success(context,
+          'Lien copié — vos $publics produits sont dans le catalogue.');
+    }
+  }
+
   /// sélecteur (cases à cocher) pour choisir lesquelles partager. Sinon
   /// partage directement.
   Future<void> _openSharePicker(Product p) async {
@@ -1302,9 +1354,18 @@ class _InventairePageState extends ConsumerState<InventairePage>
                   // le scope selector — pas besoin de passer par /exports.
                   if (ref.watch(permissionsProvider(widget.shopId))
                       .canExportProducts) ...[
-                    const SizedBox(width: 6),
                     _ExportBtn(onTap: _openExport),
                   ],
+                  // Lien de la vitrine publique — compteur `publics/total`
+                  // calculé sur TOUS les produits de la boutique, pas sur
+                  // `_filtered` : le lien ignore la vue active (Globale /
+                  // Boutique / Partenaire) et le filtre de recherche.
+                  _CatalogLinkBtn(
+                    publicCount: _publicCatalogueProducts.length,
+                    totalCount:
+                        _products.where((p) => !p.isDeleted).length,
+                    onTap: _copyFullCatalogueLink,
+                  ),
                 ]),
               ),
             ),
@@ -4712,6 +4773,90 @@ class _ExportBtn extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Bouton « Copier le lien du catalogue complet » — vitrine publique de la
+/// boutique, lien nu et permanent (cf. `_fullCatalogueUrl`).
+///
+/// Porte un compteur `publics/total` plutôt qu'une simple icône : le
+/// catalogue public ne montre que les produits `isActive && isVisibleWeb`,
+/// et rien côté client ne signale ceux qui manquent. Le compteur vire à
+/// l'ambre dès qu'au moins un produit ne sortira pas, pour qu'on le voie
+/// avant d'envoyer le lien plutôt qu'après.
+class _CatalogLinkBtn extends StatelessWidget {
+  final int publicCount;
+  final int totalCount;
+  final VoidCallback onTap;
+  const _CatalogLinkBtn({
+    required this.publicCount,
+    required this.totalCount,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs    = theme.colorScheme;
+    final sem   = theme.semantic;
+    final partial = publicCount < totalCount;
+    final tint    = partial ? AppColors.warning : cs.primary;
+    final hidden  = totalCount - publicCount;
+    // Marge latérale de 8 : ce bouton dépasse déjà 48 de large, `_TapTarget48`
+    // ne lui ajoute donc aucune marge — sans celle-ci il collerait au
+    // bouton précédent (16 px d'écart entre chaque bouton de la rangée).
+    return _TapTarget48(onTap: onTap, child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: SizedBox(
+      height: 32,
+      child: Tooltip(
+        message: partial
+            ? 'Copier le lien du catalogue complet — $hidden produit'
+                '${hidden > 1 ? 's' : ''} non visible'
+                '${hidden > 1 ? 's' : ''} sur le web'
+            : 'Copier le lien du catalogue complet',
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: sem.elevatedSurface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: partial
+                  ? tint.withValues(alpha: 0.45)
+                  : sem.borderSubtle),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.link_rounded, size: 16, color: tint),
+              const SizedBox(width: 5),
+              Text('$publicCount/$totalCount',
+                  style: AppTextStyles.captionBold.copyWith(color: tint)),
+            ]),
+          ),
+        ),
+      ),
+    )));
+  }
+}
+
+/// Zone tactile de 48×48 (minimum Android) autour d'un bouton compact, sans
+/// changer son dessin : le bouton reste centré à sa taille d'origine, la
+/// marge transparente autour capte les taps qui le frôlent. Un tap DANS le
+/// bouton reste géré par son propre InkWell (effet d'encre inchangé).
+class _TapTarget48 extends StatelessWidget {
+  final VoidCallback onTap;
+  final Widget child;
+  const _TapTarget48({required this.onTap, required this.child});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+          child: Center(widthFactor: 1, heightFactor: 1, child: child),
+        ),
+      );
 }
 
 /// Dialog récapitulatif du `ReconciliationReport`.
