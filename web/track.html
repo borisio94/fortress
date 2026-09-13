@@ -363,7 +363,7 @@
   function validate(){
     if(validating) return;
     validating=true; render();
-    rpc("validate_order_by_client",{p_order_id:ORDER_ID}).then(function(res){
+    rpc("validate_order_by_client",{p_tracking_token:ORDER_ID}).then(function(res){
       validating=false;
       if(res==="validated" || res==="already_validated"){
         toast("✓ Commande validée — la boutique prépare votre livraison.","ok");

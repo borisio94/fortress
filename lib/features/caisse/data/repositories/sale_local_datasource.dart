@@ -7,6 +7,7 @@ import '../../../../core/services/activity_log_service.dart';
 import '../../../../core/services/delivery_reminder_service.dart';
 import '../../../../core/services/partner_ledger_service.dart';
 import '../../../../core/database/app_database.dart';
+import '../../../../core/utils/uuid.dart';
 import '../../domain/entities/sale.dart';
 import '../../domain/entities/sale_item.dart';
 import '../../domain/approval_closure.dart';
@@ -69,7 +70,11 @@ class SaleLocalDatasource {
   /// Sauvegarder une commande avec son statut
   Future<void> saveOrder(Sale order) async {
     if (!Hive.isBoxOpen(HiveBoxes.orders)) return;
-    final id = order.id ?? 'order_${DateTime.now().millisecondsSinceEpoch}';
+    // UUID v4 (Random.secure()) : l'identifiant horodaté était devinable par
+    // énumération — il servait de seul secret au lien de suivi public — et
+    // deux commandes de la même milliseconde s'écrasaient au `put` ci-dessous,
+    // qui ne vérifie aucune existence préalable.
+    final id = order.id ?? Uuid.v4();
 
     // Date de complétion stampée uniquement si la commande est créée "completed"
     final completedAt = order.status == SaleStatus.completed
@@ -125,6 +130,10 @@ class SaleLocalDatasource {
       // GF-1 : clé d'idempotence du panier — persistée en Hive ET pushée
       // à Supabase pour bénéficier de l'UNIQUE constraint (hotfix_080).
       'idempotency_key': order.idempotencyKey,
+      // Jeton de suivi (hotfix_171) : présent en Hive UNIQUEMENT. La colonne
+      // appartient au serveur, qui la remplit par DEFAULT ; l'omettre de la
+      // map Supabase garantit qu'un upsert client ne l'écrase jamais.
+      'tracking_token':  order.trackingToken,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
         'product_name': i.productName,
@@ -304,6 +313,12 @@ class SaleLocalDatasource {
     // Map Hive
     final hiveMap = <String, dynamic>{
       'id':             order.id,
+      // Jeton de suivi (hotfix_171). INDISPENSABLE ici : cette map REMPLACE
+      // intégralement la ligne Hive (put sans merge) — c'est déjà ainsi que
+      // `source` et `idempotency_key` se perdent à chaque modification de
+      // commande. Sans cette ligne, modifier une commande lui ferait perdre
+      // son jeton, donc son lien de suivi.
+      'tracking_token': order.trackingToken,
       'shop_id':        order.shopId,
       'status':         order.status.name,
       'discount_amount': order.discountAmount,
@@ -1528,6 +1543,8 @@ class SaleLocalDatasource {
       paymentStatus:      PaymentStatusX.fromKey(
                               m['payment_status'] as String?),
       idempotencyKey:     m['idempotency_key'] as String?, // GF-1
+      // Jeton de suivi (hotfix_171) — lecture seule, jamais écrit par le client.
+      trackingToken:      m['tracking_token'] as String?,
       // Vente « à choisir sur place » (lecture tolérante : colonnes absentes
       // sur les commandes legacy → false).
       isApprovalSale:     (m['is_approval_sale'] as bool?) ?? false,

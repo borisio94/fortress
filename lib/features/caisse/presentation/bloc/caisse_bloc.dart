@@ -725,7 +725,10 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
       // Vente directe à la caisse → encaissement complet à la création.
       // amountPaid = total + paymentStatus = paid (cf. hotfix_065).
       final sale = Sale(
-        id:             'sale_${DateTime.now().millisecondsSinceEpoch}',
+        // UUID v4 (Random.secure()) et non un horodatage : deux ventes dans
+        // la même milliseconde portaient la même clé et s'écrasaient
+        // silencieusement à l'écriture Hive (put sans vérification).
+        id:             Uuid.v4(),
         shopId:         event.shopId,
         items:          state.items,
         discountAmount: state.discountAmount,
@@ -1345,7 +1348,11 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
                 ? PaymentStatus.paid
                 : PaymentStatus.partial);
         final order = Sale(
-          id:             'order_${DateTime.now().millisecondsSinceEpoch}',
+          // UUID v4 : l'identifiant horodaté était devinable par énumération,
+          // et il servait de seul secret au lien de suivi public. Il ouvrait
+          // aussi la porte à l'écrasement silencieux de deux commandes créées
+          // dans la même milliseconde.
+          id:             Uuid.v4(),
           shopId:         event.shopId,
           items:          state.items,
           discountAmount: state.discountAmount,

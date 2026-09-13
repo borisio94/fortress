@@ -298,6 +298,17 @@ class Sale extends Equatable {
   /// Null pour les commandes legacy pré-PR-A.
   final String? idempotencyKey;
 
+  /// Secret du lien de suivi public (hotfix_171), distinct de [id].
+  ///
+  /// Le lien `/track/<token>` envoyé au client ne porte plus l'identifiant :
+  /// celui des commandes créées dans l'app est `order_<horodatage>`, donc
+  /// énumérable, et servait pourtant de seul secret. Le jeton est GÉNÉRÉ PAR
+  /// LE SERVEUR et n'est jamais écrit par le client — il est seulement relu.
+  ///
+  /// `null` tant que la commande n'a pas été synchronisée (création hors
+  /// ligne) : l'appelant retombe alors sur [id], qui reste lisible.
+  final String? trackingToken;
+
   /// Soft-delete (hotfix_084). Quand non-null, la commande est masquée
   /// des listes membres et n'est plus visible qu'aux super-admins via
   /// l'écran « Commandes supprimées ». L'UPDATE est exécuté par la RPC
@@ -389,6 +400,7 @@ class Sale extends Equatable {
     this.amountPaid = 0,
     this.paymentStatus = PaymentStatus.unpaid,
     this.idempotencyKey,
+    this.trackingToken,
     this.deletedAt,
     this.deletedBy,
     this.deleteReason,
@@ -486,6 +498,7 @@ class Sale extends Equatable {
     double? amountPaid,
     PaymentStatus? paymentStatus,
     String? idempotencyKey,
+    String? trackingToken,
     DateTime? deletedAt,
     String?   deletedBy,
     String?   deleteReason,
@@ -540,6 +553,7 @@ class Sale extends Equatable {
     amountPaid:         amountPaid         ?? this.amountPaid,
     paymentStatus:      paymentStatus      ?? this.paymentStatus,
     idempotencyKey:     idempotencyKey     ?? this.idempotencyKey,
+    trackingToken:      trackingToken      ?? this.trackingToken,
     deletedAt:    clearDeleted ? null : (deletedAt    ?? this.deletedAt),
     deletedBy:    clearDeleted ? null : (deletedBy    ?? this.deletedBy),
     deleteReason: clearDeleted ? null : (deleteReason ?? this.deleteReason),

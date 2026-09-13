@@ -4374,6 +4374,11 @@ end \$\$;""",
             // GF-1 (hotfix_080) — cf. syncOrders : préserver la clé sur les
             // events realtime, sinon un update distant l'efface en Hive.
             'idempotency_key': row['idempotency_key'],
+            // Jeton de suivi (hotfix_171) — MEME RAISON : généré côté serveur,
+            // il n'existe en local que par ce pull. L'omettre ici le remettrait
+            // à null au premier event realtime, et le lien WhatsApp retomberait
+            // sur l'identifiant, c'est-à-dire sur la fuite qu'on vient de fermer.
+            'tracking_token':  row['tracking_token'],
             // Module restaurant (hotfix_137) — MEME RAISON que les 2 blocs
             // ci-dessus : ce hiveMap REMPLACE integralement la ligne locale
             // (put, pas de merge). Sans ces cles, chaque pull/push realtime
@@ -4892,6 +4897,11 @@ end \$\$;""",
           // mais sans cette ligne le pull Supabase l'écrasait à null à chaque
           // refresh → garde-fou anti-doublon perdu après synchronisation.
           'idempotency_key': row['idempotency_key'],
+          // Jeton de suivi (hotfix_171). Généré par le SERVEUR : ce pull est le
+          // seul chemin par lequel il arrive en local. Sans cette ligne, il
+          // serait écrasé à null à chaque synchronisation et le lien WhatsApp
+          // retomberait sur l'identifiant — la fuite qu'on vient de fermer.
+          'tracking_token':  row['tracking_token'],
           // Module restaurant (hotfix_137) — MEME RAISON que les 2 blocs
           // ci-dessus : ce hiveMap REMPLACE integralement la ligne locale
           // (put, pas de merge). Sans ces cles, chaque pull/push realtime

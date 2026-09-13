@@ -2716,8 +2716,15 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     final totalStr = CurrencyFormatter.format(order.total);
     // Lien de suivi public — le client y verra sa commande et pourra la
     // valider en un tap. La RPC `validate_order_by_client` bascule alors
-    // le statut vers `processing` (cf. hotfix_057_order_tracking.sql).
-    final trackUrl = 'https://fortress-pos.web.app/track/${order.id}';
+    // le statut vers `processing` (cf. hotfix_173).
+    //
+    // Le lien porte le JETON, pas l'identifiant : celui-ci est devinable par
+    // énumération sur les commandes créées dans l'app, et il exposait nom,
+    // téléphone, panier et adresse de n'importe quelle commande (hotfix_171).
+    // Repli sur l'id tant que la commande n'a pas été synchronisée — elle
+    // reste alors lisible, mais le client ne pourra pas la valider.
+    final trackKey = order.trackingToken ?? order.id;
+    final trackUrl = 'https://fortress-pos.web.app/track/$trackKey';
     final msg =
         'Bonjour $clientName,\n\n'
         'Petit rappel pour votre commande chez $shopName '
