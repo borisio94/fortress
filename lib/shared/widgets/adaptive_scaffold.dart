@@ -138,7 +138,6 @@ void _smartBack(BuildContext context) {
 class AdaptiveScaffold extends ConsumerStatefulWidget {
   final String       shopId;
   final Widget       body;
-  final Widget?      floatingActionButton;
   /// Actions additionnelles affichées à droite de la topbar (en plus des
   /// boutons standards panier + notifications).
   final List<Widget>? extraActions;
@@ -147,7 +146,6 @@ class AdaptiveScaffold extends ConsumerStatefulWidget {
     super.key,
     required this.shopId,
     required this.body,
-    this.floatingActionButton,
     this.extraActions,
   });
 
@@ -205,8 +203,6 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
     final tabQuery     = goState.uri.queryParameters['tab'];
     final selectedIdx  = shellSelectedIndex(loc, widget.shopId,
         tabQuery: tabQuery, sector: shopSector(widget.shopId));
-    final fab = widget.floatingActionButton
-        ?? _newOrderFab(context, widget.shopId, loc, perms);
     // Layout desktop ssi OS desktop + fenêtre ≥ 900px de large. Sur fenêtre
     // étroite (utilisateur qui split-screen, ou OS mobile), on bascule
     // automatiquement sur le layout mobile.
@@ -214,7 +210,6 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
         ? _DesktopShell(
             shopId:        widget.shopId,
             body:          widget.body,
-            fab:           fab,
             extraActions:  widget.extraActions,
             perms:         perms,
             selectedIndex: selectedIdx,
@@ -222,7 +217,6 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
         : _MobileShell(
             shopId:        widget.shopId,
             body:          widget.body,
-            fab:           fab,
             extraActions:  widget.extraActions,
             perms:         perms,
             selectedIndex: selectedIdx,
@@ -244,57 +238,11 @@ class _AdaptiveScaffoldState extends ConsumerState<AdaptiveScaffold> {
   }
 }
 
-// ─── FAB « Nouvelle commande » ────────────────────────────────────────────────
-
-/// Écrans de module dont la page porte DÉJÀ son propre bouton flottant au
-/// même coin : le FAB du shell s'effacerait derrière (ou par-dessus).
-const _kRoutesWithOwnFab = {
-  '/tickets',
-  '/parametres/whatsapp-templates',
-  '/campaigns',
-};
-
-/// FAB « Nouvelle commande » : la caisse en 1 tap depuis les écrans de module.
-///
-/// E-commerce uniquement : le restaurant n'a pas de caisse dans son menu.
-/// Affiché sur les écrans listés dans le menu (stock, CRM, finances…),
-/// JAMAIS sur les sous-pages (formulaires, fiches), où il masquerait les
-/// boutons d'enregistrement. Masqué sur la caisse et sa liste de commandes,
-/// ainsi que sur l'accueil, qui porte son propre bouton intégré.
-Widget? _newOrderFab(BuildContext context, String shopId, String loc,
-    AppPermissions perms) {
-  if (isRestaurantShop(shopId) || !perms.canAccessCaisse) return null;
-  final base = '/shop/$shopId';
-  if (!loc.startsWith(base)) return null;
-  final rest = loc.substring(base.length);
-  if (rest == '/caisse' || rest.startsWith('/caisse/')) return null;
-  // Accueil : la page porte son propre bouton « Nouvelle commande » intégré
-  // au défilement — le FAB flottant ferait doublon (masqué, pas supprimé).
-  if (rest == '/dashboard') return null;
-  if (_kRoutesWithOwnFab.contains(rest)) return null;
-  final sector = shopSector(shopId);
-  final isModuleScreen = kShellNavItems
-      .where((i) => i.matchesSector(sector))
-      .expand((i) => [i, ...i.childrenFor(sector)])
-      .any((i) => Uri.parse(i.route(shopId)).path == loc);
-  if (!isModuleScreen) return null;
-  final cs = Theme.of(context).colorScheme;
-  return FloatingActionButton(
-    heroTag:         'shell_new_order_fab',
-    tooltip:         'Nouvelle commande',
-    backgroundColor: cs.primary,
-    foregroundColor: cs.onPrimary,
-    onPressed:       () => context.go('$base/caisse'),
-    child:           const Icon(Icons.add_rounded),
-  );
-}
-
 // ─── Layout mobile ────────────────────────────────────────────────────────────
 
 class _MobileShell extends StatelessWidget {
   final String                shopId;
   final Widget                body;
-  final Widget?               fab;
   final List<Widget>?         extraActions;
   final AppPermissions        perms;
   final int                   selectedIndex;
@@ -302,7 +250,6 @@ class _MobileShell extends StatelessWidget {
   const _MobileShell({
     required this.shopId,
     required this.body,
-    required this.fab,
     required this.extraActions,
     required this.perms,
     required this.selectedIndex,
@@ -468,7 +415,6 @@ class _MobileShell extends StatelessWidget {
         // désormais uniquement par le drawer pour éviter la redondance.
         Expanded(child: body),
       ]),
-      floatingActionButton: fab,
       // Bottom nav (manipulation à une main) : 4 modules principaux + onglet
       // « Plus » qui ouvre le drawer latéral pour les modules secondaires
       // (Finances, WhatsApp, Historique, Messagerie, Paramètres…). Le drawer
@@ -1187,7 +1133,6 @@ void _confirmLogout(BuildContext context) {
 class _DesktopShell extends StatelessWidget {
   final String        shopId;
   final Widget        body;
-  final Widget?       fab;
   final List<Widget>? extraActions;
   final AppPermissions perms;
   final int           selectedIndex;
@@ -1195,7 +1140,6 @@ class _DesktopShell extends StatelessWidget {
   const _DesktopShell({
     required this.shopId,
     required this.body,
-    required this.fab,
     required this.extraActions,
     required this.perms,
     required this.selectedIndex,
@@ -1242,7 +1186,6 @@ class _DesktopShell extends StatelessWidget {
         // Transparent : le fond photographique est monté SOUS ce Scaffold,
         // un fond opaque ici le masquerait entièrement.
         backgroundColor: Colors.transparent,
-        floatingActionButton: fab,
         body: Padding(
           padding: const EdgeInsets.all(_kRestoBlockGap),
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -1263,7 +1206,6 @@ class _DesktopShell extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
-      floatingActionButton: fab,
       body: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         sidebar,
         Expanded(child: Column(children: [
