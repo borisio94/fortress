@@ -672,6 +672,12 @@ class SaleLocalDatasource {
     // < total laisse une créance client (payment_status partial/unpaid). Si
     // null, comportement historique (force amount_paid = total, paid).
     double? amountPaidOnComplete,
+    // ARG-2 — `true` quand c'est le PARTENAIRE-LIVREUR qui a encaissé le
+    // client, sans avoir encore versé à la boutique. Sans cette information,
+    // la clôture écrivait `paid` : la commande passait pour soldée côté
+    // boutique alors que l'argent était ailleurs. L'appelant la tient du
+    // sheet de clôture (`CollectedBy`), seul endroit où la question est posée.
+    bool collectedByPartner = false,
   }) async {
     final raw = _ordersBox.get(orderId);
     if (raw == null) return;
@@ -734,9 +740,19 @@ class SaleLocalDatasource {
         map['amount_paid']    = paid;
         map['payment_status'] = PaymentStatusX.fromAmount(paid, total).key;
       } else {
-        // Comportement historique : clôture = encaissement total garanti.
+        // Aucun montant transmis = le client a tout réglé. Reste à savoir À
+        // QUI : `amountPaidOnComplete` n'est renseigné que lorsque la BOUTIQUE
+        // encaisse, si bien que ce chemin couvre AUSSI le cas « le partenaire
+        // a encaissé » — qui s'écrivait jusqu'ici `paid`, comme si la boutique
+        // avait l'argent en main.
+        //
+        // `amount_paid` reste au total dans les deux cas : la somme a bien été
+        // perçue, seul son porteur diffère. La remettre à zéro ferait
+        // réapparaître une créance CLIENT qui n'existe pas.
         map['amount_paid']    = total;
-        map['payment_status'] = PaymentStatus.paid.key;
+        map['payment_status'] = collectedByPartner
+            ? PaymentStatus.paidByPartner.key
+            : PaymentStatus.paid.key;
       }
     } else if (status == SaleStatus.refunded) {
       map['payment_status'] = PaymentStatus.refunded.key;

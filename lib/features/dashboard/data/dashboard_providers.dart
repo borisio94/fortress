@@ -984,8 +984,13 @@ final dashDataProvider =
       if (clientId != null && clientId.isNotEmpty) clientSet.add(clientId);
       // Créance = solde dû (vente à crédit). Cohérent avec Sale.amountDue :
       // payment_status 'paid' → 0, sinon (total − encaissé) borné à ≥ 0.
+      // `paid_by_partner` (hotfix_175) compte comme soldé ICI : le CLIENT a
+      // tout réglé, il n'a aucune dette. Ce que le partenaire doit encore
+      // verser est une créance sur LUI, portée par le livre partenaire — la
+      // compter en créance client la ferait apparaître deux fois, sur deux
+      // écrans qui ne parlent pas de la même personne.
       final paymentStatus = (o['payment_status'] as String?) ?? 'unpaid';
-      if (paymentStatus != 'paid') {
+      if (paymentStatus != 'paid' && paymentStatus != 'paid_by_partner') {
         final amountPaid = (o['amount_paid'] as num?)?.toDouble() ?? 0;
         totalClientDebts +=
             (orderTotal - amountPaid).clamp(0, double.infinity).toDouble();

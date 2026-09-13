@@ -1292,6 +1292,10 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               // VENTE À CRÉDIT — total réellement encaissé du client à la
               // clôture (null = clôture « entièrement payé », historique).
               double? amountPaidOnComplete;
+              // ARG-2 — qui a physiquement encaissé. Déclaré ici, hors du
+              // bloc de clôture, pour rester lisible à l'appel de
+              // `updateOrderStatus` plus bas (même motif que ci-dessus).
+              bool collectedByPartner = false;
               if (becomingCompleted) {
                 // Si on saute scheduled → completed direct (raccourci POS),
                 // collecter aussi paiement+mode AVANT les frais. Sinon
@@ -1404,6 +1408,8 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                     order: updated, fees: fres.fees,
                     collectedBy: fres.collectedBy);
                 completedAt = fres.completedAt;
+                collectedByPartner =
+                    fres.collectedBy == CollectedBy.partnerNotRemitted;
               }
 
               // Livraison refusée par le client : le partenaire-livreur a
@@ -1419,7 +1425,8 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 
               await _ds.updateOrderStatus(order.id!, status,
                   completedAt: completedAt,
-                  amountPaidOnComplete: amountPaidOnComplete);
+                  amountPaidOnComplete: amountPaidOnComplete,
+                  collectedByPartner: collectedByPartner);
               // (La libération de table du restaurant vivait ici. Elle est
               // remontée dans `settleRestaurantOrder`, qui court-circuite tout
               // ce parcours : ce point n'est plus atteint en restauration.)

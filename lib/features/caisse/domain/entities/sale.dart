@@ -21,36 +21,61 @@ enum SaleStatus {
 enum PaymentStatus {
   unpaid,    // Rien d'encaissé
   partial,   // Acompte versé, solde restant
-  paid,      // Totalement encaissée
+  paid,      // Totalement encaissée, la boutique a l'argent
   refunded,  // Remboursée
+
+  /// Le CLIENT a tout payé, mais au PARTENAIRE-LIVREUR, qui n'a pas encore
+  /// versé à la boutique.
+  ///
+  /// Sans cette valeur, la clôture « partenaire encaisseur » écrivait `paid` :
+  /// la commande passait pour soldée côté boutique alors que l'argent était
+  /// ailleurs, et la contrepartie ne subsistait que dans le livre partenaire.
+  /// Rien ne le signalait sur la commande elle-même.
+  ///
+  /// Ce n'est PAS une créance client — le client ne doit plus rien. C'est une
+  /// créance sur le partenaire, que le livre partenaire porte déjà.
+  /// Cf. `hotfix_175_payment_status_paid_by_partner.sql`.
+  paidByPartner,
 }
 
 extension PaymentStatusX on PaymentStatus {
   /// Clé canonique côté SQL et JSON.
   String get key => switch (this) {
-    PaymentStatus.unpaid   => 'unpaid',
-    PaymentStatus.partial  => 'partial',
-    PaymentStatus.paid     => 'paid',
-    PaymentStatus.refunded => 'refunded',
+    PaymentStatus.unpaid        => 'unpaid',
+    PaymentStatus.partial       => 'partial',
+    PaymentStatus.paid          => 'paid',
+    PaymentStatus.refunded      => 'refunded',
+    PaymentStatus.paidByPartner => 'paid_by_partner',
   };
   String get label => switch (this) {
-    PaymentStatus.unpaid   => 'Non payé',
-    PaymentStatus.partial  => 'Acompte',
-    PaymentStatus.paid     => 'Payé',
-    PaymentStatus.refunded => 'Remboursé',
+    PaymentStatus.unpaid        => 'Non payé',
+    PaymentStatus.partial       => 'Acompte',
+    PaymentStatus.paid          => 'Payé',
+    PaymentStatus.refunded      => 'Remboursé',
+    PaymentStatus.paidByPartner => 'Encaissé par le partenaire',
   };
   Color get color => switch (this) {
-    PaymentStatus.unpaid   => const Color(0xFFEF4444),
-    PaymentStatus.partial  => const Color(0xFFF59E0B),
-    PaymentStatus.paid     => const Color(0xFF10B981),
-    PaymentStatus.refunded => const Color(0xFF9CA3AF),
+    PaymentStatus.unpaid        => const Color(0xFFEF4444),
+    PaymentStatus.partial       => const Color(0xFFF59E0B),
+    PaymentStatus.paid          => const Color(0xFF10B981),
+    PaymentStatus.refunded      => const Color(0xFF9CA3AF),
+    // Ambre comme l'acompte : le client ne doit rien, mais quelque chose
+    // reste en attente — le versement du partenaire.
+    PaymentStatus.paidByPartner => const Color(0xFFF59E0B),
   };
   static PaymentStatus fromKey(String? s) => switch ((s ?? '').toLowerCase()) {
-    'partial'  => PaymentStatus.partial,
-    'paid'     => PaymentStatus.paid,
-    'refunded' => PaymentStatus.refunded,
-    _          => PaymentStatus.unpaid,
+    'partial'         => PaymentStatus.partial,
+    'paid'            => PaymentStatus.paid,
+    'refunded'        => PaymentStatus.refunded,
+    'paid_by_partner' => PaymentStatus.paidByPartner,
+    _                 => PaymentStatus.unpaid,
   };
+
+  /// `true` si le CLIENT a tout réglé — que la boutique ait l'argent en main
+  /// ou que le partenaire le détienne encore. Sert partout où l'on demande
+  /// « reste-t-il quelque chose à recouvrer AUPRÈS DU CLIENT ? ».
+  bool get isSettledByClient =>
+      this == PaymentStatus.paid || this == PaymentStatus.paidByPartner;
 
   /// Dérive le statut de paiement à partir du montant encaissé et du total
   /// facturé. Convention unique partagée par la création de commande,
@@ -460,17 +485,20 @@ class Sale extends Equatable {
   /// fixer par le marchand (quartier non répertorié → `deliveryPrice` null).
   bool get deliveryFeeToFix => deliveryPrice == null && source == 'web';
 
-  /// Reste à payer = total − amountPaid, jamais négatif. Pour les commandes
-  /// dont `paymentStatus = paid`, retourne 0 (couvre les commandes legacy
-  /// pré-hotfix_065 où amountPaid n'est pas peuplé).
+  /// Reste à payer PAR LE CLIENT = total − amountPaid, jamais négatif. Zéro
+  /// dès que le client a soldé, y compris lorsqu'il a payé au partenaire
+  /// (couvre aussi les commandes legacy pré-hotfix_065 où `amountPaid` n'est
+  /// pas peuplé).
   double get amountDue =>
-      paymentStatus == PaymentStatus.paid
+      paymentStatus.isSettledByClient
           ? 0
           : (total - amountPaid).clamp(0, double.infinity);
 
-  /// `true` si la commande est totalement encaissée (que ce soit en une
-  /// fois ou via acompte + solde).
-  bool get isFullyPaid => paymentStatus == PaymentStatus.paid;
+  /// `true` si la commande est totalement encaissée — en une fois, via
+  /// acompte + solde, ou par le partenaire-livreur. Du point de vue du
+  /// client il n'y a plus rien à percevoir dans les trois cas ; ce que le
+  /// partenaire doit encore verser relève du livre partenaire.
+  bool get isFullyPaid => paymentStatus.isSettledByClient;
 
   Sale copyWith({
     String? id, String? shopId, List<SaleItem>? items,
