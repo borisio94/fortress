@@ -1049,21 +1049,68 @@ class _InventairePageState extends ConsumerState<InventairePage>
       .where((p) => !p.isDeleted && p.isActive && p.isVisibleWeb)
       .toList();
 
-  /// URL de la vitrine publique, volontairement **nue** (aucun query param).
+  /// Emplacement sur lequel filtrer le lien, d'après l'onglet de vue actif.
+  /// `null` = vue Globale → lien nu.
   ///
-  /// Sans `ids=`, `catalogue.html` bascule sur `get_public_catalogue_products`
-  /// → tout le catalogue, et non le sous-ensemble figé de
-  /// `get_delivery_products`. Sans `stock=` ni raccourcisseur non plus : le
-  /// lien est donc **permanent** et **vivant** (un produit ajouté demain y
-  /// apparaît sans réenvoi), contrairement au lien de
-  /// `_createWhatsappCatalogue` (snapshot stock + short link à 90 jours).
-  /// C'est ce qu'il faut pour un statut WhatsApp, une bio ou une liste de
-  /// diffusion.
-  String get _fullCatalogueUrl {
+  /// `dashViewFilterProvider` a TROIS états, pas deux : `null` (Globale),
+  /// `'_base'` (la boutique seule) et `<location_id>` (un partenaire).
+  /// `'_base'` n'est PAS un id d'emplacement — c'est un sentinel qu'il faut
+  /// résoudre vers la `StockLocation` de la boutique. On ne peut donc pas
+  /// s'appuyer sur `_isPartnerView`, qui vaut `false` pour `'_base'` alors
+  /// que cet onglet doit bien produire un lien filtré.
+  StockLocation? _activeCatalogueLocation(String? viewFilter) {
+    if (viewFilter == null) return null;
+    if (viewFilter == '_base') {
+      // `getShopLocation` ne teste pas `isActive` : on le fait ici, pour que
+      // la boutique soit traitée exactement comme un partenaire.
+      final loc = AppDatabase.getShopLocation(widget.shopId);
+      return (loc != null && loc.isActive) ? loc : null;
+    }
+    final raw = HiveBoxes.stockLocationsBox.get(viewFilter);
+    if (raw == null) return null;
+    try {
+      final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+      return loc.isActive ? loc : null;
+    } catch (_) {
+      return null; // entrée Hive corrompue → on retombe sur le lien nu
+    }
+  }
+
+  /// Produits qui sortiront sur la vitrine POUR CE PÉRIMÈTRE.
+  ///
+  /// En Globale (`location == null`) le périmètre est le catalogue entier :
+  /// le compteur reste donc exactement celui d'avant. Sur un emplacement, on
+  /// ne garde que ce qui y est réellement en stock — c'est la règle que la
+  /// vitrine applique de son côté (elle masque les stocks nuls), le compteur
+  /// doit annoncer la même chose.
+  List<Product> _publicCatalogueProductsFor(StockLocation? location) {
+    if (location == null) return _publicCatalogueProducts;
+    return _publicCatalogueProducts
+        .where((p) => _stockAtLocations(p, [location.id]) > 0)
+        .toList();
+  }
+
+  /// URL de la vitrine publique.
+  ///
+  /// En Globale elle reste volontairement **nue** : sans `ids=`,
+  /// `catalogue.html` appelle `get_public_catalogue_products` et sert tout le
+  /// catalogue ; sans `stock=` ni raccourcisseur, le lien est **permanent** et
+  /// **vivant** (un produit ajouté demain y apparaît sans réenvoi). C'est ce
+  /// qu'il faut pour un statut WhatsApp, une bio ou une liste de diffusion.
+  ///
+  /// Sur un emplacement, on n'ajoute QUE `?location=<id>` (hotfix_174) : le
+  /// filtrage se fait en base, à la lecture, donc le lien reste vivant lui
+  /// aussi. Surtout pas `ids=` + `stock=` comme `_createWhatsappCatalogue` —
+  /// ceux-là gèlent la liste et le stock dans l'URL, et un article
+  /// réapprovisionné n'apparaîtrait jamais dans un lien déjà envoyé.
+  String _catalogueUrlFor(StockLocation? location) {
     final origin = Uri.base.origin.startsWith('http')
         ? Uri.base.origin
         : 'https://fortress-pos.web.app';
-    return '$origin/catalogue/${widget.shopId}';
+    final base = '$origin/catalogue/${widget.shopId}';
+    return location == null
+        ? base
+        : '$base?location=${Uri.encodeQueryComponent(location.id)}';
   }
 
   /// Copie le lien du catalogue complet et rapporte combien de produits
@@ -1071,10 +1118,33 @@ class _InventairePageState extends ConsumerState<InventairePage>
   /// à moitié invisible ne lève aucune erreur côté client, il affiche
   /// simplement une vitrine amputée en silence.
   Future<void> _copyFullCatalogueLink() async {
-    final total   = _products.where((p) => !p.isDeleted).length;
-    final publics = _publicCatalogueProducts.length;
-    await Clipboard.setData(ClipboardData(text: _fullCatalogueUrl));
+    final location = _activeCatalogueLocation(ref.read(dashViewFilterProvider));
+    final total    = _products.where((p) => !p.isDeleted).length;
+    final publics  = _publicCatalogueProductsFor(location).length;
+
+    // Emplacement VIDE : on ne copie rien. Même garde que le partage « Par
+    // emplacement » (cf. `_createWhatsappCatalogue`) — livrer un lien qui
+    // ouvre une vitrine déserte passe pour une panne aux yeux du client,
+    // alors qu'ici il suffit de changer d'onglet. En Globale, en revanche,
+    // on copie quand même : le lien reste valable pour plus tard, dès qu'un
+    // produit passera en « visible web ».
+    if (location != null && publics == 0) {
+      AppSnack.info(context,
+          'Aucun produit en stock chez ${location.name} — lien non copié.');
+      return;
+    }
+
+    await Clipboard.setData(ClipboardData(text: _catalogueUrlFor(location)));
     if (!mounted) return;
+
+    if (location != null) {
+      AppSnack.success(context,
+          'Lien catalogue ${location.name} copié — $publics produit'
+          '${publics > 1 ? 's' : ''} en stock sur place.');
+      return;
+    }
+
+    // Vue Globale : messages d'origine, inchangés.
     final hidden = total - publics;
     if (publics == 0) {
       AppSnack.warning(context,
@@ -1356,12 +1426,15 @@ class _InventairePageState extends ConsumerState<InventairePage>
                       .canExportProducts) ...[
                     _ExportBtn(onTap: _openExport),
                   ],
-                  // Lien de la vitrine publique — compteur `publics/total`
-                  // calculé sur TOUS les produits de la boutique, pas sur
-                  // `_filtered` : le lien ignore la vue active (Globale /
-                  // Boutique / Partenaire) et le filtre de recherche.
+                  // Lien de la vitrine publique. Le compteur SUIT désormais
+                  // l'onglet de vue : en Globale il vaut `publics/total` sur
+                  // toute la boutique (inchangé) ; sur un emplacement il ne
+                  // compte que ce qui y est réellement en stock — le lien
+                  // copié étant filtré, un compteur global mentirait. Il
+                  // reste en revanche insensible au filtre de recherche.
                   _CatalogLinkBtn(
-                    publicCount: _publicCatalogueProducts.length,
+                    publicCount: _publicCatalogueProductsFor(
+                        _activeCatalogueLocation(viewFilter)).length,
                     totalCount:
                         _products.where((p) => !p.isDeleted).length,
                     onTap: _copyFullCatalogueLink,
@@ -4775,12 +4848,14 @@ class _ExportBtn extends StatelessWidget {
   }
 }
 
-/// Bouton « Copier le lien du catalogue complet » — vitrine publique de la
-/// boutique, lien nu et permanent (cf. `_fullCatalogueUrl`).
+/// Bouton « Copier le lien du catalogue » — vitrine publique de la boutique.
+/// Lien nu et permanent en vue Globale, filtré sur l'emplacement actif sinon
+/// (cf. `_catalogueUrlFor`).
 ///
 /// Porte un compteur `publics/total` plutôt qu'une simple icône : le
 /// catalogue public ne montre que les produits `isActive && isVisibleWeb`,
-/// et rien côté client ne signale ceux qui manquent. Le compteur vire à
+/// et rien côté client ne signale ceux qui manquent. Sur un emplacement,
+/// `publics` retranche en plus ce qui n'y est pas en stock. Le compteur vire à
 /// l'ambre dès qu'au moins un produit ne sortira pas, pour qu'on le voie
 /// avant d'envoyer le lien plutôt qu'après.
 class _CatalogLinkBtn extends StatelessWidget {
