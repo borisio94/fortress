@@ -974,6 +974,21 @@ class StockService {
             : ((cause ?? '').trim().isNotEmpty ? cause : 'Ajustement de stock'),
     };
     HiveBoxes.stockMovementsBox.put(map['id'], map);
+    // POUSSÉ AU SERVEUR, et pas seulement écrit en local.
+    //
+    // `stock_movements` est synchronisée en PASSTHROUGH : `_syncTablePassthrough`
+    // efface toute ligne Hive de la boutique absente du distant. Son garde-fou
+    // ne protège que les lignes ayant une écriture en attente dans la file
+    // offline — un `put` Hive seul n'en crée aucune. Le journal était donc
+    // purgé à la première synchronisation.
+    //
+    // Ce n'est pas qu'une perte d'historique : le recalcul de stock et
+    // `reconcileShop` LISENT ce journal (quatre chemins dans ce fichier). Un
+    // journal amputé reconstruit un stock faux, puis l'écrit.
+    //
+    // `bgUpsert` (et non `_bgWrite`, privé à AppDatabase) — même voie que les
+    // incidents plus haut dans ce service.
+    AppDatabase.bgUpsert('stock_movements', map);
   }
 
   // ════════════════════════════════════════════════════════════════════════════
