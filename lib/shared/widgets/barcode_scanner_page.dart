@@ -1,5 +1,8 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+
+import 'app_snack.dart';
 
 /// Lecture d'un code-barres à la caméra, en plein écran.
 ///
@@ -14,10 +17,23 @@ class BarcodeScannerPage extends StatefulWidget {
   const BarcodeScannerPage({super.key});
 
   /// Ouvre le scanner et renvoie le code lu. `null` = abandon.
-  static Future<String?> open(BuildContext context) =>
-      Navigator.of(context).push<String>(
-        MaterialPageRoute(builder: (_) => const BarcodeScannerPage()),
-      );
+  ///
+  /// SUR WEB, ON N'OUVRE RIEN. `mobile_scanner` n'a pas d'implémentation
+  /// web : le canal natif est absent, l'appel lève une MissingPluginException
+  /// et l'utilisateur se retrouvait devant un écran noir, sans un mot. Mieux
+  /// vaut le dire que de l'y envoyer.
+  ///
+  /// La garde vit ICI et non chez les appelants : le widget est partagé, et
+  /// la placer à la source couvre aussi les appels à venir.
+  static Future<String?> open(BuildContext context) async {
+    if (kIsWeb) {
+      AppSnack.info(context, 'Scanner disponible sur l\'application mobile');
+      return null;
+    }
+    return Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const BarcodeScannerPage()),
+    );
+  }
 
   @override
   State<BarcodeScannerPage> createState() => _BarcodeScannerPageState();

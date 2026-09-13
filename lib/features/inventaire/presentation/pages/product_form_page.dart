@@ -124,10 +124,18 @@ class ProductFormExtra {
   final Product product;
   final String? focusVariantId;
   final bool addNewVariant;
+
+  /// Le produit vient de l'AJOUT RAPIDE et n'est pas encore enregistré : on
+  /// poursuit une saisie, on ne modifie pas une fiche existante. Sert
+  /// uniquement au titre de l'écran — sans lui, un produit neuf s'ouvrirait
+  /// sous « Modifier le produit », ce qui ferait croire qu'il existe déjà.
+  final bool isQuickAddContinuation;
+
   const ProductFormExtra({
     required this.product,
     this.focusVariantId,
     this.addNewVariant = false,
+    this.isQuickAddContinuation = false,
   });
 }
 
@@ -142,6 +150,10 @@ class _ProductFormPageState extends State<ProductFormPage> {
   final _pageCtrl = PageController();
   int  _step      = 0;
   static const _totalSteps = 3;
+
+  /// Saisie poursuivie depuis l'ajout rapide (cf. [ProductFormExtra]) :
+  /// change le titre, rien d'autre.
+  bool _isQuickAddContinuation = false;
 
   final _keys = List.generate(3, (_) => GlobalKey<FormState>());
 
@@ -209,6 +221,14 @@ class _ProductFormPageState extends State<ProductFormPage> {
   @override
   void initState() {
     super.initState();
+    // LU TOUT DE SUITE, et non dans le post-frame ci-dessous : le titre est
+    // peint dès la première frame. Laissé à `_prefillIfEdit`, il se serait
+    // affiché « Modifier le produit » avant de changer — ou de ne jamais
+    // changer, faute de reconstruction déclenchée.
+    final raw = widget.extra;
+    if (raw is ProductFormExtra) {
+      _isQuickAddContinuation = raw.isQuickAddContinuation;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadCategories();
       _prefillIfEdit();
@@ -262,6 +282,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
       p = raw.product;
       focusVariantId = raw.focusVariantId;
       addNewVariant = raw.addNewVariant;
+      // `_isQuickAddContinuation` est déjà posé dans initState (voir là-bas).
     }
     if (p == null) return;
     _nameCtrl.text    = p.name;
@@ -336,7 +357,22 @@ class _ProductFormPageState extends State<ProductFormPage> {
         for (final existing in _variants) {
           existing.isExpanded = false;
         }
-        _variants.add(_Variant()..isExpanded = true..isNew = true);
+        // Point de départ repris du produit parent : une nouvelle déclinaison
+        // se vend presque toujours au même prix et vient du même fournisseur.
+        // Restent VIDES le nom (c'est ce qui la distingue : « Taille L »,
+        // « Rouge »…), le SKU (il doit être unique) et le stock (chaque
+        // variante a le sien).
+        //
+        // On est ici forcément dans la branche `p.variants.isNotEmpty` :
+        // la première variante existe toujours et sert de gabarit.
+        final ref = p.variants.first;
+        final nv  = _Variant()..isExpanded = true..isNew = true;
+        nv.purchasePrice.text = ref.priceBuy     > 0 ? ref.priceBuy.toString()     : '';
+        nv.salePricePos.text  = ref.priceSellPos > 0 ? ref.priceSellPos.toString() : '';
+        nv.salePriceWeb.text  = ref.priceSellWeb > 0 ? ref.priceSellWeb.toString() : '';
+        nv.supplier.text      = ref.supplier    ?? '';
+        nv.supplierRef.text   = ref.supplierRef ?? '';
+        _variants.add(nv);
         _step = 1;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && _pageCtrl.hasClients) {
@@ -1271,7 +1307,13 @@ class _ProductFormPageState extends State<ProductFormPage> {
       },
       child: AppScaffold(
       shopId: widget.shopId,
-      title: widget.extra != null ? 'Modifier le produit' : l.inventaireAdd,
+      // Trois états distincts : poursuivre une saisie rapide n'est ni créer
+      // de zéro, ni modifier une fiche existante.
+      title: _isQuickAddContinuation
+          ? 'Compléter le produit'
+          : widget.extra != null
+              ? 'Modifier le produit'
+              : 'Nouveau produit',
       isRootPage: false,
       onBeforeBack: _confirmExit,
       body: Column(children: [

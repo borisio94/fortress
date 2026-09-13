@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -18,6 +19,8 @@ import '../../../../shared/widgets/form_sheet.dart';
 import '../../../inventaire/domain/entities/product.dart';
 import '../../../inventaire/presentation/bloc/inventaire_bloc.dart';
 import '../../../inventaire/presentation/bloc/inventaire_event.dart';
+import '../../../inventaire/presentation/pages/product_form_page.dart'
+    show ProductFormExtra;
 
 /// Ajout produit éclair (point 7 de l'onboarding spec).
 ///
@@ -100,13 +103,49 @@ class _ProductQuickAddPageState extends State<ProductQuickAddPage> {
   Future<void> _pickImage() async {
     final source = await _askImageSource();
     if (source == null || !mounted) return;
-    final xFile = await ImagePicker().pickImage(source: source);
+    XFile? xFile;
+    try {
+      xFile = await ImagePicker().pickImage(source: source);
+    } catch (_) {
+      // ÉCRAN NOIR SUR WEB. La caméra y dépend du navigateur et d'une
+      // permission qui peut être refusée sans un mot : `image_picker` lève
+      // alors au lieu de rendre la main, et l'utilisateur restait devant un
+      // écran noir. On le dit, et on bascule sur le sélecteur de fichiers,
+      // qui fonctionne partout.
+      if (!kIsWeb || source != ImageSource.camera) rethrow;
+      if (!mounted) return;
+      AppSnack.info(context, 'Sélectionnez une photo depuis votre galerie');
+      xFile = await ImagePicker().pickImage(source: ImageSource.gallery);
+    }
     if (xFile == null || !mounted) return;
     // Même validation que la fiche complète : refus sous 800×800,
     // 1600 px max, ré-encodage PNG sans perte.
     final result = await validateAndReadImage(xFile, context);
     if (!mounted || !result.isValid) return;
     setState(() => _imageBytes = result.bytes);
+  }
+
+  /// Bascule vers la fiche complète EN CONSERVANT la saisie.
+  ///
+  /// Le bouton renvoyait jusqu'ici vers `/inventaire` : tout ce qui venait
+  /// d'être tapé était perdu, et l'utilisateur devait recommencer. On
+  /// construit ici un produit NON PERSISTÉ (`id: null` — rien n'est écrit) et
+  /// on le passe en `extra`. `ProductFormPage` le traite comme n'importe quel
+  /// pré-remplissage : ses champs se garnissent, et comme ce produit n'a
+  /// aucune variante, la fiche en fabrique une de base qui reprend prix
+  /// d'achat, prix de vente et stock.
+  void _openFullForm() {
+    final draft = Product(
+      storeId:      widget.shopId,
+      name:         _nameCtrl.text.trim(),
+      priceBuy:     _buy,
+      priceSellPos: _sell,
+      stockQty:     int.tryParse(_stockCtrl.text) ?? 0,
+      createdAt:    DateTime.now(),
+    );
+    context.go('/shop/${widget.shopId}/inventaire/product',
+        extra: ProductFormExtra(
+            product: draft, isQuickAddContinuation: true));
   }
 
   Future<void> _submit() async {
@@ -179,8 +218,7 @@ class _ProductQuickAddPageState extends State<ProductQuickAddPage> {
         title: const Text('Ajout rapide'),
         actions: [
           TextButton.icon(
-            onPressed: () => context.go(
-                '/shop/${widget.shopId}/inventaire'),
+            onPressed: _openFullForm,
             icon:  const Icon(Icons.tune_rounded, size: 16),
             label: const Text('Options avancées'),
             style: TextButton.styleFrom(

@@ -2181,6 +2181,13 @@ class _DesktopRowState extends ConsumerState<_DesktopRow> {
                 const SizedBox(width: 4),
                 if (p.sku != null) Text(p.sku!,
                     style: AppTextStyles.micro),
+                // Le badge manquait ICI alors qu'il existait sur la carte
+                // mobile : en vue bureau, rien ne distinguait une fiche
+                // incomplète d'une fiche publiée.
+                if (p.isDraft) ...[
+                  const SizedBox(width: 6),
+                  const _DraftBadge(),
+                ],
               ]),
             ])),
             Expanded(flex: 2, child: Column(
