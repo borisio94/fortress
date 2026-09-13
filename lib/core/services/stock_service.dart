@@ -961,7 +961,15 @@ class StockService {
       'status': status,
       'cause': cause,
       'notes': notes,
-      'reference_id': referenceId,
+      // `reference` et NON `reference_id` : la colonne s'appelle ainsi dans
+      // la table (hotfix_010). La clé fautive faisait rejeter CHAQUE push en
+      // PGRST204, rejouer 10 fois, puis disparaître en silence — c'est l'une
+      // des raisons pour lesquelles `caf84ba` ne refermait rien du tout.
+      //
+      // Effet de bord réparé au passage : `StockMovement.fromMap` lit
+      // `reference`, donc la référence des mouvements journalisés ici
+      // arrivait TOUJOURS nulle à l'affichage.
+      'reference': referenceId,
       'created_by': user?.name,
       'created_at': now.toIso8601String(),
       // GF-7 : pour les mouvements `adjustment`, `reason` est OBLIGATOIRE

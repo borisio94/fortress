@@ -1097,6 +1097,22 @@ class SaleLocalDatasource {
     return moved;
   }
 
+  /// Référence de commande d'un mouvement de stock, quelle que soit la clé
+  /// sous laquelle elle a été écrite.
+  ///
+  /// `StockService._log` écrivait `reference_id` — une clé qui n'existe PAS
+  /// dans la table, dont la colonne s'appelle `reference` depuis l'origine
+  /// (hotfix_010). Le client écrit désormais le bon nom, mais les lignes déjà
+  /// présentes dans Hive portent l'ancienne clé, et celles qui reviennent du
+  /// serveur portent la nouvelle : les deux cohabiteront durablement.
+  ///
+  /// Ne lire que la nouvelle rendrait l'anti-doublon de retour inopérant et
+  /// ferait retomber la restitution sélective (STK-1) sur « tout restituer »
+  /// pour tout l'historique local. On lit donc les deux, sans date de
+  /// péremption — le coût est nul, l'oubli serait silencieux.
+  static String? _movementRef(Map<String, dynamic> m) =>
+      (m['reference'] ?? m['reference_id'])?.toString();
+
   /// Quantité encore SORTIE par variante pour cette commande, d'après le
   /// journal des mouvements.
   ///
@@ -1116,7 +1132,7 @@ class SaleLocalDatasource {
     for (final raw in HiveBoxes.stockMovementsBox.values) {
       try {
         final m = Map<String, dynamic>.from(raw);
-        if (m['reference_id'] != orderId) continue;
+        if (_movementRef(m) != orderId) continue;
         if ((m['type'] as String? ?? '') != 'sale') continue;
         final vid = m['variant_id'] as String?;
         if (vid == null || vid.isEmpty) continue;
@@ -1525,7 +1541,9 @@ class SaleLocalDatasource {
 
   /// GF-5 — Anti-doublon retour. Retourne `true` si au moins un mouvement
   /// `return_client_good` ou `return_defective` existe avec
-  /// `reference_id = orderId` dans `stock_movements`. Si [variantId] est
+  /// `reference = orderId` dans `stock_movements` — l'ancienne clé
+  /// `reference_id` restant lue par [_movementRef] pour l'historique local.
+  /// Si [variantId] est
   /// fourni, le check est restreint à cette variante précise (utile pour
   /// gérer les retours partiels article-par-article).
   ///
@@ -1538,7 +1556,7 @@ class SaleLocalDatasource {
     for (final raw in HiveBoxes.stockMovementsBox.values) {
       try {
         final m = Map<String, dynamic>.from(raw);
-        if (m['reference_id'] != orderId) continue;
+        if (_movementRef(m) != orderId) continue;
         if (variantId != null && m['variant_id'] != variantId) continue;
         final type = m['type'] as String? ?? '';
         if (type == 'return_client_good' || type == 'return_defective') {
@@ -1561,7 +1579,7 @@ class SaleLocalDatasource {
     for (final raw in HiveBoxes.stockMovementsBox.values) {
       try {
         final m = Map<String, dynamic>.from(raw);
-        if (m['reference_id'] != orderId) continue;
+        if (_movementRef(m) != orderId) continue;
         final type = m['type'] as String? ?? '';
         if (type != 'return_client_good' && type != 'return_defective') {
           continue;
