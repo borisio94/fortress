@@ -330,7 +330,10 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
     // Pas de variantes → ajouter directement au panier
     if (product.variants.isEmpty || product.variants.length == 1) {
       final v = product.variants.isNotEmpty ? product.variants.first : null;
-      final price = v?.priceSellPos ?? product.priceSellPos;
+      // PRIX PROMOTIONNEL APPLIQUÉ. La carte produit affichait la promotion
+      // et le panier facturait `priceSellPos` : le client voyait une remise
+      // et payait le plein tarif.
+      final price = v?.effectiveSellPrice ?? product.priceSellPos;
       final id = v?.id ?? (product.id ?? product.name);
       final stock = v != null
           ? _stockForVariant(v, deliveryLocId)
@@ -569,8 +572,11 @@ class _ProductCard extends StatelessWidget {
 
   String _displayPrice() {
     if (product.variants.isNotEmpty) {
+      // Prix EFFECTIFS : la fourchette affichée doit être celle qui sera
+      // facturée. Bâtie sur `priceSellPos`, elle annonçait le plein tarif
+      // d'un article vendu en promotion.
       final prices = product.variants
-          .map((v) => v.priceSellPos)
+          .map((v) => v.effectiveSellPrice)
           .where((p) => p > 0)
           .toList();
       if (prices.isEmpty) return 'N/D';
@@ -686,7 +692,8 @@ class _VariantPickerSheet extends StatelessWidget {
                         productName: product.name,
                         variantName: product.variants.length > 1 ? v.name : null,
                         imageUrl:    v.imageUrl ?? product.mainImageUrl,
-                        unitPrice:   v.priceSellPos,
+                        // Promotion appliquée (cf. `effectiveSellPrice`).
+                        unitPrice:   v.effectiveSellPrice,
                         priceBuy:    v.priceBuy,
                         quantity:    1,
                       ),
@@ -751,8 +758,10 @@ class _VariantPickerSheet extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               Text(
-                                v.priceSellPos > 0
-                                    ? CurrencyFormatter.format(v.priceSellPos)
+                                // Prix effectif : ce que le client paiera.
+                                v.effectiveSellPrice > 0
+                                    ? CurrencyFormatter.format(
+                                        v.effectiveSellPrice)
                                     : 'N/D',
                                 style: AppTextStyles.bodyBold.copyWith(
                                     fontWeight: FontWeight.w800,
@@ -1276,7 +1285,8 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
     final deliveryLocId = bloc.state.deliveryLocationId;
     if (product.variants.isEmpty || product.variants.length == 1) {
       final v = product.variants.isNotEmpty ? product.variants.first : null;
-      final price = v?.priceSellPos ?? product.priceSellPos;
+      // Promotion appliquée (cf. `effectiveSellPrice`).
+      final price = v?.effectiveSellPrice ?? product.priceSellPos;
       final id = v?.id ?? (product.id ?? product.name);
       final stock = v != null
           ? _stockForVariant(v, deliveryLocId)
@@ -1475,7 +1485,8 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
       SaleItem(
         productId:   id,
         productName: name,
-        unitPrice:   v.priceSellPos,
+        // Promotion appliquée (cf. `effectiveSellPrice`).
+        unitPrice:   v.effectiveSellPrice,
         priceBuy:    v.priceBuy,
         imageUrl:    v.imageUrl ?? p.mainImageUrl,
         quantity:    1,

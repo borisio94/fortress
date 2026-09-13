@@ -153,6 +153,32 @@ class ProductVariant extends Equatable {
 
   double effectivePriceBuy(double expensePerUnit) => priceBuy + expensePerUnit;
 
+  /// `true` si une promotion est RÉELLEMENT en cours sur cette variante.
+  ///
+  /// Quatre conditions, toutes nécessaires : la promo est activée, un prix
+  /// promotionnel existe, l'instant présent tombe dans la fenêtre (bornes
+  /// nulles = pas de borne), et ce prix est bien INFÉRIEUR au prix normal —
+  /// une « promo » plus chère n'en est pas une.
+  ///
+  /// Cette règle vivait en privé dans `product_grid_card.dart`, qui l'utilisait
+  /// pour AFFICHER un prix barré. Le panier, lui, ne la connaissait pas et
+  /// facturait `priceSellPos` : le client voyait une promotion et payait le
+  /// plein tarif. Elle est remontée ici pour qu'affichage et facturation
+  /// dépendent d'une seule et même vérité.
+  bool get isPromoActive {
+    if (!promoEnabled || promoPrice == null) return false;
+    final now = DateTime.now();
+    if (promoStart != null && now.isBefore(promoStart!)) return false;
+    if (promoEnd   != null && now.isAfter(promoEnd!))    return false;
+    return promoPrice! < priceSellPos;
+  }
+
+  /// Prix de vente à APPLIQUER : le prix promotionnel si la promotion est
+  /// active, le prix normal sinon. C'est ce montant qui doit être affiché ET
+  /// facturé — jamais l'un sans l'autre.
+  double get effectiveSellPrice =>
+      isPromoActive ? promoPrice! : priceSellPos;
+
   double? get marginPos => priceSellPos > 0
       ? ((priceSellPos - priceBuy) / priceSellPos) * 100
       : null;
