@@ -1476,6 +1476,28 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               setState(() {});
             },
             onCancelWithReason: (reason) async {
+              // Garde défensive, comme sur `onUpdate` plus haut : annuler une
+              // commande requiert salesCancel. Elle manquait ICI seulement,
+              // et ce n'était pas une simple redondance d'UI.
+              //
+              // Les deux portes d'annulation de la carte sont MUTUELLEMENT
+              // EXCLUSIVES via `_canConfirmClient()` : le bouton « Annuler ou
+              // refuser » (gardé par `canCancel`) ne s'affiche QUE tant que la
+              // commande n'est pas à échéance ; passée l'échéance, c'est la
+              // paire « Validée / Annulée par client » qui prend sa place — et
+              // celle-là n'était gardée par rien. La protection était donc
+              // inversée par rapport au risque : présente avant l'échéance,
+              // absente le jour où la commande est effectivement traitée.
+              //
+              // Placée sur le callback parent, cette garde ferme les TROIS
+              // chemins d'un coup — ils convergent tous vers
+              // `widget.onCancelWithReason`.
+              if (!perms.canCancelSale) {
+                AppSnack.error(context,
+                    'Action réservée : annuler une commande requiert la '
+                    'permission "sales.cancel".');
+                return;
+              }
               final o = orders[i];
               await _ds.cancelOrderWithReason(o.id!, reason);
               ActivityLogService.log(
@@ -2300,15 +2322,29 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                               widget.onUpdate(SaleStatus.processing),
                         ),
                       ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: _WideActionButton(
-                          icon: Icons.cancel_outlined,
-                          label: 'Annulée par client',
-                          color: AppColors.error,
-                          onPressed: () => _askCancelReason(context),
+                      // La moitié « Annulée » SEULEMENT est conditionnée :
+                      // annuler requiert salesCancel, valider non. Une
+                      // validation client n'est pas un geste d'annulation et
+                      // reste ouverte à tout opérateur — gouverner les deux
+                      // boutons par la même condition aurait empêché de
+                      // confirmer une commande arrivée à échéance.
+                      //
+                      // Sans la permission, le bouton DISPARAÎT au lieu de
+                      // faire saisir un motif pour refuser ensuite. La garde
+                      // du callback parent reste la frontière qui compte ;
+                      // celle-ci évite seulement de promettre un geste
+                      // impossible.
+                      if (widget.canCancel) ...[
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: _WideActionButton(
+                            icon: Icons.cancel_outlined,
+                            label: 'Annulée par client',
+                            color: AppColors.error,
+                            onPressed: () => _askCancelReason(context),
+                          ),
                         ),
-                      ),
+                      ],
                     ]),
                     const SizedBox(height: 8),
                   ],
