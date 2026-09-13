@@ -889,16 +889,42 @@ class SaleLocalDatasource {
 
     final decision = StockEngagement.decide(
       oldStatus: oldStatus, newStatus: status, reserved: reserved);
+    // `decide` est PUR et le reste : il dit ce qu'il FAUDRAIT faire, sans
+    // rien savoir de ce qui se passera. C'est ici, après la tentative, que
+    // le drapeau se décide — sur un résultat, plus sur une intention.
+    var reservedToPersist = decision.reserved;
     if (decision.action == StockAction.decrement) {
-      await _decrementOrderStock(order);
+      final moved = await _decrementOrderStock(order);
+      // STK-1 — le drapeau ne vaut `true` que si AU MOINS un article est
+      // réellement sorti. Rien n'est sorti → rien n'est engagé → une
+      // annulation ne restituera rien, au lieu de créer du stock.
+      reservedToPersist = moved.isNotEmpty;
+      if (moved.isEmpty && order.items.isNotEmpty) {
+        // Synthèse : chaque article a déjà été tracé individuellement par
+        // `_logStockDecrementMiss`, mais l'échec TOTAL mérite sa propre
+        // entrée — c'est lui qui explique qu'une commande passe à
+        // `completed` sans qu'aucun stock n'ait bougé.
+        ActivityLogService.log(
+          action:      'stock_decrement_none',
+          targetType:  'sale',
+          targetId:    order.id,
+          targetLabel: order.clientName ?? 'Commande',
+          shopId:      order.shopId,
+          details: {
+            'items':      order.items.length,
+            'new_status': status.name,
+            'reason':     'aucun article n\'a pu sortir du stock',
+          },
+        );
+      }
     } else if (decision.action == StockAction.restore) {
       await _restoreOrderStock(order);
     }
     // Persister le flag « stock sorti » s'il change (mouvement OU simple
     // réalignement d'idempotence), pour que les transitions ultérieures et les
     // autres devices décident correctement.
-    if (decision.reserved != reserved) {
-      map['stock_reserved'] = decision.reserved;
+    if (reservedToPersist != reserved) {
+      map['stock_reserved'] = reservedToPersist;
       await _ordersBox.put(orderId, map);
       final supa2 = Map<String, dynamic>.from(map)..remove('image_url');
       AppDatabase.bgWriteOrder(supa2);
@@ -934,6 +960,16 @@ class SaleLocalDatasource {
     final products = AppDatabase.getProductsForShop(order.shopId);
     final usePartner = order.deliveryMode == DeliveryMode.partner
         && (order.deliveryLocationId ?? '').isNotEmpty;
+    // STK-1 — on ne rend QUE ce qui est réellement sorti. Depuis que le
+    // drapeau peut être posé sur un décrément PARTIEL (au moins un article),
+    // restituer aveuglément toute la commande recréerait le stock des
+    // articles qui n'étaient jamais partis.
+    //
+    // Map vide = journal inconnu (commande antérieure, ou purgée avant le
+    // correctif STK-2) → on retombe sur le comportement historique, tout
+    // restituer. Le repli est automatique, sans drapeau de version.
+    final stillOut = _stillOutByVariant(order.id);
+    final selective = stillOut.isNotEmpty;
     for (final item in order.items) {
       final (pid, vid) = _resolveProductVariant(products, item.productId);
       if (pid == null) {
@@ -945,11 +981,25 @@ class SaleLocalDatasource {
       // la vente n'a rien décrémenté ne doit rien recréditer à l'annulation,
       // sinon chaque cycle vente→annulation créerait du stock ex nihilo.
       if (!_isStockTracked(products, pid)) continue;
+      var qty = item.quantity;
+      if (selective) {
+        final out = stillOut[vid] ?? 0;
+        if (out <= 0) {
+          // Jamais sorti (ou déjà restitué) — on ne rend rien, et on le dit :
+          // l'écart entre ce qui est facturé et ce qui revient en stock doit
+          // rester lisible dans le journal d'activité.
+          _logRestockMiss(order, item.productId, item.quantity,
+              'article jamais sorti du stock — aucune restitution');
+          continue;
+        }
+        if (out < qty) qty = out;
+        stillOut[vid] = out - qty;
+      }
       if (usePartner) {
         await StockService.reverseSaleFromLocation(
           locationId: order.deliveryLocationId!,
           variantId:  vid,
-          quantity:   item.quantity,
+          quantity:   qty,
           shopId:     order.shopId,
           productId:  pid,
           orderId:    order.id,
@@ -959,7 +1009,7 @@ class SaleLocalDatasource {
           shopId:    order.shopId,
           productId: pid,
           variantId: vid,
-          quantity:  item.quantity,
+          quantity:  qty,
           orderId:   order.id,
         );
       }
@@ -994,10 +1044,18 @@ class SaleLocalDatasource {
   /// partenaire ou boutique selon le mode de livraison. Chaque article est
   /// isolé (try/catch) : l'échec d'un article ne bloque pas les autres et
   /// n'est JAMAIS silencieux.
-  static Future<void> _decrementOrderStock(Sale order) async {
+  /// Renvoie les variantes dont le stock est RÉELLEMENT sorti.
+  ///
+  /// STK-1 — ce retour est le cœur du correctif. Le drapeau `stock_reserved`
+  /// était posé d'après `StockEngagement.decide()`, une décision PURE qui
+  /// ignore tout du résultat : une commande dont aucun article n'avait pu
+  /// sortir était quand même marquée « stock engagé ». Une annulation
+  /// ultérieure restituait alors du stock jamais pris — elle en CRÉAIT.
+  static Future<Set<String>> _decrementOrderStock(Sale order) async {
     final products = AppDatabase.getProductsForShop(order.shopId);
     final usePartner = order.deliveryMode == DeliveryMode.partner
         && (order.deliveryLocationId ?? '').isNotEmpty;
+    final moved = <String>{};
     for (final item in order.items) {
       final (pid, vid) = _resolveProductVariant(products, item.productId);
       if (pid == null) {
@@ -1028,12 +1086,48 @@ class SaleLocalDatasource {
             orderId:   order.id,
           );
         }
+        // Sortie CONFIRMÉE : aucune exception n'a été levée.
+        moved.add(vid);
       } catch (e) {
         // Stock insuffisant, variante disparue, erreur d'écriture… — tracé,
         // jamais avalé, et sans interrompre les autres articles.
         _logStockDecrementMiss(order, item, 'échec décrément vente : $e');
       }
     }
+    return moved;
+  }
+
+  /// Quantité encore SORTIE par variante pour cette commande, d'après le
+  /// journal des mouvements.
+  ///
+  /// Les ventes y sont écrites en quantité négative, les restitutions en
+  /// positif, sous le même `type: 'sale'` — on somme donc le net, et on ne
+  /// garde que ce qui reste effectivement dehors.
+  ///
+  /// Map VIDE = aucun mouvement connu pour cette commande : soit elle est
+  /// antérieure au correctif, soit son journal a été purgé (cf. STK-2). Dans
+  /// ce cas l'appelant retombe sur le comportement historique — tout
+  /// restituer — plutôt que de ne rien rendre : mieux vaut l'imprécision
+  /// d'hier qu'une perte de stock nouvelle.
+  static Map<String, int> _stillOutByVariant(String? orderId) {
+    final out = <String, int>{};
+    if (orderId == null || orderId.isEmpty) return out;
+    if (!Hive.isBoxOpen(HiveBoxes.stockMovements)) return out;
+    for (final raw in HiveBoxes.stockMovementsBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw);
+        if (m['reference_id'] != orderId) continue;
+        if ((m['type'] as String? ?? '') != 'sale') continue;
+        final vid = m['variant_id'] as String?;
+        if (vid == null || vid.isEmpty) continue;
+        final q = (m['quantity'] as num?)?.toInt() ?? 0;
+        // Sortie (q < 0) → ce qui est dehors augmente ; restitution (q > 0)
+        // → il diminue. D'où le signe inversé.
+        out[vid] = (out[vid] ?? 0) - q;
+      } catch (_) {/* ligne corrompue — ignorée */}
+    }
+    out.removeWhere((_, v) => v <= 0);
+    return out;
   }
 
   // ══════════════════════════════════════════════════════════════════════
