@@ -61,6 +61,14 @@
   .tpill.pay{background:#ECFDF3;color:#067647}
   .tpill svg{width:15px;height:15px;flex:0 0 auto}
 
+  /* ---- Bandeau emplacement (lien ?location=) ----
+     Même gabarit que le bandeau de confiance, en teinte marque : il annonce
+     une restriction, pas une garantie — le vert lui donnerait le sens inverse. */
+  .locbar{max-width:1100px;margin:0 auto;padding:10px 16px 0;display:flex;gap:8px;flex-wrap:wrap}
+  .locpill{display:inline-flex;align-items:center;gap:6px;background:var(--brand-s);
+    color:var(--brand-l);font-size:12.5px;font-weight:700;padding:7px 12px;
+    border-radius:20px;line-height:1.1}
+
   /* ---- Search + categories ---- */
   .tools{max-width:1100px;margin:0 auto;padding:12px 16px 4px}
   .search{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--line);
@@ -324,6 +332,8 @@
   </div>
 </header>
 
+<div class="locbar hide" id="locbar"></div>
+
 <div class="trust hide" id="trust">
   <span class="tpill pay">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
@@ -392,9 +402,19 @@
   var P_CAT = (Q.get("cat")||"").trim() || null;
   var P_PRODUCT = (Q.get("product")||"").trim() || null;
   var P_LOC = (Q.get("loc")||"").trim() || null;
+  // `?location=` porte les DEUX usages : il FILTRE la vitrine sur le stock de
+  // cet emplacement, et rattache la commande qui en sortira. `?loc=` ne faisait
+  // que rattacher ; on le garde en repli pour les liens déjà partagés.
+  var P_AT  = (Q.get("location")||"").trim() || null;
   var P_MODE = (Q.get("mode")||"").trim();
   var DELIVERY_VIEW = P_MODE === "delivery";
   var P_IDS = (Q.get("ids")||"").split(",").map(function(s){return s.trim();}).filter(Boolean);
+  // Le filtrage par emplacement n'a lieu QUE sur la vitrine ouverte : avec des
+  // `ids`, c'est `get_delivery_products` qui répond, et elle ne filtre pas.
+  // Sans ce drapeau, le bandeau annoncerait un filtrage qui n'a pas eu lieu —
+  // un bandeau qui ment est pire que pas de bandeau. Le rattachement de la
+  // commande, lui, reste actif dans les deux cas.
+  var AT_FILTERED = !!P_AT && !P_IDS.length;
   var STOCK_OV = (function(){
     var raw = Q.get("stock"); if(!raw) return null; var m={};
     raw.split(",").forEach(function(tok){
@@ -1009,7 +1029,7 @@
         product_id:it.productId, variant_id:it.variantId, name:it.name, sku:it.sku,
         quantity:qtyOf(it), unit_price:it.price, image_url:it.imageUrl }; });
       var orderParams={
-        p_shop_id:SHOP, p_items:itemsJson, p_location_id:P_LOC,
+        p_shop_id:SHOP, p_items:itemsJson, p_location_id:(P_AT||P_LOC),
         p_client_name:name, p_client_phone:e164(phone, dCCVal),
         p_client_city:city||null, p_client_district:dist||null,
         p_notes:note||null,
@@ -1102,11 +1122,22 @@
   // chaque chargement réussi.
   Promise.all([
     rpc("get_public_shop_info",{p_shop_id:SHOP}),
+    // `get_delivery_products` ne prend PAS d'emplacement : son périmètre est
+    // déjà figé par la liste d'`ids`. Le filtre ne vaut que pour la vitrine
+    // ouverte, seule à charger le catalogue entier.
     P_IDS.length
       ? rpc("get_delivery_products",{p_shop_id:SHOP,p_product_ids:P_IDS})
-      : rpc("get_public_catalogue_products",{p_shop_id:SHOP,p_category:P_CAT})
+      : rpc("get_public_catalogue_products",
+            {p_shop_id:SHOP,p_category:P_CAT,p_location_id:P_AT}),
+    // Le nom de l'emplacement passe par une RPC dédiée : `stock_locations` est
+    // sous RLS, un visiteur anonyme ne peut pas le lire. Null si absent, si
+    // inactif, ou s'il relève d'un autre propriétaire → bandeau masqué.
+    // Inutile quand des `ids` sont fournis : aucun filtrage n'a lieu (cf. AT_FILTERED).
+    AT_FILTERED
+      ? rpc("get_public_location_label",{p_shop_id:SHOP,p_location_id:P_AT})
+      : null
   ]).then(function(res){
-    var shop = res[0], products = res[1];
+    var shop = res[0], products = res[1], locName = res[2];
     if(!shop || (Array.isArray(shop)&&!shop.length)){ fail("Boutique introuvable ou indisponible."); return; }
     SHOP_INFO = Array.isArray(shop)? shop[0] : shop;
     // `sector` est exposé par get_public_shop_info depuis hotfix_139. Sur une
@@ -1133,6 +1164,21 @@
     }
     renderCats();
     renderGrid();
+    // Bandeau emplacement. Le visiteur DOIT savoir que la vitrine est
+    // restreinte : sans ça, un catalogue à moitié vide passe pour une panne.
+    // Compté en produits distincts, pas en lignes — une même référence
+    // décomposée en cinq tailles reste un produit.
+    if(AT_FILTERED){
+      var seen={}; ITEMS.forEach(function(it){ seen[it.productId]=1; });
+      var nProd = Object.keys(seen).length;
+      var label = (typeof locName === "string" && locName.trim())
+        ? locName.trim() : "Emplacement";
+      var lb = document.getElementById("locbar");
+      lb.innerHTML = '<span class="locpill">📍 ' + esc(label) + ' · ' + nProd
+        + ' produit' + (nProd>1?'s':'') + ' disponible' + (nProd>1?'s':'')
+        + '</span>';
+      lb.classList.remove("hide");
+    }
     var foot=document.getElementById("foot");
     foot.classList.remove("hide");
     foot.innerHTML = "🔒 Commande sécurisée · Paiement à la réception"+(SHOP_INFO.name?" · "+esc(SHOP_INFO.name):"");
