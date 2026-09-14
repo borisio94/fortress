@@ -731,41 +731,89 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     return list;
   }
 
-  /// Puce/bannière du filtre « Versement partenaire en attente ». Tap =
-  /// bascule `_remitFilter` (affiche uniquement ces commandes). Même style
-  /// que `_lateBanner` pour la cohérence visuelle.
-  Widget _remitBanner(int count, double total) {
-    final active = _remitFilter;
-    const color = AppColors.info;
+  /// Barre d'alerte unique — livraisons à traiter (en retard > 6h / à
+  /// planifier) et versements partenaire en attente.
+  ///
+  /// Au repos : compteurs « Libellé · N », tap → feuille de détail d'où l'on
+  /// active un filtre. Filtre actif : « Filtre : … · Tout voir », tap → retour
+  /// à la liste complète. Le filtre versement l'emporte sur le filtre retard
+  /// (cf. `orders` dans build), les deux sont donc exclusifs.
+  Widget _alertBar({
+    required int lateCount,
+    required int unplannedCount,
+    required int remitCount,
+    required double remitTotal,
+    required bool showLate,
+    required bool showRemit,
+  }) {
+    final sem = Theme.of(context).semantic;
+    final filtering = showLate || showRemit;
+    // Couleur = alerte la plus grave présente (ou celle du filtre actif).
+    final Color color = showRemit
+        ? sem.info
+        : showLate
+            ? (lateCount > 0 ? sem.danger : sem.warning)
+            : lateCount > 0
+                ? sem.danger
+                : unplannedCount > 0
+                    ? sem.warning
+                    : sem.info;
+    final remitLabel =
+        'Versements · $remitCount · ${CurrencyFormatter.format(remitTotal)}';
+    final parts = filtering
+        ? <String>[
+            showRemit
+                ? 'Filtre : $remitLabel'
+                : 'Filtre : livraisons à traiter · '
+                  '${lateCount + unplannedCount}',
+          ]
+        : <String>[
+            if (lateCount > 0) 'En retard · $lateCount',
+            if (unplannedCount > 0) 'À planifier · $unplannedCount',
+            if (remitCount > 0) remitLabel,
+          ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: InkWell(
-        onTap: () => setState(() => _remitFilter = !_remitFilter),
+        onTap: filtering
+            ? () => setState(() {
+                  _lateFilter  = false;
+                  _remitFilter = false;
+                })
+            : () => _openAlertSheet(
+                  lateCount:      lateCount,
+                  unplannedCount: unplannedCount,
+                  remitLabel:     remitCount > 0 ? remitLabel : null,
+                ),
         borderRadius: BorderRadius.circular(10),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: active ? 0.16 : 0.08),
+            color: color.withValues(alpha: filtering ? 0.16 : 0.08),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-                color: color.withValues(alpha: active ? 0.6 : 0.25)),
+                color: color.withValues(alpha: filtering ? 0.6 : 0.25)),
           ),
           child: Row(children: [
-            Icon(active
+            Icon(filtering
                     ? Icons.filter_alt_rounded
-                    : Icons.account_balance_wallet_rounded,
+                    : Icons.notifications_active_rounded,
                 size: 16, color: color),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                'Versement partenaire en attente : $count · '
-                '${CurrencyFormatter.format(total)}',
-                style: AppTextStyles.bodySmBold.copyWith(color: color),
+              child: Wrap(
+                spacing: 12, runSpacing: 2,
+                children: [
+                  for (final p in parts)
+                    Text(p,
+                        style: AppTextStyles.bodySmBold.copyWith(color: color)),
+                ],
               ),
             ),
-            Text(active ? 'Tout voir' : 'Filtrer',
-                style: AppTextStyles.captionBold.copyWith(color: color)),
-            Icon(active ? Icons.close_rounded : Icons.chevron_right_rounded,
+            if (filtering)
+              Text('Tout voir',
+                  style: AppTextStyles.captionBold.copyWith(color: color)),
+            Icon(filtering ? Icons.close_rounded : Icons.chevron_right_rounded,
                 size: 16, color: color),
           ]),
         ),
@@ -773,59 +821,81 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     );
   }
 
-  /// (en retard, à planifier) — pour le libellé de la pastille.
-  (int, int) _lateCounts(List<Sale> base) {
-    final cutoff = DateTime.now().subtract(_lateThreshold);
-    var late = 0, unplanned = 0;
-    for (final o in base) {
-      if (o.status != SaleStatus.scheduled) continue;
-      final s = o.scheduledAt;
-      if (s == null) {
-        unplanned++;
-      } else if (s.isBefore(cutoff)) {
-        late++;
-      }
-    }
-    return (late, unplanned);
-  }
-
-  /// Pastille persistante d'attention sur les livraisons à traiter. Tap =
-  /// bascule le filtre `_lateFilter` (affiche uniquement ces commandes).
-  Widget _lateBanner(int late, int unplanned) {
-    final parts = <String>[
-      if (late > 0) '$late en retard',
-      if (unplanned > 0) '$unplanned à planifier',
+  /// Feuille de détail de la barre d'alerte : une ligne par catégorie
+  /// présente ; tap → active le filtre correspondant (et désactive l'autre).
+  void _openAlertSheet({
+    required int lateCount,
+    required int unplannedCount,
+    required String? remitLabel,
+  }) {
+    final sem = Theme.of(context).semantic;
+    final lateParts = <String>[
+      if (lateCount > 0) 'En retard · $lateCount',
+      if (unplannedCount > 0) 'À planifier · $unplannedCount',
     ];
-    final active = _lateFilter;
-    final color = late > 0 ? AppColors.error : AppColors.warning;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      child: InkWell(
-        onTap: () => setState(() => _lateFilter = !_lateFilter),
-        borderRadius: BorderRadius.circular(10),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: active ? 0.16 : 0.08),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-                color: color.withValues(alpha: active ? 0.6 : 0.25)),
-          ),
-          child: Row(children: [
-            Icon(active ? Icons.filter_alt_rounded : Icons.notifications_active_rounded,
-                size: 16, color: color),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Livraisons à traiter : ${parts.join(' · ')}',
-                style: AppTextStyles.bodySmBold.copyWith(color: color),
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                margin: const EdgeInsets.symmetric(vertical: 10),
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textHint.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
-            Text(active ? 'Tout voir' : 'Filtrer',
-                style: AppTextStyles.captionBold.copyWith(color: color)),
-            Icon(active ? Icons.close_rounded : Icons.chevron_right_rounded,
-                size: 16, color: color),
-          ]),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 6),
+              child: Text('À traiter', style: AppTextStyles.subtitleBold),
+            ),
+            if (lateParts.isNotEmpty)
+              ListTile(
+                leading: Icon(Icons.notifications_active_rounded,
+                    color: lateCount > 0 ? sem.danger : sem.warning),
+                title: Text('Livraisons à traiter',
+                    style: AppTextStyles.body
+                        .copyWith(color: AppColors.textPrimary)),
+                subtitle: Text(lateParts.join('   '),
+                    style: AppTextStyles.captionHint),
+                trailing: Icon(Icons.chevron_right_rounded,
+                    color: AppColors.textHint),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  setState(() {
+                    _lateFilter  = true;
+                    _remitFilter = false;
+                  });
+                },
+              ),
+            if (remitLabel != null)
+              ListTile(
+                leading: Icon(Icons.account_balance_wallet_rounded,
+                    color: sem.info),
+                title: Text('Versements partenaire en attente',
+                    style: AppTextStyles.body
+                        .copyWith(color: AppColors.textPrimary)),
+                subtitle: Text(remitLabel, style: AppTextStyles.captionHint),
+                trailing: Icon(Icons.chevron_right_rounded,
+                    color: AppColors.textHint),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  setState(() {
+                    _remitFilter = true;
+                    _lateFilter  = false;
+                  });
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );
@@ -850,30 +920,15 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     return '${d(r.start)} → ${d(r.end)}';
   }
 
-  /// Onglet du TabBar : libellé + pastille compteur. La pastille n'apparaît
-  /// que si l'onglet contient au moins une commande.
-  Widget _tabLabel(String text, int count, bool selected) {
-    final color = selected ? AppColors.primary : AppColors.textHint;
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      Text(text),
-      if (count > 0) ...[
-        const SizedBox(width: 5),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: selected ? 0.14 : 0.10),
-            borderRadius: BorderRadius.circular(9),
-          ),
-          child: Text('$count',
-              style: AppTextStyles.microBold.copyWith(color: color)),
-        ),
-      ],
-    ]);
-  }
+  /// Onglet du TabBar : « Libellé · N » — même grammaire de compteur que la
+  /// barre d'alerte. Compteur omis quand l'onglet est vide.
+  Widget _tabLabel(String text, int count) =>
+      Text(count > 0 ? '$text · $count' : text);
 
-  /// Bandeau de synthèse de la sélection courante : total facturé et reste
-  /// à encaisser. Masqué quand la liste est vide (rien à résumer).
-  Widget _summaryBar(double totalCA, double totalDue) {
+  /// Bandeau de synthèse de la sélection courante, coloré par nature :
+  /// déjà encaissé (acquis, vert) et reste à encaisser (dû, ambre ; vert à
+  /// zéro). Masqué quand la liste est vide (rien à résumer).
+  Widget _summaryBar(double totalPaid, double totalDue) {
     final sem = Theme.of(context).semantic;
     Widget cell(IconData icon, String label, String value, Color color) =>
         Expanded(
@@ -903,13 +958,13 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
         border: Border.all(color: AppColors.primary.withValues(alpha: 0.12)),
       ),
       child: Row(children: [
-        cell(Icons.account_balance_wallet_outlined, 'Total facturé',
-            CurrencyFormatter.format(totalCA), AppColors.primary),
+        cell(Icons.check_circle_outline_rounded, 'Encaissé',
+            CurrencyFormatter.format(totalPaid), sem.success),
         Container(width: 1, height: 28, color: sem.borderSubtle),
         const SizedBox(width: 12),
         cell(Icons.payments_outlined, 'Reste à encaisser',
             CurrencyFormatter.format(totalDue),
-            totalDue > 0 ? AppColors.warning : sem.success),
+            totalDue > 0 ? sem.warning : sem.success),
       ]),
     );
   }
@@ -924,9 +979,13 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     // compteurs d'onglets.
     final base    = _baseList;
     final counts  = _countsByStatus(base);
-    // Pastille « En retard / à planifier » : commandes programmées hors radar.
-    final (lateCount, unplannedCount) = _lateCounts(base);
-    final hasLate  = lateCount > 0 || unplannedCount > 0;
+    // « En retard / à planifier » : commandes programmées hors radar. Les
+    // compteurs sont tirés de la liste FILTRÉE (recherche comprise) : la barre
+    // annonce exactement ce que le filtre affichera.
+    final lateList       = _lateUnplanned(base);
+    final unplannedCount = lateList.where((o) => o.scheduledAt == null).length;
+    final lateCount      = lateList.length - unplannedCount;
+    final hasLate  = lateList.isNotEmpty;
     final showLate = _lateFilter && hasLate;
     // Versement partenaire en attente, par commande (une passe ledger Hive).
     // Garde-fou « nouvelles commandes » basé sur la date de l'ÉCRITURE
@@ -937,25 +996,30 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
         widget.shopId,
         base.map((o) => o.id).whereType<String>(),
         since: _remitTrackingSince);
-    final remitCount = pendingRemit.length;
-    final remitTotal = pendingRemit.values.fold<double>(0, (s, v) => s + v);
+    // Même règle que ci-dessus : compteur et total suivent la recherche.
+    final remitList  = _pendingRemitList(base, pendingRemit);
+    final remitCount = remitList.length;
+    final remitTotal = remitList.fold<double>(
+        0, (s, o) => s + (pendingRemit[o.id] ?? 0));
     final hasRemit   = remitCount > 0;
     final showRemit  = _remitFilter && hasRemit;
     final orders   = showRemit
-        ? _pendingRemitList(base, pendingRemit)
+        ? remitList
         : showLate
-            ? _lateUnplanned(base)
+            ? lateList
             : _listForStatus(_filters[_filter.index].$1, base);
     final orderDebts = PartnerLedgerService.debtByOrder(
         widget.shopId, orders.map((o) => o.id).whereType<String>());
-    // Synthèse de la sélection courante : total facturé + reste à encaisser.
-    final totalCA  = orders.fold<double>(0, (s, o) => s + o.total);
-    final totalDue = orders.fold<double>(0, (s, o) => s + o.amountDue);
+    // Synthèse de la sélection courante : déjà encaissé + reste à encaisser.
+    // « Encaissé » inclut ce que le partenaire a perçu pour la boutique
+    // (`amountPaid` reste au total) : le client, lui, a soldé.
+    final totalPaid = orders.fold<double>(0, (s, o) => s + o.amountPaid);
+    final totalDue  = orders.fold<double>(0, (s, o) => s + o.amountDue);
     return Column(children: [
-      // ── Onglets « Vue » : Globale / Boutique / Partenaires ──────────
+      // ── Emplacements : Globale / Boutique / Partenaires ─────────────
       // Le filtre s'applique aux lignes via `orderToPartnerLocId` plus haut
       // dans `_orders` (cf. ref.watch(dashViewFilterProvider)).
-      ViewFilterChipBar(shopId: widget.shopId, useTabs: true),
+      ViewFilterChipBar(shopId: widget.shopId, compactPills: true),
 
       // ── Filtres ─────────────────────────────────────────────
       Container(
@@ -976,17 +1040,23 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
           tabs: [
             for (var i = 0; i < _filters.length; i++)
               Tab(child: _tabLabel(_filters[i].$2,
-                  counts[_filters[i].$1] ?? 0, _filter.index == i)),
+                  counts[_filters[i].$1] ?? 0)),
           ],
         ),
       ),
       Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
 
-      // ── Pastille « Livraisons à traiter » (en retard > 6h / à planifier) ──
-      if (hasLate) _lateBanner(lateCount, unplannedCount),
-
-      // ── Puce « Versement partenaire en attente » (filtre séparé) ──────────
-      if (hasRemit) _remitBanner(remitCount, remitTotal),
+      // ── Barre d'alerte unique : livraisons à traiter + versements ─────────
+      // Disparaît quand tout est à zéro.
+      if (hasLate || hasRemit)
+        _alertBar(
+          lateCount:      lateCount,
+          unplannedCount: unplannedCount,
+          remitCount:     remitCount,
+          remitTotal:     remitTotal,
+          showLate:       showLate,
+          showRemit:      showRemit,
+        ),
 
       // ── Recherche + filtres sur UNE ligne (densité) ──────────
       // Recherche extensible + filtre date + export en icônes compactes
@@ -1082,17 +1152,19 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               child: InkWell(
                 onTap: _openExport,
                 borderRadius: BorderRadius.circular(20),
+                // Même poids visuel que le bouton date au repos : l'export
+                // est un outil, pas l'action principale de l'écran.
                 child: Container(
                   height: 38, width: 40,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.10),
+                    color: AppColors.inputFill,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                        color: AppColors.primary.withValues(alpha: 0.4)),
+                        color: Theme.of(context).semantic.borderSubtle),
                   ),
                   child: Icon(Icons.download_rounded,
-                      size: 16, color: AppColors.primary),
+                      size: 16, color: AppColors.textSecondary),
                 ),
               ),
             ),
@@ -1101,10 +1173,10 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
       ),
       Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
 
-      // ── Synthèse de la sélection (total facturé + reste à encaisser) ──
+      // ── Synthèse de la sélection (encaissé + reste à encaisser) ──
       if (orders.isNotEmpty) ...[
         const SizedBox(height: 8),
-        _summaryBar(totalCA, totalDue),
+        _summaryBar(totalPaid, totalDue),
       ],
 
       // ── Liste commandes ──────────────────────────────────────
@@ -2611,6 +2683,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     final sem    = Theme.of(context).semantic;
     final client = o.clientName ?? 'Client de passage';
     final visual = _statusVisual(s, sem);
+    final money  = _collapsedMoney(sem);
     final primary = _primaryAction(context);
     final quick   = _quickActions(context);
 
@@ -2702,12 +2775,17 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     textColor: visual.textColor,
                   ),
                   const SizedBox(height: AppSpacing.xs),
-                  // Total conservé sur la carte repliée : sans lui, la liste
-                  // ne montrerait plus aucun montant sans déplier.
+                  // Montant de la carte repliée, coloré par état de PAIEMENT
+                  // (une Complétée peut rester due) : deux montants égaux ne
+                  // se confondent plus.
                   Row(mainAxisSize: MainAxisSize.min, children: [
-                    Text(CurrencyFormatter.format(o.total),
+                    if (money.label != null) ...[
+                      Text(money.label!, style: AppTextStyles.captionHint),
+                      const SizedBox(width: AppSpacing.xs),
+                    ],
+                    Text(CurrencyFormatter.format(money.amount),
                         style: AppTextStyles.bodySmBold
-                            .copyWith(color: AppColors.primary)),
+                            .copyWith(color: money.color)),
                     AnimatedRotation(
                       turns: _expanded ? 0.5 : 0,
                       duration: const Duration(milliseconds: 220),
@@ -2777,6 +2855,24 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         ),
       ),
     );
+  }
+
+  /// Montant affiché sur la carte repliée :
+  ///   * annulée / refusée / remboursée → total en gris, sans libellé ;
+  ///   * rien à percevoir du client     → total en vert, « encaissé » ;
+  ///   * reste dû                       → reste en ambre, « à encaisser ».
+  ({double amount, Color color, String? label}) _collapsedMoney(
+      AppSemanticColors sem) {
+    final o = widget.order;
+    if (o.status == SaleStatus.cancelled
+        || o.status == SaleStatus.refused
+        || o.status == SaleStatus.refunded) {
+      return (amount: o.total, color: AppColors.textHint, label: null);
+    }
+    if (o.amountDue <= 0) {
+      return (amount: o.total, color: sem.successText, label: 'encaissé');
+    }
+    return (amount: o.amountDue, color: sem.warningText, label: 'à encaisser');
   }
 
   /// Couleur, couleur de texte lisible et icône du badge de statut.

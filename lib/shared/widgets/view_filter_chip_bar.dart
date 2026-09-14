@@ -28,15 +28,21 @@ import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
 /// icône, indicateur souligné sur l'élément actif, sans cadre encadrant) au
 /// lieu de chips arrondies. Utilisé sur Produits / Vente / Commandes ; le
 /// dashboard garde le rendu chip historique.
+///
+/// `compactPills` (false par défaut) : rangée de pastilles défilant
+/// horizontalement, sans cadre ni label « Vue ». Prioritaire sur `useTabs`.
+/// Utilisé sur Commandes ; les autres pages gardent leur rendu.
 class ViewFilterChipBar extends ConsumerStatefulWidget {
   final String shopId;
   final bool showGlobal;
   final bool useTabs;
+  final bool compactPills;
   const ViewFilterChipBar({
     super.key,
     required this.shopId,
     this.showGlobal = true,
     this.useTabs = false,
+    this.compactPills = false,
   });
 
   @override
@@ -228,6 +234,23 @@ class _ViewFilterChipBarState extends ConsumerState<ViewFilterChipBar> {
                     active: args.active, onTap: args.onTap);
         },
     ];
+
+    if (widget.compactPills) {
+      // Pastilles défilantes : chaque libellé garde sa largeur naturelle et
+      // la rangée défile, au lieu de se partager une largeur contrainte.
+      return Container(
+        width: double.infinity,
+        color: restoDecorActive ? restoGlassFill(context) : null,
+        alignment: Alignment.centerLeft,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+          child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [for (final b in builders) b(false)]),
+        ),
+      );
+    }
 
     if (widget.useTabs) {
       // Rendu onglets : groupe compact aligné à gauche, scrollable
