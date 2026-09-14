@@ -800,6 +800,14 @@ class AppLocalizations {
   String get dashCancelled      => _isFr ? 'Annulé' : 'Cancelled';
   String get dashFinancialSummary => _isFr ? 'Résumé financier'      : 'Financial summary';
   String get dashProductCost      => _isFr ? 'Coût des produits'     : 'Product cost';
+  /// Avertissement affiché sur la ligne « Coût des produits » quand des
+  /// articles vendus n'ont aucun prix d'achat connu : leur marge est comptée
+  /// à 100 %, donc le bénéfice affiché est surestimé.
+  String dashCostUnknown(int n) => _isFr
+      ? '$n article(s) vendu(s) sans prix d\'achat connu : le bénéfice '
+        'affiché est surestimé. Renseignez leur prix d\'achat pour corriger.'
+      : '$n item(s) sold with no known cost price: the profit shown is '
+        'overstated. Set their cost price to correct it.';
   String get dashScrappedLoss     => _isFr ? 'Pertes rebuts'         : 'Scrap losses';
   String get dashRepairCost       => _isFr ? 'Coûts réparation'      : 'Repair costs';
   String get dashOperatingExpenses => _isFr ? 'Dépenses opérationnelles' : 'Operating expenses';

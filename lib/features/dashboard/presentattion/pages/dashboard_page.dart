@@ -1013,8 +1013,21 @@ class _FinancialSummaryCard extends StatelessWidget {
         _row(l.financesCA, '+${_fmt(data.totalSales)} ${CurrencyFormatter.currentSymbol}',
             AppColors.textPrimary),
         const SizedBox(height: 4),
+        // Coût incomplet → on le DIT. Sans ce signal, « Coût des produits : 0 »
+        // se lit comme « je n'ai rien dépensé », alors qu'il signifie « je ne
+        // sais pas ce que j'ai dépensé » — et le bénéfice juste en dessous est
+        // surestimé d'autant.
         _row(l.dashProductCost, '−${_fmt(productCost)} ${CurrencyFormatter.currentSymbol}',
-            AppColors.textSecondary),
+            AppColors.textSecondary,
+            trailing: data.costlessLines > 0
+                ? Tooltip(
+                    message: l.dashCostUnknown(data.costlessLines),
+                    triggerMode: TooltipTriggerMode.tap,
+                    showDuration: const Duration(seconds: 6),
+                    child: const Icon(Icons.warning_amber_rounded,
+                        size: 14, color: AppColors.warning),
+                  )
+                : null),
         const SizedBox(height: 8),
         Divider(height: 1, color: AppColors.divider),
         const SizedBox(height: 8),
@@ -1026,7 +1039,8 @@ class _FinancialSummaryCard extends StatelessWidget {
     );
   }
 
-  Widget _row(String label, String value, Color valueColor, {bool bold = false}) =>
+  Widget _row(String label, String value, Color valueColor,
+          {bool bold = false, Widget? trailing}) =>
       Row(children: [
     Expanded(child: Text(label,
         maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -1034,6 +1048,7 @@ class _FinancialSummaryCard extends StatelessWidget {
             fontSize: bold ? 12 : 10,
             fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
             color: bold ? AppColors.textPrimary : AppColors.textSecondary))),
+    if (trailing != null) ...[trailing, const SizedBox(width: 6)],
     Text(value,
         maxLines: 1, overflow: TextOverflow.ellipsis,
         style: AppTextStyles.body.copyWith(fontSize: bold ? 13 : 10,

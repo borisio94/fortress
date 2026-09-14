@@ -141,6 +141,20 @@ class DashData {
   // (ventes à crédit). Même formule que Sale.amountDue (paid → 0).
   final double totalClientDebts;
 
+  /// Nombre de LIGNES de commande complétées dont le coût de revient est
+  /// inconnu (`baseCost == 0`).
+  ///
+  /// Ces lignes remontent INTÉGRALEMENT au bénéfice : `orderProfit =
+  /// orderTotal − totalCost` avec un coût nul affiche une marge de 100 %.
+  /// Sans ce compteur, rien ne distingue « je n'ai rien dépensé » de « je ne
+  /// sais pas ce que j'ai dépensé » — le second gonfle le bénéfice en silence.
+  ///
+  /// ⚠ Un article dont le prix d'achat est RÉELLEMENT nul (cadeau,
+  /// échantillon) est compté ici aussi : `costByProduct` écrase « 0 saisi »
+  /// et « jamais saisi » dans la même valeur. Faux positif assumé — les
+  /// séparer demanderait de rendre ce coût nullable.
+  final int costlessLines;
+
   /// Bénéfice net = bénéfice brut − rebuts − réparations − dépenses opérationnelles
   double get netProfit =>
       totalProfit - scrappedLoss - repairCost - operatingExpenses;
@@ -168,6 +182,7 @@ class DashData {
     this.operatingExpenses = 0,
     this.expensesByCategory = const {},
     this.totalClientDebts = 0,
+    this.costlessLines = 0,
   });
 }
 
@@ -842,6 +857,10 @@ final dashDataProvider =
   double totalProfit = 0;
   double totalLoss = 0;
   int orderCount = 0;
+  // Lignes vendues dont le coût de revient est inconnu — cf. DashData.
+  // Déclaré ICI, avec les autres accumulateurs de période : `totalCost` (plus
+  // bas) vit à l'intérieur de la boucle et repart à zéro à chaque commande.
+  int costlessLines = 0;
   // Créances clients sur la période : solde dû des commandes complétées non
   // soldées (ventes à crédit). Même formule que Sale.amountDue.
   double totalClientDebts = 0;
@@ -920,6 +939,18 @@ final dashDataProvider =
         final itemBuy = (it['price_buy'] as num?)?.toDouble();
         final baseCost = productCost ?? itemBuy ?? 0.0;
         totalCost += baseCost * qty;
+        // Coût inconnu → la ligne remonte entièrement au bénéfice. On le
+        // compte pour pouvoir le SIGNALER, sans altérer le calcul lui-même :
+        // inventer un coût serait pire que d'afficher un chiffre incertain
+        // en le disant.
+        //
+        // ⚠ Le repli `itemBuy` est en pratique inopérant tant que la variante
+        // existe au catalogue : `costByProduct` y est peuplé
+        // INCONDITIONNELLEMENT (même à 0), et `??` ne se déclenche que sur
+        // `null`. L'instantané figé dans la ligne de commande ne sert donc
+        // qu'aux produits supprimés — le cas courant ici est un prix d'achat
+        // jamais saisi, que le commerçant peut encore corriger.
+        if (baseCost == 0 && qty > 0) costlessLines += qty;
 
         if (pid != null) {
           final name = (it['product_name'] ?? it['name']) as String? ?? 'Produit';
@@ -1179,6 +1210,7 @@ final dashDataProvider =
     totalProfit: totalProfit,
     totalLoss: totalLoss,
     orderCount: orderCount,
+    costlessLines: costlessLines,
     clientCount: clientSet.length,
     avgTicket: orderCount > 0 ? totalSales / orderCount : 0,
     scheduledCount: scheduledCount,
