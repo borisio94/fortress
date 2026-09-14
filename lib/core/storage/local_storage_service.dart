@@ -338,6 +338,7 @@ class LocalStorageService {
     'owner_id': s.ownerId, 'phone': s.phone,
     'whatsapp_phone': s.whatsappPhone, 'email': s.email,
     'facebook_pixel_id': s.facebookPixelId,
+    'partner_debt_alert_days': s.partnerDebtAlertDays,
     'created_at': s.createdAt?.toIso8601String(),
     'kind':           s.kind.key,
     'parent_shop_id': s.parentShopId,
@@ -367,6 +368,11 @@ class LocalStorageService {
     whatsappPhone: m['whatsapp_phone']?.toString(),
     email:        m['email']?.toString(),
     facebookPixelId: m['facebook_pixel_id']?.toString(),
+    // Champ ajouté après coup : toute map écrite par une version antérieure
+    // en est dépourvue. Le défaut suffit, aucune migration n'est requise —
+    // c'est précisément ce que la lecture défensive permet d'éviter.
+    partnerDebtAlertDays:
+        (m['partner_debt_alert_days'] as num?)?.toInt() ?? 30,
     createdAt:    m['created_at'] is String
         ? DateTime.tryParse(m['created_at'] as String)
         : (m['created_at'] is DateTime

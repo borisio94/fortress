@@ -2106,6 +2106,7 @@ end \$\$;""",
     String? currency, String? country,
     String? phone, String? whatsappPhone, String? email,
     String? facebookPixelId,
+    int? partnerDebtAlertDays,
   }) async {
     _assertNotFrozen();
     final userId = _userId;
@@ -2133,6 +2134,14 @@ end \$\$;""",
     if (facebookPixelId != null) {
       payload['facebook_pixel_id'] =
           facebookPixelId.trim().isEmpty ? null : facebookPixelId.trim();
+    }
+    // Seuil d'alerte d'ancienneté des dettes partenaires. Borné ici AUSSI,
+    // et pas seulement par le CHECK SQL (hotfix_178) : une valeur hors
+    // bornes partirait sinon jusqu'au serveur pour revenir en 23514, que
+    // `_isPermanentError` classe désormais comme définitif.
+    if (partnerDebtAlertDays != null) {
+      payload['partner_debt_alert_days'] =
+          partnerDebtAlertDays.clamp(1, 365);
     }
     if (payload.isEmpty) {
       final cached = LocalStorageService.getShop(shopId);
@@ -6070,6 +6079,10 @@ end \$\$;""",
     whatsappPhone: r['whatsapp_phone'] as String?,
     email: r['email'] as String?,
     facebookPixelId: r['facebook_pixel_id'] as String?,
+    // Colonne ajoutée par hotfix_178 : absente sur une base pas encore
+    // migrée → on retombe sur le défaut plutôt que de casser le mapping.
+    partnerDebtAlertDays:
+        (r['partner_debt_alert_days'] as num?)?.toInt() ?? 30,
     createdAt: r['created_at'] != null
         ? DateTime.tryParse(r['created_at'] as String) : null,
     kind:         ShopKindX.fromKey(r['kind'] as String?),

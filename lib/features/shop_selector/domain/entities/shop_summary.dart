@@ -46,6 +46,16 @@ class ShopSummary extends Equatable {
   /// sensible).
   final String? facebookPixelId;
 
+  /// Ancienneté, EN JOURS, au-delà de laquelle une vente encaissée par un
+  /// partenaire et non reversée est signalée (bandeau du tableau de bord,
+  /// carte partenaire). Défaut 30 ; borné 1–365 côté SQL (hotfix_178).
+  ///
+  /// Porté par `shops` et NON par `ShopSettingsStore` : ce dernier n'écrit
+  /// que dans Hive (cf. `caisse_tax_rate`), donc un seuil réglé sur le
+  /// téléphone ne suivrait pas le commerçant sur sa tablette. Un réglage
+  /// métier doit être partagé par tous les appareils de la boutique.
+  final int partnerDebtAlertDays;
+
   /// Date de création (pour le DatePicker période personnalisée)
   final DateTime? createdAt;
 
@@ -84,6 +94,7 @@ class ShopSummary extends Equatable {
     this.whatsappPhone,
     this.email,
     this.facebookPixelId,
+    this.partnerDebtAlertDays = 30,
     this.createdAt,
     this.members = const [],
     this.kind = ShopKind.main,

@@ -352,6 +352,68 @@ class PartnerLedgerService {
     return out;
   }
 
+  /// Ancienneté EN JOURS de la plus vieille vente encaissée par le partenaire
+  /// et pas encore couverte — « depuis combien de temps cet argent dort-il
+  /// chez lui ? ». Clé = `partnerLocationId`. Partenaire absent de la map =
+  /// rien qui vieillisse chez lui.
+  ///
+  /// LETTRAGE FIFO RESTREINT. On empile les `saleCollected` du plus ancien au
+  /// plus récent, on impute dessus la TOTALITÉ des écritures négatives
+  /// (versements reçus, frais de livraison, charges), et l'âge est celui de
+  /// la première vente encore découverte.
+  ///
+  /// Les écritures POSITIVES qui ne sont pas des ventes — un `remittance`
+  /// ÉMIS par la boutique, une `advance` — sont IGNORÉES des deux côtés :
+  ///   * ni empilées : sinon régler un partenaire ferait REJAILLIR une date
+  ///     fraîche, et sa vente de janvier paraîtrait dater d'hier ;
+  ///   * ni comptées en crédit : de l'argent SORTI de la boutique n'éteint
+  ///     pas une vente que le partenaire doit encore reverser. Les compter
+  ///     inventerait une extinction qui n'a pas eu lieu.
+  ///
+  /// CONSÉQUENCE ASSUMÉE : un partenaire dont le solde n'est positif qu'à
+  /// cause d'une avance non remboursée n'a PAS d'âge. C'est voulu — une
+  /// avance consentie n'est pas un retard de reversement.
+  ///
+  /// Aucune donnée persistée : recalculé à chaque lecture, donc rien à
+  /// migrer et aucune désynchronisation possible. Coût = une passe Hive,
+  /// la même que [balancesForShop] ; les deux ne sont pas fusionnées pour
+  /// ne pas toucher aux appelants existants.
+  static Map<String, int> debtAgeByPartner(String shopId) {
+    final sales   = <String, List<PartnerLedgerEntry>>{};
+    final credits = <String, double>{};
+    for (final e in entriesForShop(shopId)) {
+      if (e.type == PartnerLedgerEntryType.saleCollected && e.amount > 0) {
+        sales.putIfAbsent(e.partnerLocationId, () => []).add(e);
+      } else if (e.amount < 0) {
+        credits.update(e.partnerLocationId, (v) => v + e.amount.abs(),
+            ifAbsent: () => e.amount.abs());
+      }
+    }
+    final now = DateTime.now();
+    final out = <String, int>{};
+    sales.forEach((partnerId, list) {
+      // `entriesForShop` trie du plus RÉCENT au plus ancien — le FIFO exige
+      // l'inverse.
+      list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      var credit = credits[partnerId] ?? 0.0;
+      for (final sale in list) {
+        // Tolérance 0.5 : même seuil que `pendingRemittanceByOrder`, pour
+        // qu'un reliquat de centimes d'arrondi ne fasse pas vieillir une
+        // vente en réalité soldée.
+        if (sale.amount - credit <= 0.5) {
+          credit -= sale.amount;
+          if (credit < 0) credit = 0;
+          continue;
+        }
+        // Première vente non couverte : c'est elle qui donne l'âge.
+        final days = now.difference(sale.createdAt).inDays;
+        if (days > 0) out[partnerId] = days;
+        break;
+      }
+    });
+    return out;
+  }
+
   /// Supprime un mouvement (utile pour annuler un versement saisi par
   /// erreur). N'a PAS d'effet en cascade : pour annuler une commande, il
   /// faut chercher toutes les entries avec cet `orderId`.

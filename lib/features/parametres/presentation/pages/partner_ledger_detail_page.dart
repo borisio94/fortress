@@ -11,6 +11,7 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/widgets/back_dated_picker.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../shared/providers/current_shop_provider.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/form_sheet.dart';
@@ -219,6 +220,14 @@ class _PartnerLedgerViewState
         : (boutiqueOwes
             ? 'Vous devez au partenaire'
             : 'Comptes à jour');
+    // Ancienneté de la plus vieille vente encaissée et pas encore reversée.
+    // Absente quand tout est couvert, ou quand le solde positif ne tient
+    // qu'à une avance consentie — qui n'est pas un retard.
+    final ageDays = PartnerLedgerService
+        .debtAgeByPartner(widget.shopId)[widget.partnerLocationId];
+    final alertDays =
+        ref.watch(currentShopProvider)?.partnerDebtAlertDays ?? 30;
+    final isLate = ageDays != null && ageDays > alertDays;
 
     return Column(children: [
         // Bandeau solde
@@ -239,6 +248,22 @@ class _PartnerLedgerViewState
                 CurrencyFormatter.format(balance.abs()),
                 style: AppTextStyles.display.copyWith(color: color),
               ),
+              if (ageDays != null) ...[
+                const SizedBox(height: 6),
+                Row(children: [
+                  Icon(Icons.schedule_rounded,
+                      size: 13,
+                      color: isLate ? AppColors.error : AppColors.textHint),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: Text(
+                        'Plus ancienne vente non reversée : $ageDays j'
+                        '${isLate ? ' · au-delà de $alertDays j' : ''}',
+                        style: AppTextStyles.caption.copyWith(
+                            color: isLate ? AppColors.error : null)),
+                  ),
+                ]),
+              ],
             ],
           ),
         ),
