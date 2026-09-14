@@ -32,6 +32,7 @@ import '../widgets/approval_closure_sheet.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/dimens.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/permisions/app_permissions.dart';
@@ -2008,6 +2009,14 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
 
   @override
   Widget build(BuildContext context) {
+    // UI séparée par secteur : la restauration garde son rendu historique
+    // (service, emballage, livreur) ; le e-commerce a sa carte hiérarchisée.
+    if (_isResto) return _buildRestoCard(context);
+    return _buildEcommerceCard(context);
+  }
+
+  /// Rendu historique de la carte — conservé pour la RESTAURATION.
+  Widget _buildRestoCard(BuildContext context) {
     final s     = widget.order.status;
     final color = s.color;
     final client = widget.order.clientName;
@@ -2153,82 +2162,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
             // (Realtime/local via _onDataChanged). Masqué dès que la dette
             // est compensée (encaissement/versement lié à la commande) ou
             // nulle — plus jamais statique.
-            if (widget.debt != null && widget.debt!.isOutstanding) ...[
-              const SizedBox(height: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 5),
-                decoration: BoxDecoration(
-                  color: sem.dangerSurface,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                      color: sem.danger.withValues(alpha: 0.2),
-                      width: 0.5),
-                ),
-                child: Row(children: [
-                  Icon(Icons.attach_money_rounded,
-                      size: 12, color: sem.danger),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                        'Dette partenaire : '
-                        '${CurrencyFormatter.format(widget.debt!.amount)} '
-                        '— compensée au prochain versement',
-                        style: AppTextStyles.captionBold
-                            .copyWith(color: sem.dangerText),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis),
-                  ),
-                ]),
-              ),
-            ],
-
-            // Bandeau « Encaisser / Reste à payer » RETIRÉ de la carte
-            // repliée (densité) — l'action reste accessible via l'icône
-            // « Enregistrer un acompte » dans le dépliage de la commande.
-
-            // ── Bandeau « Versement partenaire en attente » ───────
-            // Toujours visible (hors zone expansion) : la commande a été
-            // livrée par un partenaire qui a encaissé pour le compte de la
-            // boutique mais n'a pas encore reversé (dérivé du livre
-            // partenaire). Tap → confirme et enregistre le versement reçu.
-            if ((widget.pendingRemittance ?? 0) > 0) ...[
-              const SizedBox(height: 6),
-              InkWell(
-                onTap: () => _confirmRemitReceived(context),
-                borderRadius: BorderRadius.circular(6),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: AppColors.info.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                        color: AppColors.info.withValues(alpha: 0.3),
-                        width: 0.5),
-                  ),
-                  child: Row(children: [
-                    const Icon(Icons.account_balance_wallet_outlined,
-                        size: 12, color: AppColors.info),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                          'Versement partenaire en attente : '
-                          '${CurrencyFormatter.format(widget.pendingRemittance!)}',
-                          style: AppTextStyles.captionBold
-                              .copyWith(color: AppColors.info),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis),
-                    ),
-                    const SizedBox(width: 6),
-                    Text('Marquer reçu →',
-                        style: AppTextStyles.microBold.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.info.withValues(alpha: 0.85))),
-                  ]),
-                ),
-              ),
-            ],
+            ..._partnerBanners(context),
 
             // Bandeau « Frais de livraison à fixer » RETIRÉ de la carte
             // repliée (densité) — l'action est désormais dans la feuille
@@ -2248,48 +2182,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   Divider(height: 1, color: AppColors.inputFill),
                   const SizedBox(height: 8),
 
-                  // Articles
-                  ...widget.order.items.map((i) => Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Row(children: [
-                      Container(
-                        width: 20, height: 20,
-                        decoration: BoxDecoration(
-                          color: AppColors.primarySurface,
-                          borderRadius: BorderRadius.circular(5),
-                        ),
-                        child: Center(
-                          child: Text('${i.quantity}',
-                              style: AppTextStyles.microBold.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                  color: AppColors.primary)),
-                        ),
-                      ),
-                      const SizedBox(width: 7),
-                      Expanded(
-                        child: Text(i.productName,
-                            style: AppTextStyles.captionHint
-                                .copyWith(color: AppColors.textSecondary),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis),
-                      ),
-                    ]),
-                  )),
-
-                  // Notes
-                  if (widget.order.notes != null) ...[
-                    const SizedBox(height: 4),
-                    Row(children: [
-                      Icon(Icons.notes_rounded,
-                          size: 11, color: AppColors.textHint),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(widget.order.notes!,
-                            style: AppTextStyles.micro.copyWith(
-                                fontStyle: FontStyle.italic)),
-                      ),
-                    ]),
-                  ],
+                  ..._itemsAndNotes(),
 
                   const SizedBox(height: 8),
                   Divider(height: 1, color: AppColors.inputFill),
@@ -2582,6 +2475,626 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     );
   }
 
+  // ─── Blocs communs aux deux rendus ─────────────────────────────────────
+
+  /// Bandeaux partenaire, hors zone dépliée (toujours visibles) :
+  ///   * dette enregistrée envers le partenaire. Synchronisée : `widget.debt`
+  ///     est calculé groupé par le parent (une passe Hive) et recalculé sur
+  ///     tout changement ledger (Realtime/local via _onDataChanged). Masqué
+  ///     dès que la dette est compensée ou nulle — plus jamais statique ;
+  ///   * versement partenaire en attente : la commande a été livrée par un
+  ///     partenaire qui a encaissé pour le compte de la boutique mais n'a pas
+  ///     encore reversé (dérivé du livre partenaire). Tap → confirme et
+  ///     enregistre le versement reçu.
+  ///
+  /// Le bandeau « Encaisser / Reste à payer » a été RETIRÉ de la carte
+  /// repliée (densité).
+  List<Widget> _partnerBanners(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return [
+      if (widget.debt != null && widget.debt!.isOutstanding) ...[
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          decoration: BoxDecoration(
+            color: sem.dangerSurface,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+                color: sem.danger.withValues(alpha: 0.2), width: 0.5),
+          ),
+          child: Row(children: [
+            Icon(Icons.attach_money_rounded, size: 12, color: sem.danger),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                  'Dette partenaire : '
+                  '${CurrencyFormatter.format(widget.debt!.amount)} '
+                  '— compensée au prochain versement',
+                  style: AppTextStyles.captionBold
+                      .copyWith(color: sem.dangerText),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis),
+            ),
+          ]),
+        ),
+      ],
+      if ((widget.pendingRemittance ?? 0) > 0) ...[
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: () => _confirmRemitReceived(context),
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            decoration: BoxDecoration(
+              color: AppColors.info.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                  color: AppColors.info.withValues(alpha: 0.3), width: 0.5),
+            ),
+            child: Row(children: [
+              const Icon(Icons.account_balance_wallet_outlined,
+                  size: 12, color: AppColors.info),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                    'Versement partenaire en attente : '
+                    '${CurrencyFormatter.format(widget.pendingRemittance!)}',
+                    style: AppTextStyles.captionBold
+                        .copyWith(color: AppColors.info),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis),
+              ),
+              const SizedBox(width: 6),
+              Text('Marquer reçu →',
+                  style: AppTextStyles.microBold.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.info.withValues(alpha: 0.85))),
+            ]),
+          ),
+        ),
+      ],
+    ];
+  }
+
+  /// Articles (quantité + nom) puis notes de la commande.
+  List<Widget> _itemsAndNotes() => [
+        ...widget.order.items.map((i) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(children: [
+                Container(
+                  width: 20, height: 20,
+                  decoration: BoxDecoration(
+                    color: AppColors.primarySurface,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Center(
+                    child: Text('${i.quantity}',
+                        style: AppTextStyles.microBold.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.primary)),
+                  ),
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(i.productName,
+                      style: AppTextStyles.captionHint
+                          .copyWith(color: AppColors.textSecondary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ),
+              ]),
+            )),
+        if (widget.order.notes != null) ...[
+          const SizedBox(height: 4),
+          Row(children: [
+            Icon(Icons.notes_rounded, size: 11, color: AppColors.textHint),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(widget.order.notes!,
+                  style: AppTextStyles.micro
+                      .copyWith(fontStyle: FontStyle.italic)),
+            ),
+          ]),
+        ],
+      ];
+
+  // ─── Carte E-COMMERCE ───────────────────────────────────────────────────
+  //
+  // Hiérarchie : en-tête (client · ID · statut) → montants → UNE action
+  // principale → actions client (à échéance) → articles & détails → actions
+  // rapides en pied de carte. Aucune logique déplacée : chaque bouton appelle
+  // le même callback, sous la même condition, que l'ancienne rangée d'icônes.
+
+  Widget _buildEcommerceCard(BuildContext context) {
+    final o      = widget.order;
+    final s      = o.status;
+    final sem    = Theme.of(context).semantic;
+    final client = o.clientName ?? 'Client de passage';
+    final visual = _statusVisual(s, sem);
+    final primary = _primaryAction(context);
+    final quick   = _quickActions(context);
+
+    final meta = <Widget>[
+      // Chip « À choisir sur place » — ventes d'approbation uniquement.
+      if (o.isApprovalSale)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+          decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.12),
+              borderRadius:
+                  const BorderRadius.all(Radius.circular(AppRadius.xs))),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.fact_check_outlined,
+                size: 10, color: AppColors.primary),
+            const SizedBox(width: 3),
+            Text('À choisir',
+                style:
+                    AppTextStyles.microBold.copyWith(color: AppColors.primary)),
+          ]),
+        ),
+      // Pastille statut paiement (hors annulée/refusée).
+      if (s != SaleStatus.cancelled && s != SaleStatus.refused)
+        _PaymentStatusPill(status: o.paymentStatus),
+      // Badge "Web"/"WhatsApp" si source != 'pos'.
+      if (o.source != 'pos') OrderSourceBadge(source: o.source),
+      Text(_formatDate(o.createdAt), style: AppTextStyles.micro),
+      if (o.scheduledAt != null)
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.event_rounded, size: 11, color: sem.warning),
+          const SizedBox(width: 3),
+          Text('Livré ${_formatDate(o.scheduledAt!)}',
+              style: AppTextStyles.micro.copyWith(
+                  fontWeight: FontWeight.w600, color: sem.warningText)),
+        ]),
+    ];
+
+    return GestureDetector(
+      onTap: () {
+        setState(() => _expanded = !_expanded);
+        if (_expanded) _prepareInvoice();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeInOut,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+              color: _expanded
+                  ? visual.color.withValues(alpha: 0.35)
+                  : sem.borderSubtle),
+          boxShadow: [BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 6, offset: const Offset(0, 2))],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── 1. En-tête ───────────────────────────────────────────────
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _ClientAvatar(name: client, size: 36, color: sem.info),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(client,
+                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.labelRegular.copyWith(
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.textPrimary)),
+                    const SizedBox(height: 2),
+                    _idAndPhoneLine(context),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _OrderStatusBadge(
+                    label: _statusLabel(s),
+                    icon:  visual.icon,
+                    color: visual.color,
+                    textColor: visual.textColor,
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  // Total conservé sur la carte repliée : sans lui, la liste
+                  // ne montrerait plus aucun montant sans déplier.
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text(CurrencyFormatter.format(o.total),
+                        style: AppTextStyles.bodySmBold
+                            .copyWith(color: AppColors.primary)),
+                    AnimatedRotation(
+                      turns: _expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 220),
+                      child: Icon(Icons.keyboard_arrow_down_rounded,
+                          size: 18,
+                          color: _expanded ? visual.color : AppColors.textHint),
+                    ),
+                  ]),
+                ],
+              ),
+            ]),
+            if (meta.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Wrap(
+                spacing: 6, runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: meta,
+              ),
+            ],
+
+            ..._partnerBanners(context),
+
+            // ── Détails dépliés ──────────────────────────────────────────
+            AnimatedCrossFade(
+              duration: const Duration(milliseconds: 220),
+              crossFadeState: _expanded
+                  ? CrossFadeState.showSecond
+                  : CrossFadeState.showFirst,
+              firstChild: const SizedBox.shrink(),
+              secondChild: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: AppSpacing.md),
+                  // ── 2. Montants ────────────────────────────────────────
+                  _OrderAmountsRow(order: o),
+
+                  // ── 3. Action principale contextuelle ──────────────────
+                  if (primary != null) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    _PrimaryActionTile(action: primary),
+                  ],
+
+                  // ── 4. Actions client (à échéance) ─────────────────────
+                  if (_canConfirmClient()) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    _clientActionsBlock(context),
+                  ],
+
+                  // ── Articles, notes, détails ───────────────────────────
+                  const SizedBox(height: AppSpacing.md),
+                  Divider(height: 0.5, thickness: 0.5, color: sem.borderSubtle),
+                  const SizedBox(height: AppSpacing.sm),
+                  ..._itemsAndNotes(),
+                  const SizedBox(height: AppSpacing.sm),
+                  // Référence + téléphone déjà dans l'en-tête → masqués ici.
+                  _OrderDetailsBlock(order: o, showReference: false),
+
+                  // ── 5. Actions rapides ─────────────────────────────────
+                  if (quick.isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    _QuickActionsBar(actions: quick),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Couleur, couleur de texte lisible et icône du badge de statut.
+  ({Color color, Color textColor, IconData icon}) _statusVisual(
+      SaleStatus s, AppSemanticColors sem) {
+    return switch (s) {
+      SaleStatus.scheduled => (
+          color: sem.warning,
+          textColor: sem.warningText,
+          icon: (widget.order.rescheduleReason ?? '').isNotEmpty
+              ? Icons.event_repeat_rounded
+              : Icons.schedule_rounded,
+        ),
+      SaleStatus.processing => (
+          color: sem.info,
+          textColor: sem.info,
+          icon: Icons.local_shipping_outlined,
+        ),
+      SaleStatus.completed => (
+          color: sem.success,
+          textColor: sem.successText,
+          icon: Icons.check_rounded,
+        ),
+      SaleStatus.cancelled || SaleStatus.refused => (
+          color: sem.danger,
+          textColor: sem.dangerText,
+          icon: Icons.close_rounded,
+        ),
+      SaleStatus.refunded => (
+          color: AppColors.textSecondary,
+          textColor: AppColors.textSecondary,
+          icon: Icons.undo_rounded,
+        ),
+    };
+  }
+
+  /// « abcd1234 [copier] · 6XX XX XX XX » — l'ID tronqué se copie en entier ;
+  /// le téléphone ouvre WhatsApp (même comportement que l'ancienne ligne de
+  /// référence du bloc détails).
+  Widget _idAndPhoneLine(BuildContext context) {
+    final id    = widget.order.id ?? '';
+    final phone = (widget.order.clientPhone ?? '').trim();
+    return Wrap(
+      spacing: AppSpacing.xs,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (id.isNotEmpty) ...[
+          Text(id.length > 8 ? id.substring(0, 8) : id,
+              style: AppTextStyles.captionHint),
+          Tooltip(
+            message: 'Copier l\'ID complet',
+            child: InkWell(
+              borderRadius:
+                  const BorderRadius.all(Radius.circular(AppRadius.xs)),
+              onTap: () async {
+                await Clipboard.setData(ClipboardData(text: id));
+                if (context.mounted) AppSnack.success(context, 'ID copié');
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.xxs),
+                child: Icon(Icons.copy_rounded,
+                    size: 11, color: AppColors.textHint),
+              ),
+            ),
+          ),
+        ],
+        if (id.isNotEmpty && phone.isNotEmpty)
+          Text('·', style: AppTextStyles.captionHint),
+        if (phone.isNotEmpty)
+          InkWell(
+            borderRadius:
+                const BorderRadius.all(Radius.circular(AppRadius.xs)),
+            // Tap → WhatsApp avec le numéro (digits only ; wa.me ignore les
+            // + et tirets). Sans WhatsApp, l'OS retombe sur le composeur.
+            onTap: () {
+              final digits = phone.replaceAll(RegExp(r'[^0-9]'), '');
+              if (digits.isEmpty) return;
+              openExternal('https://wa.me/$digits');
+            },
+            child: Text(phone,
+                style: AppTextStyles.captionHint
+                    .copyWith(color: AppColors.primary)),
+          ),
+      ],
+    );
+  }
+
+  /// Action principale selon le statut — UNE seule, callbacks existants.
+  /// `null` → aucune (commande terminale, ou paire « actions client » affichée
+  /// à échéance, qui tient lieu d'action comme dans l'ancien rendu).
+  _PrimaryOrderAction? _primaryAction(BuildContext context) {
+    final o = widget.order;
+    final s = o.status;
+    // Tournée « à choisir sur place » : le stock est géré par
+    // close/cancelApprovalOrder — jamais par la transition générique, qui
+    // re-décrémenterait / restaurerait le stock à tort.
+    if (o.isApprovalSale
+        && (s == SaleStatus.scheduled || s == SaleStatus.processing)) {
+      return _PrimaryOrderAction(
+        icon: Icons.fact_check_outlined,
+        title: 'Clôturer la tournée',
+        subtitle: 'Réconcilier le stock gardé et rendu',
+        onTap: () => _closeApproval(context),
+      );
+    }
+    switch (s) {
+      case SaleStatus.scheduled:
+        if (_canConfirmClient()) return null;
+        return _PrimaryOrderAction(
+          icon: Icons.local_shipping_outlined,
+          title: 'Démarrer la livraison',
+          subtitle: 'Passer en En cours',
+          onTap: () => widget.onUpdate(SaleStatus.processing),
+        );
+      case SaleStatus.processing:
+        return _PrimaryOrderAction(
+          icon: Icons.check_rounded,
+          title: 'Marquer comme livrée',
+          subtitle: 'Clôturer la commande',
+          onTap: () => widget.onUpdate(SaleStatus.completed),
+        );
+      case SaleStatus.completed:
+        // Vente à crédit : le solde à récupérer passe avant la facture
+        // (qui reste accessible dans « Plus »).
+        if (o.amountDue > 0) {
+          return _PrimaryOrderAction(
+            icon: Icons.payments_outlined,
+            title: 'Encaisser le solde',
+            subtitle: 'Reste ${CurrencyFormatter.format(o.amountDue)}',
+            onTap: () => _recordAcompte(context),
+          );
+        }
+        return _PrimaryOrderAction(
+          icon: Icons.receipt_long_outlined,
+          title: 'Voir la facture',
+          subtitle: 'PDF ou impression',
+          onTap: () => _previewBrandedInvoice(context),
+        );
+      case SaleStatus.cancelled:
+      case SaleStatus.refused:
+      case SaleStatus.refunded:
+        return null;
+    }
+  }
+
+  /// Paire « Validée / Annulée par le client » (commande programmée arrivée à
+  /// échéance, cf. `_canConfirmClient`).
+  Widget _clientActionsBlock(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+          child: Text('ACTIONS CLIENT',
+              style: AppTextStyles.micro.copyWith(letterSpacing: 0.5)),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            borderRadius: AppRadius.mdR,
+            border: Border.all(color: sem.borderSubtle, width: 0.5),
+          ),
+          child: IntrinsicHeight(
+            child: Row(children: [
+              Expanded(
+                child: _ClientActionButton(
+                  icon: Icons.check_circle_outline_rounded,
+                  label: 'Validée par le client',
+                  color: sem.success,
+                  onTap: () => widget.onUpdate(SaleStatus.processing),
+                ),
+              ),
+              // La moitié « Annulée » SEULEMENT est conditionnée : annuler
+              // requiert salesCancel, valider non. Une validation client n'est
+              // pas un geste d'annulation et reste ouverte à tout opérateur.
+              // Sans la permission, le bouton DISPARAÎT au lieu de faire
+              // saisir un motif pour refuser ensuite ; la garde du callback
+              // parent reste la frontière qui compte.
+              if (widget.canCancel) ...[
+                VerticalDivider(
+                    width: 0.5, thickness: 0.5, color: sem.borderSubtle),
+                Expanded(
+                  child: _ClientActionButton(
+                    icon: Icons.cancel_outlined,
+                    label: 'Annulée par le client',
+                    color: sem.danger,
+                    onTap: () => _askCancelReason(context),
+                  ),
+                ),
+              ],
+            ]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Actions rapides du pied de carte. Chaque entrée reprend EXACTEMENT la
+  /// condition de l'ancien bouton icône correspondant ; « Plus » ouvre la
+  /// feuille des actions restantes.
+  List<_QuickAction> _quickActions(BuildContext context) {
+    final o    = widget.order;
+    final s    = o.status;
+    final open = s == SaleStatus.scheduled || s == SaleStatus.processing;
+    final hasPhone = (o.clientPhone ?? '').trim().isNotEmpty;
+    final more = _moreActions(context);
+    return [
+      // Rappel : icône « Relancer » (hors web) + entrée « Relancer le
+      // client » de la feuille (web, avec téléphone) réunies.
+      if (open && (o.source != 'web' || hasPhone))
+        _QuickAction(
+          icon: Icons.notifications_active_outlined,
+          label: 'Rappel',
+          onTap: () => _relaunchClient(context),
+        ),
+      // Articles figés une fois la commande complétée (frais dans « Plus »).
+      if (widget.canEdit && s != SaleStatus.completed)
+        _QuickAction(
+          icon: Icons.edit_outlined,
+          label: 'Modifier',
+          onTap: () => _showEditOrder(context),
+        ),
+      if (s == SaleStatus.completed)
+        _QuickAction(
+          icon: (_sendingInvoice || _preparingInvoice)
+              ? Icons.hourglass_top_rounded
+              : Icons.share_outlined,
+          label: 'Partager',
+          tooltip: _preparingInvoice
+              ? 'Préparation de la facture…'
+              : 'Envoyer la facture par WhatsApp',
+          onTap: (_sendingInvoice || _preparingInvoice)
+              ? null
+              : () => _sendInvoiceWhatsApp(context),
+        )
+      else if (open && _permsForOrder().canTransferDelivery)
+        _QuickAction(
+          icon: Icons.share_outlined,
+          label: 'Partager',
+          tooltip: 'Copier le message de livraison',
+          onTap: () => _openCopyDeliveryMessage(context),
+        ),
+      // hotfix_084 : seulement si la commande est éligible (statut ouvert
+      // non payé) — le use case et la RPC appliquent les mêmes règles.
+      if (widget.canDelete
+          && DeleteSaleUseCase.allowedStatuses.contains(s)
+          && o.amountPaid <= 0)
+        _QuickAction(
+          icon: Icons.delete_outline_rounded,
+          label: 'Supprimer',
+          danger: true,
+          onTap: () => _confirmDelete(context),
+        ),
+      if (more.isNotEmpty)
+        _QuickAction(
+          icon: Icons.more_horiz_rounded,
+          label: 'Plus',
+          onTap: () => _showActionsSheet(context, more),
+        ),
+    ];
+  }
+
+  /// Contenu de la feuille « Plus » : les actions contextuelles historiques
+  /// (hors celles promues en actions rapides) + les icônes qui n'ont pas de
+  /// place dans le pied de carte, chacune sous sa condition d'origine.
+  List<_OrderActionItem> _moreActions(BuildContext context) {
+    final o    = widget.order;
+    final s    = o.status;
+    final open = s == SaleStatus.scheduled || s == SaleStatus.processing;
+    return [
+      ..._contextualActions(context, quickBar: true),
+      if (o.isApprovalSale && open)
+        _OrderActionItem(
+          icon: Icons.cancel_outlined,
+          label: 'Annuler la tournée',
+          color: AppColors.error,
+          onTap: () => _cancelApproval(context),
+        )
+      else if (widget.canCancel && open && !_canConfirmClient())
+        _OrderActionItem(
+          icon: Icons.do_not_disturb_on_outlined,
+          label: 'Annuler ou refuser',
+          color: AppColors.error,
+          onTap: () => _askCancelOrRefuse(context),
+        ),
+      // Repasser en programmée (correction / re-finalisation) — réservé
+      // admin. Restitue stock + paiement + écritures partenaire.
+      if (s == SaleStatus.completed && widget.canCancel)
+        _OrderActionItem(
+          icon: Icons.undo_rounded,
+          label: 'Repasser en programmée',
+          color: AppColors.warning,
+          onTap: () => _reopenPaidSale(context),
+        ),
+      // Soldée, la facture est l'action principale ; sinon elle vit ici.
+      if (s == SaleStatus.completed && o.amountDue > 0)
+        _OrderActionItem(
+          icon: Icons.picture_as_pdf_rounded,
+          label: 'Facture (PDF avec logo)',
+          color: AppColors.primary,
+          onTap: () => _previewBrandedInvoice(context),
+        ),
+      // Frais modifiables même après complétion (souvent connus APRÈS la
+      // livraison) ; sans objet sur annulée / refusée / remboursée.
+      if (widget.canEdit
+          && s != SaleStatus.cancelled
+          && s != SaleStatus.refused
+          && s != SaleStatus.refunded)
+        _OrderActionItem(
+          icon: Icons.local_shipping_outlined,
+          label: 'Modifier les frais (livraison…)',
+          color: AppColors.primary,
+          onTap: () => _editFees(context),
+        ),
+    ];
+  }
+
   String _formatDate(DateTime d) {
     final now = DateTime.now();
     if (d.day == now.day && d.month == now.month)
@@ -2611,7 +3124,12 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   /// Actions secondaires contextuelles d'une commande — regroupées dans la
   /// feuille « Actions » pour alléger la carte (densité). La liste dépend du
   /// statut/permissions ; vide → aucun bouton « Actions » affiché.
-  List<_OrderActionItem> _contextualActions(BuildContext context) {
+  ///
+  /// [quickBar] = feuille « Plus » de la carte e-commerce : « Copier message
+  /// livraison » et « Relancer le client » (web) sont alors omis, puisqu'ils
+  /// y ont déjà un bouton rapide (Partager / Rappel) sous la même condition.
+  List<_OrderActionItem> _contextualActions(BuildContext context,
+      {bool quickBar = false}) {
     final o = widget.order;
     final s = o.status;
     final hasPhone = (o.clientPhone ?? '').trim().isNotEmpty;
@@ -2630,7 +3148,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     // Disponible tant que la commande est active (Programmée OU En cours) :
     // le client peut confirmer via le lien web (→ En cours) et il faut alors
     // pouvoir envoyer le message au livreur/partenaire.
-    if (!_isResto
+    if (!quickBar
+        && !_isResto
         && (s == SaleStatus.scheduled || s == SaleStatus.processing)
         && _permsForOrder().canTransferDelivery) {
       list.add(_OrderActionItem(
@@ -2639,7 +3158,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
           color: AppColors.whatsapp,
           onTap: () => _openCopyDeliveryMessage(context)));
     }
-    if (o.source == 'web'
+    if (!quickBar
+        && o.source == 'web'
         && (s == SaleStatus.scheduled || s == SaleStatus.processing)
         && hasPhone) {
       list.add(_OrderActionItem(
@@ -4493,7 +5013,10 @@ class _PaymentStatusPill extends StatelessWidget {
 class _ClientAvatar extends StatelessWidget {
   final String name;
   final double size;
-  const _ClientAvatar({required this.name, this.size = 20});
+  /// Couleur imposée (carte e-commerce : bleu info). `null` → couleur
+  /// déterministe dérivée du nom (rendu historique).
+  final Color? color;
+  const _ClientAvatar({required this.name, this.size = 20, this.color});
 
   // Palette douce — l'index est dérivé du nom (cf. _color).
   static const _palette = [
@@ -4528,7 +5051,7 @@ class _ClientAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _color;
+    final color = this.color ?? _color;
     return Container(
       width: size, height: size,
       alignment: Alignment.center,
@@ -4540,6 +5063,267 @@ class _ClientAvatar extends StatelessWidget {
       child: Text(_initials,
           style: (size >= 30 ? AppTextStyles.captionBold : AppTextStyles.microBold)
               .copyWith(color: color)),
+    );
+  }
+}
+
+// ─── Carte commande e-commerce : briques visuelles ─────────────────────────
+
+/// Badge de statut en haut à droite de l'en-tête : icône + libellé teintés.
+class _OrderStatusBadge extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final Color textColor;
+  const _OrderStatusBadge({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.textColor,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: const BorderRadius.all(Radius.circular(AppRadius.xs)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: AppSpacing.xs),
+          Text(label,
+              style: AppTextStyles.caption
+                  .copyWith(fontWeight: FontWeight.w600, color: textColor)),
+        ]),
+      );
+}
+
+/// Ligne de 3 métriques séparées par des filets verticaux :
+/// Facturé · À encaisser · Livraison (« — » sans livraison facturée).
+class _OrderAmountsRow extends StatelessWidget {
+  final Sale order;
+  const _OrderAmountsRow({required this.order});
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    final delivery = order.deliveryMode == DeliveryMode.pickup
+        ? 0.0
+        : (order.deliveryPrice ?? 0);
+    final divider =
+        VerticalDivider(width: 0.5, thickness: 0.5, color: sem.borderSubtle);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.inputFill,
+        borderRadius: AppRadius.mdR,
+      ),
+      child: IntrinsicHeight(
+        child: Row(children: [
+          Expanded(child: _metric('Facturé',
+              CurrencyFormatter.format(order.total), AppColors.primary)),
+          divider,
+          Expanded(child: _metric('À encaisser',
+              CurrencyFormatter.format(order.amountDue),
+              AppColors.textPrimary)),
+          divider,
+          Expanded(child: _metric('Livraison',
+              delivery > 0 ? CurrencyFormatter.format(delivery) : '—',
+              AppColors.textPrimary)),
+        ]),
+      ),
+    );
+  }
+
+  Widget _metric(String label, String value, Color color) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(label,
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.captionHint),
+          const SizedBox(height: AppSpacing.xxs),
+          // Montants longs : réduits plutôt que tronqués.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(value,
+                maxLines: 1,
+                style: AppTextStyles.labelRegular
+                    .copyWith(fontWeight: FontWeight.w500, color: color)),
+          ),
+        ]),
+      );
+}
+
+/// Action principale contextuelle d'une commande (cf. `_primaryAction`).
+class _PrimaryOrderAction {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  const _PrimaryOrderAction({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+}
+
+/// Tuile mise en avant : carré d'icône coloré · titre + sous-titre · chevron.
+class _PrimaryActionTile extends StatelessWidget {
+  final _PrimaryOrderAction action;
+  const _PrimaryActionTile({required this.action});
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return Material(
+      color: sem.info.withValues(alpha: 0.12),
+      shape: RoundedRectangleBorder(
+        borderRadius: AppRadius.mdR,
+        side: BorderSide(color: sem.info, width: 0.5),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: action.onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md, vertical: 10),
+          child: Row(children: [
+            Container(
+              width: 28, height: 28,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: sem.info,
+                borderRadius:
+                    const BorderRadius.all(Radius.circular(AppRadius.sm)),
+              ),
+              child: Icon(action.icon, size: 16, color: Colors.white),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(action.title,
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodyBold
+                          .copyWith(color: AppColors.textPrimary)),
+                  Text(action.subtitle,
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.captionHint),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, size: 20, color: sem.info),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Moitié de la paire « Validée / Annulée par le client ».
+class _ClientActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  const _ClientActionButton({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: onTap,
+        borderRadius: AppRadius.mdR,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm, vertical: 10),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 16, color: color),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(label,
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.bodySmBold.copyWith(color: color)),
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
+/// Entrée du pied « actions rapides ». `onTap == null` → désactivée.
+class _QuickAction {
+  final IconData icon;
+  final String label;
+  final String? tooltip;
+  final bool danger;
+  final VoidCallback? onTap;
+  const _QuickAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.tooltip,
+    this.danger = false,
+  });
+}
+
+/// Pied de carte : boutons icône + libellé séparés par des filets verticaux.
+class _QuickActionsBar extends StatelessWidget {
+  final List<_QuickAction> actions;
+  const _QuickActionsBar({required this.actions});
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: AppRadius.mdR,
+        side: BorderSide(color: sem.borderSubtle, width: 0.5),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: IntrinsicHeight(
+        child: Row(children: [
+          for (var i = 0; i < actions.length; i++) ...[
+            if (i > 0)
+              VerticalDivider(
+                  width: 0.5, thickness: 0.5, color: sem.borderSubtle),
+            Expanded(child: _button(actions[i], sem)),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  Widget _button(_QuickAction a, AppSemanticColors sem) {
+    final color = a.onTap == null
+        ? AppColors.textHint
+        : (a.danger ? sem.danger : AppColors.textSecondary);
+    return Tooltip(
+      message: a.tooltip ?? a.label,
+      child: InkWell(
+        onTap: a.onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(a.icon, size: 18, color: color),
+            const SizedBox(height: AppSpacing.xxs),
+            Text(a.label,
+                maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.micro.copyWith(color: color)),
+          ]),
+        ),
+      ),
     );
   }
 }
@@ -4720,7 +5504,10 @@ class _ActionBtn extends StatelessWidget {
 // ─── Détails complets d'une commande (paiement, livraison, finance) ─────────
 class _OrderDetailsBlock extends StatelessWidget {
   final Sale order;
-  const _OrderDetailsBlock({required this.order});
+  /// `false` sur la carte e-commerce : ID et téléphone y sont déjà dans
+  /// l'en-tête.
+  final bool showReference;
+  const _OrderDetailsBlock({required this.order, this.showReference = true});
 
   String _paymentLabel(PaymentMethod m) => switch (m) {
     PaymentMethod.cash        => 'Espèces',
@@ -4942,6 +5729,7 @@ class _OrderDetailsBlock extends StatelessWidget {
         ],
 
         // ─── Référence + numéro client ────────────────────────────
+        if (showReference) ...[
         const SizedBox(height: 8),
         Row(children: [
           Icon(Icons.tag_rounded, size: 10, color: AppColors.textHint),
@@ -4985,6 +5773,7 @@ class _OrderDetailsBlock extends StatelessWidget {
               ),
             ),
         ]),
+        ],
       ],
     );
   }
