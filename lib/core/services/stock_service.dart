@@ -401,6 +401,10 @@ class StockService {
     String? productId,
     String? orderId,
     String? reason,
+    /// Code STRUCTURÉ du motif (prix / qualité / différent / autre), rangé à
+    /// part du texte libre : `notes` reste lisible par un humain, `cause` se
+    /// filtre et se compte. Les deux vivent dans la même ligne de journal.
+    String? cause,
   }) async {
     final lvl = AppDatabase.getStockLevel(variantId, locationId);
     if (lvl == null) return;
@@ -424,6 +428,7 @@ class StockService {
       afterPhys:   updated.stockPhysical,
       referenceId: orderId,
       notes:       reason ?? 'Annulation vente livrée par location distincte',
+      cause:       cause,
     );
   }
 
@@ -442,6 +447,8 @@ class StockService {
     required int quantity,
     String? orderId,
     String? reason,
+    /// Code STRUCTURÉ du motif de retour — cf. `reverseSaleFromLocation`.
+    String? cause,
   }) async {
     final result = _findVariant(shopId, productId, variantId);
     if (result == null) return;
@@ -469,6 +476,7 @@ class StockService {
       afterPhys:   updated.stockPhysical,
       referenceId: orderId,
       notes:       reason ?? 'Annulation vente (commande reprogrammée)',
+      cause:       cause,
     );
   }
 

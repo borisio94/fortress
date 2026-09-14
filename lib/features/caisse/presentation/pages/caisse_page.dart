@@ -1541,7 +1541,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
             onCloseApproval: (res) async {
               final o = orders[i];
               await _ds.closeApprovalOrder(o.id!, res.kept,
-                  amountPaid: res.amountPaidTotal);
+                  amountPaid:  res.amountPaidTotal,
+                  // `.name` et non l'énumération : `CollectedBy` appartient à
+                  // la présentation, la couche données ne doit pas l'importer.
+                  collectedBy: res.collectedBy.name,
+                  refusals:    res.refusals);
               // Suites de la finalisation, identiques à une complétion
               // classique (la clôture court-circuite `updateOrderStatus`
               // pour ne pas rejouer le stock, mais le VOLET FINANCIER doit
@@ -1599,18 +1603,9 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                 }
                 AppDatabase.notifyProductChange(o.shopId);
               }
-              ActivityLogService.log(
-                action: 'approval_closed',
-                targetType: 'order', targetId: o.id,
-                targetLabel: o.clientName ?? 'Commande',
-                shopId: o.shopId,
-                details: {
-                  'kept_total':
-                      res.kept.values.fold<int>(0, (s, v) => s + v),
-                  'amount_paid':  res.amountPaidTotal,
-                  'collected_by': res.collectedBy.name,
-                },
-              );
+              // Journal déplacé dans `closeApprovalOrder` : il y est écrit au
+              // moment où la commande change d'état, avec le détail des
+              // refus. Le laisser ici en plus produirait deux entrées.
               if (mounted) setState(() {});
             },
             // Annulation d'une tournée : restaure tout le stock réservé.
@@ -1618,13 +1613,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               final o = orders[i];
               await _ds.cancelApprovalOrder(o.id!,
                   reason: 'annulation tournée');
-              ActivityLogService.log(
-                action: 'approval_cancelled',
-                targetType: 'order', targetId: o.id,
-                targetLabel: o.clientName ?? 'Commande',
-                shopId: o.shopId,
-                details: const {'reason': 'annulation tournée'},
-              );
+              // Journal déplacé dans `cancelApprovalOrder` — cf. clôture.
               if (mounted) setState(() {});
             },
             // Marquage manuel « versement partenaire reçu » : enregistre un

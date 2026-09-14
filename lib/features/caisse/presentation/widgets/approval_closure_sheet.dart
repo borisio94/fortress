@@ -7,6 +7,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
+import '../../../../shared/widgets/app_select_menu.dart';
 import '../../domain/approval_closure.dart';
 import '../../domain/entities/sale.dart';
 import '../../domain/entities/sale_item.dart';
@@ -31,10 +32,21 @@ class ApprovalClosureResult {
   /// exactement comme la finalisation classique).
   final CollectedBy collectedBy;
 
+  /// Motif de refus par article — clé = `SaleItem.productId`, renseignée
+  /// UNIQUEMENT pour les articles dont une quantité revient (refus total ou
+  /// partiel).
+  ///
+  /// `code` est structuré (il se filtre et se compte), `detail` porte la
+  /// précision libre quand le code vaut « Autre ». Les deux voyagent
+  /// ensemble plutôt qu'en deux maps parallèles, qui finissent toujours par
+  /// se désynchroniser.
+  final Map<String, ({String code, String? detail})> refusals;
+
   const ApprovalClosureResult({
     required this.kept,
     required this.amountPaidTotal,
     required this.collectedBy,
+    this.refusals = const {},
   });
 }
 
@@ -65,6 +77,20 @@ class _ApprovalClosureSheet extends StatefulWidget {
 class _ApprovalClosureSheetState extends State<_ApprovalClosureSheet> {
   // Quantité gardée (vendue) par article. Par défaut : tout est gardé.
   late final Map<String, int> _kept;
+
+  /// Motif de refus par article : code structuré, puis précision libre.
+  ///
+  /// Volontairement SANS `TextEditingController` — il faudrait alors les
+  /// détruire un à un dans `dispose()`, pour un champ qui n'apparaît que sur
+  /// les lignes refusées. Un `TextField` non contrôlé conserve sa saisie à
+  /// travers les `setState` déclenchés par les steppers.
+  final Map<String, String> _reasonCode   = {};
+  final Map<String, String> _reasonDetail = {};
+
+  /// Libellés proposés. « Autre » ouvre le champ de précision.
+  static const List<String> kRefusalReasons = [
+    'Prix', 'Qualité', 'Différent', 'Autre',
+  ];
 
   final _amountCtrl = TextEditingController();
   /// Vrai dès que l'opérateur a modifié le champ montant à la main : on cesse
@@ -147,13 +173,45 @@ class _ApprovalClosureSheetState extends State<_ApprovalClosureSheet> {
     });
   }
 
+  /// Quantité REFUSÉE d'un article (0 si tout est gardé).
+  int _returnedOf(SaleItem i) => i.quantity - (_kept[i.productId] ?? 0);
+
   void _submit() {
+    // Motif OBLIGATOIRE dès qu'une quantité revient — totalement OU
+    // partiellement. Ne l'exiger que sur un refus total (`kept == 0`)
+    // laisserait sans trace le cas le plus courant en tournée : « le client
+    // en garde 3 sur 5 ». Le stock, lui, est restitué de la même façon dans
+    // les deux cas.
+    final missing = [
+      for (final i in widget.order.items)
+        if (_returnedOf(i) > 0 && (_reasonCode[i.productId] ?? '').isEmpty)
+          i.productName,
+    ];
+    if (missing.isNotEmpty) {
+      setState(() => _error = missing.length == 1
+          ? 'Motif de refus manquant : ${missing.first}'
+          : 'Motif de refus manquant sur ${missing.length} articles');
+      return;
+    }
+
+    final refusals = <String, ({String code, String? detail})>{
+      for (final i in widget.order.items)
+        if (_returnedOf(i) > 0)
+          i.productId: (
+            code:   _reasonCode[i.productId]!,
+            detail: (_reasonDetail[i.productId] ?? '').trim().isEmpty
+                ? null
+                : _reasonDetail[i.productId]!.trim(),
+          ),
+    };
+
     // Rien gardé : pas d'encaissement, la commande part en annulée.
     if (_nothingKept) {
       Navigator.of(context).pop(ApprovalClosureResult(
         kept: Map<String, int>.from(_kept),
         amountPaidTotal: null,
         collectedBy: CollectedBy.boutique,
+        refusals: refusals,
       ));
       return;
     }
@@ -220,6 +278,17 @@ class _ApprovalClosureSheetState extends State<_ApprovalClosureSheet> {
                 kept: _kept[item.productId] ?? 0,
                 onDec: () => _dec(item.productId),
                 onInc: () => _inc(item.productId, item.quantity),
+                // Le motif n'apparaît que si quelque chose revient — et il
+                // apparaît AUSSI sur un refus partiel, pas seulement quand la
+                // ligne est entièrement rendue.
+                reasonOptions: kRefusalReasons,
+                reasonCode:    _reasonCode[item.productId],
+                reasonDetail:  _reasonDetail[item.productId],
+                onReasonChanged: (v) => setState(() {
+                  _reasonCode[item.productId] = v;
+                  _error = null;
+                }),
+                onDetailChanged: (v) => _reasonDetail[item.productId] = v,
               ),
 
             // ── Récapitulatif gardé / retourné ────────────────────────────
@@ -480,20 +549,34 @@ class _ChoiceChipBtn extends StatelessWidget {
   }
 }
 
-/// Ligne article : nom + quantité réservée + stepper de la quantité gardée.
+/// Ligne article : nom + quantité réservée + stepper de la quantité gardée,
+/// et — dès qu'une quantité revient — le motif du refus.
 class _ApprovalItemRow extends StatelessWidget {
   final String name;
   final int reserved;
   final int kept;
   final VoidCallback onDec;
   final VoidCallback onInc;
+  final List<String> reasonOptions;
+  final String? reasonCode;
+  final String? reasonDetail;
+  final ValueChanged<String> onReasonChanged;
+  final ValueChanged<String> onDetailChanged;
   const _ApprovalItemRow({
     required this.name,
     required this.reserved,
     required this.kept,
     required this.onDec,
     required this.onInc,
+    required this.reasonOptions,
+    required this.reasonCode,
+    required this.reasonDetail,
+    required this.onReasonChanged,
+    required this.onDetailChanged,
   });
+
+  /// Quantité qui revient en stock pour cette ligne.
+  int get _returned => reserved - kept;
 
   @override
   Widget build(BuildContext context) {
@@ -506,37 +589,96 @@ class _ApprovalItemRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: sem.borderSubtle),
       ),
-      child: Row(children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.body.copyWith(
-                      fontWeight: FontWeight.w600,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.body.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.onSurface)),
+                  const SizedBox(height: 2),
+                  Text('Réservé : $reserved',
+                      style: AppTextStyles.captionHint
+                          .copyWith(color: AppColors.textSecondary)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            _StepBtn(icon: Icons.remove_rounded, onTap: onDec),
+            SizedBox(
+              width: 34,
+              child: Text('$kept',
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.bodyBold.copyWith(
+                      fontWeight: FontWeight.w800,
                       color: AppColors.onSurface)),
-              const SizedBox(height: 2),
-              Text('Réservé : $reserved',
-                  style: AppTextStyles.captionHint
-                      .copyWith(color: AppColors.textSecondary)),
+            ),
+            _StepBtn(icon: Icons.add_rounded, onTap: onInc),
+          ]),
+          // MOTIF — n'apparaît que si quelque chose revient, et dès la
+          // PREMIÈRE unité refusée : un client qui garde 3 articles sur 5 doit
+          // s'expliquer autant que celui qui rend tout.
+          if (_returned > 0) ...[
+            const SizedBox(height: 8),
+            Text('$_returned refusé${_returned > 1 ? 's' : ''} — motif',
+                style: AppTextStyles.captionHint
+                    .copyWith(color: AppColors.error)),
+            const SizedBox(height: 4),
+            AppSelectWidget(
+              label: '',
+              required: true,
+              items: reasonOptions,
+              value: reasonCode,
+              icon: Icons.help_outline_rounded,
+              onChanged: onReasonChanged,
+            ),
+            if (reasonCode == 'Autre') ...[
+              const SizedBox(height: 6),
+              TextField(
+                onChanged: onDetailChanged,
+                style: AppTextStyles.body
+                    .copyWith(color: AppColors.onSurface),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'Préciser la raison',
+                  hintStyle: AppTextStyles.captionHint
+                      .copyWith(color: AppColors.textSecondary),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 10),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: sem.borderSubtle),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: sem.borderSubtle),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    // PAS de `const` : les tokens AppColors sont des getters
+                    // adaptatifs (mode sombre), jamais des constantes de
+                    // compilation. Les deux bordures ci-dessus s'en passent
+                    // déjà pour la même raison.
+                    borderSide: BorderSide(
+                        color: AppColors.primary, width: 2),
+                  ),
+                ),
+              ),
             ],
-          ),
-        ),
-        const SizedBox(width: 8),
-        _StepBtn(icon: Icons.remove_rounded, onTap: onDec),
-        SizedBox(
-          width: 34,
-          child: Text('$kept',
-              textAlign: TextAlign.center,
-              style: AppTextStyles.bodyBold.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.onSurface)),
-        ),
-        _StepBtn(icon: Icons.add_rounded, onTap: onInc),
-      ]),
+          ],
+        ],
+      ),
     );
   }
 }

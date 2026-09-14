@@ -102,6 +102,11 @@ class ActivityActions {
     'order_status_changed':       ActivityCategory.sale,
     'acompte_recorded':           ActivityCategory.sale,
     'order_cancelled_by_client_from_alert': ActivityCategory.alert,
+    // Tournées « à choisir sur place ». Ces deux actions étaient ÉMISES depuis
+    // longtemps sans figurer ici : elles retombaient donc en catégorie
+    // « other », invisibles dans tous les filtres sauf « Tous ».
+    'approval_closed':            ActivityCategory.sale,
+    'approval_cancelled':         ActivityCategory.alert,
     // Gestes de service sous PIN gérant (restaurant — Lot A). Catégorie
     // « alerte » : ce sont les deux façons de faire sortir de l'argent sans
     // qu'un plat sorte, ils doivent ressortir dans le filtre des actions

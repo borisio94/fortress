@@ -1185,8 +1185,14 @@ class SaleLocalDatasource {
 
   /// Remise en stock d'UN article (retour / annulation / rollback), routée de
   /// la même façon que `_approvalTakeStock`.
+  /// [cause] porte le CODE structuré du motif de refus (prix / qualité /
+  /// différent / autre) ; [reason] le texte lisible. Les deux atterrissent
+  /// dans la même ligne de `stock_movements`, seul réceptacle qui soit
+  /// nativement PAR ARTICLE et PAR QUANTITÉ retournée — donc le seul à couvrir
+  /// aussi bien le refus total que le refus partiel.
   static Future<void> _approvalReturnStock(
-      Sale order, String pid, String vid, int qty, String reason) async {
+      Sale order, String pid, String vid, int qty, String reason,
+      {String? cause}) async {
     final usePartner = order.deliveryMode == DeliveryMode.partner
         && (order.deliveryLocationId ?? '').isNotEmpty;
     if (usePartner) {
@@ -1197,6 +1203,12 @@ class SaleLocalDatasource {
         shopId:     order.shopId,
         productId:  pid,
         orderId:    order.id,
+        // `reason` n'était PAS transmis ici — écart ancien, et pas anodin :
+        // une tournée « à choisir » part presque toujours d'un emplacement
+        // partenaire, si bien que la branche muette était la branche
+        // NOMINALE. Tout motif saisi se serait perdu là.
+        reason:     reason,
+        cause:      cause,
       );
     } else {
       await StockService.reverseSale(
@@ -1206,6 +1218,7 @@ class SaleLocalDatasource {
         quantity:  qty,
         orderId:   order.id,
         reason:    reason,
+        cause:     cause,
       );
     }
   }
@@ -1269,8 +1282,19 @@ class SaleLocalDatasource {
   /// `amount_paid = 0` / `unpaid` (bug « terminée mais jamais payée »), car la
   /// clôture court-circuite volontairement `updateOrderStatus` (garde-fou
   /// stock). `null` → comportement historique : clôture = entièrement payée.
+  /// [refusals] : motif de refus par article — `code` structuré, `detail`
+  /// libre. Renseigné pour toute ligne dont une quantité revient, refus total
+  /// ou partiel.
+  ///
+  /// [collectedBy] arrive en `String` et non sous son type d'origine :
+  /// `CollectedBy` vit dans la couche PRÉSENTATION, et la couche données ne
+  /// doit pas l'importer. On transporte sa valeur, pas son type.
   Future<void> closeApprovalOrder(
-      String orderId, Map<String, int> keptByItemId, {double? amountPaid}) async {
+      String orderId, Map<String, int> keptByItemId,
+      {double? amountPaid,
+       String? collectedBy,
+       Map<String, ({String code, String? detail})> refusals =
+           const {}}) async {
     final raw = _ordersBox.get(orderId);
     if (raw is! Map) return;
     final order = _mapToSaleWithStatus(Map<String, dynamic>.from(raw));
@@ -1289,8 +1313,17 @@ class SaleLocalDatasource {
         _logRestockMiss(order, entry.key, entry.value, 'retour clôture à choisir');
         continue;
       }
+      // Le motif saisi remplace le libellé générique : c'est cette ligne de
+      // `stock_movements` qui portera, durablement, la raison du refus.
+      final r = refusals[entry.key];
       await _approvalReturnStock(
-          order, pid, vid, entry.value, 'retour vente à choisir');
+          order, pid, vid, entry.value,
+          r == null
+              ? 'retour vente à choisir'
+              : (r.detail == null
+                  ? 'retour vente à choisir — ${r.code}'
+                  : 'retour vente à choisir — ${r.code} : ${r.detail}'),
+          cause: r?.code);
     }
 
     // 2. Vente finale = articles gardés (qty = quantité gardée).
@@ -1344,6 +1377,36 @@ class SaleLocalDatasource {
       );
     }
     await updateOrder(closed);
+    // JOURNAL — tenu ICI, et non chez l'appelant.
+    //
+    // Il y vivait, si bien qu'une clôture déclenchée par un autre chemin
+    // n'aurait rien laissé. Le journal suit désormais la donnée : il est écrit
+    // là où la commande change réellement d'état, et il porte enfin le DÉTAIL
+    // des refus — sans lui, l'écart entre ce qui partait et ce qui revient
+    // n'était lisible nulle part.
+    ActivityLogService.log(
+      action:      'approval_closed',
+      targetType:  'order',
+      targetId:    orderId,
+      targetLabel: order.clientName ?? 'Commande',
+      shopId:      order.shopId,
+      details: {
+        'kept_total':     recon.totalKept,
+        'returned_total': recon.totalReturned,
+        'final_status':   closed.status.name,
+        'amount_paid':    amountPaid,
+        if (collectedBy != null) 'collected_by': collectedBy,
+        if (refusals.isNotEmpty)
+          'refusals': [
+            for (final e in refusals.entries)
+              {
+                'product_id': e.key,
+                'code':       e.value.code,
+                if (e.value.detail != null) 'detail': e.value.detail,
+              },
+          ],
+      },
+    );
     // La commande est finalisée (completed ou cancelled) : plus aucun rappel
     // de livraison à faire sonner. `updateOrderStatus` le fait pour les
     // transitions génériques ; la clôture ne passant pas par lui, on le fait
@@ -1390,6 +1453,21 @@ class SaleLocalDatasource {
       cancellationReason: reason,
     );
     await updateOrder(cancelled);
+    // Journal tenu ici plutôt que chez l'appelant — même raison que pour la
+    // clôture : l'évènement appartient à la donnée, pas à l'écran qui l'a
+    // déclenché.
+    ActivityLogService.log(
+      action:      'approval_cancelled',
+      targetType:  'order',
+      targetId:    orderId,
+      targetLabel: order.clientName ?? 'Commande',
+      shopId:      order.shopId,
+      details: {
+        'items':          order.items.length,
+        'stock_restored': order.stockReserved,
+        if (reason != null) 'reason': reason,
+      },
+    );
     await DeliveryReminderService.cancelFor(orderId);
   }
 
