@@ -1303,9 +1303,24 @@ class SaleLocalDatasource {
     // 3. Persister.
     final Sale closed;
     if (keptItems.isEmpty) {
+      // REFUS TOTAL — la commande ne porte plus aucun article.
+      //
+      // La marchandise est INTÉGRALEMENT revenue en stock (boucle ci-dessus).
+      // Conserver les lignes ferait peser la valeur complète de la commande
+      // dans les « Pertes » du tableau de bord, alors que rien n'est perdu :
+      // seul le déplacement a coûté. La perte retombe donc sur ce qui a
+      // réellement été engagé — livraison + frais annexes.
+      //
+      // La remise part AVEC les articles, et ce n'est pas cosmétique :
+      // `taxAmount` est un getter dérivé, `(subtotal - discountAmount) *
+      // taxRate / 100`. Avec un panier vide mais une remise conservée, la
+      // TVA deviendrait NÉGATIVE et contaminerait le total. Les deux champs
+      // ne peuvent pas être dissociés.
       closed = order.copyWith(
         status:        SaleStatus.cancelled,
         stockReserved: false, // tout a été remis en stock
+        items:         const [],
+        discountAmount: 0,
         cancellationReason: 'aucun article gardé sur place',
       );
     } else {
@@ -1357,9 +1372,21 @@ class SaleLocalDatasource {
             reason ?? 'annulation vente à choisir');
       }
     }
+    // Même traitement que le refus total dans `closeApprovalOrder` : la
+    // marchandise est revenue en stock (boucle ci-dessus), la commande ne
+    // porte donc plus d'articles et la perte se limite à ce qui a été engagé
+    // — livraison + frais annexes.
+    //
+    // Sans cet alignement, le MÊME évènement métier — une tournée entièrement
+    // refusée — pèserait deux montants différents dans les « Pertes » selon
+    // le bouton pressé : valeur pleine par ici, livraison seule par la
+    // clôture. La remise part avec les articles, faute de quoi `taxAmount`,
+    // qui dérive de `(subtotal - discountAmount)`, deviendrait négatif.
     final cancelled = order.copyWith(
       status:             SaleStatus.cancelled,
       stockReserved:      false,
+      items:              const [],
+      discountAmount:     0,
       cancellationReason: reason,
     );
     await updateOrder(cancelled);

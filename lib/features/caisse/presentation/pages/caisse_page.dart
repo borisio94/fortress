@@ -1548,6 +1548,12 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               // bien avoir lieu) : écritures du livre partenaire + frais de
               // livraison dus + rafraîchissement des stocks à l'écran.
               final fresh = _ds.getOrderById(o.id!);
+              // ÉCRITURES MARCHANDISE — réservées à une vente aboutie.
+              //
+              // `_generatePartnerLedgerEntries` inscrit ce que le partenaire a
+              // ENCAISSÉ, montant dérivé de `order.total`. Sur une tournée
+              // entièrement refusée, elle créerait une créance pour de
+              // l'argent que personne n'a touché.
               if (fresh != null && fresh.status == SaleStatus.completed) {
                 await _generatePartnerLedgerEntries(
                   order: fresh,
@@ -1560,6 +1566,26 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                       .toList(),
                   collectedBy: res.collectedBy,
                 );
+              }
+              // FRAIS DE LIVRAISON — dus même quand tout est refusé.
+              //
+              // Le partenaire a fait le trajet ; que le client ait tout rendu
+              // ne le lui rembourse pas. `syncOrderDeliveryFee` ne dépend que
+              // du montant qu'on lui passe, jamais des articles ni du total :
+              // elle reste juste sur une commande vidée de ses lignes.
+              //
+              // ⚠ CAS PARTICULIER, ET NON RÈGLE GÉNÉRALE : les deux autres
+              // appels de cette fonction (`sale_local_datasource.dart` dans
+              // `updateOrderStatus`, et la feuille d'édition des frais plus
+              // bas) restent strictement sous `completed`. Seule la clôture
+              // d'une tournée « à choisir » connaît un refus total où le
+              // déplacement a pourtant eu lieu.
+              //
+              // Le rafraîchissement des stocks suit la même porte : la
+              // restitution vient de modifier les quantités.
+              if (fresh != null
+                  && (fresh.status == SaleStatus.completed
+                      || fresh.status == SaleStatus.cancelled)) {
                 final dp = fresh.deliveryPrice ?? 0;
                 if (fresh.deliveryMode == DeliveryMode.partner
                     && (fresh.deliveryLocationId ?? '').isNotEmpty
