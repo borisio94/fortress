@@ -166,17 +166,25 @@ class _PartnerLedgerViewState
       ),
     );
     if (res == null || !mounted) return;
-    // Boutique → partenaire = +amount : la boutique paie, le solde (négatif
-    // = dette boutique) remonte vers 0.
+    // Boutique → partenaire = +amount dans LES DEUX cas : la boutique paie,
+    // le solde monte. Un règlement ramène vers 0 une dette de la boutique ;
+    // une avance pousse au-delà et crée une créance sur le partenaire. Même
+    // arithmétique, deux intentions — seul le `type` les distingue.
+    final isAdvance = res.nature == _RemittanceNature.advance;
     await PartnerLedgerService.addEntry(
       shopId:            widget.shopId,
       partnerLocationId: widget.partnerLocationId,
-      type:              PartnerLedgerEntryType.remittance,
+      type:              isAdvance
+                            ? PartnerLedgerEntryType.advance
+                            : PartnerLedgerEntryType.remittance,
       amount:            res.amount.abs(),
       note:              res.note?.isEmpty == true ? null : res.note,
       createdAt:         res.createdAt,
     );
-    if (mounted) AppSnack.success(context, 'Règlement enregistré.');
+    if (mounted) {
+      AppSnack.success(context,
+          isAdvance ? 'Avance enregistrée.' : 'Règlement enregistré.');
+    }
   }
 
   /// Enregistre une charge que la boutique doit au partenaire (hors
@@ -443,6 +451,7 @@ class _MovementTile extends StatelessWidget {
         PartnerLedgerEntryType.deliveryOwed  => Icons.local_shipping_outlined,
         PartnerLedgerEntryType.remittance    => Icons.payments_outlined,
         PartnerLedgerEntryType.partnerCharge => Icons.receipt_long_outlined,
+        PartnerLedgerEntryType.advance       => Icons.savings_outlined,
       };
 
   String _fmtDate(DateTime d) {
@@ -456,15 +465,25 @@ class _MovementTile extends StatelessWidget {
 
 enum _RemittanceDirection { partnerToBoutique, boutiqueToPartner }
 
+/// Nature d'un versement SORTANT (boutique → partenaire). Le mouvement
+/// d'argent est le même dans les deux cas, seule l'intention change :
+///   * [settlement] SOLDE une dette que la boutique avait envers lui ;
+///   * [advance] en CRÉE une à sa charge.
+/// Le solde du partenaire est identique — la distinction sert à relire
+/// l'historique.
+enum _RemittanceNature { settlement, advance }
+
 class _RemittanceResult {
   final double amount;
   final _RemittanceDirection direction;
+  final _RemittanceNature nature;
   final String? note;
   /// Date du versement (antidatable). Si null, le caller stamp `now()`.
   final DateTime? createdAt;
   const _RemittanceResult({
-    required this.amount, required this.direction, this.note,
-    this.createdAt,
+    required this.amount, required this.direction,
+    this.nature = _RemittanceNature.settlement,
+    this.note, this.createdAt,
   });
 }
 
@@ -488,6 +507,7 @@ class _RemittanceSheet extends StatefulWidget {
 class _RemittanceSheetState extends State<_RemittanceSheet> {
   late _RemittanceDirection _direction =
       widget.lockedDirection ?? _RemittanceDirection.partnerToBoutique;
+  _RemittanceNature _nature = _RemittanceNature.settlement;
   final _amountCtrl = TextEditingController();
   final _noteCtrl   = TextEditingController();
   String? _error;
@@ -518,9 +538,23 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
     Navigator.of(context).pop(_RemittanceResult(
       amount:    amt,
       direction: _direction,
+      nature:    _nature,
       note:      _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
       createdAt: _date,
     ));
+  }
+
+  /// Bascule la nature du versement. Le champ montant est VIDÉ au passage :
+  /// il était pré-rempli avec la dette de la boutique, chiffre qui n'a aucun
+  /// sens pour une avance. Un montant pré-rempli faux est plus dangereux
+  /// qu'un champ vide — il serait validé sans être relu.
+  void _setNature(_RemittanceNature n) {
+    if (n == _nature) return;
+    setState(() {
+      _nature = n;
+      _amountCtrl.clear();
+      _error = null;
+    });
   }
 
   Future<void> _pickDate() async {
@@ -536,7 +570,11 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
   Widget build(BuildContext context) {
     final locked = widget.lockedDirection != null;
     return AdaptiveFormFrame(
-      title: locked ? 'Régler le partenaire' : 'Enregistrer un versement',
+      title: !locked
+          ? 'Enregistrer un versement'
+          : (_nature == _RemittanceNature.advance
+              ? 'Avance au partenaire'
+              : 'Régler le partenaire'),
       icon:  Icons.payments_outlined,
       body: Column(
         mainAxisSize: MainAxisSize.min,
@@ -569,25 +607,24 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
                   ),
                   const SizedBox(height: 14),
                 ] else ...[
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.06),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(children: [
-                      Icon(Icons.south_west_rounded,
-                          size: 15, color: AppColors.primary),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                            'Boutique → ${widget.partnerName} '
-                            '(règlement de ce que vous lui devez)',
-                            style: AppTextStyles.bodySm),
-                      ),
-                    ]),
+                  // Le sens est figé (boutique → partenaire) ; ce qui reste
+                  // à choisir, c'est l'INTENTION. L'encart figé qui tenait
+                  // cette place annonçait « règlement de ce que vous lui
+                  // devez » — phrase fausse dès qu'il s'agit d'une avance.
+                  const _SectionLabel('Nature du versement'),
+                  _DirRow(
+                    selected: _nature == _RemittanceNature.settlement,
+                    label: 'Règlement d\'une dette',
+                    hint:  'Vous payez ce que vous devez à '
+                           '${widget.partnerName}',
+                    onTap: () => _setNature(_RemittanceNature.settlement),
+                  ),
+                  _DirRow(
+                    selected: _nature == _RemittanceNature.advance,
+                    label: 'Avance commerciale',
+                    hint:  'Vous versez d\'avance ; '
+                           '${widget.partnerName} vous le devra',
+                    onTap: () => _setNature(_RemittanceNature.advance),
                   ),
                   const SizedBox(height: 14),
                 ],

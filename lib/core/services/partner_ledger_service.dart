@@ -468,7 +468,13 @@ class PartnerLedgerService {
       if (raw['order_id']?.toString() != orderId) continue;
       if (keepReceived) {
         final t = raw['type']?.toString();
-        if (t == 'remittance' || t == 'partnerCharge') continue;
+        // `advance` est listée par précaution : une avance est globale et
+        // ne porte en principe aucun `order_id`, donc rien ne l'atteint
+        // ici. Si elle venait à en porter un, une re-complétion de commande
+        // effacerait un versement réellement sorti de la caisse.
+        if (t == 'remittance' || t == 'partnerCharge' || t == 'advance') {
+          continue;
+        }
       }
       toDelete.add(key.toString());
     }

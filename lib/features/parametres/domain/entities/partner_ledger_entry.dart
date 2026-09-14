@@ -12,6 +12,9 @@ import '../../../../core/storage/schema_migrator.dart';
 ///     enregistré manuellement, qui solde une partie du compte. Le signe
 ///     dépend du sens (positif = partenaire verse à la boutique, négatif
 ///     = boutique verse au partenaire).
+///   * `advance` (+)       : avance commerciale versée au partenaire, qui
+///     CRÉE une créance au lieu d'en solder une. Même sens et même signe
+///     qu'un règlement — la distinction est narrative, pas comptable.
 ///
 /// **Convention de signe sur le solde** :
 ///   `solde = SUM(amount)` filtré sur le partenaire.
@@ -25,7 +28,26 @@ enum PartnerLedgerEntryType {
   /// Charge que la boutique doit au partenaire, hors livraison réussie
   /// (course refusée, stockage, commission, abonnement…). Toujours négatif.
   /// La sous-nature précise est portée par [PartnerLedgerEntry.category].
-  partnerCharge;
+  partnerCharge,
+
+  /// Avance commerciale : la boutique verse de l'argent au partenaire AVANT
+  /// toute dette de sa part — il le lui devra. Toujours POSITIF.
+  ///
+  /// C'est EXACTEMENT le même mouvement d'argent qu'un règlement, dans le
+  /// même sens et du même signe : le solde est rigoureusement identique dans
+  /// les deux cas. Seule l'INTENTION diffère — un règlement SOLDE une dette
+  /// existante, une avance en CRÉE une. Les distinguer sert à relire
+  /// l'historique, jamais à calculer un solde.
+  ///
+  /// N'est PAS reprise en dépense : `dashboard_providers` et `expenses_page`
+  /// ne retiennent que `partnerCharge`. C'est correct — une avance est une
+  /// CRÉANCE, pas une charge : l'argent sort de la trésorerie mais crée un
+  /// dû, il ne consomme aucun résultat.
+  ///
+  /// Écartée du calcul d'ancienneté de dette (cf.
+  /// `PartnerLedgerService.debtAgeByPartner`) : une avance consentie n'est
+  /// pas un retard de reversement.
+  advance;
 
   String get key => name;
 
@@ -41,6 +63,7 @@ enum PartnerLedgerEntryType {
         PartnerLedgerEntryType.deliveryOwed  => 'Frais de livraison',
         PartnerLedgerEntryType.remittance    => 'Versement',
         PartnerLedgerEntryType.partnerCharge => 'Charge partenaire',
+        PartnerLedgerEntryType.advance       => 'Avance',
       };
 }
 
