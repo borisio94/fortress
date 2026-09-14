@@ -1060,6 +1060,19 @@ class AppDatabase {
   /// `syncOrders` détecte les transitions par diff du statut Hive et émet
   /// les notifications manquées (dédup → pas de double avec le realtime).
   static Future<void> onAppResumed() async {
+    // VIDER LA FILE AVANT DE TIRER — ordre non négociable.
+    //
+    // `syncOrders` purge les commandes locales absentes du serveur. Une
+    // commande créée hors ligne et pas encore poussée est absente du serveur
+    // sans être périmée : tirer avant d'avoir poussé la ferait disparaître
+    // définitivement. `_onNetworkRestored` respecte déjà cet ordre (flush
+    // puis sync) ; ce hook, lui, tirait directement.
+    //
+    // LIMITE ASSUMÉE : `flushOfflineQueue` sort immédiatement si un flush est
+    // déjà en cours (`_syncing`). Dans ce cas on tire quand même. La fenêtre
+    // est fortement réduite, pas refermée — la garde anti-purge de
+    // `syncOrders` est la seconde ligne de défense.
+    await flushOfflineQueue();
     for (final shopId in List.of(_i._channels.keys)) {
       try {
         await syncOrders(shopId);
@@ -1308,6 +1321,50 @@ class AppDatabase {
       ...op, 'queued_at': DateTime.now().toIso8601String(),
     });
     debugPrint('[DB] 📦 Enqueued: ${op["table"]} ${op["op"]}');
+  }
+
+  /// Identifiants dont une écriture est ENCORE EN FILE pour [table].
+  ///
+  /// Garde anti-purge : une ligne locale absente du serveur mais dont le push
+  /// n'est pas confirmé n'est PAS un résidu à supprimer — c'est une écriture
+  /// en vol. La purger perd définitivement une commande ou une dépense créée
+  /// hors ligne.
+  ///
+  /// Diffère VOLONTAIREMENT de la garde interne à `_syncTablePassthrough` sur
+  /// deux points, et c'est tout l'intérêt :
+  ///   • `update` est accepté — `bgUpdateOrder` enfile ce type pour les
+  ///     mutations partielles (paiement, livraison, frais), c'est-à-dire
+  ///     précisément celles qui portent l'argent ;
+  ///   • l'identifiant est lu dans `data['id']` OU `match['id']`, ce dernier
+  ///     étant l'emplacement qu'utilisent les ops `update`.
+  /// Ne filtrer que `insert`/`upsert` sur `data['id']` laisserait ces
+  /// écritures sans protection tout en donnant l'illusion du contraire.
+  ///
+  /// `delete` est exclu à dessein : une suppression en file signifie que la
+  /// ligne DOIT partir — l'épargner irait contre l'intention.
+  static Set<String> _pendingIdsFor(String table) {
+    final ids = <String>{};
+    try {
+      for (final raw in HiveBoxes.offlineQueueBox.values) {
+        // PAS de `if (raw is! Map)` ici : la boîte est déclarée `Box<Map>`
+        // (hive_boxes.dart), donc `.values` produit des `Map` NON nullables
+        // et le test serait du code mort — l'analyseur le signale.
+        //
+        // Les purges voisines gardent le leur à juste titre : elles passent
+        // par `box.get(key)`, qui retourne `Map?`. La symétrie n'est
+        // qu'apparente, ne pas « rétablir » celui-ci.
+        if (raw['table']?.toString() != table) continue;
+        final opType = raw['op']?.toString();
+        if (opType != 'insert' && opType != 'upsert' && opType != 'update') {
+          continue;
+        }
+        final d = raw['data'];
+        final m = raw['match'];
+        final id = (d is Map ? d['id'] : null) ?? (m is Map ? m['id'] : null);
+        if (id != null) ids.add(id.toString());
+      }
+    } catch (_) {/* best effort — en cas de doute on ne purge pas */}
+    return ids;
   }
 
   static Future<void> flushOfflineQueue() async {
@@ -3986,12 +4043,17 @@ end \$\$;""",
       }
       // Diff purge : supprimer les dépenses locales de ce shop
       // qui n'existent plus distant (reset / suppression depuis autre appareil).
+      // Même garde que pour les commandes : une dépense créée hors ligne est
+      // absente du serveur sans être périmée. La purger la perd sans trace.
+      final pendingExpenseIds = _pendingIdsFor('expenses');
       final staleKeys = <dynamic>[];
       for (final key in HiveBoxes.expensesBox.keys) {
         final raw = HiveBoxes.expensesBox.get(key);
         if (raw is! Map) continue;
         if (raw['shop_id']?.toString() != shopId) continue;
-        if (!remoteIds.contains(key.toString())) staleKeys.add(key);
+        final ks = key.toString();
+        if (pendingExpenseIds.contains(ks)) continue;
+        if (!remoteIds.contains(ks)) staleKeys.add(key);
       }
       for (final k in staleKeys) {
         await HiveBoxes.expensesBox.delete(k);
@@ -4046,6 +4108,15 @@ end \$\$;""",
       // confirmée côté Supabase (push async lent, rechargement web avant
       // flush, reconnexion) serait effacée définitivement → perte de
       // données financière silencieuse (bug solde partenaire qui revient).
+      // ⚠ ANGLE MORT CONNU, non traité ici (périmètre : ~25 tables passent par
+      // cette fonction). Ce filtre ignore les ops `update` et ne lit que
+      // `data['id']` — or une op `update` porte son identifiant dans
+      // `match['id']`. Une mutation partielle en vol n'est donc PAS protégée
+      // de la purge sur ces tables.
+      //
+      // `_pendingIdsFor` (plus haut) couvre les deux cas et sert déjà
+      // `syncOrders` / `syncExpenses`. Le généraliser ici toucherait toutes
+      // les tables passthrough d'un coup → reporté en vague 4.
       final pendingIds = <String>{};
       try {
         for (final raw in HiveBoxes.offlineQueueBox.values) {
@@ -4970,12 +5041,20 @@ end \$\$;""",
       }
       // Diff purge : supprimer les commandes locales de ce shop
       // qui ne sont plus distantes.
+      // Garde anti-perte : on ne purge JAMAIS une commande dont l'écriture
+      // est encore en file. Absente du serveur ≠ périmée — elle peut n'avoir
+      // simplement pas encore été poussée (création hors ligne, push en vol,
+      // rechargement web avant flush). Sans cette garde, `onAppResumed`
+      // pouvait effacer une vente jamais parvenue au serveur.
+      final pendingOrderIds = _pendingIdsFor('orders');
       final staleKeys = <dynamic>[];
       for (final key in HiveBoxes.ordersBox.keys) {
         final raw = HiveBoxes.ordersBox.get(key);
         if (raw is! Map) continue;
         if (raw['shop_id']?.toString() != shopId) continue;
-        if (!remoteIds.contains(key.toString())) staleKeys.add(key);
+        final ks = key.toString();
+        if (pendingOrderIds.contains(ks)) continue;
+        if (!remoteIds.contains(ks)) staleKeys.add(key);
       }
       for (final k in staleKeys) {
         await HiveBoxes.ordersBox.delete(k);
@@ -6467,6 +6546,12 @@ end \$\$;""",
       }
       // Diff purge : supprimer les clients locaux de ce shop
       // qui n'existent plus distant.
+      // TODO P1-B-suite : syncClients présente le même angle mort que
+      // syncOrders/syncExpenses avant leur correctif — cette purge ne
+      // consulte pas la file d'attente, donc un client créé hors ligne et
+      // pas encore poussé peut être effacé. Non traité dans ce commit
+      // (périmètre financier), le correctif tient en un appel à
+      // `_pendingIdsFor('clients')`.
       final staleKeys = <dynamic>[];
       for (final key in HiveBoxes.clientsBox.keys) {
         final raw = HiveBoxes.clientsBox.get(key);
