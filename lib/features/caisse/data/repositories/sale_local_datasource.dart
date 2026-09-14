@@ -785,6 +785,38 @@ class SaleLocalDatasource {
     supaMap.remove('image_url'); // pas de colonne image dans Supabase
     AppDatabase.bgWriteOrder(supaMap);
 
+    // ── Remboursement → la créance partenaire disparaît avec la vente ────
+    //
+    // Une commande encaissée PAR un partenaire crée une créance
+    // `saleCollected` à la clôture. Remboursée au client, cette créance n'a
+    // plus d'objet : le partenaire était redevable du produit d'une vente qui
+    // n'existe plus. Sans ce retrait, il restait affiché comme débiteur
+    // indéfiniment — créance fantôme, jamais soldable autrement qu'à la main.
+    //
+    // `keepReceived: false` — purge TOTALE — et NON `true`, et ce n'est pas
+    // un détail. Avec `true`, un `remittance` déjà enregistré survivrait
+    // seul : partenaire encaisse 10 000 (`saleCollected` +10 000), reverse
+    // (`remittance` −10 000), solde 0. Retirer le seul `saleCollected`
+    // laisserait −10 000, soit « la boutique doit 10 000 au partenaire ».
+    // Faux : il a rendu l'argent, la boutique a remboursé le client de sa
+    // poche, le partenaire est quitte. Les deux écritures s'annulent, elles
+    // partent ensemble.
+    //
+    // La trace du versement reste lisible dans le journal d'activité et
+    // l'historique des mouvements ; le livre partenaire, lui, ne doit porter
+    // que des soldes vrais.
+    //
+    // Placé ici plutôt que dans la page Retours : `updateOrderStatus` est le
+    // SEUL site d'écriture du statut (l.773), et les deux chemins qui peuvent
+    // poser `refunded` — menu d'évènements et page Retours — y passent tous
+    // les deux. Un correctif local n'aurait couvert que l'un des deux.
+    if (status == SaleStatus.refunded
+        && oldStatus != SaleStatus.refunded
+        && shopId != null) {
+      await PartnerLedgerService.removeForOrder(shopId, orderId,
+          keepReceived: false);
+    }
+
     // ── Frais de livraison → dette envers le partenaire livreur ──────────
     // À la clôture (completed) d'une commande livrée par un PARTENAIRE avec
     // des frais de livraison, on enregistre ces frais comme une dette de la
