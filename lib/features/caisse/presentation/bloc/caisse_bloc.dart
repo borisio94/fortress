@@ -155,7 +155,10 @@ class SaveOrder extends CaisseEvent {
   final double amountPaid;
   /// Vente « à choisir sur place » : le livreur emporte plusieurs articles,
   /// le client en garde certains, le reste revient. Si `true`, le stock est
-  /// RÉSERVÉ à la création (et la commande naît `processing`, isApprovalSale).
+  /// RÉSERVÉ à la création et la commande naît `scheduled` — « Programmée »,
+  /// comme une commande e-commerce ordinaire, mais avec `isApprovalSale` et
+  /// `stockReserved` à vrai (cf. `reserveApprovalOrder`, qui écrit
+  /// explicitement `SaleStatus.scheduled`).
   final bool isApprovalSale;
   SaveOrder(this.shopId,
       {this.createdAt, this.amountPaid = 0, this.isApprovalSale = false});
@@ -1389,14 +1392,17 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
           // côté Supabase (UNIQUE constraint sur orders.idempotency_key).
           idempotencyKey: state.idempotencyKey,
           // Vente « à choisir sur place » : le moteur réservera le stock et
-          // passera la commande en `processing` (cf. reserveApprovalOrder).
+          // persistera la commande en `scheduled` (cf. reserveApprovalOrder,
+          // qui écrit explicitement `SaleStatus.scheduled`). Ce commentaire
+          // annonçait `processing` — la commande naît « Programmée », avec le
+          // drapeau et le stock déjà sortis.
           isApprovalSale: event.isApprovalSale,
           notes:          state.note,
           tabLabel:       state.tabLabel,
         );
         if (event.isApprovalSale) {
           // Réserve (décrémente) tous les articles + persiste la commande en
-          // `processing, stockReserved=true`. Peut throw si stock insuffisant
+          // `scheduled, stockReserved=true`. Peut throw si stock insuffisant
           // → dans ce cas on n'enregistre PAS la commande et on signale.
           try {
             await ds.reserveApprovalOrder(order);
