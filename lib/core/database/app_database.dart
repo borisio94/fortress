@@ -1627,7 +1627,18 @@ class AppDatabase {
       }
 
       // ── Table inexistante (42P01) → afficher le SQL de création
-      if (err.contains('42P01') || err.contains('does not exist')) {
+      //
+      // `does not exist` a été RETIRÉ de ce test : une colonne absente produit
+      // elle aussi ce libellé (`column "x" ... does not exist`), et retombait
+      // donc ici — où on lui proposait de créer la TABLE, ce qui n'a aucun
+      // sens quand la table existe et qu'il ne manque qu'une colonne. Ce cas
+      // est désormais traité plus haut comme une dérive de schéma permanente.
+      //
+      // Aucune donnée ne peut être perdue par ce retrait : une erreur de table
+      // manquante sans le code `42P01` retombe en fin de fonction sur
+      // `return false` — l'op reste en file, exactement comme avant. Seul
+      // l'affichage du SQL de création lui échappe.
+      if (err.contains('42P01')) {
         final tbl = op['table'] as String? ?? '?';
         final sql = getSqlForTable(tbl);
         debugPrint('[DB] ⚠️ Table "$tbl" inexistante → op gardée en queue');
@@ -1649,6 +1660,27 @@ class AppDatabase {
           err.contains('42501') || // permission denied
           err.contains('42502') || // insufficient privilege
           err.contains('23502') || // not null violation
+          // ── DÉRIVE DE SCHÉMA ────────────────────────────────────────────
+          // Client et base ne s'accordent plus. Réessayer la même charge
+          // utile ne changera jamais la réponse : seule une migration le
+          // peut. Ces trois cas tombaient jusqu'ici dans « erreur
+          // temporaire », d'où dix rejeux inutiles suivis du log aveugle
+          // « Abandoned after 10 retries » — un message qui a déjà fait
+          // conclure à tort à un succès, alors que l'écriture était perdue.
+          //
+          // Vécu deux fois : le CHECK `stock_movements.type` (hotfix_176) et
+          // la catégorie `storage` absente du CHECK `expenses` (hotfix_177).
+          //
+          // Sur les tables de `neverDropTables` cela ne change PAS le sort de
+          // l'op — elle reste en file dans les deux cas. Ce qui change est le
+          // journal : la vraie cause serveur est écrite dès le PREMIER échec,
+          // au lieu d'attendre la 3ᵉ tentative.
+          err.contains('23514') ||   // violation de contrainte CHECK
+          err.contains('42703') ||   // colonne inconnue (code Postgres brut)
+          // PostgREST n'expose pas toujours le code brut : pour une colonne
+          // absente de son cache de schéma, il répond PGRST204. Couvrir les
+          // deux formes supprime la dépendance à celle qui arrive.
+          err.contains('PGRST204') ||
           // RAISE EXCEPTION métier (PL/pgSQL) — codes émis intentionnellement
           // par les RPC pour signaler une règle de domaine violée
           // (delete_sale → suppression_statut_invalide, motif_required, …).
