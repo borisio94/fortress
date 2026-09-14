@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/storage/hive_boxes.dart';
 import '../../../core/storage/local_storage_service.dart';
 import '../../../core/permisions/subscription_provider.dart';
+import '../../../core/utils/order_revenue_class.dart';
 import '../../inventaire/domain/entities/product.dart';
 import '../../inventaire/domain/entities/stock_location.dart';
 import '../../inventaire/domain/entities/stock_level.dart';
@@ -571,24 +572,27 @@ FinancialSnapshot _computeFinancialSnapshot(String shopId, DashRange range,
     // seule fois, par `netProfit` via `operatingExpenses`.
     final orderProfit   = orderTotal - totalCost;
 
-    final isLoss = status == 'refunded' ||
-        status == 'cancelled' ||
-        status == 'refused';
+    // Règle de classement : voir `classifyOrderStatus`. Elle était écrite
+    // ici en toutes lettres, et une seconde fois dans le calcul de
+    // tendance ; l'export des commandes, lui, ne la connaissait pas.
+    final revClass    = classifyOrderStatus(status);
+    final isLoss      = revClass == OrderRevenueClass.loss;
+    final isCompleted = revClass == OrderRevenueClass.revenue;
     if (isLoss) {
       totalLoss += orderTotal;
-    } else if (status == 'completed') {
+    } else if (isCompleted) {
       totalSales  += orderTotal;
       totalProfit += orderProfit;
     }
     // Frais de commande : comptés uniquement sur les ventes encaissées —
-    // tant que `status != completed` la dépense n'est pas réalisée.
-    if (status == 'completed' && orderFees > 0) {
+    // tant que la commande n'est pas encaissée la dépense n'est pas réalisée.
+    if (isCompleted && orderFees > 0) {
       operatingExpenses += orderFees;
     }
     // Livraison payée à un tiers — elle MANQUAIT ici alors que le moteur
     // principal la comptait : `operatingExpenses` n'avait donc pas la même
     // définition des deux côtés, et `netProfit` divergeait même à CA égal.
-    if (status == 'completed' && delivExpense > 0) {
+    if (isCompleted && delivExpense > 0) {
       operatingExpenses += delivExpense;
     }
   }
@@ -891,10 +895,11 @@ final dashDataProvider =
     final bucket = range.bucketOf(effective);
     final items = (o['items'] as List?) ?? [];
 
-    final isLoss = status == 'refunded' ||
-        status == 'cancelled' ||
-        status == 'refused';
-    final isCompleted = status == 'completed';
+    // Même règle que le moteur principal, par le même helper — c'était la
+    // seconde des deux copies littérales.
+    final revClass    = classifyOrderStatus(status);
+    final isLoss      = revClass == OrderRevenueClass.loss;
+    final isCompleted = revClass == OrderRevenueClass.revenue;
 
     // Frais de commande (livraison, emballage, etc.)
     final rawFees = o['fees'] as List?;
