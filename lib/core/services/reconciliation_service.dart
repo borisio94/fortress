@@ -197,11 +197,13 @@ class ReconciliationService {
           category: lossCategory,
           origin: originFor(v.item.name),
           declaredBy: declaredBy,
-          // Rattachement à l'INGRÉDIENT : c'est ce qui permet au bilan de
-          // retirer ce manque des achats répartis au lieu de le compter en
-          // plus (hotfix_179). Une fourniture (`si_…`) n'est pas répartie sur
-          // les plats : elle reste non rattachée, donc une charge.
-          ingredientId: v.item.isIngredient ? v.item.id : null,
+          // Rattachement OBLIGATOIRE pour un écart d'inventaire (hotfix_179).
+          // Ingrédient (`ig_…`) : le bilan retire ce manque des achats
+          // répartis au lieu de le compter en plus. Fourniture (`si_…`) :
+          // même colonne, comme `daily_expenses.ingredient_id` — la perte
+          // reste traçable mais demeure une CHARGE, les fournitures n'étant
+          // pas réparties sur les plats.
+          ingredientId: v.item.id,
         );
         lossesCount++;
         lossTotal += decision.lossAmount;

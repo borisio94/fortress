@@ -81,7 +81,13 @@ class LossService {
 
   static Future<void> update(Loss l) => _put(l);
 
+  /// Toute écriture passe ici : c'est donc ici que la règle de rattachement
+  /// est tenue, pour la saisie manuelle comme pour les écritures
+  /// automatiques (incidents, réconciliation, consignes). Une perte de
+  /// matière sans rattachement serait comptée deux fois par le bilan.
   static Future<void> _put(Loss l) async {
+    final issue = l.attachmentIssue;
+    if (issue != null) throw LossAttachmentException(issue);
     final map = l.toMap();
     try {
       await _raw().put(l.id, map);

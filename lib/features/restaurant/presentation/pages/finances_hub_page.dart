@@ -14,7 +14,9 @@ import '../../../../core/services/reconciliation_service.dart';
 import '../../../../core/services/restaurant_reporting_service.dart'
     show LossLine;
 import '../../../../core/services/round_routing.dart';
+import '../../../../core/services/service_incident_service.dart';
 import '../../../../core/services/stock_item_service.dart';
+import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -27,6 +29,8 @@ import '../../../../shared/widgets/period_selector.dart';
 import '../../data/restaurant_dashboard_providers.dart'
     show restaurantFinanceProvider;
 import '../widgets/resto_empty_state.dart' show RestoEmptyState;
+import '../../../caisse/domain/entities/sale_item.dart';
+import '../../../inventaire/domain/entities/product.dart';
 import '../../domain/entities/daily_expense.dart';
 import '../../domain/entities/fixed_charge.dart';
 import '../../domain/entities/ingredient.dart';
@@ -2354,6 +2358,9 @@ class _LossRow extends StatelessWidget {
   }
 }
 
+/// Ce à quoi une perte est rattachée dans l'éditeur.
+enum _LossAttach { none, plates, ingredient }
+
 /// Éditeur perte (déclaration / modification / suppression).
 class _LossEditor extends StatefulWidget {
   final String shopId;
@@ -2375,12 +2382,83 @@ class _LossEditorState extends State<_LossEditor> {
   String? _err;
   bool get _isEdit => widget.existing != null;
 
+  // ── Rattachement (audit des marges, 2026-09-15) ─────────────────────────
+  // Une perte de MATIÈRE doit dire ce qui a été perdu — des plats ou un
+  // ingrédient — sans quoi le bilan la compterait en plus d'achats déjà
+  // répartis sur les plats vendus. Règle : `Loss.attachmentError`.
+
+  late final List<Product> _dishes = LocalStorageService.getProductsForShop(
+          widget.shopId)
+      .where((p) => p.id != null && p.isActive)
+      .toList();
+  late final List<Ingredient> _ingredients =
+      IngredientService.forShop(widget.shopId);
+
+  late final List<WastedPlate> _plates = [...?widget.existing?.items];
+  late String? _ingredientId = (widget.existing?.ingredientId
+                  ?.startsWith('ig_') ??
+              false) &&
+          _ingredients.any((i) => i.id == widget.existing!.ingredientId)
+      ? widget.existing!.ingredientId
+      : null;
+  late _LossAttach _mode = _plates.isNotEmpty
+      ? _LossAttach.plates
+      : (_ingredientId != null ? _LossAttach.ingredient : _LossAttach.none);
+
+  String? _pickedDish;
+  final _dishQty = TextEditingController(text: '1');
+
+  /// Catégorie de matière saisissable à la main : rattachement obligatoire.
+  bool get _mustAttach =>
+      Loss.materialCategories.contains(_category) &&
+      _category != ReconciliationService.lossCategory;
+
+  /// Rattachement proposé à l'écran (obligatoire ou facultatif).
+  bool get _canAttach => _mustAttach || _category == 'autre';
+
+  /// Écart d'inventaire : produit par la réconciliation, son rattachement
+  /// (ingrédient ou fourniture) n'est pas modifiable ici.
+  bool get _isInventory => _category == ReconciliationService.lossCategory;
+
+  /// Mode effectif : une catégorie obligatoire n'offre pas « aucun ».
+  _LossAttach get _effectiveMode =>
+      _mustAttach && _mode == _LossAttach.none ? _LossAttach.plates : _mode;
+
   @override
   void dispose() {
     _desc.dispose();
     _amount.dispose();
     _origin.dispose();
+    _dishQty.dispose();
     super.dispose();
+  }
+
+  String _dishName(String productId) {
+    for (final p in _dishes) {
+      if (p.id == productId) return p.name;
+    }
+    return 'Plat supprimé';
+  }
+
+  void _addPlate() {
+    final pid = _pickedDish;
+    final qty = int.tryParse(_dishQty.text.trim()) ?? 0;
+    if (pid == null || qty <= 0) {
+      setState(() => _err = 'Choisissez un plat et une quantité');
+      return;
+    }
+    setState(() {
+      final i = _plates.indexWhere((p) => p.productId == pid);
+      if (i >= 0) {
+        _plates[i] = WastedPlate(
+            productId: pid, quantity: _plates[i].quantity + qty);
+      } else {
+        _plates.add(WastedPlate(productId: pid, quantity: qty.toDouble()));
+      }
+      _pickedDish = null;
+      _dishQty.text = '1';
+      _err = null;
+    });
   }
 
   Future<void> _pickDate() async {
@@ -2399,30 +2477,203 @@ class _LossEditorState extends State<_LossEditor> {
       setState(() => _err = 'Description requise');
       return;
     }
-    final amount = int.tryParse(_amount.text.trim()) ?? 0;
-    if (amount <= 0) {
-      setState(() => _err = 'Montant requis');
+    // Rattachement retenu selon la catégorie.
+    List<WastedPlate> items = const [];
+    String? ingredientId;
+    if (_isInventory) {
+      items = widget.existing?.items ?? const [];
+      ingredientId = widget.existing?.ingredientId;
+    } else if (_canAttach) {
+      switch (_effectiveMode) {
+        case _LossAttach.plates:
+          items = List.of(_plates);
+        case _LossAttach.ingredient:
+          ingredientId = _ingredientId;
+        case _LossAttach.none:
+          break;
+      }
+    }
+
+    final issue = Loss.attachmentError(
+        category: _category, items: items, ingredientId: ingredientId);
+    if (issue != null) {
+      setState(() => _err = issue);
       return;
     }
-    if (_isEdit) {
-      await LossService.update(widget.existing!.copyWith(
-        description: desc,
-        amount: amount,
-        category: _category,
-        origin: _origin.text.trim(),
-        date: _date,
-      ));
-    } else {
-      await LossService.record(
-        shopId: widget.shopId,
-        description: desc,
-        amount: amount,
-        category: _category,
-        origin: _origin.text.trim(),
-        date: _date,
-      );
+
+    var amount = int.tryParse(_amount.text.trim()) ?? 0;
+    if (amount <= 0) {
+      if (items.isNotEmpty && ingredientId == null) {
+        // Assiettes : le montant n'est qu'une estimation, le bilan recalcule.
+        // Estimée ici plutôt qu'exigée — personne ne sait chiffrer la matière
+        // d'un plat raté de tête.
+        amount = ServiceIncidentService.materialCostOf(widget.shopId, [
+          for (final p in items)
+            SaleItem(
+              productId: p.productId,
+              productName: _dishName(p.productId),
+              unitPrice: 0,
+              quantity: p.quantity.round(),
+            ),
+        ]).round();
+      } else {
+        setState(() => _err = 'Montant requis');
+        return;
+      }
+    }
+
+    try {
+      if (_isEdit) {
+        await LossService.update(widget.existing!.copyWith(
+          description: desc,
+          amount: amount,
+          category: _category,
+          origin: _origin.text.trim(),
+          date: _date,
+          items: items,
+          ingredientId: ingredientId,
+          clearIngredient: ingredientId == null,
+        ));
+      } else {
+        await LossService.record(
+          shopId: widget.shopId,
+          description: desc,
+          amount: amount,
+          category: _category,
+          origin: _origin.text.trim(),
+          date: _date,
+          items: items,
+          ingredientId: ingredientId,
+        );
+      }
+    } on LossAttachmentException catch (e) {
+      if (mounted) setState(() => _err = e.message);
+      return;
     }
     if (mounted) Navigator.of(context).pop(true);
+  }
+
+  /// Section « Ce qui a été perdu » : plats ou ingrédient.
+  List<Widget> _attachmentSection(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final inputStyle = AppTextStyles.input.copyWith(color: cs.onSurface);
+
+    if (_isInventory) {
+      final id = widget.existing?.ingredientId;
+      String? name;
+      for (final i in _ingredients) {
+        if (i.id == id) name = i.name;
+      }
+      name ??= id == null ? null : StockItemService.byId(widget.shopId, id)?.name;
+      return [
+        const SizedBox(height: 14),
+        Text(
+            'Écart constaté à l\'inventaire'
+            '${name == null ? '' : ' — $name'}.',
+            style: AppTextStyles.captionHint),
+      ];
+    }
+    if (!_canAttach) return const [];
+
+    final mode = _effectiveMode;
+    return [
+      const SizedBox(height: 14),
+      Text(
+          _mustAttach
+              ? 'Ce qui a été perdu (obligatoire)'
+              : 'Ce qui a été perdu (facultatif)',
+          style: AppTextStyles.caption),
+      const SizedBox(height: 6),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        if (!_mustAttach)
+          ChoiceChip(
+            label: const Text('Rien de précis'),
+            selected: mode == _LossAttach.none,
+            onSelected: (_) => setState(() => _mode = _LossAttach.none),
+          ),
+        ChoiceChip(
+          label: const Text('Des plats'),
+          selected: mode == _LossAttach.plates,
+          onSelected: (_) => setState(() => _mode = _LossAttach.plates),
+        ),
+        ChoiceChip(
+          label: const Text('Un ingrédient'),
+          selected: mode == _LossAttach.ingredient,
+          onSelected: (_) => setState(() => _mode = _LossAttach.ingredient),
+        ),
+      ]),
+      if (mode == _LossAttach.plates) ...[
+        for (final p in _plates)
+          ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: Text(_dishName(p.productId), style: AppTextStyles.bodySm),
+            subtitle: Text('× ${p.quantity.round()}',
+                style: AppTextStyles.caption),
+            trailing: IconButton(
+              tooltip: 'Retirer',
+              icon: const Icon(Icons.close_rounded, size: 18),
+              onPressed: () => setState(() => _plates.remove(p)),
+            ),
+          ),
+        const SizedBox(height: 6),
+        Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Expanded(
+            flex: 3,
+            child: DropdownButtonFormField<String>(
+              initialValue: _pickedDish,
+              isExpanded: true,
+              style: inputStyle,
+              decoration: const InputDecoration(labelText: 'Plat'),
+              items: [
+                for (final d in _dishes)
+                  DropdownMenuItem(
+                    value: d.id,
+                    child: Text(d.name,
+                        overflow: TextOverflow.ellipsis, style: inputStyle),
+                  ),
+              ],
+              onChanged: (v) => setState(() => _pickedDish = v),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(width: 64, child: _numField(_dishQty, 'Qté')),
+          IconButton(
+            tooltip: 'Ajouter ce plat',
+            icon: const Icon(Icons.add_circle_outline_rounded),
+            onPressed: _addPlate,
+          ),
+        ]),
+        const SizedBox(height: 4),
+        Text(
+            'Montant facultatif : laissé vide, il est estimé. Le bilan '
+            'recalcule la matière de ces plats sur la période affichée.',
+            style: AppTextStyles.captionHint),
+      ],
+      if (mode == _LossAttach.ingredient) ...[
+        const SizedBox(height: 6),
+        DropdownButtonFormField<String>(
+          initialValue: _ingredientId,
+          isExpanded: true,
+          style: inputStyle,
+          decoration: const InputDecoration(labelText: 'Ingrédient'),
+          items: [
+            for (final i in _ingredients)
+              DropdownMenuItem(
+                value: i.id,
+                child: Text(i.name,
+                    overflow: TextOverflow.ellipsis, style: inputStyle),
+              ),
+          ],
+          onChanged: (v) => setState(() => _ingredientId = v),
+        ),
+        const SizedBox(height: 4),
+        Text(
+            'Le montant est retiré des achats de cet ingrédient sur la '
+            'période, dans la limite de ce qui a été acheté.',
+            style: AppTextStyles.captionHint),
+      ],
+    ];
   }
 
   Future<void> _delete() async {
@@ -2459,13 +2710,6 @@ class _LossEditorState extends State<_LossEditor> {
                 decoration: const InputDecoration(labelText: 'Description')),
             const SizedBox(height: 10),
             _numField(_amount, 'Montant (F)'),
-            if (widget.existing?.isMaterial ?? false) ...[
-              const SizedBox(height: 4),
-              Text(
-                  'Perte de matière : ce montant n\'est qu\'une estimation. '
-                  'Le bilan recalcule sa valeur sur la période affichée.',
-                  style: AppTextStyles.captionHint),
-            ],
             const SizedBox(height: 14),
             Text('Catégorie', style: AppTextStyles.caption),
             const SizedBox(height: 6),
@@ -2479,9 +2723,13 @@ class _LossEditorState extends State<_LossEditor> {
                   ChoiceChip(
                     label: Text(e.value),
                     selected: _category == e.key,
-                    onSelected: (_) => setState(() => _category = e.key),
+                    onSelected: (_) => setState(() {
+                      _category = e.key;
+                      _err = null;
+                    }),
                   ),
             ]),
+            ..._attachmentSection(context),
             const SizedBox(height: 14),
             InkWell(
               onTap: _pickDate,

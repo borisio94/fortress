@@ -405,6 +405,9 @@ class RestaurantReportingService {
       for (final l in LossService.forShop(shopId)) {
         if (_outside(l.date, range)) continue;
         periodLosses.add(l);
+        // Une charge ne touche pas à l'assiette, même si une donnée hors
+        // règle lui porte des assiettes ou un ingrédient.
+        if (!l.isMaterial) continue;
         for (final p in l.items) {
           wastedByProduct[p.productId] =
               (wastedByProduct[p.productId] ?? 0) + p.quantity;

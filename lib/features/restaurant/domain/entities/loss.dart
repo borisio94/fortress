@@ -21,6 +21,16 @@ class WastedPlate {
   }
 }
 
+/// Perte refusée : son rattachement ne respecte pas la règle de sa catégorie
+/// (cf. [Loss.attachmentError]).
+class LossAttachmentException implements Exception {
+  final String message;
+  const LossAttachmentException(this.message);
+
+  @override
+  String toString() => message;
+}
+
 /// Déclaration de perte (module finances — PR-C) : casse, invendu en fin de
 /// service, plat mal fait, addition non payée, matériel endommagé…
 ///
@@ -72,16 +82,87 @@ class Loss {
     this.ingredientId,
   });
 
-  /// Perte de MATIÈRE — rattachée à des assiettes ou à un ingrédient.
+  // ── Matière ou charge (audit des marges, 2026-09-15) ───────────────────
+
+  /// Catégories qui désignent de la MATIÈRE : rattachement OBLIGATOIRE, à des
+  /// assiettes ou à un ingrédient. Sans lui, la perte ne peut pas être
+  /// retirée de l'assiette à répartir et la matière serait comptée deux fois.
   ///
-  /// C'est le rattachement, et non la catégorie, qui décide du calcul : seule
-  /// une perte rattachée peut être retirée de l'assiette. Une perte non
-  /// rattachée reste une charge ordinaire, comptée à son montant saisi.
+  /// `ecart_inventaire` y figure mais accepte aussi une FOURNITURE (`si_…`) :
+  /// il reste alors une charge.
+  static const Set<String> materialCategories = {
+    'reste_invendu',
+    'plat_mal_fait',
+    'non_paye',
+    'ecart_inventaire',
+  };
+
+  /// Catégories qui ne sont PAS de la matière : aucun rattachement, hors du
+  /// retrait de l'assiette. Une charge, comptée à son montant.
+  static const Set<String> chargeCategories = {
+    'casse',
+    'materiel_endommage',
+    'consigne_perdue',
+  };
+
+  static bool _isIngredientId(String? id) => id?.startsWith('ig_') ?? false;
+  static bool _isSupplyId(String? id) => id?.startsWith('si_') ?? false;
+
+  /// LA RÈGLE DE RATTACHEMENT, sous forme pure. `null` = conforme, sinon le
+  /// motif du refus, affichable tel quel.
   ///
-  /// Un `ingredient_id` qui n'est pas un ingrédient (`si_…`, une fourniture)
-  /// ne rattache pas : les fournitures ne sont pas réparties sur les plats.
+  ///   * matière (`reste_invendu`, `plat_mal_fait`, `non_paye`) : des
+  ///     assiettes ou un ingrédient, obligatoirement ;
+  ///   * `ecart_inventaire` : un ingrédient, des assiettes, ou une fourniture ;
+  ///   * charge (`casse`, `materiel_endommage`, `consigne_perdue`) : rien ;
+  ///   * `autre` : optionnel — assiettes ou ingrédient.
+  static String? attachmentError({
+    required String category,
+    required List<WastedPlate> items,
+    required String? ingredientId,
+  }) {
+    final hasPlates = items.isNotEmpty;
+    final hasIngredient = _isIngredientId(ingredientId);
+    final hasSupply = _isSupplyId(ingredientId);
+    final attached = hasPlates || hasIngredient || hasSupply;
+
+    if (chargeCategories.contains(category)) {
+      return attached
+          ? 'Cette catégorie est une charge : elle ne se rattache ni à des '
+              'plats ni à un ingrédient.'
+          : null;
+    }
+    if (category == 'ecart_inventaire') {
+      return attached
+          ? null
+          : 'Un écart d\'inventaire doit désigner l\'ingrédient ou la '
+              'fourniture manquante.';
+    }
+    if (hasSupply) {
+      return 'Une fourniture ne se rattache qu\'à un écart d\'inventaire.';
+    }
+    if (materialCategories.contains(category) && !hasPlates && !hasIngredient) {
+      return 'Perte de matière : indiquez les plats perdus ou l\'ingrédient '
+          'concerné.';
+    }
+    return null;
+  }
+
+  /// Motif de refus de CETTE perte, `null` si elle est conforme.
+  String? get attachmentIssue => attachmentError(
+      category: category, items: items, ingredientId: ingredientId);
+
+  /// Perte de MATIÈRE — retirée de l'assiette à répartir par le bilan.
+  ///
+  /// Il faut les DEUX : une catégorie qui peut être de la matière (toute sauf
+  /// les charges) ET un rattachement à des assiettes ou à un ingrédient. Une
+  /// fourniture (`si_…`) ne rend jamais matière : les fournitures ne sont pas
+  /// réparties sur les plats. Une catégorie de charge reste une charge même
+  /// si une donnée hors règle lui porte des assiettes (synchro, ancienne
+  /// version) — elle est alors comptée à son montant.
   bool get isMaterial =>
-      items.isNotEmpty || (ingredientId?.startsWith('ig_') ?? false);
+      !chargeCategories.contains(category) &&
+      (items.isNotEmpty || _isIngredientId(ingredientId));
 
   /// Clé `yyyy-MM-dd` d'une date (stockage DATE sans heure).
   static String dayKey(DateTime d) =>
@@ -96,6 +177,11 @@ class Loss {
     String? origin,
     DateTime? date,
     String? declaredBy,
+    List<WastedPlate>? items,
+    String? ingredientId,
+
+    /// Détache l'ingrédient (`null` seul voudrait dire « inchangé »).
+    bool clearIngredient = false,
   }) =>
       Loss(
         id: id,
@@ -107,10 +193,11 @@ class Loss {
         origin: origin ?? this.origin,
         date: date ?? this.date,
         declaredBy: declaredBy ?? this.declaredBy,
-        // Rattachement conservé : modifier la description d'une perte ne doit
-        // pas la faire basculer de matière en charge.
-        items: items,
-        ingredientId: ingredientId,
+        // Rattachement conservé par défaut : modifier la description d'une
+        // perte ne doit pas la faire basculer de matière en charge.
+        items: items ?? this.items,
+        ingredientId:
+            clearIngredient ? null : (ingredientId ?? this.ingredientId),
       );
 
   // v2 (hotfix_179) : `items` + `ingredient_id`. Aucune transformation — une
