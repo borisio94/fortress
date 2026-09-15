@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../../features/dashboard/data/dashboard_providers.dart' show DashRange;
+import '../../features/restaurant/domain/entities/loss.dart';
 import '../storage/hive_boxes.dart';
 import '../storage/local_storage_service.dart';
 import 'activity_service.dart';
@@ -9,6 +10,21 @@ import 'fixed_charge_service.dart';
 import 'dish_cost_service.dart';
 import 'loss_service.dart';
 import 'staff_service.dart';
+
+/// Une perte de la période et la valeur que le bilan lui retient.
+class LossLine {
+  final Loss loss;
+
+  /// Valeur retenue (FCFA) — celle qui entre dans le total.
+  final double value;
+
+  const LossLine({required this.loss, required this.value});
+
+  /// Valeur RECALCULÉE sur la période (perte de matière) plutôt que montant
+  /// saisi. Dans ce cas, `loss.amount` n'est qu'une estimation de déclaration :
+  /// à afficher comme telle, jamais à sommer.
+  bool get isRecalculated => loss.isMaterial;
+}
 
 /// Résultat par secteur d'activité (`restaurant_activities`).
 ///
@@ -71,8 +87,19 @@ class RestaurantFinanceReport {
   /// Charges fixes imputables à la période (FCFA).
   final int charges;
 
-  /// Pertes déclarées sur la période (FCFA).
+  /// Pertes de la période (FCFA) : matière perdue RECALCULÉE sur la période
+  /// (assiettes au coût unitaire de la période, manques d'inventaire
+  /// plafonnés) + pertes non rattachées à leur montant saisi.
   final int losses;
+
+  /// Part des [losses] qui est de la MATIÈRE ACHETÉE : elle est déjà dans les
+  /// achats réels ([realFoodCost]) et doit en être retirée quand le bilan
+  /// retient le réel, sinon elle serait comptée deux fois.
+  final double purchasedMaterialLosses;
+
+  /// Les pertes de la période, chacune avec sa valeur retenue. [losses] en
+  /// est la somme arrondie : c'est la SEULE source de la page Pertes.
+  final List<LossLine> lossLines;
 
   /// Masse salariale nette de la période (fiches de paie du mois, Lot D).
   final int payroll;
@@ -118,7 +145,17 @@ class RestaurantFinanceReport {
     required this.sectors,
     this.realFoodCost = 0,
     this.operatingCost = 0,
+    this.purchasedMaterialLosses = 0,
+    this.lossLines = const [],
   });
+
+  /// Achats de matières MOINS la matière perdue qu'ils contiennent — la
+  /// matière réellement passée dans les assiettes vendues. Voie (b) : food
+  /// cost + pertes = achats.
+  double get netRealFoodCost {
+    final v = realFoodCost - purchasedMaterialLosses;
+    return v > 0 ? v : 0;
+  }
 
   /// Part MINIMALE du coût théorique que les achats saisis doivent couvrir
   /// pour que le bilan bascule sur le réel.
@@ -136,14 +173,14 @@ class RestaurantFinanceReport {
   /// le réel est alors la seule mesure disponible), ou si les achats couvrent
   /// au moins [realFoodCostCoverage] du théorique.
   bool get usesRealFoodCost =>
-      realFoodCost > 0 &&
+      netRealFoodCost > 0 &&
       (materialCost <= 0 ||
-          realFoodCost >= materialCost * realFoodCostCoverage);
+          netRealFoodCost >= materialCost * realFoodCostCoverage);
 
   /// Des achats ont été saisis, mais trop peu pour être crédibles face à ce que
   /// les ventes ont consommé. Le bilan reste sur le théorique et l'écran doit
   /// le dire — sinon le gérant croit ses achats pris en compte.
-  bool get partialFoodCostEntry => realFoodCost > 0 && !usesRealFoodCost;
+  bool get partialFoodCostEntry => netRealFoodCost > 0 && !usesRealFoodCost;
 
   /// Coût des matières retenu pour le bénéfice : le réel s'il est saisi, le
   /// théorique sinon.
@@ -151,8 +188,10 @@ class RestaurantFinanceReport {
   /// PAS LES DEUX — c'est le piège de ce module : additionner le coût des
   /// recettes ET les achats du marché déduirait la matière deux fois et
   /// afficherait une perte à un restaurant rentable.
-  double get foodCost =>
-      usesRealFoodCost ? realFoodCost.toDouble() : materialCost;
+  ///
+  /// Le réel est pris NET de la matière perdue : celle-ci figure déjà dans
+  /// [losses].
+  double get foodCost => usesRealFoodCost ? netRealFoodCost : materialCost;
 
   /// Tout ce qui sort, hors pertes : matières + exploitation + charges fixes
   /// + paie.
@@ -173,7 +212,7 @@ class RestaurantFinanceReport {
 
   /// FOOD COST % réel — achats de matières rapportés aux ventes.
   double get realFoodCostRate =>
-      revenue <= 0 ? 0 : (realFoodCost / revenue) * 100;
+      revenue <= 0 ? 0 : (netRealFoodCost / revenue) * 100;
 
   /// Le taux à afficher en premier : le réel dès qu'il existe.
   double get foodCostRate =>
@@ -186,7 +225,7 @@ class RestaurantFinanceReport {
   /// fausse — l'indicateur que ce module existe pour donner. Sur quelques
   /// jours, ça peut n'être qu'un stock constitué d'avance.
   double get foodCostGap =>
-      usesRealFoodCost ? realFoodCost - materialCost : 0;
+      usesRealFoodCost ? netRealFoodCost - materialCost : 0;
 
   /// Bénéfice par bucket, déduit des trois autres séries — elles restent donc
   /// forcément cohérentes entre elles à l'écran.
@@ -277,18 +316,41 @@ class RestaurantReportingService {
         if (date.isBefore(range.from) || date.isAfter(range.to)) continue;
         final b = range.bucketOf(date);
 
-        for (final rawItem in (o['items'] as List? ?? [])) {
-          if (rawItem is! Map) continue;
-          final it = Map<String, dynamic>.from(rawItem);
+        final items = [
+          for (final rawItem in (o['items'] as List? ?? []))
+            if (rawItem is Map) Map<String, dynamic>.from(rawItem),
+        ];
+
+        // CHIFFRE D'AFFAIRES DE LA COMMANDE — `Sale.total` sur le périmètre
+        // de ce qui est VENDU : articles − remise de l'addition (+ TVA).
+        //
+        // Hors CA, à dessein :
+        //   * les FRAIS (`fees`) : au restaurant ce sont des consignes, des
+        //     cautions rendues au client — pas un produit. Leur remboursement
+        //     est exclu du bilan (`ExpenseKind.isCharge`) : exclues des deux
+        //     côtés, elles se neutralisent ;
+        //   * la LIVRAISON : aucune ligne du bilan ne porte le coût du livreur.
+        //     Entrer la recette sans la charge gonflerait le bénéfice (dette
+        //     notée, audit des marges 2026-09-15).
+        //
+        // La TVA suit `Sale.total` mais reste à 0 côté restaurant : chemin
+        // inerte tant qu'aucun taux n'est saisi.
+        var itemsTotal = 0.0;
+        for (final it in items) {
+          itemsTotal += _grossLine(it);
+        }
+        final orderDiscount = (o['discount_amount'] as num?)?.toDouble() ?? 0;
+        final taxRate = (o['tax_rate'] as num?)?.toDouble() ?? 0;
+        // La remise de l'addition est VENTILÉE au prorata des lignes : chaque
+        // ligne porte sa part, donc la somme des secteurs égale le CA.
+        final orderFactor = itemsTotal <= 0
+            ? 0.0
+            : (itemsTotal - orderDiscount) * (1 + taxRate / 100) / itemsTotal;
+
+        for (final it in items) {
           final qty = ((it['quantity'] ?? it['qty']) as num?)?.toDouble() ?? 0;
           if (qty <= 0) continue;
-          // Même formule de ligne que le tableau de bord e-commerce : les
-          // deux écrans doivent annoncer le même chiffre d'affaires.
-          final unit =
-              ((it['unit_price'] ?? it['price']) as num?)?.toDouble() ?? 0;
-          final custom = (it['custom_price'] as num?)?.toDouble();
-          final discount = (it['discount'] as num?)?.toDouble() ?? 0;
-          final lineRevenue = (custom ?? unit) * qty * (1 - discount / 100);
+          final lineRevenue = _grossLine(it) * orderFactor;
 
           final pid = it['product_id']?.toString() ?? '';
           final key = sectorOf[pid] ?? '';
@@ -333,22 +395,54 @@ class RestaurantReportingService {
     // balayage de la boîte des commandes.
     // Façade : la méthode active (répartition ou fiche technique) est choisie
     // par la boutique, le reporting n'a pas à la connaître.
+    //
+    // Les pertes de MATIÈRE sont lues AVANT : la répartition en a besoin
+    // (voie b — la matière perdue est retirée de l'assiette, pas ajoutée).
+    final periodLosses = <Loss>[];
+    final wastedByProduct = <String, double>{};
+    final withdrawalRequests = <String, int>{};
+    try {
+      for (final l in LossService.forShop(shopId)) {
+        if (_outside(l.date, range)) continue;
+        periodLosses.add(l);
+        for (final p in l.items) {
+          wastedByProduct[p.productId] =
+              (wastedByProduct[p.productId] ?? 0) + p.quantity;
+        }
+        final ig = _withdrawnIngredientOf(l);
+        if (ig != null) {
+          withdrawalRequests[ig] = (withdrawalRequests[ig] ?? 0) + l.amount;
+        }
+      }
+    } catch (e) {
+      debugPrint('[RestoReport] pertes err: $e');
+    }
+
     final allocation = DishCostService.forSales(shopId,
-        from: range.from, to: range.to, soldByProduct: soldByProduct);
+        from: range.from,
+        to: range.to,
+        soldByProduct: soldByProduct,
+        wastedByProduct: wastedByProduct,
+        withdrawnByIngredient: withdrawalRequests);
+
+    // Coût d'UNE assiette : réparti si le plat porte des ingrédients achetés
+    // sur la période, sinon le coût matière saisi à la main sur le plat
+    // (`priceBuy`), sinon le prix d'achat figé dans la ligne — un plat sans
+    // ingrédient coché n'est pas gratuit pour autant. Même règle pour une
+    // assiette vendue et une assiette perdue.
+    double unitCostOf(String pid) {
+      final allocated = allocation.forProduct(pid);
+      return allocated > 0
+          ? allocated
+          : (catalogCost[pid] ?? frozenCost[pid] ?? 0);
+    }
 
     final sectorCost = <String, double>{};
     final sectorCostSeries = <String, List<double>>{};
 
     for (final entry in soldByProductBucket.entries) {
       final pid = entry.key;
-      // Coût réparti si le plat porte des ingrédients achetés sur la période,
-      // sinon le coût matière saisi à la main sur le plat (`priceBuy`), sinon
-      // le prix d'achat figé dans la ligne — un plat sans ingrédient coché
-      // n'est pas gratuit pour autant.
-      final allocated = allocation.forProduct(pid);
-      final unitCost = allocated > 0
-          ? allocated
-          : (catalogCost[pid] ?? frozenCost[pid] ?? 0);
+      final unitCost = unitCostOf(pid);
       if (unitCost <= 0) continue;
 
       final key = sectorOf[pid] ?? '';
@@ -387,17 +481,64 @@ class RestaurantReportingService {
       debugPrint('[RestoReport] charges err: $e');
     }
 
-    // ── Pertes déclarées (saisie manuelle + écarts d'inventaire) ───────
-    var losses = 0;
-    try {
-      for (final l in LossService.forShop(shopId)) {
-        if (_outside(l.date, range)) continue;
-        losses += l.amount;
-        lossSeries[range.bucketOf(l.date)] += l.amount.toDouble();
+    // ── Pertes de la période, valorisées UNE PAR UNE ───────────────────
+    // Chaque perte reçoit sa valeur ici, et nulle part ailleurs : la page
+    // Pertes affiche ces lignes-là, le total du bilan en est la somme. Un
+    // seul calcul, donc un seul total (décision A1).
+    //
+    // Perte de MATIÈRE : le montant saisi à la déclaration n'est qu'une
+    // estimation — la matière perdue vaut ce que la répartition de CETTE
+    // période lui impute. Perte NON rattachée : une charge, à son montant.
+    final lossLines = <LossLine>[];
+    var lossTotal = 0.0;
+    // Matière perdue qui figure dans les achats — à retirer du réel.
+    var purchasedMaterialLosses = 0.0;
+    final purchasedLossSeries = List<double>.filled(n, 0);
+
+    for (final l in periodLosses) {
+      final lb = range.bucketOf(l.date);
+      var value = 0.0;
+      var purchased = 0.0;
+
+      if (!l.isMaterial) {
+        value = l.amount.toDouble();
+      } else {
+        for (final p in l.items) {
+          final cost = p.quantity * unitCostOf(p.productId);
+          if (cost <= 0) continue;
+          value += cost;
+          if (allocation.forProduct(p.productId) > 0) {
+            purchased += cost;
+          }
+          // ⚠ Assiette chiffrée HORS ingrédients (`priceBuy` saisi à la main,
+          // typiquement une boisson) : elle n'est PAS retirée des achats
+          // réels, faute de savoir si elle y figure. En mode achats réels, si
+          // cette boisson a été achetée en « Achat marché », sa perte est
+          // comptée deux fois. Cas connu et accepté (audit des marges, lot 1)
+          // — ne pas « corriger » sans décision.
+        }
+        final ig = _withdrawnIngredientOf(l);
+        if (ig != null) {
+          // Montant PLAFONNÉ aux achats de la période, partagé entre les
+          // manques du même ingrédient au prorata de ce qu'ils déclaraient.
+          final requested = withdrawalRequests[ig] ?? 0;
+          final withdrawn = allocation.withdrawnByIngredient[ig] ?? 0;
+          if (requested > 0 && withdrawn > 0) {
+            final share = withdrawn * l.amount / requested;
+            value += share;
+            purchased += share;
+          }
+        }
       }
-    } catch (e) {
-      debugPrint('[RestoReport] pertes err: $e');
+
+      lossLines.add(LossLine(loss: l, value: value));
+      lossTotal += value;
+      lossSeries[lb] += value;
+      purchasedMaterialLosses += purchased;
+      purchasedLossSeries[lb] += purchased;
     }
+
+    final losses = lossTotal.round();
 
     // ── Dépenses quotidiennes (Lot E) ──────────────────────────────────
     // Elles sont datées au JOUR et entrent dans la série des dépenses au même
@@ -482,20 +623,46 @@ class RestaurantReportingService {
       revenue: revenueSeries.fold(0, (s, v) => s + v),
       materialCost: materialSeries.fold(0, (s, v) => s + v),
       realFoodCost: realFoodCost,
+      purchasedMaterialLosses: purchasedMaterialLosses,
       operatingCost: operatingCost,
       charges: charges,
       losses: losses,
+      lossLines: lossLines,
       payroll: payroll,
       revenueSeries: revenueSeries,
       expenseSeries: [
         for (var i = 0; i < n; i++)
-          (useReal ? dailySeries[i] : materialSeries[i] + dailySeries[i]) +
+          // En réel, la matière perdue sort des achats : elle est déjà dans
+          // la série des pertes.
+          (useReal
+                  ? dailySeries[i] - purchasedLossSeries[i]
+                  : materialSeries[i] + dailySeries[i]) +
               chargeSeries[i] +
               payrollSeries[i],
       ],
       lossSeries: lossSeries,
       sectors: sectors,
     );
+  }
+
+  /// Ingrédient dont un manque est retiré des achats, `null` sinon. Une
+  /// fourniture (`si_…`) n'est pas répartie sur les plats : elle ne retire
+  /// rien.
+  static String? _withdrawnIngredientOf(Loss l) {
+    final ig = l.ingredientId;
+    if (ig == null || !ig.startsWith('ig_') || l.amount <= 0) return null;
+    return ig;
+  }
+
+  /// Montant d'une ligne AVANT remise de l'addition — même formule de ligne
+  /// que `SaleItem.subtotal` et que le tableau de bord e-commerce.
+  static double _grossLine(Map<String, dynamic> it) {
+    final qty = ((it['quantity'] ?? it['qty']) as num?)?.toDouble() ?? 0;
+    if (qty <= 0) return 0;
+    final unit = ((it['unit_price'] ?? it['price']) as num?)?.toDouble() ?? 0;
+    final custom = (it['custom_price'] as num?)?.toDouble();
+    final discount = (it['discount'] as num?)?.toDouble() ?? 0;
+    return (custom ?? unit) * qty * (1 - discount / 100);
   }
 
   /// Mois `YYYY-MM` couverts par la période, du plus ancien au plus récent.

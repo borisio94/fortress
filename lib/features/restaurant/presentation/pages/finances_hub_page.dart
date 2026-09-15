@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/database/app_database.dart';
@@ -10,6 +11,8 @@ import '../../../../core/services/ingredient_service.dart';
 import '../widgets/cost_method_picker.dart';
 import '../../../../core/services/loss_service.dart';
 import '../../../../core/services/reconciliation_service.dart';
+import '../../../../core/services/restaurant_reporting_service.dart'
+    show LossLine;
 import '../../../../core/services/round_routing.dart';
 import '../../../../core/services/stock_item_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
@@ -20,6 +23,9 @@ import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
+import '../../../../shared/widgets/period_selector.dart';
+import '../../data/restaurant_dashboard_providers.dart'
+    show restaurantFinanceProvider;
 import '../widgets/resto_empty_state.dart' show RestoEmptyState;
 import '../../domain/entities/daily_expense.dart';
 import '../../domain/entities/fixed_charge.dart';
@@ -2185,51 +2191,104 @@ class _MiniStat extends StatelessWidget {
 // prête aucun contenant. Le service `BottleDepositService` et la table
 // `bottle_deposits` subsistent, inertes — rien n'écrit plus de consigne, et
 // rétablir l'onglet ne demanderait que de recréer cet écran.
-class _LossesTab extends StatefulWidget {
+/// Onglet PERTES — UN SEUL TOTAL, celui du bilan (audit des marges, A1).
+///
+/// Il ne somme plus les montants saisis : il affiche les lignes que
+/// `RestaurantReportingService` valorise pour la période du tableau de bord,
+/// via le MÊME provider que le tableau de bord. Une perte de matière y vaut ce
+/// que la répartition de la période lui impute ; son montant de déclaration
+/// reste visible comme estimation, jamais sommé.
+///
+/// Conséquence assumée : changer de période change la valeur d'une perte de
+/// matière — le coût d'une assiette dépend des achats et des ventes de la
+/// période. Les pertes hors période ne sont pas listées.
+class _LossesTab extends ConsumerStatefulWidget {
   final String shopId;
   const _LossesTab({required this.shopId});
   @override
-  State<_LossesTab> createState() => _LossesTabState();
+  ConsumerState<_LossesTab> createState() => _LossesTabState();
 }
 
-class _LossesTabState extends _TabState<_LossesTab> {
+class _LossesTabState extends ConsumerState<_LossesTab> {
+  /// Tout ce qui fait bouger la valeur d'une perte : la perte elle-même, et
+  /// les ventes, achats et recettes dont dépend la répartition.
+  static const _valuationTables = {
+    'losses',
+    'orders',
+    'daily_expenses',
+    'ingredients',
+    'recipe_ingredients',
+    'products',
+  };
+
+  late final OnDataChanged _listener;
+
   @override
-  String get table => 'losses';
+  void initState() {
+    super.initState();
+    _listener = (t, sid) {
+      if (!mounted) return;
+      if (!_valuationTables.contains(t)) return;
+      if (sid != widget.shopId && sid != '_all') return;
+      ref.invalidate(restaurantFinanceProvider(widget.shopId));
+    };
+    AppDatabase.addListener(_listener);
+  }
+
   @override
-  String get shopId => widget.shopId;
+  void dispose() {
+    AppDatabase.removeListener(_listener);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final items = LossService.forShop(widget.shopId);
-    final total = items.fold<int>(0, (s, l) => s + l.amount);
+    final report = ref.watch(restaurantFinanceProvider(widget.shopId));
+    final lines = report.lossLines;
     return Column(children: [
-      headerButton('Perte', () => _edit(null)),
-      if (items.isNotEmpty)
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Row(children: [
+          const Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: PeriodSelector(mode: PeriodSelectorMode.inline),
+            ),
+          ),
+          FilledButton.icon(
+            onPressed: () => _edit(null),
+            icon: const Icon(Icons.add_rounded, size: 18),
+            label: const Text('Perte'),
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 40)),
+          ),
+        ]),
+      ),
+      if (lines.isNotEmpty)
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
           child: Align(
             alignment: Alignment.centerLeft,
             child: Text(
-                'Total des pertes : '
-                '${CurrencyFormatter.format(total.toDouble())}',
+                'Total des pertes sur la période : '
+                '${CurrencyFormatter.format(report.losses.toDouble())}',
                 style: AppTextStyles.captionHint),
           ),
         ),
       Expanded(
-        child: items.isEmpty
+        child: lines.isEmpty
             ? const RestoEmptyState(
                 icon: Icons.warning_amber_rounded,
-                title: 'Aucune perte déclarée',
+                title: 'Aucune perte sur cette période',
                 subtitle:
                     'Casse, invendus, additions non payées… déclarez-les ici.',
               )
             : ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                itemCount: items.length,
+                itemCount: lines.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (_, i) => _LossRow(
-                  loss: items[i],
-                  onTap: () => _edit(items[i]),
+                  line: lines[i],
+                  onTap: () => _edit(lines[i].loss),
                 ),
               ),
       ),
@@ -2241,19 +2300,20 @@ class _LossesTabState extends _TabState<_LossesTab> {
       context: context,
       builder: (_) => _LossEditor(shopId: widget.shopId, existing: l),
     );
-    if (mounted) setState(() {});
+    if (mounted) ref.invalidate(restaurantFinanceProvider(widget.shopId));
   }
 }
 
 class _LossRow extends StatelessWidget {
-  final Loss loss;
+  final LossLine line;
   final VoidCallback onTap;
-  const _LossRow({required this.loss, required this.onTap});
+  const _LossRow({required this.line, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final sem = Theme.of(context).semantic;
+    final loss = line.loss;
     final cat = _kLossCategoryLabels[loss.category] ?? loss.category;
     return _Card(
       onTap: onTap,
@@ -2274,10 +2334,18 @@ class _LossRow extends StatelessWidget {
                 _Pill(cat, sem.danger),
               ]),
               Text(
-                  '${CurrencyFormatter.format(loss.amount.toDouble())}'
+                  '${CurrencyFormatter.format(line.value)}'
                   ' · ${_dayLabel(loss.date)}'
                   '${loss.origin.isNotEmpty ? ' · ${loss.origin}' : ''}',
                   style: AppTextStyles.caption),
+              // Perte de matière : le montant de déclaration n'est qu'une
+              // estimation. Affiché pour mémoire, JAMAIS sommé.
+              if (line.isRecalculated)
+                Text(
+                    'Estimation à la déclaration : '
+                    '${CurrencyFormatter.format(loss.amount.toDouble())} '
+                    '(non comptée)',
+                    style: AppTextStyles.captionHint),
             ],
           ),
         ),
@@ -2391,6 +2459,13 @@ class _LossEditorState extends State<_LossEditor> {
                 decoration: const InputDecoration(labelText: 'Description')),
             const SizedBox(height: 10),
             _numField(_amount, 'Montant (F)'),
+            if (widget.existing?.isMaterial ?? false) ...[
+              const SizedBox(height: 4),
+              Text(
+                  'Perte de matière : ce montant n\'est qu\'une estimation. '
+                  'Le bilan recalcule sa valeur sur la période affichée.',
+                  style: AppTextStyles.captionHint),
+            ],
             const SizedBox(height: 14),
             Text('Catégorie', style: AppTextStyles.caption),
             const SizedBox(height: 6),

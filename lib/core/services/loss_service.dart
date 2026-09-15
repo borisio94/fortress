@@ -57,6 +57,10 @@ class LossService {
     String origin = '',
     DateTime? date,
     String? declaredBy,
+    /// Assiettes perdues — rend la perte « matière » (cf. [Loss.isMaterial]).
+    List<WastedPlate> items = const [],
+    /// Ingrédient manquant — rend la perte « matière » (cf. [Loss.isMaterial]).
+    String? ingredientId,
   }) async {
     final l = Loss(
       id: _id(),
@@ -67,6 +71,8 @@ class LossService {
       origin: origin,
       date: date ?? DateTime.now(),
       declaredBy: declaredBy,
+      items: items,
+      ingredientId: ingredientId,
       createdAt: DateTime.now(),
     );
     await _put(l);

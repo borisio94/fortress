@@ -27,11 +27,22 @@ class AllocationResult {
   /// Quantités vendues par produit sur la période.
   final Map<String, double> soldByProduct;
 
+  /// Assiettes PERDUES par produit sur la période (hotfix_179). Elles ont
+  /// compté comme des parts de la répartition, au même coût unitaire que les
+  /// assiettes vendues.
+  final Map<String, double> wastedByProduct;
+
+  /// Montants retirés des achats de chaque ingrédient pour des manques
+  /// d'inventaire, APRÈS plafonnement à ces achats (FCFA).
+  final Map<String, int> withdrawnByIngredient;
+
   const AllocationResult({
     this.costPerDish = const {},
     this.spendByIngredient = const {},
     this.unallocated = 0,
     this.soldByProduct = const {},
+    this.wastedByProduct = const {},
+    this.withdrawnByIngredient = const {},
   });
 
   /// Coût matières d'un plat, 0 si rien ne lui a été imputé.

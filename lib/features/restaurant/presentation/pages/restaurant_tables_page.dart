@@ -751,9 +751,8 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
 
   /// Déclare un départ sans paiement sur ce compte.
   ///
-  /// Les bons sont clôturés et une perte du montant TOTAL est enregistrée :
-  /// c'est elle qui annule le chiffre d'affaires, sinon le bilan afficherait
-  /// une recette que personne n'a payée.
+  /// Les bons sont annulés — ils n'ont jamais été du chiffre d'affaires — et
+  /// la matière des tournées envoyées en cuisine est enregistrée en perte.
   Future<void> _unpaid(RestaurantTab tab) async {
     final ok = await AppConfirmDialog.show(
       context: context,
@@ -762,10 +761,9 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
       title: 'Départ sans paiement ?',
       body: Text(
           '« ${tab.displayLabel} » · ${CurrencyFormatter.format(tab.total)}\n\n'
-          'La commande sera clôturée et le montant enregistré en perte '
-          '(catégorie « Non payé »). Cette écriture annule la recette : sans '
-          'elle, le bilan afficherait un chiffre d\'affaires que personne '
-          'n\'a réglé.'),
+          'La commande sera annulée. La matière des plats déjà envoyés en '
+          'cuisine sera enregistrée en perte (catégorie « Non payé ») — pas '
+          'le prix de l\'addition, dont la marge n\'a jamais été gagnée.'),
       cancelLabel: 'Annuler',
       confirmLabel: 'Déclarer la perte',
       onConfirm: () {},

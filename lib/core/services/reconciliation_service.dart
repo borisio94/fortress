@@ -197,6 +197,11 @@ class ReconciliationService {
           category: lossCategory,
           origin: originFor(v.item.name),
           declaredBy: declaredBy,
+          // Rattachement à l'INGRÉDIENT : c'est ce qui permet au bilan de
+          // retirer ce manque des achats répartis au lieu de le compter en
+          // plus (hotfix_179). Une fourniture (`si_…`) n'est pas répartie sur
+          // les plats : elle reste non rattachée, donc une charge.
+          ingredientId: v.item.isIngredient ? v.item.id : null,
         );
         lossesCount++;
         lossTotal += decision.lossAmount;

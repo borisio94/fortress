@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 
 import 'daily_expense_service.dart';
 import 'ingredient_allocation_service.dart';
@@ -138,24 +138,67 @@ class DishCostService {
         to: DateTime(day.year, day.month + 1, 0, 23, 59, 59),
       );
 
+  /// Coût matières des ventes de la période.
+  ///
+  /// PERTES DE MATIÈRE — voie (b), audit des marges, lot 1 : la matière
+  /// perdue est RETIRÉE de l'assiette à répartir, jamais ajoutée par-dessus.
+  /// Sans ce retrait, 100 % des achats étaient déjà imputés aux plats vendus
+  /// et la perte déclarée les comptait une seconde fois.
+  ///
+  ///   * [wastedByProduct] — assiettes perdues (plat raté, tournée annulée,
+  ///     impayé). Elles comptent comme des PARTS de la répartition, au même
+  ///     coût unitaire que les assiettes vendues. Le coût d'un plat est ainsi
+  ///     celui de ce qui a été servi : le gâchis ne le fait pas monter, il
+  ///     apparaît en perte. Deux diagnostics séparés — la recette et la
+  ///     cuisine.
+  ///   * [withdrawnByIngredient] — manques d'inventaire, en FCFA, retirés des
+  ///     achats de l'ingrédient AVANT partage. Plafonnés à ces achats : un
+  ///     manque plus gros que ce qui a été acheté sur la période ne produit
+  ///     jamais un coût négatif ; le dépassement est journalisé.
+  ///
+  /// Identité qui en résulte, par ingrédient réparti :
+  /// `vendu + perdu + non réparti + retiré = acheté`.
   static AllocationResult forSales(
     String shopId, {
     required DateTime from,
     required DateTime to,
     required Map<String, double> soldByProduct,
+    Map<String, double> wastedByProduct = const {},
+    Map<String, int> withdrawnByIngredient = const {},
   }) {
     final sheetIds = _sheetIngredientIds(shopId);
+    final spend = DailyExpenseService.spendByIngredient(shopId,
+        from: from, to: to);
+
+    // ── Retraits d'inventaire, plafonnés aux achats de la période ────────
+    final withdrawn = <String, int>{};
+    for (final e in withdrawnByIngredient.entries) {
+      if (e.value <= 0) continue;
+      final available = spend[e.key] ?? 0;
+      final taken = e.value < available ? e.value : available;
+      if (taken < e.value) {
+        debugPrint('[DishCost] manque d\'inventaire plafonné — ${e.key} : '
+            '${e.value} F déclarés, $available F achetés sur la période, '
+            '${e.value - taken} F ignorés');
+      }
+      if (taken > 0) withdrawn[e.key] = taken;
+    }
+
+    // Parts consommées = vendues + perdues.
+    final consumed = <String, double>{...soldByProduct};
+    for (final e in wastedByProduct.entries) {
+      if (e.value <= 0) continue;
+      consumed[e.key] = (consumed[e.key] ?? 0) + e.value;
+    }
 
     // ── Part RÉPARTIE ────────────────────────────────────────────────────
     // Achats et liens des ingrédients « fiche » ÉCARTÉS des deux côtés. Ne
     // filtrer que les achats laisserait leurs liens diluer les parts des
     // autres ; ne filtrer que les liens enverrait leurs achats en « non
     // réparti », gonflant un écart qui sert à détecter le gaspillage.
-    final spend = DailyExpenseService.spendByIngredient(shopId,
-        from: from, to: to);
     final repSpend = <String, int>{
       for (final e in spend.entries)
-        if (!sheetIds.contains(e.key)) e.key: e.value,
+        if (!sheetIds.contains(e.key)) e.key: e.value - (withdrawn[e.key] ?? 0),
     };
     final allLinks = IngredientAllocationService.linksByIngredient(shopId);
     final repLinks = <String, List<DishLink>>{
@@ -165,12 +208,11 @@ class DishCostService {
     final repartition = IngredientAllocationService.allocate(
       spendByIngredient: repSpend,
       linksByIngredient: repLinks,
-      soldByProduct: soldByProduct,
+      soldByProduct: consumed,
     );
 
     // ── Part FICHE ───────────────────────────────────────────────────────
-    final sheet = TechnicalSheetService.costByProduct(
-        shopId, soldByProduct.keys);
+    final sheet = TechnicalSheetService.costByProduct(shopId, consumed.keys);
 
     // ── Somme ────────────────────────────────────────────────────────────
     // Un plat dont la part fiche est INCONNUE est retiré entièrement : rendre
@@ -178,7 +220,7 @@ class DishCostService {
     // pesés, plus crédible et plus faux que pas de coût du tout. Il retombe
     // alors sur le coût matière saisi à la main, comme un plat sans recette.
     final costPerDish = <String, double>{};
-    for (final pid in soldByProduct.keys) {
+    for (final pid in consumed.keys) {
       final sheetPart = sheet[pid];
       if (sheetPart == null) continue;
       final repPart = repartition.costPerDish[pid] ?? 0;
@@ -193,6 +235,11 @@ class DishCostService {
       spendByIngredient: spend,
       unallocated: repartition.unallocated,
       soldByProduct: soldByProduct,
+      wastedByProduct: {
+        for (final e in wastedByProduct.entries)
+          if (e.value > 0) e.key: e.value,
+      },
+      withdrawnByIngredient: withdrawn,
     );
   }
 

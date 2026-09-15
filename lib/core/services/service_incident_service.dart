@@ -25,10 +25,15 @@ import 'restaurant_table_service.dart';
 ///     dans le chiffre d'affaires : compter son prix de vente gonflerait la
 ///     perte d'une marge qu'on n'a jamais encaissée.
 ///
-///   * **Client parti sans payer** → on perd le MONTANT DE L'ADDITION. La
-///     commande est encaissée côté application (elle compte donc dans le
-///     chiffre d'affaires) ; la perte doit l'annuler en entier, matière ET
-///     marge.
+///   * **Client parti sans payer** → on perd AUSSI la matière, et rien
+///     d'autre. Les commandes du compte étaient ouvertes : elles ne sont
+///     jamais entrées dans le chiffre d'affaires, il n'y a pas de recette à
+///     annuler. Ne compter que la matière des tournées envoyées en cuisine.
+///
+/// Dans les trois cas la perte porte des ASSIETTES (`Loss.items`) : le bilan
+/// les retire de l'assiette à répartir, faute de quoi la matière perdue
+/// serait comptée deux fois — une fois dans les achats répartis sur les plats
+/// vendus, une fois en perte (audit des marges, lot 1, voie b).
 class ServiceIncidentService {
   ServiceIncidentService._();
 
@@ -113,17 +118,37 @@ class ServiceIncidentService {
 
     await _releaseTableOf(order);
 
-    final amount = materialCostOf(shopId, order.items).round();
-    if (amount <= 0) return null;
+    final plates = platesOf(order.items);
+    if (plates.isEmpty) return null;
     return LossService.record(
       shopId: shopId,
       description: 'Tournée annulée après envoi — '
           '${order.items.length} article${order.items.length > 1 ? 's' : ''}',
-      amount: amount,
+      // ESTIMATION à la déclaration. Le bilan recalcule la matière sur sa
+      // période, à partir des assiettes ci-dessous.
+      amount: materialCostOf(shopId, order.items).round(),
       category: 'reste_invendu',
       origin: reason,
       declaredBy: declaredBy,
+      items: plates,
     );
+  }
+
+  /// Assiettes perdues d'une liste d'articles, regroupées par plat.
+  ///
+  /// Ce sont elles — et non le montant — qui portent la perte dans le bilan :
+  /// elles y comptent comme des parts de la répartition (hotfix_179).
+  @visibleForTesting
+  static List<WastedPlate> platesOf(List<SaleItem> items) {
+    final byProduct = <String, double>{};
+    for (final it in items) {
+      if (it.productId.isEmpty || it.quantity <= 0) continue;
+      byProduct[it.productId] = (byProduct[it.productId] ?? 0) + it.quantity;
+    }
+    return [
+      for (final e in byProduct.entries)
+        WastedPlate(productId: e.key, quantity: e.value),
+    ];
   }
 
   /// Déclare un plat raté, à refaire. Le client sera bien servi, mais la
@@ -138,23 +163,31 @@ class ServiceIncidentService {
     String origin = '',
     String? declaredBy,
   }) async {
-    final amount = (unitMaterialCost(shopId, item) * quantity).round();
-    if (amount <= 0) return null;
+    if (item.productId.isEmpty || quantity <= 0) return null;
     return LossService.record(
       shopId: shopId,
       description: '${item.productName} — plat refait (×$quantity)',
-      amount: amount,
+      // ESTIMATION à la déclaration, recalculée par le bilan.
+      amount: (unitMaterialCost(shopId, item) * quantity).round(),
       category: 'plat_mal_fait',
       origin: origin,
       declaredBy: declaredBy,
+      items: [
+        WastedPlate(productId: item.productId, quantity: quantity.toDouble()),
+      ],
     );
   }
 
   /// Déclare un départ sans paiement sur un compte.
   ///
-  /// Les commandes sont clôturées (le service a bien eu lieu, la matière est
-  /// consommée) et la perte porte le TOTAL — c'est elle qui annule le chiffre
-  /// d'affaires que la clôture vient d'enregistrer.
+  /// Les commandes du compte sont ANNULÉES. Elles étaient ouvertes, donc jamais
+  /// entrées dans le chiffre d'affaires : il n'y a aucune recette à annuler.
+  /// Ce que le restaurant perd, c'est la MATIÈRE engagée — pas le prix de
+  /// l'addition, dont la marge n'a jamais été gagnée.
+  ///
+  /// La perte porte donc les assiettes des tournées ENVOYÉES en cuisine, que
+  /// le bilan retire de l'assiette à répartir (hotfix_179). Rien d'envoyé →
+  /// aucune perte.
   static Future<Loss?> reportUnpaid({
     required String shopId,
     required List<Sale> orders,
@@ -162,9 +195,17 @@ class ServiceIncidentService {
     String? declaredBy,
   }) async {
     if (orders.isEmpty) return null;
-    var total = 0.0;
+    final engaged = <SaleItem>[];
     for (final o in orders) {
-      total += o.total;
+      // ⚠ `sentToKitchen` NE DIT PAS « cuisiné ». La prise de commande envoie
+      // la tournée en cuisine dans le même geste qu'elle la crée
+      // (`order_type_sheet.dart`, « créer puis envoyer ») : en pratique
+      // presque toute tournée d'un compte est marquée envoyée. Ce filtre
+      // n'écarte que les envois qui ont échoué et les commandes créées par un
+      // autre chemin. C'est le seul signal disponible, retenu en connaissance
+      // de cause (audit des marges, lot 1, 2026-09-15) — ne pas en déduire
+      // que la préparation a réellement commencé.
+      if (o.sentToKitchen) engaged.addAll(o.items);
       try {
         await _ds.updateOrder(
             o.copyWith(status: SaleStatus.cancelled));
@@ -174,16 +215,18 @@ class ServiceIncidentService {
     }
     await _releaseTableOf(orders.first);
 
-    final amount = total.round();
-    if (amount <= 0) return null;
+    final plates = platesOf(engaged);
+    if (plates.isEmpty) return null;
     return LossService.record(
       shopId: shopId,
       description: 'Addition non réglée — '
           '${orders.length} bon${orders.length > 1 ? 's' : ''}',
-      amount: amount,
+      // ESTIMATION de la matière à la déclaration, recalculée par le bilan.
+      amount: materialCostOf(shopId, engaged).round(),
       category: 'non_paye',
       origin: origin,
       declaredBy: declaredBy,
+      items: plates,
     );
   }
 
