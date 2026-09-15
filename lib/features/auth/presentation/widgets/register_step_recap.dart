@@ -56,11 +56,6 @@ class _StepRecap extends StatelessWidget {
               label: 'Boutique',
               value:
                   '${state._shopNameCtrl.text.trim()} ($sectorLabel)'),
-          if (state._shopAddressCtrl.text.trim().isNotEmpty)
-            _RecapRow(
-                icon: Icons.location_on_outlined,
-                label: 'Adresse',
-                value: state._shopAddressCtrl.text.trim()),
           const SizedBox(height: 20),
           Container(
             padding: const EdgeInsets.all(14),

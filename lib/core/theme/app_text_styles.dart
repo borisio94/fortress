@@ -52,29 +52,33 @@ class AppTextStyles {
   // ════════════════════════════════════════════════════════════════════
 
   // ── 1. micro (10) ────────────────────────────────────────────────────
-  static const micro = TextStyle(
-      fontSize: 10, height: 1.3, color: AppColors.textHint);
-  static const microSecondary = TextStyle(
-      fontSize: 10, height: 1.3, color: AppColors.textSecondary);
-  static const microBold = TextStyle(
-      fontSize: 10, height: 1.3,
-      fontWeight: FontWeight.w700, color: AppColors.textSecondary);
+  // GETTERS (non-const) : la couleur secondary/hint suit le mode clair/sombre.
+  static TextStyle get micro => const TextStyle(fontSize: 10, height: 1.3)
+      .copyWith(color: AppColors.textHint);
+  static TextStyle get microSecondary =>
+      const TextStyle(fontSize: 10, height: 1.3)
+          .copyWith(color: AppColors.textSecondary);
+  static TextStyle get microBold => const TextStyle(
+          fontSize: 10, height: 1.3, fontWeight: FontWeight.w700)
+      .copyWith(color: AppColors.textSecondary);
 
   // ── 2. caption (11) ──────────────────────────────────────────────────
-  static const caption = TextStyle(
-      fontSize: 11, height: 1.35,
-      fontWeight: FontWeight.w500, color: AppColors.textSecondary);
-  static const captionHint = TextStyle(
-      fontSize: 11, height: 1.35, color: AppColors.textHint);
-  static const captionBold = TextStyle(
-      fontSize: 11, height: 1.35,
-      fontWeight: FontWeight.w700, color: AppColors.textSecondary);
+  static TextStyle get caption => const TextStyle(
+          fontSize: 11, height: 1.35, fontWeight: FontWeight.w500)
+      .copyWith(color: AppColors.textSecondary);
+  static TextStyle get captionHint =>
+      const TextStyle(fontSize: 11, height: 1.35)
+          .copyWith(color: AppColors.textHint);
+  static TextStyle get captionBold => const TextStyle(
+          fontSize: 11, height: 1.35, fontWeight: FontWeight.w700)
+      .copyWith(color: AppColors.textSecondary);
 
   // ── 3. bodySm (12) ───────────────────────────────────────────────────
   static const bodySm = TextStyle(
       fontSize: 12, height: 1.45);
-  static const bodySmSecondary = TextStyle(
-      fontSize: 12, height: 1.45, color: AppColors.textSecondary);
+  static TextStyle get bodySmSecondary =>
+      const TextStyle(fontSize: 12, height: 1.45)
+          .copyWith(color: AppColors.textSecondary);
   static const bodySmBold = TextStyle(
       fontSize: 12, height: 1.45,
       fontWeight: FontWeight.w700);
@@ -82,8 +86,9 @@ class AppTextStyles {
   // ── 4. body (13) — CORPS PAR DÉFAUT ──────────────────────────────────
   static const body = TextStyle(
       fontSize: 13, height: 1.5);
-  static const bodySecondary = TextStyle(
-      fontSize: 13, height: 1.5, color: AppColors.textSecondary);
+  static TextStyle get bodySecondary =>
+      const TextStyle(fontSize: 13, height: 1.5)
+          .copyWith(color: AppColors.textSecondary);
   static const bodyBold = TextStyle(
       fontSize: 13, height: 1.5,
       fontWeight: FontWeight.w700);
@@ -94,8 +99,9 @@ class AppTextStyles {
       fontWeight: FontWeight.w600);
   static const labelRegular = TextStyle(
       fontSize: 14, height: 1.4);
-  static const labelSecondary = TextStyle(
-      fontSize: 14, height: 1.4, color: AppColors.textSecondary);
+  static TextStyle get labelSecondary =>
+      const TextStyle(fontSize: 14, height: 1.4)
+          .copyWith(color: AppColors.textSecondary);
 
   /// Texte SAISI dans un champ (TextField / TextFormField). Échelon `label`
   /// sans gras. UNIQUE référence pour la taille de saisie de toute l'app
@@ -104,8 +110,9 @@ class AppTextStyles {
       fontSize: 14, height: 1.3);
 
   /// Placeholder / hint d'un champ — même taille que [input], couleur hint.
-  static const inputHint = TextStyle(
-      fontSize: 14, height: 1.3, color: AppColors.textHint);
+  static TextStyle get inputHint =>
+      const TextStyle(fontSize: 14, height: 1.3)
+          .copyWith(color: AppColors.textHint);
 
   // ── 6. subtitle (16) — sous-titres / titres de card / dialogue ───────
   static const subtitle = TextStyle(
@@ -131,33 +138,34 @@ class AppTextStyles {
   //  les écrans non encore migrés s'alignent automatiquement.
   // ════════════════════════════════════════════════════════════════════
 
+  // Alias vers des échelons devenus getters (couleur adaptative) → getters.
   @Deprecated('Utiliser AppTextStyles.micro')
-  static const micro9 = micro;
+  static TextStyle get micro9 => micro;
   @Deprecated('Utiliser AppTextStyles.microBold')
-  static const micro9Bold = microBold;
+  static TextStyle get micro9Bold => microBold;
   @Deprecated('Utiliser AppTextStyles.micro')
-  static const micro10 = micro;
+  static TextStyle get micro10 => micro;
   @Deprecated('Utiliser AppTextStyles.microBold')
-  static const micro10Bold = microBold;
+  static TextStyle get micro10Bold => microBold;
 
   @Deprecated('Utiliser AppTextStyles.caption')
-  static const caption11 = caption;
+  static TextStyle get caption11 => caption;
   @Deprecated('Utiliser AppTextStyles.captionBold')
-  static const caption11Bold = captionBold;
+  static TextStyle get caption11Bold => captionBold;
   @Deprecated('Utiliser AppTextStyles.captionHint')
-  static const caption11Hint = captionHint;
+  static TextStyle get caption11Hint => captionHint;
 
   @Deprecated('Utiliser AppTextStyles.bodySm')
   static const body12 = bodySm;
   @Deprecated('Utiliser AppTextStyles.bodySmSecondary')
-  static const body12Secondary = bodySmSecondary;
+  static TextStyle get body12Secondary => bodySmSecondary;
   @Deprecated('Utiliser AppTextStyles.bodySmBold')
   static const body12Bold = bodySmBold;
 
   @Deprecated('Utiliser AppTextStyles.body')
   static const body13 = body;
   @Deprecated('Utiliser AppTextStyles.bodySecondary')
-  static const body13Secondary = bodySecondary;
+  static TextStyle get body13Secondary => bodySecondary;
   @Deprecated('Utiliser AppTextStyles.bodyBold')
   static const body13Bold = bodyBold;
 
@@ -166,7 +174,7 @@ class AppTextStyles {
   @Deprecated('Utiliser AppTextStyles.label')
   static const label14Bold = label;
   @Deprecated('Utiliser AppTextStyles.labelSecondary')
-  static const label14Secondary = labelSecondary;
+  static TextStyle get label14Secondary => labelSecondary;
 
   @Deprecated('Utiliser AppTextStyles.subtitle')
   static const subtitle15 = subtitle;

@@ -123,11 +123,11 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
                         color: Theme.of(context).colorScheme.onSurface)),
                 const SizedBox(height: 2),
                 Text('Stock disponible actuel : $_current',
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 11,
                         color: AppColors.textSecondary)),
                 const SizedBox(height: 14),
-                const Text('Nouvelle valeur',
+                Text('Nouvelle valeur',
                     style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w500,
@@ -153,7 +153,7 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
                     prefixIcon: const Icon(Icons.inventory_2_outlined,
                         size: 15, color: Color(0xFFAAAAAA)),
                     filled: true,
-                    fillColor: const Color(0xFFF9FAFB),
+                    fillColor: AppColors.inputFill,
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 11),
@@ -189,7 +189,7 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
                   ]),
                 ],
                 const SizedBox(height: 12),
-                const Row(children: [
+                Row(children: [
                   Text('Raison',
                       style: TextStyle(
                           fontSize: 11,
@@ -213,7 +213,7 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
                     hintStyle: const TextStyle(
                         color: Color(0xFFBBBBBB), fontSize: 11),
                     filled: true,
-                    fillColor: const Color(0xFFF9FAFB),
+                    fillColor: AppColors.inputFill,
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 10),

@@ -62,7 +62,7 @@ class AppLoadingOverlay extends StatelessWidget {
                             Text(
                               message!,
                               style: AppTextStyles.body.copyWith(
-                                color: const Color(0xFF374151),
+                                color: AppColors.onSurface,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),

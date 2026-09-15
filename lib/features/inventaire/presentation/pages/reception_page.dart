@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/storage/hive_boxes.dart';
-import '../../../../core/widgets/back_dated_picker.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
@@ -12,8 +10,12 @@ import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/widgets/danger_confirm_dialog.dart';
 import '../../../../core/services/stock_service.dart';
 import '../../../../core/services/activity_log_service.dart';
+import '../../../../core/services/arrival_costing_service.dart';
+import '../../../../core/utils/currency_formatter.dart';
+import '../../domain/entities/product.dart';
 import '../../domain/entities/reception.dart';
 import '../../domain/entities/stock_movement.dart';
+import '../widgets/arrival_widgets.dart';
 
 /// Page de gestion des bons de réception.
 /// Mode A : lié à une commande fournisseur (purchaseOrderId)
@@ -26,6 +28,12 @@ class ReceptionPage extends StatefulWidget {
 
 class _ReceptionPageState extends State<ReceptionPage> {
   List<Reception> _receptions = [];
+
+  /// Filtre de NATURE : `null` = tout, `false` = arrivages, `true` = frais
+  /// seuls. Les deux natures se mélangeaient dans une liste unique où seul
+  /// un petit badge les distinguait — chercher « quand ai-je passé les frais
+  /// de douane » revenait à faire défiler tout l'historique.
+  bool? _natureFilter;
 
   @override
   void initState() {
@@ -56,251 +64,144 @@ class _ReceptionPageState extends State<ReceptionPage> {
 
   @override
   Widget build(BuildContext context) {
-    final drafts    = _receptions.where((r) => r.status == ReceptionStatus.draft).toList();
-    final validated = _receptions.where((r) => r.status == ReceptionStatus.validated).toList();
+    final shown = _natureFilter == null
+        ? _receptions
+        : _receptions.where((r) => r.costOnly == _natureFilter).toList();
+    final drafts    = shown.where((r) => r.status == ReceptionStatus.draft).toList();
+    final validated = shown.where((r) => r.status == ReceptionStatus.validated).toList();
 
     return AppScaffold(
       shopId: widget.shopId,
-      title: 'Bons de réception',
+      title: 'Historique des arrivages',
       isRootPage: false,
-      actions: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Material(
-            color: AppColors.primary,
-            borderRadius: BorderRadius.circular(10),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(10),
-              onTap: () => _showCreateSheet(context),
-              child: const SizedBox(width: 36, height: 36,
-                  child: Center(child: Icon(Icons.add_rounded,
-                      color: Colors.white, size: 22))),
-            ),
-          ),
-        ),
-      ],
       body: _receptions.isEmpty
           ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Icon(Icons.inbox_outlined, size: 48, color: Color(0xFFD1D5DB)),
+              Icon(Icons.inbox_outlined, size: 48, color: AppColors.textHint),
               const SizedBox(height: 12),
-              Text('Aucun bon de réception',
+              Text('Aucun arrivage enregistré',
                   style: AppTextStyles.labelRegular
-                      .copyWith(color: const Color(0xFF9CA3AF))),
-              const SizedBox(height: 16),
-              Center(
-                child: TextButton.icon(
-                  onPressed: () => _showCreateSheet(context),
-                  icon: const Icon(Icons.add_rounded, size: 16,
-                      color: Colors.white),
-                  label: Text('Créer un bon',
-                      style: AppTextStyles.bodySm
-                          .copyWith(color: Colors.white)),
-                  style: TextButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
-                  ),
-                ),
+                      .copyWith(color: AppColors.textHint)),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Text(
+                    "Les arrivages se saisissent depuis l'inventaire, "
+                    'bouton camion à côté du « + ».',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.micro
+                        .copyWith(color: AppColors.textHint)),
               ),
             ]))
-          : ListView(padding: const EdgeInsets.all(16), children: [
-              if (drafts.isNotEmpty) ...[
-                _SectionLabel('Brouillons (${drafts.length})'),
-                ...drafts.map((r) => _ReceptionCard(
-                    reception: r, shopId: widget.shopId,
-                    onValidate: () => _validate(r),
-                    onDelete: () => _delete(r))),
-                const SizedBox(height: 16),
-              ],
-              if (validated.isNotEmpty) ...[
-                _SectionLabel('Validées (${validated.length})'),
-                ...validated.map((r) => _ReceptionCard(
-                    reception: r, shopId: widget.shopId)),
-              ],
+          : Column(children: [
+              _natureChips(),
+              Expanded(
+                child: drafts.isEmpty && validated.isEmpty
+                    ? Center(child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 32),
+                        child: Text(
+                            'Aucun arrivage de cette nature.',
+                            textAlign: TextAlign.center,
+                            style: AppTextStyles.bodySm
+                                .copyWith(color: AppColors.textHint)),
+                      ))
+                    : ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        children: [
+                        if (drafts.isNotEmpty) ...[
+                          _SectionLabel('Brouillons (${drafts.length})'),
+                          ...drafts.map((r) => _ReceptionCard(
+                              reception: r, shopId: widget.shopId,
+                              onTap: () => _showDetail(r),
+                              onValidate: () => _validate(r),
+                              onDelete: () => _delete(r))),
+                          const SizedBox(height: 16),
+                        ],
+                        if (validated.isNotEmpty) ...[
+                          _SectionLabel('Validées (${validated.length})'),
+                          ...validated.map((r) => _ReceptionCard(
+                              reception: r, shopId: widget.shopId,
+                              onTap: () => _showDetail(r))),
+                        ],
+                      ]),
+              ),
             ]),
     );
   }
 
-  // ── Créer un bon de réception directe ──────────────────────────────────
-  bool _isToday(DateTime d) {
-    final now = DateTime.now();
-    return d.year == now.year && d.month == now.month && d.day == now.day;
+  /// Filtre de nature, en tête de liste. Trois choix seulement : au-delà,
+  /// une barre de filtres coûte plus d'écran qu'elle n'en fait gagner sur
+  /// un historique qu'on parcourt surtout du regard.
+  Widget _natureChips() {
+    Widget chip(String label, bool? value, int count) {
+      final on = _natureFilter == value;
+      return Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => setState(() => _natureFilter = value),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: on ? AppColors.primarySurface : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                  color: on
+                      ? AppColors.primary
+                      : Theme.of(context).semantic.borderSubtle,
+                  width: on ? 1.5 : 1),
+            ),
+            child: Text('$label ($count)',
+                style: AppTextStyles.microBold.copyWith(
+                    color: on ? AppColors.primary : AppColors.textSecondary)),
+          ),
+        ),
+      );
+    }
+
+    final arrivals = _receptions.where((r) => !r.costOnly).length;
+    final fees     = _receptions.where((r) => r.costOnly).length;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+      child: Row(children: [
+        chip('Tous', null, _receptions.length),
+        chip('Arrivages', false, arrivals),
+        chip('Frais seuls', true, fees),
+      ]),
+    );
   }
 
-  void _showCreateSheet(BuildContext context) {
-    final products = AppDatabase.getProductsForShop(widget.shopId);
-    final selected = <String, int>{}; // productId → quantité attendue
-    final user = LocalStorageService.getCurrentUser();
-    // Date de réception (antidatable) — partagée entre les rebuilds du
-    // StatefulBuilder via une closure-level variable.
-    var receptionDate = DateTime.now();
+  /// Ouvre le détail d'un bon en lecture seule.
+  void _showDetail(Reception r) => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Theme.of(context).colorScheme.surface,
+    shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (_) => _ArrivalDetailSheet(reception: r),
+  );
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) => DraggableScrollableSheet(
-          initialChildSize: 0.75, minChildSize: 0.5, maxChildSize: 0.9,
-          expand: false,
-          builder: (_, sc) => Column(children: [
-            // Poignée
-            Center(child: Container(width: 36, height: 4,
-                margin: const EdgeInsets.only(top: 10, bottom: 14),
-                decoration: BoxDecoration(color: Theme.of(ctx).semantic.borderSubtle,
-                    borderRadius: BorderRadius.circular(2)))),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(children: [
-                Container(width: 34, height: 34,
-                    decoration: BoxDecoration(
-                        color: AppColors.primarySurface,
-                        borderRadius: BorderRadius.circular(9)),
-                    child: Icon(Icons.local_shipping_rounded,
-                        size: 17, color: AppColors.primary)),
-                const SizedBox(width: 10),
-                const Expanded(child: Text('Nouvelle réception',
-                    style: AppTextStyles.subtitleBold)),
-              ]),
-            ),
-            const SizedBox(height: 12),
-            // Tile date — antidatable (numériser une réception passée).
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: InkWell(
-                onTap: () async {
-                  final d = await pickBackDate(
-                    context: ctx,
-                    initial: receptionDate,
-                    helpText: 'Date de réception',
-                  );
-                  if (d != null) setSt(() => receptionDate = d);
-                },
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF9FAFB),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Theme.of(ctx).semantic.borderSubtle),
-                  ),
-                  child: Row(children: [
-                    Icon(Icons.event_rounded,
-                        size: 14, color: AppColors.primary),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                          _isToday(receptionDate)
-                              ? 'Aujourd\'hui'
-                              : DateFormat('d MMMM yyyy', 'fr_FR')
-                                  .format(receptionDate),
-                          style: AppTextStyles.bodySmBold),
-                    ),
-                    Icon(Icons.edit_calendar_outlined,
-                        size: 12,
-                        color: Theme.of(ctx).colorScheme.onSurface
-                            .withValues(alpha: 0.4)),
-                  ]),
-                ),
-              ),
-            ),
-            const Divider(height: 24),
-            // Liste produits
-            Expanded(child: ListView.builder(
-              controller: sc,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: products.length,
-              itemBuilder: (_, i) {
-                final p = products[i];
-                final qty = selected[p.id] ?? 0;
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 6),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: qty > 0 ? AppColors.primarySurface : const Color(0xFFF9FAFB),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: qty > 0
-                        ? AppColors.primary.withValues(alpha:0.3) : Theme.of(ctx).semantic.borderSubtle)),
-                  child: Row(children: [
-                    Expanded(child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(p.name, style: AppTextStyles.bodyBold, maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
-                      Text('Stock actuel : ${p.totalStock}',
-                          style: AppTextStyles.micro
-                              .copyWith(color: const Color(0xFF9CA3AF))),
-                    ])),
-                    // Contrôles quantité
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      IconButton(
-                        onPressed: qty > 0 ? () => setSt(() {
-                          if (qty <= 1) { selected.remove(p.id); }
-                          else { selected[p.id!] = qty - 1; }
-                        }) : null,
-                        icon: const Icon(Icons.remove_circle_outline, size: 20),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                        color: AppColors.primary),
-                      SizedBox(width: 28, child: Center(
-                          child: Text('$qty', style: AppTextStyles.label
-                              .copyWith(fontWeight: FontWeight.w700)))),
-                      IconButton(
-                        onPressed: () => setSt(() => selected[p.id!] = qty + 1),
-                        icon: const Icon(Icons.add_circle_outline, size: 20),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                        color: AppColors.primary),
-                    ]),
-                  ]),
-                );
-              },
-            )),
-            // Bouton créer
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-              child: SizedBox(width: double.infinity, height: 46,
-                child: ElevatedButton.icon(
-                  onPressed: selected.isEmpty ? null : () {
-                    final items = selected.entries.map((e) {
-                      final p = products.firstWhere((p) => p.id == e.key);
-                      return ReceptionItem(
-                        id: 'ri_${DateTime.now().microsecondsSinceEpoch}_${e.key}',
-                        productId: p.id,
-                        productName: p.name,
-                        expectedQty: e.value,
-                      );
-                    }).toList();
-                    final reception = Reception(
-                      id: 'rec_${DateTime.now().millisecondsSinceEpoch}',
-                      shopId: widget.shopId,
-                      items: items,
-                      createdBy: user?.name,
-                      createdAt: receptionDate,
-                    );
-                    HiveBoxes.receptionsBox.put(reception.id, reception.toMap());
-                    AppDatabase.notifyProductChange(widget.shopId);
-                    Navigator.of(ctx).pop();
-                    _load();
-                    AppSnack.success(context, 'Bon de réception créé');
-                  },
-                  icon: const Icon(Icons.check_rounded, size: 18),
-                  label: Text('Créer (${selected.length} produit${selected.length > 1 ? 's' : ''})'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary, foregroundColor: Colors.white,
-                    elevation: 0, disabledBackgroundColor: const Color(0xFFE5E7EB),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                ),
-              ),
-            ),
-          ]),
-        ),
-      ),
-    );
+  /// Frais saisis → entité, en écartant les lignes vides. Encore utilisé par
+  /// la validation d'un brouillon (bon issu d'une commande fournisseur).
+  static List<ReceptionFee> _feesOf(List<FeeDraft> fees) => fees
+      .map((f) => ReceptionFee(
+          label: f.label.text.trim().isEmpty
+              ? 'Frais' : f.label.text.trim(),
+          amount: _parseAmount(f.amount.text)))
+      .where((f) => f.amount > 0)
+      .toList();
+
+  static double _parseAmount(String? raw) {
+    if (raw == null) return 0;
+    final v = double.tryParse(raw.trim().replaceAll(',', '.')) ?? 0;
+    return v.isFinite && v > 0 ? v : 0;
+  }
+
+  /// Variante qui reçoit le stock (et donc le coût) : la principale, sinon
+  /// la première. Même règle que `StockService._findVariant`.
+  static String? _mainVariantId(Product p) {
+    if (p.variants.isEmpty) return null;
+    final main = p.variants.indexWhere((v) => v.isMain);
+    return p.variants[main >= 0 ? main : 0].id;
   }
 
   // ── Valider une réception ──────────────────────────────────────────────
@@ -335,6 +236,7 @@ class _ReceptionPageState extends State<ReceptionPage> {
     );
     if (confirmed != true || !mounted) return;
     await HiveBoxes.receptionsBox.delete(r.id);
+    AppDatabase.bgDelete('receptions', val: r.id);
     _load();
     if (mounted) AppSnack.success(context, 'Bon supprimé');
   }
@@ -353,6 +255,7 @@ class _ValidateSheet extends StatefulWidget {
 
 class _ValidateSheetState extends State<_ValidateSheet> {
   late List<_ItemState> _items;
+  late List<FeeDraft>  _fees;
 
   @override
   void initState() {
@@ -360,14 +263,35 @@ class _ValidateSheetState extends State<_ValidateSheet> {
     _items = widget.reception.items.map((i) => _ItemState(
       item: i,
       receivedCtrl: TextEditingController(text: '${i.expectedQty}'),
+      costCtrl: TextEditingController(
+          text: i.unitCost > 0 ? i.unitCost.toStringAsFixed(0) : ''),
     )).toList();
+    // Frais du lot repris du brouillon et encore modifiables : la facture
+    // de transport n'est souvent connue qu'à l'arrivée de la marchandise.
+    _fees = widget.reception.fees
+        .map((f) => FeeDraft(label: f.label, amount: f.amount))
+        .toList();
   }
 
   @override
   void dispose() {
-    for (final i in _items) { i.receivedCtrl.dispose(); }
+    for (final i in _items) { i.dispose(); }
+    for (final f in _fees)  { f.dispose(); }
     super.dispose();
   }
+
+  bool get _costOnly => widget.reception.costOnly;
+
+  /// Valorisation calculée sur les quantités RÉELLEMENT reçues.
+  ArrivalCosting _costing() => ArrivalCostingService.compute(
+    lines: _items.map((s) => ArrivalLine(
+      key:      s.item.id,
+      quantity: int.tryParse(s.receivedCtrl.text) ?? 0,
+      unitCost: _ReceptionPageState._parseAmount(s.costCtrl.text),
+    )).toList(),
+    feesTotal: _fees.fold(
+        0.0, (s, f) => s + _ReceptionPageState._parseAmount(f.amount.text)),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -379,52 +303,105 @@ class _ValidateSheetState extends State<_ValidateSheet> {
             margin: const EdgeInsets.only(top: 10, bottom: 14),
             decoration: BoxDecoration(color: Theme.of(context).semantic.borderSubtle,
                 borderRadius: BorderRadius.circular(2)))),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 20),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Row(children: [
-            Icon(Icons.fact_check_rounded, size: 20, color: Color(0xFF3B82F6)),
-            SizedBox(width: 10),
-            Text('Validation de la réception',
-                style: AppTextStyles.subtitleBold),
+            Icon(_costOnly
+                    ? Icons.receipt_long_rounded : Icons.fact_check_rounded,
+                size: 20, color: const Color(0xFF3B82F6)),
+            const SizedBox(width: 10),
+            Expanded(child: Text(
+                _costOnly
+                    ? 'Imputation des frais'
+                    : 'Validation de la réception',
+                style: AppTextStyles.subtitleBold)),
           ]),
         ),
         const Divider(height: 24),
-        Expanded(child: ListView.builder(
-          controller: sc,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          itemCount: _items.length,
-          itemBuilder: (_, i) {
-            final s = _items[i];
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(s.item.productName, style: AppTextStyles.bodyBold),
-                Text('Attendu : ${s.item.expectedQty}',
-                    style: AppTextStyles.captionHint
-                        .copyWith(color: const Color(0xFF9CA3AF))),
-                const SizedBox(height: 8),
-                _QtyField(label: 'Quantité reçue', ctrl: s.receivedCtrl,
-                    color: const Color(0xFF10B981)),
-                const SizedBox(height: 4),
-                Text(
-                    'Les défauts se déclarent après en incident sur le produit.',
-                    style: AppTextStyles.micro
-                        .copyWith(color: const Color(0xFF9CA3AF))),
-              ]),
-            );
-          },
-        )),
+        Expanded(child: Builder(builder: (context) {
+          final costing = _costing();
+          return ListView.builder(
+            controller: sc,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: _items.length + 1,
+            itemBuilder: (_, i) {
+              if (i == _items.length) {
+                return LotFeesEditor(
+                  fees: _fees, onChanged: () => setState(() {}));
+              }
+              final s = _items[i];
+              final line = costing.lineFor(s.item.id);
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface, borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(s.item.productName, style: AppTextStyles.bodyBold),
+                  Text(_costOnly
+                          ? 'Pièces chargées : ${s.item.expectedQty}'
+                          : 'Attendu : ${s.item.expectedQty}',
+                      style: AppTextStyles.captionHint
+                          .copyWith(color: AppColors.textHint)),
+                  const SizedBox(height: 8),
+                  _QtyField(
+                      label: _costOnly
+                          ? 'Pièces à charger' : 'Quantité reçue',
+                      ctrl: s.receivedCtrl,
+                      color: const Color(0xFF10B981)),
+                  // Frais seuls : le prix d'achat n'est pas ressaisi — les
+                  // frais s'ajoutent à celui déjà enregistré sur la fiche.
+                  if (!_costOnly) ...[
+                    const SizedBox(height: 8),
+                    MoneyField(
+                      label: 'Prix d\'achat unitaire',
+                      hint: 'Hors frais du lot',
+                      controller: s.costCtrl,
+                      onChanged: () => setState(() {}),
+                    ),
+                  ],
+                  if (_costOnly && costing.feePerPiece > 0) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                        'Prix d\'achat : '
+                        '+${CurrencyFormatter.format(costing.feePerPiece)} '
+                        'par pièce',
+                        style: AppTextStyles.micro
+                            .copyWith(color: AppColors.primary)),
+                  ] else if (line != null && line.landedUnitCost > 0) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                        'Coût de revient : '
+                        '${CurrencyFormatter.format(line.landedUnitCost)} / pièce'
+                        '${line.feePerPiece > 0
+                            ? '  (dont ${CurrencyFormatter.format(line.feePerPiece)} de frais)'
+                            : ''}',
+                        style: AppTextStyles.micro
+                            .copyWith(color: AppColors.primary)),
+                  ],
+                  const SizedBox(height: 4),
+                  Text(
+                      _costOnly
+                          ? 'Aucune pièce n\'entre en stock : seul le prix '
+                            'de revient est corrigé.'
+                          : 'Les défauts se déclarent après en incident sur le produit.',
+                      style: AppTextStyles.micro
+                          .copyWith(color: AppColors.textHint)),
+                ]),
+              );
+            },
+          );
+        })),
+        LotSummary(costing: _costing(), costOnly: _costOnly),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           child: SizedBox(width: double.infinity, height: 46,
             child: ElevatedButton.icon(
               onPressed: _onValidate,
               icon: const Icon(Icons.check_circle_rounded, size: 18),
-              label: const Text('Valider la réception'),
+              label: Text(_costOnly
+                  ? 'Imputer les frais' : 'Valider la réception'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF10B981), foregroundColor: Colors.white,
                 elevation: 0,
@@ -446,7 +423,10 @@ class _ValidateSheetState extends State<_ValidateSheet> {
     // L'utilisateur doit confirmer explicitement avant l'écriture stock.
     // Log `reception_anormale` pour chaque ligne confirmée hors norme.
     final anomalies = <({_ItemState item, double avg, int qty})>[];
-    for (final s in _items) {
+    // Un bon de frais seuls ne fait entrer aucune pièce : comparer ses
+    // quantités à l'historique des réceptions n'aurait aucun sens (elles
+    // décrivent du stock déjà là) et alerterait à tort.
+    for (final s in _costOnly ? const <_ItemState>[] : _items) {
       final received = int.tryParse(s.receivedCtrl.text) ?? 0;
       if (received <= 0) continue;
       final vid = s.item.variantId;
@@ -483,41 +463,59 @@ class _ValidateSheetState extends State<_ValidateSheet> {
       }
     }
 
+    // Répartition des frais du lot sur les quantités réellement reçues.
+    final costing = _costing();
+
     for (final s in _items) {
       final received = int.tryParse(s.receivedCtrl.text) ?? 0;
+      final line     = costing.lineFor(s.item.id);
+      final landed   = line?.landedUnitCost ?? 0;
 
-      updatedItems.add(ReceptionItem(
-        id: s.item.id, productId: s.item.productId,
-        variantId: s.item.variantId, productName: s.item.productName,
-        expectedQty: s.item.expectedQty, receivedQty: received,
+      updatedItems.add(s.item.copyWith(
+        receivedQty: received,
         status: ReceptionItemStatus.available,
+        unitCost: line?.unitCost ?? 0,
+        landedUnitCost: landed,
       ));
 
-      // Toute la quantité reçue entre en stock disponible.
-      // Les défauts éventuels se déclarent ensuite en incident.
       if (received > 0 && s.item.productId != null) {
-        _addStock(s.item.productId!, s.item.variantId, received, now, user?.name);
+        if (_costOnly) {
+          // Frais seuls : AUCUNE entrée de stock. Le prix d'achat de la
+          // variante augmente simplement de sa part de frais.
+          await StockService.applyCostSurcharge(
+            shopId:        widget.shopId,
+            productId:     s.item.productId!,
+            variantId:     s.item.variantId ?? '',
+            feePerPiece:   costing.feePerPiece,
+            piecesCharged: received,
+            referenceId:   widget.reception.id,
+          );
+        } else {
+          // Toute la quantité reçue entre en stock disponible, valorisée à
+          // son coût de revient. Les défauts éventuels se déclarent ensuite
+          // en incident.
+          await _applyArrival(s.item.productId!, s.item.variantId, received,
+              now, user?.name, landed);
+        }
       }
     }
 
     // Mettre à jour la réception
-    final validated = Reception(
-      id: widget.reception.id, shopId: widget.reception.shopId,
-      purchaseOrderId: widget.reception.purchaseOrderId,
-      supplierId: widget.reception.supplierId,
+    final validated = widget.reception.copyWith(
       status: ReceptionStatus.validated,
       items: updatedItems,
-      notes: widget.reception.notes,
-      createdBy: widget.reception.createdBy,
-      createdAt: widget.reception.createdAt,
+      fees: _ReceptionPageState._feesOf(_fees),
     );
     HiveBoxes.receptionsBox.put(validated.id, validated.toMap());
+    AppDatabase.bgUpsert('receptions', validated.toMap());
     AppDatabase.notifyProductChange(widget.shopId);
 
     if (!mounted) return;
     Navigator.of(context).pop();
     widget.onValidated();
-    AppSnack.success(context, 'Réception validée — stock mis à jour');
+    AppSnack.success(context, _costOnly
+        ? 'Frais imputés — prix de revient mis à jour'
+        : 'Réception validée — stock mis à jour');
   }
 
   Future<bool?> _showAnomalyConfirmDialog(
@@ -589,9 +587,39 @@ class _ValidateSheetState extends State<_ValidateSheet> {
     );
   }
 
-  void _addStock(String productId, String? variantId, int qty,
-      DateTime now, String? userName) {
-    // Mouvement de stock
+  /// Entrée en stock d'une ligne d'arrivage, valorisée à [landedUnitCost]
+  /// (0 = pas de prix saisi → seul le stock bouge, le coût reste intact).
+  ///
+  /// Passe par `StockService` plutôt que d'écrire le produit à la main :
+  /// c'est lui qui tient `stockPhysical` en plus de `stockAvailable`, qui
+  /// force la resynchro du `StockLevel` boutique (sans quoi l'inventaire
+  /// affiche l'ancienne valeur) et qui trace le mouvement.
+  Future<void> _applyArrival(String productId, String? variantId, int qty,
+      DateTime now, String? userName, double landedUnitCost) async {
+    final products = AppDatabase.getProductsForShop(widget.shopId);
+    Product? product;
+    for (final p in products) {
+      if (p.id == productId) { product = p; break; }
+    }
+
+    if (product != null && product.variants.isNotEmpty) {
+      final resolved = variantId != null &&
+              product.variants.any((v) => v.id == variantId)
+          ? variantId
+          : _ReceptionPageState._mainVariantId(product);
+      await StockService.arrivalAvailable(
+        shopId: widget.shopId,
+        productId: productId,
+        variantId: resolved ?? '',
+        quantity: qty,
+        cause: 'supplier_delivery',
+        referenceId: widget.reception.id,
+        landedUnitCost: landedUnitCost > 0 ? landedUnitCost : null,
+      );
+      return;
+    }
+
+    // Produit sans variante : écriture directe + mouvement, comme avant.
     final mvt = StockMovement(
       id: 'sm_${now.microsecondsSinceEpoch}_$productId',
       shopId: widget.shopId, productId: productId,
@@ -599,34 +627,17 @@ class _ValidateSheetState extends State<_ValidateSheet> {
       quantity: qty, createdBy: userName, createdAt: now,
     );
     HiveBoxes.stockMovementsBox.put(mvt.id, mvt.toMap());
-
-    // Mettre à jour le stock du produit
-    final products = AppDatabase.getProductsForShop(widget.shopId);
-    for (final p in products) {
-      if (variantId != null) {
-        for (int i = 0; i < p.variants.length; i++) {
-          if (p.variants[i].id == variantId || p.variants[i].id == productId) {
-            final variants = List.of(p.variants);
-            variants[i] = variants[i].copyWith(stockQty: variants[i].stockQty + qty);
-            AppDatabase.saveProduct(p.copyWith(variants: variants));
-            return;
-          }
-        }
-      }
-      if (p.id == productId) {
-        if (p.variants.isNotEmpty) {
-          // Ajouter au stock de la première variante principale
-          final variants = List.of(p.variants);
-          final mainIdx = variants.indexWhere((v) => v.isMain);
-          final idx = mainIdx >= 0 ? mainIdx : 0;
-          variants[idx] = variants[idx].copyWith(stockQty: variants[idx].stockQty + qty);
-          AppDatabase.saveProduct(p.copyWith(variants: variants));
-        } else {
-          AppDatabase.saveProduct(p.copyWith(stockQty: p.stockQty + qty));
-        }
-        return;
-      }
-    }
+    if (product == null) return;
+    await AppDatabase.saveProduct(product.copyWith(
+      stockQty: product.stockQty + qty,
+      priceBuy: landedUnitCost > 0
+          ? ArrivalCostingService.weightedAverageUnitCost(
+              currentQty:       product.stockQty,
+              currentUnitCost:  product.priceBuy,
+              incomingQty:      qty,
+              incomingUnitCost: landedUnitCost)
+          : null,
+    ));
   }
 
 }
@@ -634,11 +645,11 @@ class _ValidateSheetState extends State<_ValidateSheet> {
 class _ItemState {
   final ReceptionItem item;
   final TextEditingController receivedCtrl;
-  _ItemState({required this.item, required this.receivedCtrl});
+  final TextEditingController costCtrl;
+  _ItemState({required this.item, required this.receivedCtrl,
+    required this.costCtrl});
+  void dispose() { receivedCtrl.dispose(); costCtrl.dispose(); }
 }
-
-// ═══ Widgets réutilisables ══════════════════════════════════════════════════
-
 class _SectionLabel extends StatelessWidget {
   final String text;
   const _SectionLabel(this.text);
@@ -646,23 +657,27 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
     child: Text(text, style: AppTextStyles.bodySmBold.copyWith(
-        letterSpacing: 0.3, color: const Color(0xFF6B7280))),
+        letterSpacing: 0.3, color: AppColors.textSecondary)),
   );
 }
 
 class _ReceptionCard extends StatelessWidget {
   final Reception reception;
   final String shopId;
+  final VoidCallback? onTap;
   final VoidCallback? onValidate;
   final VoidCallback? onDelete;
   const _ReceptionCard({required this.reception, required this.shopId,
-    this.onValidate, this.onDelete});
+    this.onTap, this.onValidate, this.onDelete});
 
   @override
   Widget build(BuildContext context) {
     final isDraft = reception.status == ReceptionStatus.draft;
     final statusColor = isDraft ? const Color(0xFFF59E0B) : const Color(0xFF10B981);
-    return Container(
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -681,15 +696,41 @@ class _ReceptionCard extends StatelessWidget {
                 style: AppTextStyles.microBold
                     .copyWith(color: statusColor)),
           ),
+          if (reception.costOnly) ...[
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                  color: AppColors.primarySurface,
+                  borderRadius: BorderRadius.circular(6)),
+              child: Text('Frais seuls', style: AppTextStyles.microBold
+                  .copyWith(color: AppColors.primary)),
+            ),
+          ],
           const SizedBox(width: 8),
           Expanded(child: Text(
               '${reception.items.length} produit${reception.items.length > 1 ? 's' : ''}',
               style: AppTextStyles.bodySm
-                  .copyWith(color: const Color(0xFF6B7280)))),
+                  .copyWith(color: AppColors.textSecondary))),
           Text(_fmtDate(reception.createdAt),
               style: AppTextStyles.micro
-                  .copyWith(color: const Color(0xFF9CA3AF))),
+                  .copyWith(color: AppColors.textHint)),
         ]),
+        if (reception.hasCosting) ...[
+          const SizedBox(height: 6),
+          Row(children: [
+            Icon(Icons.payments_rounded, size: 12, color: AppColors.textHint),
+            const SizedBox(width: 5),
+            Expanded(child: Text(
+                reception.status == ReceptionStatus.validated
+                    ? 'Coût du lot : '
+                        '${CurrencyFormatter.format(reception.landedTotal)}'
+                    : 'Frais du lot : '
+                        '${CurrencyFormatter.format(reception.feesTotal)}',
+                style: AppTextStyles.micro
+                    .copyWith(color: AppColors.textSecondary))),
+          ]),
+        ],
         if (reception.status == ReceptionStatus.validated) ...[
           const SizedBox(height: 6),
           Row(children: [
@@ -730,6 +771,7 @@ class _ReceptionCard extends StatelessWidget {
           ]),
         ],
       ]),
+      ),
     );
   }
 
@@ -748,6 +790,130 @@ class _Chip extends StatelessWidget {
     child: Text(label, style: AppTextStyles.micro
         .copyWith(fontWeight: FontWeight.w600, color: color)),
   );
+}
+
+/// Détail d'un bon, en lecture seule.
+///
+/// La liste ne montrait que des totaux : nombre de produits, coût du lot.
+/// Retrouver CE qui était arrivé — quelles références, à quel prix, avec
+/// quels frais — était impossible sans rouvrir la base. Un bon d'arrivage est
+/// pourtant une pièce comptable : il doit pouvoir se relire des mois plus
+/// tard, tel qu'il a été validé.
+class _ArrivalDetailSheet extends StatelessWidget {
+  final Reception reception;
+  const _ArrivalDetailSheet({required this.reception});
+
+  @override
+  Widget build(BuildContext context) {
+    final r   = reception;
+    final sem = Theme.of(context).semantic;
+    return DraggableScrollableSheet(
+      initialChildSize: 0.75, minChildSize: 0.4, maxChildSize: 0.95,
+      expand: false,
+      builder: (_, sc) => Column(children: [
+        Center(child: Container(width: 36, height: 4,
+            margin: const EdgeInsets.only(top: 10, bottom: 12),
+            decoration: BoxDecoration(color: sem.borderSubtle,
+                borderRadius: BorderRadius.circular(2)))),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(children: [
+            Container(width: 34, height: 34,
+                decoration: BoxDecoration(
+                    color: AppColors.primarySurface,
+                    borderRadius: BorderRadius.circular(9)),
+                child: Icon(
+                    r.costOnly
+                        ? Icons.receipt_long_rounded
+                        : Icons.local_shipping_rounded,
+                    size: 17, color: AppColors.primary)),
+            const SizedBox(width: 10),
+            Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(r.costOnly ? 'Frais sur stock existant' : 'Arrivage',
+                  style: AppTextStyles.subtitleBold),
+              Text(
+                  '${_ReceptionCard._fmtDate(r.createdAt)}'
+                  '${(r.createdBy ?? '').isNotEmpty ? ' · ${r.createdBy}' : ''}',
+                  style: AppTextStyles.micro
+                      .copyWith(color: AppColors.textHint)),
+            ])),
+          ]),
+        ),
+        const Divider(height: 20),
+        Expanded(child: ListView(
+          controller: sc,
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+          children: [
+            _label(r.costOnly ? 'Pièces chargées' : 'Lignes reçues'),
+            ...r.items.map((i) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Expanded(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(i.productName, style: AppTextStyles.bodySm),
+                  Text(
+                      i.landedUnitCost > 0
+                          ? '${i.receivedQty} × coût de revient '
+                            '${CurrencyFormatter.format(i.landedUnitCost)}'
+                          : '${i.receivedQty} pièce'
+                            '${i.receivedQty > 1 ? 's' : ''}',
+                      style: AppTextStyles.micro
+                          .copyWith(color: AppColors.textHint)),
+                ])),
+                const SizedBox(width: 8),
+                if (i.landedUnitCost > 0)
+                  Text(
+                      CurrencyFormatter.format(
+                          i.receivedQty * i.landedUnitCost),
+                      style: AppTextStyles.microBold
+                          .copyWith(color: AppColors.textSecondary)),
+              ]),
+            )),
+            if (r.fees.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _label('Frais du lot'),
+              ...r.fees.map((f) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(children: [
+                  Expanded(child: Text(f.label, style: AppTextStyles.bodySm)),
+                  Text(CurrencyFormatter.format(f.amount),
+                      style: AppTextStyles.microBold
+                          .copyWith(color: AppColors.textSecondary)),
+                ]),
+              )),
+            ],
+            const Divider(height: 22),
+            _total(r.costOnly ? 'Frais imputés' : 'Coût du lot',
+                CurrencyFormatter.format(
+                    r.costOnly ? r.feesTotal : r.landedTotal)),
+            const SizedBox(height: 10),
+            Text(
+                r.costOnly
+                    ? 'Ce bon n\'a fait entrer aucune pièce : les frais ont '
+                      'été ajoutés au prix d\'achat des produits déjà en rayon.'
+                    : 'Le stock a été augmenté et le prix de revient recalculé '
+                      'en moyenne avec les pièces déjà en rayon.',
+                style: AppTextStyles.caption
+                    .copyWith(color: AppColors.textHint, height: 1.45)),
+          ],
+        )),
+      ]),
+    );
+  }
+
+  static Widget _label(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(text, style: AppTextStyles.bodySmBold
+        .copyWith(letterSpacing: 0.3, color: AppColors.textSecondary)),
+  );
+
+  static Widget _total(String label, String value) => Row(children: [
+    Expanded(child: Text(label, style: AppTextStyles.bodyBold)),
+    Text(value, style: AppTextStyles.bodyBold
+        .copyWith(color: AppColors.primary)),
+  ]);
 }
 
 class _QtyField extends StatelessWidget {

@@ -4,7 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/config/app_modes.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/router/registration_flag.dart';
@@ -52,13 +52,12 @@ part '../widgets/register_step_recap.dart';
 // avec `_countryFromPhone` de CreateShopPage). Pas de champ explicite.
 // ═════════════════════════════════════════════════════════════════════════════
 
+// Choix DÉFINITIF, non modifiable après création (cf. kCreationSectors).
+// Les secteurs legacy restent valides en base mais ne sont plus proposés.
 const _kSectors = <_SectorOption>[
-  _SectorOption('retail',      'Commerce'),
-  _SectorOption('restaurant',  'Restaurant'),
-  _SectorOption('supermarche', 'Supermarché'),
-  _SectorOption('pharmacie',   'Pharmacie'),
   _SectorOption('ecommerce',   'E-commerce'),
-  _SectorOption('autre',       'Autre'),
+  _SectorOption('restaurant',  'Restaurant / Café'),
+  _SectorOption('fastfood',    'Fast-food'),
 ];
 
 const _countryCurrency = <String, String>{
@@ -102,10 +101,8 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   // ── Step 2 — Boutique ─────────────────────────────────────────────────
   final _shopNameCtrl    = TextEditingController();
-  final _shopAddressCtrl = TextEditingController();
-  String  _sector        = kEcommerceOnlyMode ? 'ecommerce' : 'retail';
+  String  _sector        = kDefaultSector;
   String? _shopNameError;
-  String? _shopAddressError;
 
   bool   _isOnline = true;
 
@@ -142,12 +139,6 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
               ? 'Minimum 2 caractères'
               : v.length > 60 ? 'Maximum 60 caractères' : null;
     }));
-    _shopAddressCtrl.addListener(() => setState(() {
-      final v = _shopAddressCtrl.text.trim();
-      _shopAddressError = v.isEmpty
-          ? null
-          : v.length < 2 ? 'Minimum 2 caractères' : null;
-    }));
   }
 
   Future<void> _checkConnectivity() async {
@@ -163,7 +154,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   @override
   void dispose() {
     for (final c in [_namCtrl, _mailCtrl, _telCtrl, _passCtrl, _confCtrl,
-                     _shopNameCtrl, _shopAddressCtrl]) {
+                     _shopNameCtrl]) {
       c.dispose();
     }
     _pageCtrl.dispose();
@@ -185,9 +176,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   bool get _step2Valid =>
       _shopNameError == null &&
-      _shopNameCtrl.text.trim().length >= 2 &&
-      _shopAddressError == null &&
-      _shopAddressCtrl.text.trim().length >= 2;
+      _shopNameCtrl.text.trim().length >= 2;
 
   void _next() {
     if (_step == 0) {
@@ -203,8 +192,6 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
       setState(() {
         _shopNameError = _shopNameCtrl.text.trim().isEmpty
             ? 'Nom de boutique requis' : _shopNameError;
-        _shopAddressError = _shopAddressCtrl.text.trim().isEmpty
-            ? 'Adresse / ville requise' : _shopAddressError;
       });
       if (!_step2Valid) return;
     }
@@ -250,8 +237,6 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
         country:  country,
         phone:    null,
         email:    null,
-        address:  _shopAddressCtrl.text.trim().isNotEmpty
-            ? _shopAddressCtrl.text.trim() : null,
       ),
     ));
   }
@@ -415,19 +400,17 @@ class _BottomBar extends StatelessWidget {
               style: AppTextStyles.bodySecondary
                   .copyWith(fontWeight: FontWeight.w700)),
         ),
-        const SizedBox(width: 12),
-        // `Expanded` (au lieu d'une largeur fixe 200) : le bouton occupe la
-        // place restante et le label long « Démarrer mon essai 14 jours »
-        // n'est plus tronqué/comprimé.
-        Expanded(
-          child: AppPrimaryButton(
-            isLoading: state._submitting,
-            enabled: canForward && !state._submitting,
-            onTap: isLast ? state._submit : state._next,
-            label: isLast
-                ? 'Démarrer mon essai 14 jours'
-                : 'Continuer',
-          ),
+        const Spacer(),
+        // Bouton dimensionné au CONTENU, collé à l'angle droit, texte centré
+        // (demande utilisateur). `AppPrimaryButton` est content-sized par
+        // défaut (fullWidth:false) → la largeur épouse le label.
+        AppPrimaryButton(
+          isLoading: state._submitting,
+          enabled: canForward && !state._submitting,
+          onTap: isLast ? state._submit : state._next,
+          label: isLast
+              ? 'Démarrer mon essai 14 jours'
+              : 'Continuer',
         ),
       ]),
     );

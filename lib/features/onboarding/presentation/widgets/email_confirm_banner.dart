@@ -111,7 +111,7 @@ class _EmailConfirmBannerState extends State<EmailConfirmBanner> {
             ),
             IconButton(
               tooltip: 'Plus tard',
-              icon: const Icon(Icons.close_rounded,
+              icon: Icon(Icons.close_rounded,
                   color: AppColors.textSecondary, size: 18),
               onPressed: _dismiss,
             ),

@@ -15,9 +15,16 @@ class ThemeModeNotifier extends Notifier<ThemeMode> {
     return _readFromHive();
   }
 
+  /// Mode par défaut quand l'utilisateur n'a jamais choisi.
+  ///
+  /// Sombre : c'est désormais l'identité visuelle de l'application. Un
+  /// utilisateur qui a explicitement choisi « clair » garde son réglage —
+  /// la valeur persistée prime toujours sur ce défaut.
+  static const _fallback = ThemeMode.dark;
+
   ThemeMode _readFromHive() {
     try {
-      if (!Hive.isBoxOpen(HiveBoxes.settings)) return ThemeMode.light;
+      if (!Hive.isBoxOpen(HiveBoxes.settings)) return _fallback;
       final raw = HiveBoxes.settingsBox.get(_key);
       switch (raw) {
         case 'dark':
@@ -25,12 +32,14 @@ class ThemeModeNotifier extends Notifier<ThemeMode> {
         case 'system':
           return ThemeMode.system;
         case 'light':
-        default:
           return ThemeMode.light;
+        default:
+          // Clé absente = jamais configuré → défaut application.
+          return _fallback;
       }
     } catch (e) {
       debugPrint('[ThemeMode] read error: $e');
-      return ThemeMode.light;
+      return _fallback;
     }
   }
 

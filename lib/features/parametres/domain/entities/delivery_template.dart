@@ -5,9 +5,10 @@ import '../../../../core/storage/schema_migrator.dart';
 /// livreur. Le `body` peut contenir des placeholders `{{nom_variable}}`
 /// remplacés au moment du transfert par `delivery_message_builder`.
 ///
-/// Variables supportées : caisse, client_name, client_phone, lieu_livraison,
-/// ville_expedition, produits, date, heure, prix_produit, frais_livraison,
-/// total, notes, partner_name, partner_phone, partner_city, partner_notes.
+/// Variables supportées : caisse, titre_livraison, reference, client_name,
+/// client_phone, lieu_livraison, ville_expedition, produits, date, heure,
+/// prix_produit, frais_livraison, total, notes, partner_name, partner_phone,
+/// partner_city, partner_notes.
 ///
 /// Portée (hotfix_093) :
 ///   • `partnerId == null` → template SHOP-WIDE (rétro-compatible avec

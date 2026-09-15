@@ -92,16 +92,17 @@ void main() {
       expect(s.total, closeTo(9540, 0.001));
     });
 
-    test('les frais (fees) ne sont PAS ajoutés au total facturé', () {
+    test('les dépenses supplémentaires (fees) s\'AJOUTENT au total facturé', () {
       final s = _sale(
         items: [_item(unitPrice: 5000, qty: 1)],
         fees: [
-          {'id': 'f1', 'label': 'Livraison', 'amount': 1500},
+          {'id': 'f1', 'label': 'Emballage', 'amount': 1500},
         ],
       );
       expect(s.totalFees, 1500);
-      // Invariant : total ignore les fees (absorbés par la boutique).
-      expect(s.total, 5000);
+      // Nouveau modèle : les dépenses s'ajustent PAR-DESSUS le prix de vente →
+      // total = prix de vente (5000) + dépenses (1500) = 6500.
+      expect(s.total, 6500);
     });
   });
 

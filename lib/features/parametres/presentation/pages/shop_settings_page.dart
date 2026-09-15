@@ -13,12 +13,14 @@ import '../../../../core/widgets/owner_pin_dialog.dart';
 import '../../../../core/services/logo_color_extractor.dart';
 import '../../../../core/services/logo_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/logo_theme_builder.dart';
 import '../../../../core/theme/theme_palette.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/permisions/subscription_provider.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../../../features/auth/domain/entities/user.dart';
 import '../../../../shared/providers/current_shop_provider.dart';
 import '../../../../features/shop_selector/domain/entities/shop_summary.dart';
@@ -143,13 +145,10 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
     _ => code,
   };
 
-  static String _sectorLabel(String s) => switch (s) {
-    'retail'      => 'Commerce de détail',
-    'restaurant'  => 'Restaurant / Restauration',
-    'supermarche' => 'Supermarché',
-    'pharmacie'   => 'Pharmacie',
-    _             => s,
-  };
+  // Délégué à `establishmentLabel` (core/config/restaurant_mode.dart) pour
+  // qu'il n'existe qu'UNE table de libellés de secteur : la liste locale
+  // ignorait déjà 'ecommerce' et aurait re-divergé avec 'fastfood'/'mixed'.
+  static String _sectorLabel(String s) => establishmentLabel(s);
 
   static String _formatPhone(String raw, String country) {
     final clean = raw.replaceAll(RegExp(r'\s'), '');
@@ -214,7 +213,7 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.storefront_outlined,
+            Icon(Icons.storefront_outlined,
                 size: 40, color: AppColors.textHint),
             const SizedBox(height: 12),
             Text('Boutique introuvable',
@@ -222,8 +221,8 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
                     fontWeight: FontWeight.w600,
                     color: Theme.of(context).colorScheme.onSurface)),
             const SizedBox(height: 8),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 32),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
               child: Text(
                   'Aucune donnée locale pour cette boutique. '
                   'Vérifiez votre connexion et réessayez.',
@@ -308,6 +307,10 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
         ),
         const SizedBox(height: 16),
 
+        // (Le type d'établissement est affiché en LECTURE SEULE dans la
+        //  carte d'infos ci-dessus, ligne « Secteur ». Il est figé à la
+        //  création : cf. `kCreationSectors` dans restaurant_mode.dart.)
+
         // ── Statut avec toggle Switch ──────────────────────────────
         _Card(
           child: Padding(
@@ -324,7 +327,7 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
                   children: [
                 Text(l.shopInfoStatus,
                     maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 10,
+                    style: TextStyle(fontSize: 10,
                         color: AppColors.textHint,
                         fontWeight: FontWeight.w500)),
                 const SizedBox(height: 2),
@@ -339,7 +342,7 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
                         ? l.shopStatusDescActive
                         : l.shopStatusDescInactive,
                     maxLines: 2, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11,
+                    style: TextStyle(fontSize: 11,
                         color: AppColors.textSecondary)),
               ])),
               Switch(
@@ -514,7 +517,7 @@ class _ShopHeroCardState extends ConsumerState<_ShopHeroCard> {
       icon: Icons.delete_outline_rounded,
       iconColor: AppColors.error,
       title: 'Supprimer le logo ?',
-      body: const Text(
+      body: Text(
           'La facture utilisera les couleurs par défaut.',
           style: TextStyle(fontSize: 13,
               color: AppColors.textSecondary)),
@@ -881,7 +884,7 @@ class _MembersSection extends StatelessWidget {
             if (members.isEmpty) ...[
               const SizedBox(height: 4),
               Text(emptyHint ?? '—',
-                  style: const TextStyle(fontSize: 12,
+                  style: TextStyle(fontSize: 12,
                       color: AppColors.textHint)),
             ] else
               for (var i = 0; i < members.length; i++) ...[
@@ -905,7 +908,7 @@ class _MembersSection extends StatelessWidget {
                       icon: Icons.person_remove_outlined,
                       iconColor: AppColors.error,
                       title: 'Retirer ce membre ?',
-                      body: const Text('Il perdra l\'accès à cette boutique.',
+                      body: Text('Il perdra l\'accès à cette boutique.',
                           style: TextStyle(fontSize: 13,
                               color: AppColors.textSecondary)),
                       cancelLabel: 'Annuler',
@@ -986,7 +989,7 @@ class _CopyTab extends StatelessWidget {
                               color: Theme.of(context).colorScheme.onSurface)),
                       const SizedBox(height: 2),
                       Text(l.shopCopyCardSubtitle,
-                          style: const TextStyle(fontSize: 12,
+                          style: TextStyle(fontSize: 12,
                               color: AppColors.textSecondary,
                               height: 1.3)),
                     ])),
@@ -1062,7 +1065,7 @@ class _CopyTab extends StatelessWidget {
             TextButton(
               onPressed: () => Navigator.of(dc).pop(),
               child: Text(l.commonCancel,
-                  style: const TextStyle(color: AppColors.textSecondary)),
+                  style: TextStyle(color: AppColors.textSecondary)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
@@ -1167,7 +1170,7 @@ class _InfoRow extends StatelessWidget {
             children: [
               Text(label,
                   maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 10, color: AppColors.textHint,
                       fontWeight: FontWeight.w500)),
               const SizedBox(height: 2),
@@ -1180,7 +1183,7 @@ class _InfoRow extends StatelessWidget {
             ])),
         if (canCopy)
           IconButton(
-            icon: const Icon(Icons.copy_rounded,
+            icon: Icon(Icons.copy_rounded,
                 size: 15, color: AppColors.textSecondary),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: value));
@@ -1226,7 +1229,7 @@ class _SectionHeader extends StatelessWidget {
                 fontSize: 15, fontWeight: FontWeight.w700,
                 color: Theme.of(context).colorScheme.onSurface)),
             const SizedBox(height: 3),
-            Text(subtitle, style: const TextStyle(
+            Text(subtitle, style: TextStyle(
                 fontSize: 12, color: AppColors.textSecondary, height: 1.4)),
           ])),
     ],
@@ -1267,7 +1270,7 @@ class _RoleGrid extends StatelessWidget {
       final cardW = (cons.maxWidth - (cols - 1) * spacing) / cols;
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(l.shopRolesTitle,
-            style: const TextStyle(fontSize: 12,
+            style: TextStyle(fontSize: 12,
                 fontWeight: FontWeight.w700,
                 color: AppColors.textSecondary,
                 letterSpacing: 0.2)),
@@ -1317,7 +1320,7 @@ class _RoleCard extends StatelessWidget {
               color: Theme.of(context).colorScheme.onSurface)),
       const SizedBox(height: 2),
       Text(description,
-          style: const TextStyle(fontSize: 10,
+          style: TextStyle(fontSize: 10,
               color: AppColors.textSecondary, height: 1.3)),
     ]),
   );
@@ -1600,7 +1603,7 @@ class _EmptyMembers extends StatelessWidget {
         const SizedBox(height: 6),
         Text(l.shopEmptyMembersSubtitle,
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 12,
+            style: TextStyle(fontSize: 12,
                 height: 1.4,
                 color: AppColors.textSecondary)),
         const SizedBox(height: 16),
@@ -1677,7 +1680,7 @@ class _FieldLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Align(
     alignment: Alignment.centerLeft,
-    child: Text(text, style: const TextStyle(
+    child: Text(text, style: TextStyle(
         fontSize: 11, fontWeight: FontWeight.w600,
         color: AppColors.textSecondary)),
   );
@@ -1697,7 +1700,7 @@ class _InviteField extends StatelessWidget {
       hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 13),
       prefixIcon: const Icon(Icons.email_outlined, size: 16,
           color: Color(0xFFAAAAAA)),
-      filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
+      filled: true, fillColor: AppColors.inputFill, isDense: true,
       contentPadding: const EdgeInsets.symmetric(
           horizontal: 12, vertical: 11),
       border: OutlineInputBorder(
@@ -1727,7 +1730,7 @@ class _RoleOption extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
-        color: selected ? AppColors.primarySurface : const Color(0xFFF9FAFB),
+        color: selected ? AppColors.primarySurface : AppColors.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
             color: selected
@@ -1747,9 +1750,9 @@ class _RoleOption extends StatelessWidget {
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
                       color: selected
                           ? AppColors.primary
-                          : const Color(0xFF374151))),
+                          : AppColors.onSurface)),
               Text(_desc(role),
-                  style: const TextStyle(fontSize: 10,
+                  style: TextStyle(fontSize: 10,
                       color: AppColors.textHint)),
             ])),
         if (selected)
@@ -1791,7 +1794,7 @@ class _StyledDropdown<T> extends StatelessWidget {
     decoration: InputDecoration(
       hintText: hint,
       hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
-      filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
+      filled: true, fillColor: AppColors.inputFill, isDense: true,
       contentPadding: const EdgeInsets.symmetric(
           horizontal: 12, vertical: 10),
       border: OutlineInputBorder(
@@ -1881,7 +1884,7 @@ class _PendingInvitationsState extends State<_PendingInvitations> {
             const SizedBox(width: 6),
             Text(
               '${_invitations.length} invitation${_invitations.length > 1 ? 's' : ''} en attente',
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: AppColors.textSecondary,
@@ -1906,7 +1909,7 @@ class _PendingInvitationsState extends State<_PendingInvitations> {
                   child: Row(children: [
                     Container(width: 34, height: 34,
                         decoration: BoxDecoration(
-                            color: const Color(0xFFFFF7ED),
+                            color: AppColors.warning.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(9)),
                         child: const Icon(Icons.mail_outline_rounded,
                             size: 17, color: AppColors.warning)),
@@ -1935,13 +1938,13 @@ class _PendingInvitationsState extends State<_PendingInvitations> {
                         ),
                         const SizedBox(width: 6),
                         Text(_expiresLabel(inv['expires_at'] as String?),
-                            style: const TextStyle(
+                            style: TextStyle(
                                 fontSize: 10, color: AppColors.textHint)),
                       ]),
                     ])),
                     IconButton(
                       onPressed: () => _cancel(inv),
-                      icon: const Icon(Icons.close_rounded,
+                      icon: Icon(Icons.close_rounded,
                           size: 18, color: AppColors.textHint),
                       tooltip: 'Annuler l\'invitation',
                       padding: EdgeInsets.zero,

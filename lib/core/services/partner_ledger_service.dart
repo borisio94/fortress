@@ -137,68 +137,255 @@ class PartnerLedgerService {
     }
   }
 
-  /// Dette partenaire PAR COMMANDE, calculée en UNE SEULE passe Hive
-  /// (offline-first) pour l'ensemble des [orderIds] visibles — jamais un
-  /// scan par commande. Clé du résultat = `orderId`. Une commande absente
-  /// de la map = aucune entrée ledger (pas de dette / pas de partenaire).
+  /// Dette de la boutique envers le partenaire, PAR COMMANDE, calculée en UNE
+  /// SEULE passe Hive (offline-first) pour les [orderIds] visibles. Clé du
+  /// résultat = `orderId` ; une commande absente de la map n'a aucune dette.
   ///
-  /// Pour chaque commande :
-  ///   * dette brute = Σ |amount| des entrées négatives (deliveryOwed /
-  ///     partnerCharge),
-  ///   * offsets     = Σ amount des entrées positives liées à la même
-  ///     commande (saleCollected / remittance),
-  ///   * `isCompensated` = **soit** le solde GLOBAL du partenaire ≥ 0
-  ///     (partenaire à jour : aucune dette nette → on masque toutes ses
-  ///     bannières, y compris si la commande est soldée par les ventes
-  ///     d'AUTRES commandes du même partenaire) **soit** les offsets de
-  ///     la commande couvrent déjà sa dette.
-  ///
-  /// Convention solde (cf. [PartnerLedgerEntry]) : `solde = SUM(amount)`
-  ///   > 0 partenaire doit à la boutique · < 0 boutique doit · = 0 à jour.
-  ///
-  /// Un seul parcours Hive (offline-first) ; re-calculé en live à chaque
-  /// changement ledger (Realtime + versement → notifyListeners). Aucune
-  /// donnée persistée : rien à migrer, pas de désynchro possible.
+  /// Le calcul lui-même est dans [computeOrderDebts] (pur, testable).
   static Map<String, PartnerDebtInfo> debtByOrder(
       String shopId, Iterable<String> orderIds) {
     final wanted = orderIds.where((e) => e.isNotEmpty).toSet();
     if (wanted.isEmpty) return const {};
-    final neg          = <String, double>{}; // dette brute / commande
-    final pos          = <String, double>{}; // offsets / commande
+    return computeOrderDebts(entriesForShop(shopId), wanted);
+  }
+
+  /// Tolérance d'arrondi : même seuil que [pendingRemittanceByOrder] et
+  /// [debtAgeByPartner], pour qu'un reliquat de centimes ne rouvre pas une
+  /// dette en réalité réglée.
+  static const double _kDebtTolerance = 0.5;
+
+  /// Reste dû par la boutique au partenaire, PAR COMMANDE — imputation FIFO.
+  ///
+  /// POURQUOI FIFO. Un règlement « Régler le partenaire » est GLOBAL (sans
+  /// `orderId`). L'ancienne règle masquait les bandeaux tant que le solde du
+  /// JOUR restait ≥ 0 : le moindre frais apparu ensuite rouvrait toutes les
+  /// dettes déjà réglées, avec leur montant d'origine (« dette fantôme »).
+  /// Désormais chaque crédit éteint les dettes LES PLUS ANCIENNES d'abord : un
+  /// nouveau frais n'apparaît que sur SA commande.
+  ///
+  /// Pour chaque partenaire, en deux temps :
+  ///   1. **Compensation dans la commande.** Ce que le partenaire a perçu sur
+  ///      une commande (écritures positives liées), diminué de ce qu'il en a
+  ///      déjà reversé (versements négatifs liés), couvre d'abord les frais
+  ///      de CETTE commande — il les a retenus à la source. Le reliquat,
+  ///      positif ou négatif, rejoint le pot commun.
+  ///   2. **Pot commun, imputé FIFO.** Pot = reliquats des commandes +
+  ///      crédits globaux (règlements et AVANCES de la boutique, positifs) −
+  ///      versements globaux du partenaire (négatifs hors frais). Il couvre
+  ///      les frais restants (`deliveryOwed`, `partnerCharge`), du plus ancien
+  ///      au plus récent. Un pot négatif ne couvre rien.
+  ///
+  /// GARANTIE (tant que le pot n'est pas négatif) : la somme des restes, y
+  /// compris ceux des charges sans commande, vaut exactement max(0, −solde)
+  /// du partenaire — ce que la boutique lui doit réellement.
+  ///
+  /// Les écritures supprimées (`deletedAt`) sont ignorées. Tri stable :
+  /// `createdAt` puis `id`.
+  static Map<String, PartnerDebtInfo> computeOrderDebts(
+      Iterable<PartnerLedgerEntry> entries, Set<String> orderIds) {
+    final byPartner = <String, List<PartnerLedgerEntry>>{};
+    for (final e in entries) {
+      if (e.deletedAt != null) continue;
+      byPartner.putIfAbsent(e.partnerLocationId, () => []).add(e);
+    }
+    final out = <String, PartnerDebtInfo>{};
+    byPartner.forEach((_, list) {
+      bool isDebt(PartnerLedgerEntry e) =>
+          e.amount < 0
+          && (e.type == PartnerLedgerEntryType.deliveryOwed
+              || e.type == PartnerLedgerEntryType.partnerCharge);
+
+      final ownCredit = <String, double>{};          // commande → net perçu
+      final debts     = <PartnerLedgerEntry>[];
+      var pool = 0.0;
+      for (final e in list) {
+        if (isDebt(e)) {
+          debts.add(e);
+        } else if (e.orderId != null) {
+          ownCredit.update(e.orderId!, (v) => v + e.amount,
+              ifAbsent: () => e.amount);
+        } else {
+          pool += e.amount;                           // crédit/versement global
+        }
+      }
+      debts.sort((a, b) {
+        final c = a.createdAt.compareTo(b.createdAt);
+        return c != 0 ? c : a.id.compareTo(b.id);
+      });
+
+      // Reste dû de chaque dette, avant imputation.
+      final remaining = <String, double>{
+        for (final d in debts) d.id: d.amount.abs(),
+      };
+
+      // 1. Compensation dans la commande (dettes de la commande, FIFO).
+      final ordersWithCredit = ownCredit.keys.toList();
+      for (final oid in ordersWithCredit) {
+        var own = ownCredit[oid]!;
+        if (own > 0) {
+          for (final d in debts.where((d) => d.orderId == oid)) {
+            final take = own < remaining[d.id]! ? own : remaining[d.id]!;
+            remaining[d.id] = remaining[d.id]! - take;
+            own -= take;
+            if (own <= 0) break;
+          }
+        }
+        pool += own;                                  // reliquat (±)
+      }
+
+      // 2. Pot commun, du frais le plus ancien au plus récent.
+      if (pool > 0) {
+        for (final d in debts) {
+          final left = remaining[d.id]!;
+          if (left <= 0) continue;
+          final take = pool < left ? pool : left;
+          remaining[d.id] = left - take;
+          pool -= take;
+          if (pool <= 0) break;
+        }
+      }
+
+      // Restitution par commande visible.
+      for (final d in debts) {
+        final oid = d.orderId;
+        if (oid == null || !orderIds.contains(oid)) continue;
+        final prev = out[oid]?.amount ?? 0.0;
+        final amount = prev + remaining[d.id]!;
+        out[oid] = PartnerDebtInfo(
+          amount:        amount,
+          isCompensated: amount <= _kDebtTolerance,
+        );
+      }
+    });
+    return out;
+  }
+
+  /// Montant ENCORE À VERSER par le partenaire pour CHAQUE commande : argent
+  /// encaissé par le partenaire pour le compte de la boutique (`saleCollected`)
+  /// mais pas encore reversé. Calculé en UNE passe Hive (offline-first) pour
+  /// l'ensemble des [orderIds] visibles.
+  ///
+  /// Pour chaque commande : `Σ de TOUTES ses écritures` (solde NET de la
+  /// commande) — saleCollected (+), remittance (−), deliveryOwed (−),
+  /// partnerCharge (−). Ainsi, ajouter une dépense/charge sur la commande
+  /// (frais de livraison, course refusée…) réduit directement le montant
+  /// affiché « à verser » par le partenaire.
+  /// Une commande n'est retenue (clé du résultat) que si :
+  ///   * ce reste NET est positif (le partenaire nous doit encore quelque
+  ///     chose sur cette commande précise), ET
+  ///   * le solde GLOBAL du partenaire est lui-même > 0 — s'il a déjà tout
+  ///     reversé via un versement global (solde ≤ 0), plus rien n'est « en
+  ///     attente », on n'affiche donc aucune commande pour lui.
+  ///
+  /// Résultat : `orderId → montant en attente (> 0)`. Commande absente = rien
+  /// à recevoir du partenaire. Aucune donnée persistée : re-calculé en live à
+  /// chaque changement ledger (Realtime + versement → notifyListeners).
+  ///
+  /// [since] (optionnel) : ne compte dans le NET de la commande que les
+  /// écritures CRÉÉES après cette date (garde-fou « nouvelles commandes »).
+  /// On se base sur la date de l'ÉCRITURE (et non de la commande) afin qu'une
+  /// ancienne commande repassée en programmée puis re-finalisée — qui génère
+  /// une écriture FRAÎCHE — participe bien à la logique « à verser », tandis
+  /// que les commandes historiques jamais retouchées (écritures anciennes)
+  /// restent exclues. Le solde GLOBAL du partenaire reste, lui, calculé sur
+  /// TOUTES les écritures (cohérence comptable).
+  static Map<String, double> pendingRemittanceByOrder(
+      String shopId, Iterable<String> orderIds, {DateTime? since}) {
+    final wanted = orderIds.where((e) => e.isNotEmpty).toSet();
+    if (wanted.isEmpty) return const {};
+    final outstanding  = <String, double>{}; // saleCollected(+) + remittance(−)
     final orderPartner = <String, String>{}; // commande → partenaire
     final partnerBal   = <String, double>{}; // solde GLOBAL / partenaire
-    // entriesForShop = un seul parcours du box Hive, déjà filtré
-    // soft-delete. On agrège tout ici en une passe.
     for (final e in entriesForShop(shopId)) {
-      // Solde global du partenaire (TOUTES ses entrées, pas seulement
-      // les commandes visibles) — clé de la compensation par solde.
       partnerBal.update(e.partnerLocationId, (v) => v + e.amount,
           ifAbsent: () => e.amount);
       final oid = e.orderId;
       if (oid == null || !wanted.contains(oid)) continue;
+      // Garde-fou « nouvelles commandes » : on ignore les écritures
+      // antérieures au cutoff (les commandes historiques restent exclues).
+      if (since != null && !e.createdAt.isAfter(since)) continue;
+      // Solde NET de la commande : on somme TOUTES ses écritures (les frais /
+      // charges négatifs déduisent ce que le partenaire doit reverser).
+      outstanding.update(oid, (v) => v + e.amount, ifAbsent: () => e.amount);
       orderPartner[oid] = e.partnerLocationId;
-      if (e.amount < 0) {
-        neg.update(oid, (v) => v + e.amount.abs(),
-            ifAbsent: () => e.amount.abs());
-      } else if (e.amount > 0) {
-        pos.update(oid, (v) => v + e.amount, ifAbsent: () => e.amount);
-      }
     }
-    final out = <String, PartnerDebtInfo>{};
-    for (final entry in neg.entries) {
-      final oid     = entry.key;
-      final debt    = entry.value;
-      final offset  = pos[oid] ?? 0;
+    final out = <String, double>{};
+    for (final entry in outstanding.entries) {
+      final oid = entry.key;
+      var reste = entry.value;
+      if (reste <= 0.5) continue;
       final partner = orderPartner[oid];
-      final balance = partner == null ? 0.0 : (partnerBal[partner] ?? 0.0);
-      out[oid] = PartnerDebtInfo(
-        amount:        debt,
-        // Partenaire à jour globalement OU dette de la commande déjà
-        // couverte par ses propres encaissements/versements.
-        isCompensated: balance >= 0 || offset >= debt,
-      );
+      final bal = partner == null ? 0.0 : (partnerBal[partner] ?? 0.0);
+      if (bal <= 0.5) continue; // partenaire déjà à jour globalement
+      // « à verser » = montant NET de CETTE commande (sans plafonner au solde
+      // global). Les charges que la boutique doit au partenaire (stockage…)
+      // sont une DETTE SÉPARÉE (réglée via « Régler le partenaire ») — les
+      // mélanger au versement laissait un résidu qui « remontait » (bug 07-2026).
+      out[oid] = reste;
     }
     return out;
+  }
+
+  /// Enregistre le VERSEMENT REÇU du partenaire pour UNE commande : crée une
+  /// entrée `remittance` négative qui solde le montant encore dû pour cette
+  /// commande (cf. [pendingRemittanceByOrder]). C'est le marquage manuel
+  /// « versement reçu » côté carte commande — il s'inscrit dans le livre
+  /// partenaire (source unique de vérité), donc le solde Finances/partenaires
+  /// reste cohérent. No-op si `amount <= 0`.
+  static Future<void> markOrderRemittanceReceived({
+    required String shopId,
+    required String partnerLocationId,
+    required String orderId,
+    required double amount,
+    String? note,
+  }) async {
+    if (amount <= 0) return;
+    // Versement reçu = montant COMPLET de la commande → elle est intégralement
+    // soldée, sans résidu, et ne « remonte » jamais. Les charges dues au
+    // partenaire (stockage…) restent une DETTE SÉPARÉE dans le livre partenaire
+    // (réglée via « Régler le partenaire », ou compensée au solde global). Ne
+    // PAS re-plafonner : le plafonnement laissait un résidu jamais soldé qui
+    // réapparaissait en « à verser » (bug rapporté 07-2026).
+    await addEntry(
+      shopId:            shopId,
+      partnerLocationId: partnerLocationId,
+      type:              PartnerLedgerEntryType.remittance,
+      // Versement reçu → réduit ce que le partenaire doit (solde vers 0).
+      amount:            -amount,
+      orderId:           orderId,
+      note:              note ?? 'Versement reçu du partenaire',
+    );
+  }
+
+  /// Resynchronise les FRAIS de livraison déduits du versement partenaire pour
+  /// UNE commande : supprime les écritures `deliveryOwed` existantes de la
+  /// commande et en recrée une seule de montant -[feesTotal] (si > 0).
+  /// Préserve `saleCollected` et les versements déjà enregistrés. Appelé quand
+  /// on édite les frais d'une commande encaissée par le partenaire → le montant
+  /// « à verser » (cf. [pendingRemittanceByOrder], net) se recalcule en direct.
+  static Future<void> syncOrderDeliveryFee({
+    required String shopId,
+    required String partnerLocationId,
+    required String orderId,
+    required double feesTotal,
+  }) async {
+    final existing = entriesForShop(shopId)
+        .where((e) => e.orderId == orderId
+            && e.type == PartnerLedgerEntryType.deliveryOwed)
+        .toList();
+    for (final e in existing) {
+      await deleteEntry(e.id, shopId);
+    }
+    if (feesTotal > 0) {
+      await addEntry(
+        shopId:            shopId,
+        partnerLocationId: partnerLocationId,
+        type:              PartnerLedgerEntryType.deliveryOwed,
+        amount:            -feesTotal,
+        orderId:           orderId,
+        note:              'Frais de livraison déduits du versement',
+      );
+    }
   }
 
   /// Solde courant d'un partenaire = SUM(amount).
@@ -221,6 +408,68 @@ class PartnerLedgerService {
       out.update(e.partnerLocationId, (v) => v + e.amount,
           ifAbsent: () => e.amount);
     }
+    return out;
+  }
+
+  /// Ancienneté EN JOURS de la plus vieille vente encaissée par le partenaire
+  /// et pas encore couverte — « depuis combien de temps cet argent dort-il
+  /// chez lui ? ». Clé = `partnerLocationId`. Partenaire absent de la map =
+  /// rien qui vieillisse chez lui.
+  ///
+  /// LETTRAGE FIFO RESTREINT. On empile les `saleCollected` du plus ancien au
+  /// plus récent, on impute dessus la TOTALITÉ des écritures négatives
+  /// (versements reçus, frais de livraison, charges), et l'âge est celui de
+  /// la première vente encore découverte.
+  ///
+  /// Les écritures POSITIVES qui ne sont pas des ventes — un `remittance`
+  /// ÉMIS par la boutique, une `advance` — sont IGNORÉES des deux côtés :
+  ///   * ni empilées : sinon régler un partenaire ferait REJAILLIR une date
+  ///     fraîche, et sa vente de janvier paraîtrait dater d'hier ;
+  ///   * ni comptées en crédit : de l'argent SORTI de la boutique n'éteint
+  ///     pas une vente que le partenaire doit encore reverser. Les compter
+  ///     inventerait une extinction qui n'a pas eu lieu.
+  ///
+  /// CONSÉQUENCE ASSUMÉE : un partenaire dont le solde n'est positif qu'à
+  /// cause d'une avance non remboursée n'a PAS d'âge. C'est voulu — une
+  /// avance consentie n'est pas un retard de reversement.
+  ///
+  /// Aucune donnée persistée : recalculé à chaque lecture, donc rien à
+  /// migrer et aucune désynchronisation possible. Coût = une passe Hive,
+  /// la même que [balancesForShop] ; les deux ne sont pas fusionnées pour
+  /// ne pas toucher aux appelants existants.
+  static Map<String, int> debtAgeByPartner(String shopId) {
+    final sales   = <String, List<PartnerLedgerEntry>>{};
+    final credits = <String, double>{};
+    for (final e in entriesForShop(shopId)) {
+      if (e.type == PartnerLedgerEntryType.saleCollected && e.amount > 0) {
+        sales.putIfAbsent(e.partnerLocationId, () => []).add(e);
+      } else if (e.amount < 0) {
+        credits.update(e.partnerLocationId, (v) => v + e.amount.abs(),
+            ifAbsent: () => e.amount.abs());
+      }
+    }
+    final now = DateTime.now();
+    final out = <String, int>{};
+    sales.forEach((partnerId, list) {
+      // `entriesForShop` trie du plus RÉCENT au plus ancien — le FIFO exige
+      // l'inverse.
+      list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      var credit = credits[partnerId] ?? 0.0;
+      for (final sale in list) {
+        // Tolérance 0.5 : même seuil que `pendingRemittanceByOrder`, pour
+        // qu'un reliquat de centimes d'arrondi ne fasse pas vieillir une
+        // vente en réalité soldée.
+        if (sale.amount - credit <= 0.5) {
+          credit -= sale.amount;
+          if (credit < 0) credit = 0;
+          continue;
+        }
+        // Première vente non couverte : c'est elle qui donne l'âge.
+        final days = now.difference(sale.createdAt).inDays;
+        if (days > 0) out[partnerId] = days;
+        break;
+      }
+    });
     return out;
   }
 
@@ -256,9 +505,19 @@ class PartnerLedgerService {
     AppDatabase.notifyListeners('partner_ledger_entries', shopId);
   }
 
-  /// Supprime tous les mouvements liés à une commande (utile en cas
-  /// d'annulation après completion).
-  static Future<void> removeForOrder(String shopId, String orderId) async {
+  /// Supprime les mouvements liés à une commande.
+  ///
+  /// [keepReceived] (défaut false) : si true, PRÉSERVE les écritures
+  /// FINANCIÈRES MANUELLES — `remittance` (versement réellement reçu du
+  /// partenaire, marqué à la main) et `partnerCharge` (charge saisie, ex.
+  /// course refusée). Ne purge alors que les écritures AUTO-générées à la
+  /// complétion (`saleCollected`, `deliveryOwed`), qui seront recréées juste
+  /// après. Indispensable pour qu'une re-complétion n'efface pas un versement
+  /// déjà encaissé (sinon le bandeau « versement en attente » réapparaît).
+  ///
+  /// [keepReceived] = false (annulation pure d'une commande) : purge tout.
+  static Future<void> removeForOrder(String shopId, String orderId,
+      {bool keepReceived = false}) async {
     final box = HiveBoxes.partnerLedgerBox;
     final toDelete = <String>[];
     for (final key in box.keys) {
@@ -266,6 +525,16 @@ class PartnerLedgerService {
       if (raw == null) continue;
       if (raw['shop_id']?.toString() != shopId) continue;
       if (raw['order_id']?.toString() != orderId) continue;
+      if (keepReceived) {
+        final t = raw['type']?.toString();
+        // `advance` est listée par précaution : une avance est globale et
+        // ne porte en principe aucun `order_id`, donc rien ne l'atteint
+        // ici. Si elle venait à en porter un, une re-complétion de commande
+        // effacerait un versement réellement sorti de la caisse.
+        if (t == 'remittance' || t == 'partnerCharge' || t == 'advance') {
+          continue;
+        }
+      }
       toDelete.add(key.toString());
     }
     for (final id in toDelete) {

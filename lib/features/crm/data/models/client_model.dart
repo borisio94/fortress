@@ -22,6 +22,7 @@ class ClientModel {
   final String? lastVisitAt;
   final int     totalOrders;
   final double  totalSpent;
+  final bool    isArchived;
 
   const ClientModel({
     required this.id,
@@ -37,6 +38,7 @@ class ClientModel {
     this.lastVisitAt,
     this.totalOrders = 0,
     this.totalSpent  = 0,
+    this.isArchived  = false,
   });
 
   factory ClientModel.fromMap(Map<String, dynamic> m) => ClientModel(
@@ -53,6 +55,8 @@ class ClientModel {
     lastVisitAt:  m['last_visit_at'] as String?,
     totalOrders:  (m['total_orders'] as num?)?.toInt()    ?? 0,
     totalSpent:   (m['total_spent']  as num?)?.toDouble() ?? 0,
+    // hotfix_016 : anciens clients Hive sans la colonne → false par défaut.
+    isArchived:   (m['is_archived'] as bool?) ?? false,
   );
 
   Map<String, dynamic> toMap() => {
@@ -69,6 +73,7 @@ class ClientModel {
     'last_visit_at':lastVisitAt,
     'total_orders': totalOrders,
     'total_spent':  totalSpent,
+    'is_archived':  isArchived,
   };
 
   factory ClientModel.fromEntity(Client c) => ClientModel(
@@ -85,6 +90,7 @@ class ClientModel {
     lastVisitAt: c.lastVisitAt?.toIso8601String(),
     totalOrders: c.totalOrders,
     totalSpent:  c.totalSpent,
+    isArchived:  c.isArchived,
   );
 
   Client toEntity() => Client(
@@ -101,5 +107,6 @@ class ClientModel {
     lastVisitAt: lastVisitAt != null ? DateTime.parse(lastVisitAt!) : null,
     totalOrders: totalOrders,
     totalSpent:  totalSpent,
+    isArchived:  isArchived,
   );
 }

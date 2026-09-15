@@ -101,11 +101,11 @@ class _TicketsPageState extends ConsumerState<TicketsPage> {
               child: visible.isEmpty
                   ? ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      children: const [
-                        SizedBox(height: 80),
+                      children: [
+                        const SizedBox(height: 80),
                         Icon(Icons.forum_outlined,
-                            size: 40, color: Color(0xFFD1D5DB)),
-                        SizedBox(height: 12),
+                            size: 40, color: AppColors.textHint),
+                        const SizedBox(height: 12),
                         Center(child: Text(
                             'Aucun ticket pour le moment.',
                             style: AppTextStyles.bodySecondary)),
@@ -224,7 +224,7 @@ class _TicketTile extends StatelessWidget {
                 minimumSize: const Size(0, 28),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              child: const Text('Marquer résolu',
+              child: Text('Marquer résolu',
                   style: AppTextStyles.captionBold),
             ),
         ]),

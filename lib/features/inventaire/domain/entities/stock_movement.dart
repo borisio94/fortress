@@ -91,6 +91,13 @@ class StockMovement extends Equatable {
     'unit_cost': unitCost, 'reference': reference,
     'notes': notes, 'created_by': createdBy,
     'created_at': createdAt.toIso8601String(),
+    // hotfix_082 : la colonne `reason` est OBLIGATOIRE (CHECK non vide) pour
+    // type='adjustment'. Sans elle, le push Supabase d'un mouvement
+    // d'ajustement (ex. arrivée de stock détectée par saveProduct) était
+    // rejeté en 23514, retried 10× puis droppé silencieusement (audit cloud
+    // perdu). On reflète ici la règle de StockService._log.
+    if (type == StockMovementType.adjustment)
+      'reason': (notes ?? '').trim().isNotEmpty ? notes : 'Ajustement de stock',
   };
 
   factory StockMovement.fromMap(Map<String, dynamic> rawM) {

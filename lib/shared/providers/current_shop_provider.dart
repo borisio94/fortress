@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import '../../features/shop_selector/domain/entities/shop_summary.dart';
 import '../../features/auth/domain/entities/user.dart';
 import '../../core/storage/local_storage_service.dart';
@@ -60,6 +61,8 @@ class CurrentShopNotifier extends Notifier<ShopSummary?> {
 
   void setShop(ShopSummary shop) {
     state = shop;
+    // Phase 0 — enrichissement Sentry : cible « boutique » sur chaque event.
+    Sentry.configureScope((scope) => scope.setTag('shop_id', shop.id));
     final userId = SupabaseClientService.currentUserId
         ?? LocalStorageService.getCurrentUser()?.id;
     if (userId != null) {
@@ -69,6 +72,8 @@ class CurrentShopNotifier extends Notifier<ShopSummary?> {
 
   void clearShop() {
     state = null;
+    // Phase 0 — Sentry : plus de boutique active sur les events suivants.
+    Sentry.configureScope((scope) => scope.removeTag('shop_id'));
     final userId = SupabaseClientService.currentUserId
         ?? LocalStorageService.getCurrentUser()?.id;
     if (userId != null) {

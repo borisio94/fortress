@@ -99,7 +99,7 @@ class _TrialEndBannerState extends ConsumerState<TrialEndBanner> {
                   style: AppTextStyles.bodyBold,
                 ),
                 const SizedBox(height: 2),
-                const Text(
+                Text(
                   'Vos données restent en sécurité. Souscrivez pour '
                   'continuer à vendre.',
                   style: AppTextStyles.bodySmSecondary,
@@ -114,7 +114,7 @@ class _TrialEndBannerState extends ConsumerState<TrialEndBanner> {
             children: [
               IconButton(
                 tooltip: 'Plus tard',
-                icon: const Icon(Icons.close_rounded,
+                icon: Icon(Icons.close_rounded,
                     color: AppColors.textSecondary, size: 18),
                 onPressed: _dismiss,
                 visualDensity: VisualDensity.compact,

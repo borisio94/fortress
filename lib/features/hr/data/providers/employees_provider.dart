@@ -53,15 +53,65 @@ class EmployeesNotifier
     final rows = await Supabase.instance.client
         .rpc('list_shop_employees', params: {'p_shop_id': shopId});
     if (rows is! List) return const [];
-    final list = rows
+    var list = rows
         .whereType<Map>()
         .map((r) => Employee.fromRpc(shopId,
             Map<String, dynamic>.from(r)))
         .toList();
+    // FONCTION MÉTIER — lue à part, sur la table.
+    //
+    // `list_shop_employees` ne la renvoie pas, et lui ajouter une colonne
+    // imposerait un DROP FUNCTION : une fenêtre pendant laquelle la gestion
+    // des comptes serait cassée pour tout le monde. La policy de lecture de
+    // `shop_memberships` autorise déjà l'admin à la consulter directement.
+    final titles = await _fetchJobTitles(shopId);
+    if (titles.isNotEmpty) {
+      list = [
+        for (final e in list)
+          titles[e.userId] == null
+              ? e
+              : e.copyWith(jobTitle: titles[e.userId]),
+      ];
+    }
     if (writeCache) {
       await _writeCache(shopId, list);
     }
     return list;
+  }
+
+  /// Fonctions métier par `user_id`. Silencieux en cas d'échec : tant que la
+  /// colonne n'existe pas (hotfix_159 non appliqué), l'absence de fonction est
+  /// un état normal — pas une raison d'empêcher la liste des comptes de
+  /// s'afficher.
+  Future<Map<String, String>> _fetchJobTitles(String shopId) async {
+    try {
+      final rows = await Supabase.instance.client
+          .from('shop_memberships')
+          .select('user_id, job_title')
+          .eq('shop_id', shopId);
+      return {
+        for (final r in rows)
+          if ((r['job_title'] ?? '').toString().trim().isNotEmpty)
+            r['user_id'].toString(): r['job_title'].toString().trim(),
+      };
+    } catch (e) {
+      debugPrint('[Employees] job_title indisponible: $e');
+      return const {};
+    }
+  }
+
+  /// Écrit la fonction métier d'un compte, directement sur la table.
+  Future<void> setJobTitle(String userId, String jobTitle) async {
+    try {
+      await Supabase.instance.client
+          .from('shop_memberships')
+          .update({'job_title': jobTitle.trim()})
+          .eq('shop_id', arg)
+          .eq('user_id', userId);
+    } catch (e) {
+      debugPrint('[Employees] écriture job_title err: $e');
+    }
+    await refresh();
   }
 
   @override

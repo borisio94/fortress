@@ -28,30 +28,30 @@ import '../../../../features/inventaire/domain/entities/stock_location.dart';
 //   COCA-33 · Boissons · 500 XAF · stock 50")
 // ═════════════════════════════════════════════════════════════════════════════
 
-// ─── Helper : résolution du filtre dashboard en location_ids ───────────────
+// ─── Helper : emplacements PARTENAIRES de la boutique ──────────────────────
 //
 // `dashViewFilterProvider` peut valoir :
-//   * null         → vue Globale, pas de filtre.
-//   * '_base'      → boutique seule, on prend la `StockLocation type='shop'`
-//                    rattachée à `shopId`.
+//   * null          → vue Globale, pas de filtre.
+//   * '_base'       → vue Boutique : on montre TOUTE l'activité de la
+//                     boutique SAUF les logs rattachés à un partenaire (les
+//                     actions générales — produit, vente, client… — n'ont pas
+//                     de location_id et doivent rester visibles).
 //   * <location_id> → un partenaire spécifique.
-List<String>? _resolveLocationIds(String? viewFilter, String shopId) {
-  if (viewFilter == null) return null;
-  if (viewFilter == '_base') {
-    final ids = <String>[];
-    for (final raw in HiveBoxes.stockLocationsBox.values) {
-      try {
-        final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
-        if (loc.shopId == shopId
-            && loc.type == StockLocationType.shop
-            && loc.isActive) {
-          ids.add(loc.id);
-        }
-      } catch (_) {/* skip */}
-    }
-    return ids;
+//
+// `_partnerLocationIds` sert à EXCLURE les partenaires en vue Boutique.
+List<String> _partnerLocationIds(String shopId) {
+  final ids = <String>[];
+  for (final raw in HiveBoxes.stockLocationsBox.values) {
+    try {
+      final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+      if (loc.shopId == shopId
+          && loc.type == StockLocationType.partner
+          && loc.isActive) {
+        ids.add(loc.id);
+      }
+    } catch (_) {/* skip */}
   }
-  return [viewFilter];
+  return ids;
 }
 
 class ActivityLogPage extends ConsumerStatefulWidget {
@@ -127,7 +127,7 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
   /// Logs filtrés selon : (1) règle hiérarchique, (2) catégorie,
   /// (3) utilisateur sélectionné, (4) vue location (Globale / boutique
   /// seule / partenaire).
-  List<_LogEntry> _filteredFor(String? selfFilterId, List<String>? locIds) {
+  List<_LogEntry> _filteredFor(String? selfFilterId, String? viewFilter) {
     Iterable<_LogEntry> out = _logs;
     // (1) Règle hiérarchique : un vendeur ne voit que ses propres actions.
     if (selfFilterId != null) {
@@ -140,9 +140,20 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
     if (_filter != 'all') {
       out = out.where((l) => l.category == _filter);
     }
-    // (4) Vue location — uniquement si filtre actif (sinon tout passe).
-    if (locIds != null && locIds.isNotEmpty) {
-      out = out.where((l) => l.matchesLocations(locIds));
+    // (4) Vue location :
+    //  - Globale (null)     → tout.
+    //  - Partenaire (id)    → uniquement les logs de ce partenaire.
+    //  - Boutique ('_base') → tout SAUF les logs rattachés à un partenaire.
+    //    Les actions générales (produit, vente, client…) n'ont PAS de
+    //    location_id → elles doivent rester visibles (bug : elles étaient
+    //    exclues, d'où un historique boutique totalement vide).
+    if (viewFilter != null && viewFilter != '_base') {
+      out = out.where((l) => l.matchesLocations([viewFilter]));
+    } else if (viewFilter == '_base') {
+      final partnerIds = _partnerLocationIds(widget.shopId);
+      if (partnerIds.isNotEmpty) {
+        out = out.where((l) => !l.matchesLocations(partnerIds));
+      }
     }
     return out.toList();
   }
@@ -160,7 +171,6 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
     // Filtre location issu du dashboard (Globale / boutique seule /
     // partenaire) — appliqué en sus des filtres existants.
     final viewFilter = ref.watch(dashViewFilterProvider);
-    final locIds     = _resolveLocationIds(viewFilter, widget.shopId);
     return Column(children: [
       _FilterBar(
         selected: _filter,
@@ -172,7 +182,7 @@ class _ActivityLogPageState extends ConsumerState<ActivityLogPage> {
           actors:   _actors,
           onChange: (v) => setState(() => _userFilter = v),
         ),
-      Expanded(child: _body(l, _filteredFor(selfFilterId, locIds),
+      Expanded(child: _body(l, _filteredFor(selfFilterId, viewFilter),
           canManage: isPrivileged)),
     ]);
   }
@@ -359,10 +369,10 @@ class _UserFilterDropdown extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
       child: Row(children: [
-        const Icon(Icons.person_outline_rounded, size: 14,
+        Icon(Icons.person_outline_rounded, size: 14,
             color: AppColors.textHint),
         const SizedBox(width: 6),
-        const Text('Utilisateur :',
+        Text('Utilisateur :',
             style: AppTextStyles.captionBold),
         const SizedBox(width: 8),
         Expanded(
@@ -820,7 +830,7 @@ _LogMeta _metaFor(String action) {
       return const _LogMeta('alert', Icons.restart_alt_rounded, AppColors.error);
 
     default:
-      return const _LogMeta('other', Icons.info_outline_rounded, AppColors.textSecondary);
+      return _LogMeta('other', Icons.info_outline_rounded, AppColors.textSecondary);
   }
 }
 

@@ -86,20 +86,43 @@ class AppColors {
   static Color get inputBorder => _isDark ? _borderDark     : _borderLight;
   static Color get divider     => _isDark ? _borderDark     : _borderLight;
 
-  // ── Textes ─────────────────────────────────────────────────────────────────
-  // Restent const : utilisés dans des `const TextStyle` (AppTextStyles).
-  // En sombre, les Text principaux héritent du textTheme (cf. PR-1) ;
-  // ces tokens ne servent que pour des couleurs explicites résiduelles.
-  static const textPrimary   = Color(0xFF111827);
-  // Assombri (gray-500 → gray-600) pour un texte/icônes secondaires plus
-  // lisibles — pilote aussi captions, iconTheme et icônes de champs. ~7:1 AA.
-  static const textSecondary = Color(0xFF4B5563);
-  // Hint (placeholders) légèrement assombri aussi (gray-500 → gray-600 doux).
-  static const textHint      = Color(0xFF5B6472);
+  // Texte PRINCIPAL adaptatif (brightness-aware) — pendant de `colorScheme
+  // .onSurface` mais lisible sans `context`. Remplace les `Color(0xFF111827)`
+  // / `Color(0xFF0F172A)` posés en dur sur des textes/icônes : quasi-noir en
+  // clair, quasi-blanc (slate-100) en sombre.
+  static const _onSurfaceLight = Color(0xFF111827);
+  static const _onSurfaceDark  = Color(0xFFF1F5F9);
+  static Color get onSurface => _isDark ? _onSurfaceDark : _onSurfaceLight;
+
+  // ── Textes (brightness-aware) ───────────────────────────────────────────────
+  // Ces 3 tokens sont désormais des GETTERS qui suivent le mode clair/sombre
+  // (comme surface/background/onSurface). Un `color: AppColors.textPrimary`
+  // posé en dur devient donc lisible en sombre sans passer par le context.
+  // Valeurs sombres alignées sur le textTheme de `AppTheme.dark`
+  // (_dTextPrimary / _dTextSecondary / _dTextHint) pour une cohérence stricte.
+  //
+  // Conséquence : ils ne sont plus utilisables dans une expression `const`.
+  // Les échelons `AppTextStyles.*Secondary` / `*Hint` qui les consomment sont
+  // donc devenus des getters eux aussi (cf. app_text_styles.dart).
+  static const _textPrimaryLight   = Color(0xFF111827);
+  static const _textPrimaryDark    = Color(0xFFF1F5F9); // slate-100
+  static const _textSecondaryLight = Color(0xFF4B5563); // gray-600 (~7:1 en clair)
+  static const _textSecondaryDark  = Color(0xFF94A3B8); // slate-400 (lisible sur slate)
+  static const _textHintLight      = Color(0xFF5B6472);
+  static const _textHintDark       = Color(0xFF64748B); // slate-500
+
+  static Color get textPrimary   => _isDark ? _textPrimaryDark   : _textPrimaryLight;
+  static Color get textSecondary => _isDark ? _textSecondaryDark : _textSecondaryLight;
+  static Color get textHint      => _isDark ? _textHintDark      : _textHintLight;
 
   static const google   = Color(0xFFEA4335);
   static const facebook = Color(0xFF1877F2);
   static const apple    = Color(0xFF000000);
+
+  /// Vert officiel WhatsApp — couleur de marque (identique clair/sombre),
+  /// utilisée par les CTA « partager sur WhatsApp ». Nommée ici pour éviter
+  /// les `Color(0xFF25D366)` dispersés.
+  static const whatsapp = Color(0xFF25D366);
 
   /// Palette stable utilisée pour dériver une couleur identifiable par
   /// hash du nom de variante quand le champ `variant.color` n'est pas

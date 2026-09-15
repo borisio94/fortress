@@ -147,7 +147,24 @@ class ScheduledOrderAlertService {
 
     _wireAppDatabaseListener();
     _startTicker();
+    // Ré-évaluation immédiate au changement de boutique active (rev bump).
+    // Sans ça, après un switch de boutique la bannière de l'ANCIENNE boutique
+    // resterait visible jusqu'au prochain tick (30 s).
+    _lastScopeShopId = NotificationService.currentShopId;
+    NotificationService.rev.removeListener(_onScopeChanged);
+    NotificationService.rev.addListener(_onScopeChanged);
     // Évaluation immédiate au démarrage pour ne pas attendre 30 s.
+    evaluateAlerts();
+  }
+
+  /// Suit `NotificationService.rev` : ne ré-évalue que si la BOUTIQUE active a
+  /// changé (rev bump aussi sur nouvelle notif → on ignore ces cas).
+  String? _lastScopeShopId;
+  void _onScopeChanged() {
+    final sid = NotificationService.currentShopId;
+    if (sid == _lastScopeShopId) return;
+    _lastScopeShopId = sid;
+    _lastEmitted.clear(); // état émis lié à l'ancienne boutique → purge
     evaluateAlerts();
   }
 
@@ -164,6 +181,7 @@ class ScheduledOrderAlertService {
       _wiredAppDb = false;
     }
     NotificationService.enabledForCurrentUser.removeListener(_onPermsChanged);
+    NotificationService.rev.removeListener(_onScopeChanged);
     _started = false;
     _lastEmitted.clear();
     _lastRepeatPlayed.clear();
@@ -192,25 +210,26 @@ class ScheduledOrderAlertService {
       const windowBackMs  =  6 * 60 * 60 * 1000; // overdue silencieux après 6h
 
       final box = HiveBoxes.ordersBox;
-      // Boutiques encore connues localement (shopsBox indexé par shop.id) :
-      // on ignore les commandes orphelines d'une boutique supprimée pour ne
-      // pas re-déclencher d'alerte après suppression/recréation. Liste vide
-      // (cache non chargé) ⇒ pas de filtre, pour ne pas masquer au boot.
-      final validShopIds =
-          HiveBoxes.shopsBox.keys.map((k) => k.toString()).toSet();
+      // ISOLATION (anti-fuite) — on n'émet QUE des alertes de la boutique
+      // ACTIVE, comme la cloche (NotificationService). Fail-closed : si la
+      // boutique courante est inconnue (boot, déconnecté, scope pas encore
+      // posé), on n'émet RIEN — sinon une commande d'une autre boutique, voire
+      // d'un autre compte encore en cache, fuiterait dans les alertes.
+      final currentShopId = NotificationService.currentShopId;
+      if (currentShopId == null) {
+        if (!_alertsCtl.isClosed) _alertsCtl.add(const []);
+        return;
+      }
       for (final raw in box.values) {
         try {
           final m = Map<String, dynamic>.from(raw);
           final status = m['status'] as String?;
           final orderId = m['id'] as String?;
           if (orderId == null) continue;
-          // Commande orpheline (boutique supprimée) → ignorer.
+          // Ne traiter que les commandes de la boutique active (couvre aussi
+          // les orphelines / autres comptes : tout sid != courant est ignoré).
           final sid = m['shop_id']?.toString();
-          if (validShopIds.isNotEmpty &&
-              sid != null &&
-              !validShopIds.contains(sid)) {
-            continue;
-          }
+          if (sid != currentShopId) continue;
 
           // Auto-purge des acquittements si la commande n'est plus 'scheduled'.
           if (status != 'scheduled') {

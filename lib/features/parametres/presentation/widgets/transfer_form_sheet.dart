@@ -244,18 +244,18 @@ class _TransferFormSheetState extends State<TransferFormSheet> {
                           Text('${_lines.length} ligne${_lines.length > 1 ? 's' : ''} '
                               '· ${_totalLines()} unités',
                               style: AppTextStyles.caption.copyWith(
-                                  color: const Color(0xFF9CA3AF))),
+                                  color: AppColors.textHint)),
                       ]),
                       const SizedBox(height: 6),
                       if (_lines.isEmpty)
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF9FAFB),
+                            color: AppColors.surface,
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(color: Theme.of(context).semantic.borderSubtle),
                           ),
-                          child: const Text(
+                          child: Text(
                               'Aucune ligne. Clique "+ Ajouter une ligne" '
                               'ci-dessous pour sélectionner une variante à transférer.',
                               style: AppTextStyles.caption),
@@ -355,15 +355,15 @@ class _TransferFormSheetState extends State<TransferFormSheet> {
 InputDecoration _inputDecoration(String hint) => InputDecoration(
   hintText: hint,
   hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 12),
-  filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
+  filled: true, fillColor: AppColors.inputFill, isDense: true,
   contentPadding:
       const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
   border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+      borderSide: BorderSide(color: AppColors.divider)),
   enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+      borderSide: BorderSide(color: AppColors.divider)),
   focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
       borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
@@ -440,8 +440,8 @@ class _LocationDropdown extends StatelessWidget {
       isExpanded: true,
       hint: Text('Choisir…',
           style: AppTextStyles.body.copyWith(color: const Color(0xFFBBBBBB))),
-      icon: const Icon(Icons.arrow_drop_down_rounded,
-          color: Color(0xFF9CA3AF)),
+      icon: Icon(Icons.arrow_drop_down_rounded,
+          color: AppColors.textHint),
       decoration: _inputDecoration(''),
     );
   }
@@ -462,7 +462,7 @@ class _LineTile extends StatelessWidget {
     margin: const EdgeInsets.only(bottom: 6),
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
     decoration: BoxDecoration(
-      color: const Color(0xFFF9FAFB),
+      color: AppColors.surface,
       borderRadius: BorderRadius.circular(8),
       border: Border.all(color: Theme.of(context).semantic.borderSubtle),
     ),
@@ -484,7 +484,7 @@ class _LineTile extends StatelessWidget {
               Text(line.variantName!,
                   maxLines: 1, overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.caption.copyWith(
-                      color: const Color(0xFF9CA3AF))),
+                      color: AppColors.textHint)),
           ],
         ),
       ),
@@ -499,8 +499,8 @@ class _LineTile extends StatelessWidget {
             style: AppTextStyles.bodySmBold.copyWith(color: AppColors.primary)),
       ),
       IconButton(
-        icon: const Icon(Icons.close_rounded, size: 16,
-            color: Color(0xFF9CA3AF)),
+        icon: Icon(Icons.close_rounded, size: 16,
+            color: AppColors.textHint),
         onPressed: onRemove,
         padding: EdgeInsets.zero,
         constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -666,9 +666,9 @@ class _VariantPickerSheetState extends State<_VariantPickerSheet> {
                 style: AppTextStyles.body,
                 decoration: _inputDecoration(
                     'Rechercher un produit, variante ou SKU…')
-                    .copyWith(prefixIcon: const Icon(
+                    .copyWith(prefixIcon: Icon(
                         Icons.search_rounded, size: 18,
-                        color: Color(0xFF9CA3AF))),
+                        color: AppColors.textHint)),
               ),
               const SizedBox(height: 10),
               Flexible(
@@ -679,7 +679,7 @@ class _VariantPickerSheetState extends State<_VariantPickerSheet> {
                           child: Text(
                               'Aucune variante disponible à la source',
                               style: AppTextStyles.bodySm.copyWith(
-                                  color: const Color(0xFF9CA3AF))),
+                                  color: AppColors.textHint)),
                         ),
                       )
                     : ListView.separated(
@@ -734,7 +734,7 @@ class _VariantPickerSheetState extends State<_VariantPickerSheet> {
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: AppTextStyles.caption.copyWith(
-                                                color: const Color(0xFF9CA3AF))),
+                                                color: AppColors.textHint)),
                                     ],
                                   ),
                                 ),
@@ -795,11 +795,11 @@ class _QtySelector extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Quantité',
+            Text('Quantité',
                 style: AppTextStyles.caption),
             Text('Max : $max',
                 style: AppTextStyles.caption.copyWith(
-                    color: const Color(0xFF9CA3AF))),
+                    color: AppColors.textHint)),
           ],
         ),
         const SizedBox(height: 4),
@@ -864,7 +864,7 @@ class _DatePickerTile extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
-          color: const Color(0xFFF9FAFB),
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: Theme.of(context).semantic.borderSubtle),
         ),

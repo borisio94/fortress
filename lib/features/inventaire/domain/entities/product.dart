@@ -112,6 +112,14 @@ class ProductVariant extends Equatable {
   final DateTime? promoStart;
   final DateTime? promoEnd;
 
+  /// Poids et dimensions du colis (grammes, centimètres). Saisis dans la
+  /// carte de variante, ils voyagent dans le JSON des variantes : il
+  /// n'existe pas de table `product_variants` en base.
+  final double? weightG;
+  final double? lengthCm;
+  final double? widthCm;
+  final double? heightCm;
+
   const ProductVariant({
     this.id,
     required this.name,
@@ -134,12 +142,42 @@ class ProductVariant extends Equatable {
     this.promoPrice,
     this.promoStart,
     this.promoEnd,
+    this.weightG,
+    this.lengthCm,
+    this.widthCm,
+    this.heightCm,
   });
 
   /// Rétrocompatibilité — ancien code qui utilise stockQty
   int get stockQty => stockAvailable;
 
   double effectivePriceBuy(double expensePerUnit) => priceBuy + expensePerUnit;
+
+  /// `true` si une promotion est RÉELLEMENT en cours sur cette variante.
+  ///
+  /// Quatre conditions, toutes nécessaires : la promo est activée, un prix
+  /// promotionnel existe, l'instant présent tombe dans la fenêtre (bornes
+  /// nulles = pas de borne), et ce prix est bien INFÉRIEUR au prix normal —
+  /// une « promo » plus chère n'en est pas une.
+  ///
+  /// Cette règle vivait en privé dans `product_grid_card.dart`, qui l'utilisait
+  /// pour AFFICHER un prix barré. Le panier, lui, ne la connaissait pas et
+  /// facturait `priceSellPos` : le client voyait une promotion et payait le
+  /// plein tarif. Elle est remontée ici pour qu'affichage et facturation
+  /// dépendent d'une seule et même vérité.
+  bool get isPromoActive {
+    if (!promoEnabled || promoPrice == null) return false;
+    final now = DateTime.now();
+    if (promoStart != null && now.isBefore(promoStart!)) return false;
+    if (promoEnd   != null && now.isAfter(promoEnd!))    return false;
+    return promoPrice! < priceSellPos;
+  }
+
+  /// Prix de vente à APPLIQUER : le prix promotionnel si la promotion est
+  /// active, le prix normal sinon. C'est ce montant qui doit être affiché ET
+  /// facturé — jamais l'un sans l'autre.
+  double get effectiveSellPrice =>
+      isPromoActive ? promoPrice! : priceSellPos;
 
   double? get marginPos => priceSellPos > 0
       ? ((priceSellPos - priceBuy) / priceSellPos) * 100
@@ -163,6 +201,7 @@ class ProductVariant extends Equatable {
     List<String>? secondaryImageUrls,
     bool? isMain, bool? promoEnabled, double? promoPrice,
     DateTime? promoStart, DateTime? promoEnd,
+    double? weightG, double? lengthCm, double? widthCm, double? heightCm,
   }) => ProductVariant(
     id:                   id                   ?? this.id,
     name:                 name                 ?? this.name,
@@ -185,6 +224,10 @@ class ProductVariant extends Equatable {
     promoPrice:           promoPrice           ?? this.promoPrice,
     promoStart:           promoStart           ?? this.promoStart,
     promoEnd:             promoEnd             ?? this.promoEnd,
+    weightG:              weightG              ?? this.weightG,
+    lengthCm:             lengthCm             ?? this.lengthCm,
+    widthCm:              widthCm              ?? this.widthCm,
+    heightCm:             heightCm             ?? this.heightCm,
   );
 
   @override
@@ -204,6 +247,7 @@ enum ProductStatus {
   scrapped,      // Mis au rebut
   returned,      // Retourné
   discontinued,  // Arrêté / fin de vie
+  draft,         // Brouillon — fiche commencée, jamais publiée
 }
 
 extension ProductStatusX on ProductStatus {
@@ -217,6 +261,7 @@ extension ProductStatusX on ProductStatus {
     ProductStatus.scrapped     => 'Rebut',
     ProductStatus.returned     => 'Retourné',
     ProductStatus.discontinued => 'Arrêté',
+    ProductStatus.draft        => 'Brouillon',
   };
 
   /// Nom snake_case pour Supabase / Hive
@@ -237,9 +282,13 @@ extension ProductStatusX on ProductStatus {
     'scrapped'     => ProductStatus.scrapped,
     'returned'     => ProductStatus.returned,
     'discontinued' => ProductStatus.discontinued,
+    'draft'        => ProductStatus.draft,
     _ => ProductStatus.available,
   };
 
+  /// ⚠ Purement descriptif aujourd'hui : AUCUN appelant dans le code. Les
+  /// surfaces de vente filtrent sur `isActive`. Un brouillon est donc exclu
+  /// par `isActive: false` + les gardes `!isDraft` posées explicitement.
   bool get isSellable  => this == ProductStatus.available || this == ProductStatus.discounted;
   bool get isIncident  => this == ProductStatus.damaged || this == ProductStatus.defective
       || this == ProductStatus.inRepair || this == ProductStatus.scrapped;
@@ -272,8 +321,38 @@ class Product extends Equatable {
   final ProductStatus status;
   final bool   isActive;
   final bool   isVisibleWeb;
+
+  /// Suivi de stock actif pour cet article (hotfix_138).
+  ///
+  /// `false` = article produit à la demande — plat cuisiné, service,
+  /// prestation : les ventes ne décrémentent rien et les annulations ne
+  /// recréditent rien. Sans ce drapeau, vendre un plat dégradait un stock
+  /// dénué de sens ou écrivait une ligne `stock_decrement_failed` dans le
+  /// journal d'activité à chaque service.
+  ///
+  /// Défaut `true` : comportement historique préservé pour tout le parc
+  /// existant tant que l'utilisateur n'a pas décoché l'option.
+  final bool   trackStock;
+
+  /// Activité connexe de rattachement — le « secteur » restaurant
+  /// (`restaurant_activities.id`, hotfix_141) : Chawarma · Glace · Bar…
+  ///
+  /// `null` = plat non rattaché, ou boutique non restaurant : l'e-commerce
+  /// n'écrit jamais ce champ. Référence logique, sans FK (offline-first) —
+  /// une activité supprimée laisse un id orphelin, traité comme « aucun
+  /// secteur » à la lecture.
+  final String? activityId;
+
   final String? imageUrl;
   final int    rating;         // 0–5
+
+  /// Unité de mesure affichée sur la fiche (pièce, kg, litre…). Saisie
+  /// depuis toujours, elle n'était jusqu'ici jamais enregistrée.
+  final String? unit;
+
+  /// Note de gestion, à usage interne. Jamais exposée par les RPC
+  /// publiques ni par le catalogue en ligne.
+  final String? internalNotes;
 
   // Variantes
   final List<ProductVariant> variants;
@@ -284,6 +363,11 @@ class Product extends Equatable {
   /// Horodatage de création côté serveur (Supabase `created_at`).
   /// Optionnel pour rester compatible avec les produits locaux non-sync.
   final DateTime? createdAt;
+
+  /// Échéance d'un brouillon. Non-null uniquement quand `status == draft` :
+  /// passé cette date, `AppDatabase.init` le supprime. Évite d'accumuler
+  /// indéfiniment des fiches jamais terminées.
+  final DateTime? draftExpiresAt;
 
   /// Soft-delete (hotfix_085). Quand non-null, le produit est masqué
   /// des listes membres et n'est plus visible qu'aux super-admins via
@@ -320,16 +404,25 @@ class Product extends Equatable {
     this.status        = ProductStatus.available,
     this.isActive      = true,
     this.isVisibleWeb  = false,
+    this.trackStock    = true,
+    this.activityId,
     this.imageUrl,
     this.rating        = 0,
+    this.unit,
+    this.internalNotes,
     this.variants      = const [],
     this.expenses      = const [],
     this.createdAt,
+    this.draftExpiresAt,
     this.deletedAt,
     this.deletedBy,
     this.deleteReason,
     this.archivedSnapshot,
   });
+
+  /// Fiche commencée puis abandonnée en cours de saisie, conservée pour être
+  /// reprise. Jamais vendable, jamais publiée, jamais comptée en alerte.
+  bool get isDraft => status == ProductStatus.draft;
 
   /// True si le produit est soft-deleted (cf. hotfix_085).
   bool get isDeleted => deletedAt != null;
@@ -409,6 +502,10 @@ class Product extends Equatable {
   /// (stockAvailable > 0 ET ≤ stockMinAlert de la variante).
   /// Sans variante (ancien format), on retombe sur le stock global du produit.
   bool get isLowStock {
+    // Un brouillon n'est pas encore au catalogue : le faire remonter en
+    // alerte de stock ferait sonner la pastille Stock pour une fiche que
+    // personne ne vend.
+    if (isDraft) return false;
     if (variants.isEmpty) {
       return stockQty > 0 && stockQty <= stockMinAlert;
     }
@@ -441,16 +538,24 @@ class Product extends Equatable {
     double? priceSellPos, double? priceSellWeb, double? taxRate,
     int? stockQty, int? stockMinAlert,
     ProductStatus? status,
-    bool? isActive, bool? isVisibleWeb,
+    bool? isActive, bool? isVisibleWeb, bool? trackStock,
+    String? activityId,
     String? imageUrl, int? rating,
+    String? unit, String? internalNotes,
     List<ProductVariant>? variants,
     List<Map<String, dynamic>>? expenses,
     DateTime? createdAt,
+    DateTime?              draftExpiresAt,
     DateTime?              deletedAt,
     String?                deletedBy,
     String?                deleteReason,
     Map<String, dynamic>?  archivedSnapshot,
     bool                   clearDeleted = false,
+    /// Sort un produit de l'état brouillon (`null` seul vaut « inchangé »).
+    bool                   clearDraftExpiry = false,
+    /// Détache le plat de son secteur (`activityId` ne peut pas être remis
+    /// à null par le passage d'un `null`, interprété comme « inchangé »).
+    bool                   clearActivity = false,
   }) => Product(
     id:           id           ?? this.id,
     storeId:      storeId      ?? this.storeId,
@@ -470,11 +575,17 @@ class Product extends Equatable {
     status:       status       ?? this.status,
     isActive:     isActive     ?? this.isActive,
     isVisibleWeb: isVisibleWeb ?? this.isVisibleWeb,
+    trackStock:   trackStock   ?? this.trackStock,
+    activityId:   clearActivity ? null : (activityId ?? this.activityId),
     imageUrl:     imageUrl     ?? this.imageUrl,
     rating:       rating       ?? this.rating,
+    unit:          unit          ?? this.unit,
+    internalNotes: internalNotes ?? this.internalNotes,
     variants:     variants     ?? this.variants,
     expenses:     expenses     ?? this.expenses,
     createdAt:    createdAt    ?? this.createdAt,
+    draftExpiresAt: clearDraftExpiry
+        ? null : (draftExpiresAt ?? this.draftExpiresAt),
     deletedAt:        clearDeleted ? null : (deletedAt    ?? this.deletedAt),
     deletedBy:        clearDeleted ? null : (deletedBy    ?? this.deletedBy),
     deleteReason:     clearDeleted ? null : (deleteReason ?? this.deleteReason),
@@ -488,7 +599,7 @@ class Product extends Equatable {
     id, storeId, name, barcode, sku,
     priceBuy, customsFee, priceSellPos, priceSellWeb, taxRate,
     stockQty, stockMinAlert, status,
-    isActive, isVisibleWeb, rating,
-    variants, expenses,
+    isActive, isVisibleWeb, trackStock, activityId, rating,
+    variants, expenses, draftExpiresAt, unit, internalNotes,
   ];
 }

@@ -52,7 +52,7 @@ class TrialStatusBanner extends ConsumerWidget {
                 Text('Mode essai · ${plan.daysLeft} jours restants',
                     style: AppTextStyles.bodyBold),
                 const SizedBox(height: 2),
-                const Text(
+                Text(
                   'Accès complet pendant 14 jours. Souscrivez à tout moment.',
                   style: AppTextStyles.bodySmSecondary,
                 ),

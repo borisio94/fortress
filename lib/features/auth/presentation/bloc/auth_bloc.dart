@@ -21,6 +21,14 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
   StreamSubscription? _supaAuthSub;
 
+  /// `true` pendant l'exécution de [_onLogout]. Empêche le listener
+  /// `onAuthStateChange(signedOut)` de ré-ajouter un `AuthLogoutRequested`
+  /// REDONDANT quand c'est NOTRE propre `signOut()` qui a émis l'évènement
+  /// (sinon la purge + revoke + emit s'exécutaient deux fois). Reste à `false`
+  /// pour les signOut EXTERNES (SessionValidator, kick d'une autre session),
+  /// qui doivent bien déclencher la logique de déconnexion.
+  bool _logoutInProgress = false;
+
   AuthBloc({
     required this.loginUseCase,
     required this.registerUseCase,
@@ -49,10 +57,14 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       // Réagit uniquement aux signedOut externes : les login passent
       // déjà par `_onLogin` (qui émet AuthAuthenticated correctement).
       if (data.event == AuthChangeEvent.signedOut) {
-        // L'état Supabase est déjà nettoyé ; on émet seulement la
-        // transition côté Bloc + on déclenche la logique cleanup
-        // standard via l'event AuthLogoutRequested (qui sera idempotent
-        // car la session est déjà révoquée).
+        // Si c'est NOTRE propre logout en cours qui a déclenché le signOut,
+        // _onLogout gère déjà tout le cleanup + l'emit : ne pas ré-ajouter
+        // un évènement redondant (évitait une double purge / double revoke).
+        if (_logoutInProgress) return;
+        // signOut EXTERNE (SessionValidator force un signOut sur compte
+        // zombie, kick d'une autre session). L'état Supabase est déjà
+        // nettoyé ; on déclenche la logique cleanup standard via
+        // AuthLogoutRequested (idempotent : la session est déjà révoquée).
         if (state is! AuthUnauthenticated) {
           add(AuthLogoutRequested());
         }
@@ -181,17 +193,52 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
   Future<void> _onLogout(
       AuthLogoutRequested event, Emitter<AuthState> emit) async {
-    // Révoque la session courante côté Supabase AVANT le logout local —
-    // sinon on perd le token nécessaire pour appeler le RPC. Chaque étape
-    // est encapsulée pour rester idempotente : si `SessionValidator` a
-    // déjà signé out le user (cas compte zombie), `revokeCurrent` /
-    // `logoutUseCase` peuvent échouer parce qu'il n'y a plus de token,
-    // mais on doit quand même finir en `AuthUnauthenticated` pour que
-    // le router redirige vers /login.
-    try { await SessionService.revokeCurrent(); } catch (_) {}
-    try { SessionService.stop();                } catch (_) {}
-    try { await logoutUseCase();                } catch (_) {}
+    // Marque le logout en cours → le listener onAuthStateChange ignore le
+    // signedOut que NOTRE signOut (en arrière-plan) va émettre (pas de double
+    // déconnexion).
+    _logoutInProgress = true;
+
+    // 1. Arrêts LOCAUX immédiats (aucun réseau, aucun verrou) : heartbeat +
+    //    listener de session, et canaux Realtime de boutique. Couper les
+    //    canaux empêche un push de re-remplir les box après la purge (fuite
+    //    inter-comptes).
+    try { SessionService.stop(); } catch (_) {}
+    try { AppDatabase.unsubscribeAllShops(); } catch (_) {}
+
+    // 2. ÉMET L'ÉTAT DÉCONNECTÉ TOUT DE SUITE → `refreshListenable` notifie →
+    //    le router redirige vers /login IMMÉDIATEMENT.
+    //
+    //    CAUSE RACINE DU GEL : auparavant l'`emit` était placé APRÈS l'await de
+    //    `signOut()` (via logoutUseCase). Or sur web, `signOut()` passe par le
+    //    verrou multi-onglet de GoTrue (navigator.locks) : avec 2 onglets
+    //    ouverts sur l'app, ce verrou peut bloquer LONGTEMPS → le handler
+    //    restait suspendu → `emit` jamais atteint → l'app figée (mais la
+    //    session finissait nettoyée, d'où « déconnecté au ré-ouverture »).
+    //    En émettant AVANT tout appel réseau/IO, l'UI ne peut plus se figer.
     emit(AuthUnauthenticated());
+
+    // 3. Reste du nettoyage (révocation serveur + purge Hive + tokens +
+    //    signOut GoTrue) en ARRIÈRE-PLAN, borné, jamais bloquant pour l'UI.
+    unawaited(_finishLogoutCleanup());
+
+    _logoutInProgress = false;
+  }
+
+  /// Nettoyage de déconnexion hors chemin critique de l'UI. Chaque étape est
+  /// bornée par un timeout pour qu'un blocage réseau / verrou GoTrue ne laisse
+  /// jamais traîner indéfiniment. Idempotent.
+  Future<void> _finishLogoutCleanup() async {
+    // Révocation serveur PENDANT que le token est encore valide (le signOut
+    // ci-dessous l'invalidera). Best-effort : le backend purge de toute façon
+    // les sessions inactives.
+    try {
+      await SessionService.revokeCurrent()
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {}
+    // Purge Hive anti-fuite + clear tokens + signOut GoTrue (datasource).
+    try {
+      await logoutUseCase().timeout(const Duration(seconds: 6));
+    } catch (_) {}
   }
 
   Future<void> _onForgotPassword(

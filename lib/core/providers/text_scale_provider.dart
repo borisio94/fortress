@@ -22,9 +22,16 @@ class TextScaleNotifier extends Notifier<double> {
   /// l'utilisateur, indépendamment de la valeur par défaut.
   static const double referenceScale = 1.25;
 
-  /// Valeur par défaut à la première ouverture = 80 % de la référence.
-  /// (0.80 × 1.25 = 1.0 → taille normale, sans agrandissement.)
-  static const double defaultScale = 1.0;
+  /// Valeur par défaut à la première ouverture = 88 % de la référence.
+  /// (0.88 × 1.25 = 1.1.) Ne s'applique qu'aux utilisateurs qui n'ont
+  /// jamais touché au curseur : une valeur déjà enregistrée dans Hive
+  /// reste prioritaire.
+  static const double defaultScale = 1.1;
+
+  /// Le même défaut exprimé en pourcentage de [referenceScale], pour
+  /// l'afficher dans l'écran de réglage. Écrit en dur plutôt que calculé :
+  /// `1.1 / 1.25 * 100` ne tombe pas exactement sur 88 en virgule flottante.
+  static const int defaultPercent = 88;
 
   @override
   double build() {

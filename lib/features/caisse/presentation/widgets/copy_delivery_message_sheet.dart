@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,7 +5,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/short_link_service.dart';
-import '../../../../core/services/url_shortener_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
@@ -20,20 +18,23 @@ import '../../domain/entities/sale.dart';
 import '../../domain/entities/sale_item.dart';
 import '../../domain/services/delivery_message_builder.dart';
 
-/// Sheet « Copier le message livraison » — remplace l'ancien
-/// `TransferDeliverySheet` qui essayait d'ouvrir wa.me/<phone>.
-/// Le user envoie en réalité dans un groupe WhatsApp unique (wa.me ne
-/// supporte pas les groupes), donc on se contente de générer le message
-/// final et de le mettre dans le presse-papier. Le user colle ensuite
-/// manuellement dans son groupe.
+/// Sheet « Copier le message livraison ».
+/// Le user envoie en réalité dans un groupe WhatsApp unique (wa.me ne supporte
+/// pas les groupes), donc on génère le message final et on le met dans le
+/// presse-papier. Le user colle ensuite manuellement dans son groupe.
+///
+/// Le message inclut un **lien vitrine** vers la mini-fiche produits de la
+/// commande (images + quantités à livrer, `mode=delivery`) via la variable
+/// `{{produits}}` / `{{produits_link}}`. Ce lien pointe sur la page statique
+/// `catalogue.html` (rapide/robuste), d'où sa réintégration (l'ancienne
+/// version Flutter était trop lente → on était repassé au texte).
 ///
 /// UI :
-///   1. Picker partenaire (radio chips) — détermine quel template est
-///      résolu + remplit les variables `{{partner_*}}`.
+///   1. Picker partenaire (radio chips) — détermine quel template est résolu
+///      + remplit les variables `{{partner_*}}`.
 ///   2. Champ ville d'expédition optionnel (résout `{{ville_expedition}}`).
-///   3. Aperçu éditable du message rendu (variables résolues, lien court
-///      `{{produits}}` généré).
-///   4. Bouton « Copier le message » → clipboard + snack + fermeture.
+///   3. Aperçu éditable du message rendu (lien court `{{produits}}` généré).
+///   4. Bouton « Copier le message » → clipboard + snack.
 class CopyDeliveryMessageSheet extends ConsumerStatefulWidget {
   final Sale   order;
   final String shopId;
@@ -56,18 +57,19 @@ class _CopyDeliveryMessageSheetState
   final _senderCityCtrl = TextEditingController();
   final _messageCtrl    = TextEditingController();
 
-  /// Cache du lien court : 1 seule génération par ouverture du sheet.
-  String? _cachedLink;
-  bool    _generating  = false;
-  bool    _copying     = false;
+  bool    _generating = false;
+  bool    _copying    = false;
   String? _error;
+
+  /// Lien court vers la mini-vitrine produits de la commande. Ne dépend que
+  /// de la commande → généré UNE fois à l'ouverture, réutilisé à chaque
+  /// re-rendu (changement de partenaire / ville) sans nouvel appel réseau.
+  String? _productsLink;
 
   @override
   void initState() {
     super.initState();
-    // Pré-build du message au premier frame (sans partenaire — utilise
-    // le template défaut shop). Async — UI affichera un spinner.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _rebuildMessage());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _init());
   }
 
   @override
@@ -77,11 +79,81 @@ class _CopyDeliveryMessageSheetState
     super.dispose();
   }
 
-  // ── Resolvers (mêmes helpers que l'ancien TransferDeliverySheet) ──────
+  /// Génère le lien vitrine (une fois) puis rend le message.
+  Future<void> _init() async {
+    setState(() => _generating = true);
+    _productsLink = await _buildProductsLink();
+    if (!mounted) return;
+    _rebuildMessage();
+  }
+
+  /// Lien court vers la fiche produits de la commande (images + quantités,
+  /// `mode=delivery`). Pointe sur `catalogue.html` (statique, robuste).
+  /// Repli sur l'URL longue si le raccourcisseur échoue ; null en cas
+  /// d'erreur → `{{produits}}` retombe alors sur la liste texte.
+  Future<String?> _buildProductsLink() async {
+    try {
+      final origin = Uri.base.origin.startsWith('http')
+          ? Uri.base.origin
+          : 'https://fortress-pos.web.app';
+      final products = LocalStorageService.getProductsForShop(widget.shopId);
+      final longUrl = DeliveryMessageBuilder.buildCatalogueLongUrl(
+        webBase: origin,
+        shopId:  widget.shopId,
+        sale:    widget.order,
+        products: products,
+      );
+      final short = await ShortLinkService.createShortLink(
+        longUrl:   longUrl,
+        linkType:  'catalogue',
+        expiresIn: const Duration(days: 90),
+      );
+      return short ?? longUrl;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ── Resolvers ──────────────────────────────────────────────────────────
   String? Function(SaleItem) _buildProductNameResolver() {
     final products = LocalStorageService.getProductsForShop(widget.shopId);
     final byId = {for (final p in products) p.id ?? '': p};
     return (SaleItem item) => byId[item.productId]?.name;
+  }
+
+  /// Résout le SKU pour `produits_text` (identifiant précis affiché À LA
+  /// PLACE du nom). Gère les variantes : SKU de la variante commandée si
+  /// présent, sinon SKU du produit parent.
+  String? Function(SaleItem) _buildProductSkuResolver() {
+    final products = LocalStorageService.getProductsForShop(widget.shopId);
+    final byId = {for (final p in products) p.id ?? '': p};
+    final variantParent = <String, String>{};
+    for (final p in products) {
+      final pid = p.id;
+      if (pid == null) continue;
+      for (final v in p.variants) {
+        final vid = v.id;
+        if (vid != null) variantParent[vid] = pid;
+      }
+    }
+    return (SaleItem item) {
+      final parentId = variantParent[item.productId];
+      if (parentId != null) {
+        final parent = byId[parentId];
+        if (parent != null) {
+          for (final v in parent.variants) {
+            if (v.id == item.productId) {
+              final s = (v.sku ?? '').trim();
+              if (s.isNotEmpty) return s;
+              break;
+            }
+          }
+          return parent.sku;
+        }
+        return null;
+      }
+      return byId[item.productId]?.sku;
+    };
   }
 
   String? _resolveClientDistrict() {
@@ -93,56 +165,17 @@ class _CopyDeliveryMessageSheetState
     return null;
   }
 
-  Future<String> _ensureLink() async {
-    if (_cachedLink != null) return _cachedLink!;
-    // Plus besoin de publier les produits (is_visible_web) : la
-    // CataloguePage utilise désormais le RPC SECURITY DEFINER
-    // `get_delivery_products` (hotfix_094) qui bypasse la RLS quand des
-    // ids explicites sont fournis. Le lien fonctionne immédiatement
-    // pour le livreur anonyme, sans race condition.
-    final webBase = kIsWeb
-        ? Uri.base.origin
-        : 'https://fortress-pos.web.app';
-    // Passe le catalogue local (Hive) au builder pour qu'il résolve
-    // les variantIds (SaleItem.productId peut être un `var_…` quand
-    // l'item est une variante) vers leur produit parent. Sans ça, le
-    // RPC get_delivery_products cherche un product dont l'id matche
-    // le variantId → 0 row → page vide.
-    final products = LocalStorageService.getProductsForShop(widget.shopId);
-    final long = DeliveryMessageBuilder.buildCatalogueLongUrl(
-        webBase: webBase, shopId: widget.shopId, sale: widget.order,
-        products: products);
-    try {
-      final maison = await ShortLinkService.createShortLink(
-        longUrl:   long,
-        linkType:  'delivery',
-        expiresIn: const Duration(days: 30),
-      );
-      _cachedLink = maison ?? await UrlShortenerService.shorten(long);
-    } catch (_) {
-      _cachedLink = long;
-    }
-    return _cachedLink!;
-  }
-
-  Future<void> _rebuildMessage() async {
-    setState(() {
-      _generating = true;
-      _error      = null;
-    });
+  void _rebuildMessage() {
     final repo = ref.read(deliveryTemplateRepositoryProvider);
     final tpl  = repo.resolveForRecipient(
         shopId: widget.shopId, partnerId: _partner?.id);
     if (tpl == null) {
-      if (!mounted) return;
       setState(() {
         _error      = 'Aucun modèle de livraison configuré pour cette boutique.';
         _generating = false;
       });
       return;
     }
-    final link = await _ensureLink();
-    if (!mounted) return;
     final msg = DeliveryMessageBuilder.build(
       template:   tpl,
       sale:       widget.order,
@@ -151,24 +184,29 @@ class _CopyDeliveryMessageSheetState
           ? null : _senderCityCtrl.text.trim(),
       clientDistrict: _resolveClientDistrict(),
       partner:        _partner,
-      productsLink:   link,
+      // Lien vitrine robuste réintégré : `{{produits}}`/`{{produits_link}}`
+      // s'y résolvent (images + quantités). Null → repli liste texte.
+      productsLink:   _productsLink,
       resolveProductName: _buildProductNameResolver(),
+      resolveProductSku:  _buildProductSkuResolver(),
     );
-    if (!mounted) return;
     setState(() {
       _messageCtrl.text = msg;
+      _error            = null;
       _generating       = false;
     });
   }
 
-  Future<void> _copy() async {
-    if (_messageCtrl.text.trim().isEmpty) return;
+  /// Copie le message (avec le lien vitrine) → l'utilisateur le colle dans
+  /// son groupe WhatsApp.
+  Future<void> _copyMessage() async {
+    if (_copying || _messageCtrl.text.trim().isEmpty) return;
     setState(() => _copying = true);
     await Clipboard.setData(ClipboardData(text: _messageCtrl.text));
     if (!mounted) return;
     AppSnack.success(context,
         'Message copié — colle-le dans ton groupe WhatsApp');
-    Navigator.of(context).pop(true);
+    setState(() => _copying = false);
   }
 
   void _onPickPartner(StockLocation? p) {
@@ -252,7 +290,7 @@ class _CopyDeliveryMessageSheetState
                     ? 'Génération du message…'
                     : 'Le message apparaîtra ici',
                 filled: true,
-                fillColor: const Color(0xFFF9FAFB),
+                fillColor: AppColors.inputFill,
                 contentPadding: const EdgeInsets.all(12),
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -276,22 +314,23 @@ class _CopyDeliveryMessageSheetState
             ),
             const SizedBox(height: 14),
 
-            // ── CTA Copier ────────────────────────────────────────────
+            // ── Copier le message (avec le lien vitrine) ──────────────
             SizedBox(
               width: double.infinity,
-              height: 44,
+              height: 46,
               child: ElevatedButton.icon(
                 onPressed: (_generating || _copying
                     || _messageCtrl.text.trim().isEmpty)
                     ? null
-                    : _copy,
+                    : _copyMessage,
                 icon: (_generating || _copying)
                     ? const SizedBox(width: 14, height: 14,
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.content_copy_rounded, size: 16),
-                label: const Text('Copier le message',
-                    style: TextStyle(
+                    : const Icon(Icons.content_copy_rounded, size: 18),
+                label: Text(
+                    _generating ? 'Génération…' : 'Copier le message',
+                    style: const TextStyle(
                         fontSize: 13, fontWeight: FontWeight.w700)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,

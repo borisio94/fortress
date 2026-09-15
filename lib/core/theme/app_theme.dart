@@ -258,7 +258,7 @@ class AppTheme {
     fontFamily: 'Inter',
 
     // ── AppBar ─────────────────────────────────────────────────────────
-    appBarTheme: const AppBarTheme(
+    appBarTheme: AppBarTheme(
       elevation: 0,
       centerTitle: true,
       backgroundColor: Colors.white,
@@ -285,11 +285,11 @@ class AppTheme {
       surfaceTintColor: Colors.transparent,
       elevation: 8,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      titleTextStyle: const TextStyle(
+      titleTextStyle: TextStyle(
         fontSize: 16, fontWeight: FontWeight.w700,
         color: AppColors.textPrimary,
       ),
-      contentTextStyle: const TextStyle(
+      contentTextStyle: TextStyle(
         fontSize: 13, color: AppColors.textSecondary, height: 1.5,
       ),
     ),
@@ -313,7 +313,7 @@ class AppTheme {
       elevation: 6,
       shadowColor: Colors.black.withValues(alpha:0.12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      textStyle: const TextStyle(
+      textStyle: TextStyle(
         fontSize: 13, color: AppColors.textPrimary,
         fontWeight: FontWeight.w500,
       ),
@@ -380,16 +380,15 @@ class AppTheme {
     ),
 
     // ── ListTile ───────────────────────────────────────────────────────
-    listTileTheme: const ListTileThemeData(
-      titleTextStyle: TextStyle(
+    listTileTheme: ListTileThemeData(
+      titleTextStyle: const TextStyle(
         fontSize: 14, fontWeight: FontWeight.w600, height: 1.4,
-        color: AppColors.textPrimary,
-      ),
-      subtitleTextStyle: TextStyle(
-        fontSize: 12, height: 1.45, color: AppColors.textSecondary,
-      ),
+      ).copyWith(color: AppColors.textPrimary),
+      subtitleTextStyle: const TextStyle(
+        fontSize: 12, height: 1.45,
+      ).copyWith(color: AppColors.textSecondary),
       iconColor: AppColors.textSecondary,
-      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     ),
 
     // ── Drawer ─────────────────────────────────────────────────────────
@@ -409,13 +408,13 @@ class AppTheme {
           return TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
               color: p.primary);
         }
-        return const TextStyle(fontSize: 11, color: AppColors.textSecondary);
+        return TextStyle(fontSize: 11, color: AppColors.textSecondary);
       }),
       iconTheme: WidgetStateProperty.resolveWith((states) {
         if (states.contains(WidgetState.selected)) {
           return IconThemeData(color: p.primary, size: 22);
         }
-        return const IconThemeData(color: AppColors.textSecondary, size: 22);
+        return IconThemeData(color: AppColors.textSecondary, size: 22);
       }),
     ),
 
@@ -483,13 +482,18 @@ class AppTheme {
           borderSide: const BorderSide(color: AppColors.error)),
       focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: AppColors.error, width: 2)),
-      hintStyle: const TextStyle(color: AppColors.textHint, fontSize: 14),
-      labelStyle: const TextStyle(color: AppColors.textSecondary),
+      hintStyle: TextStyle(color: AppColors.textHint, fontSize: 14),
+      labelStyle: TextStyle(color: AppColors.textSecondary),
       prefixIconColor: AppColors.textSecondary,
       suffixIconColor: AppColors.textSecondary,
     ),
 
     // ── Boutons ────────────────────────────────────────────────────────
+    // Boutons : dimensionnés au CONTENU + padding compact (H10/V3) — demande
+    // utilisateur. `minimumSize: Size.zero` + `shrinkWrap` retirent le plancher
+    // pleine-largeur/52px. Les boutons VOULUS pleine largeur (connexion, footers
+    // de formulaire…) le restent car ils sont enveloppés dans un SizedBox /
+    // fixent leur propre style, qui prime sur le thème.
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: p.primary,
@@ -498,7 +502,9 @@ class AppTheme {
         overlayColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        minimumSize: const Size(double.infinity, 52),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600,
             letterSpacing: 0.3),
@@ -509,7 +515,9 @@ class AppTheme {
       style: OutlinedButton.styleFrom(
         foregroundColor: AppColors.textPrimary,
         overlayColor: p.primary,
-        minimumSize: const Size(double.infinity, 52),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
         side: BorderSide(color: AppColors.inputBorder),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
@@ -520,13 +528,24 @@ class AppTheme {
       style: TextButton.styleFrom(
         foregroundColor: p.primary,
         overlayColor: p.primary,
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
         textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
       ),
     ),
 
     // FilledButton (sheets, dialogues) — ripple blanc sur fond plein.
     filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(overlayColor: Colors.white),
+      style: FilledButton.styleFrom(
+        overlayColor: Colors.white,
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+        // Coins arrondis modérés (cohérent elevated/outlined) au lieu de la
+        // forme « pilule » (StadiumBorder) par défaut de M3 pour FilledButton.
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
     ),
 
     // IconButton (app bars, toolbars) — ripple primary visible.
@@ -540,9 +559,9 @@ class AppTheme {
     // l'échelle (cohérence par défaut, avant même migration des pages).
     //   bodyLarge = échelon `label` (14) → défaut du texte SAISI M3.
     //   bodyMedium = échelon `body` (13) → défaut de Text().
-    textTheme: const TextTheme(
-      headlineLarge:  TextStyle(fontSize: 24, fontWeight: FontWeight.w800,
-          color: AppColors.textPrimary, height: 1.2),     // display
+    textTheme: TextTheme(
+      headlineLarge:  const TextStyle(fontSize: 24, fontWeight: FontWeight.w800,
+          height: 1.2).copyWith(color: AppColors.textPrimary),     // display
       headlineMedium: TextStyle(fontSize: 24, fontWeight: FontWeight.w800,
           color: AppColors.textPrimary, height: 1.2),     // display
       headlineSmall:  TextStyle(fontSize: 18, fontWeight: FontWeight.w700,
@@ -716,7 +735,9 @@ class AppTheme {
           overlayColor: Colors.white,
           surfaceTintColor: Colors.transparent,
           elevation: 0,
-          minimumSize: const Size(double.infinity, 52),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600,
               letterSpacing: 0.3),
@@ -727,7 +748,9 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: _dTextPrimary,
           overlayColor: p.primaryLight,
-          minimumSize: const Size(double.infinity, 52),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
           side: const BorderSide(color: _dBorder),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
@@ -738,12 +761,22 @@ class AppTheme {
         style: TextButton.styleFrom(
           foregroundColor: p.primaryLight,
           overlayColor: p.primaryLight,
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
         ),
       ),
 
       filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(overlayColor: Colors.white),
+        style: FilledButton.styleFrom(
+          overlayColor: Colors.white,
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+          // Coins arrondis modérés au lieu de la « pilule » M3 par défaut.
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
       ),
 
       iconButtonTheme: IconButtonThemeData(

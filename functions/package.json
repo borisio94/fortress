@@ -1,0 +1,12 @@
+{
+  "name": "fortress-functions",
+  "description": "Cloud Functions Fortress — Open Graph dynamique du catalogue public (aperçu Facebook par boutique).",
+  "private": true,
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-functions": "^5.0.1"
+  }
+}

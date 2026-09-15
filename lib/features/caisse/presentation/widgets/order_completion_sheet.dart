@@ -28,10 +28,22 @@ class OrderCompletionResult {
   /// passée. Si null, le caller stamp `DateTime.now()` (comportement
   /// historique).
   final DateTime? completedAt;
+
+  /// Montant TOTAL réellement encaissé du client après cette clôture
+  /// (acompte déjà versé + ce qui est encaissé maintenant). Sert à la VENTE
+  /// À CRÉDIT : si < total, le reste devient une créance client
+  /// (`payment_status = partial/unpaid`) au lieu d'être effacé.
+  ///
+  /// `null` = comportement historique : la clôture force « entièrement payé »
+  /// (cas partenaire encaisseur, ou commande déjà soldée). N'est renseigné
+  /// que lorsque la boutique encaisse une commande pas encore soldée.
+  final double? amountPaidTotal;
+
   const OrderCompletionResult({
     required this.fees,
     required this.collectedBy,
     this.completedAt,
+    this.amountPaidTotal,
   });
 }
 
@@ -54,17 +66,31 @@ Future<OrderCompletionResult?> showOrderCompletionSheet(
   /// est désactivé et le choix forcé sur `boutique` — impossible que le
   /// partenaire ait encaissé quelque chose si tout a été versé en amont.
   bool orderAlreadyFullyPaid = false,
+  /// Total facturé de la commande — sert au récap d'encaissement et au calcul
+  /// du reste à crédit (vente à crédit).
+  double orderTotal = 0,
+  /// Acompte déjà encaissé par la boutique avant la clôture.
+  double amountPaidBefore = 0,
+  /// `true` uniquement si la commande est LIVRÉE PAR UN PARTENAIRE
+  /// (deliveryMode == partner). Sinon (livraison équipe boutique, retrait sur
+  /// place…) l'option « Partenaire — pas encore versé » n'a aucun sens : on
+  /// masque la section « Qui a encaissé ? » et l'encaissement est forcément
+  /// boutique → aucun bandeau bleu « à verser ».
+  bool allowPartnerCollected = true,
 }) {
   return showFormSheet<OrderCompletionResult>(
     context: context,
     builder: (_) => _OrderCompletionSheet(
       initialFees:        initialFees,
-      defaultCollectedBy: orderAlreadyFullyPaid
+      defaultCollectedBy: (orderAlreadyFullyPaid || !allowPartnerCollected)
           ? CollectedBy.boutique
           : defaultCollectedBy,
       partnerName:        partnerName,
       partnerBalanceBefore: partnerBalanceBefore,
       orderAlreadyFullyPaid: orderAlreadyFullyPaid,
+      orderTotal:         orderTotal,
+      amountPaidBefore:   amountPaidBefore,
+      allowPartnerCollected: allowPartnerCollected,
     ),
   );
 }
@@ -75,12 +101,18 @@ class _OrderCompletionSheet extends StatefulWidget {
   final String?        partnerName;
   final double?        partnerBalanceBefore;
   final bool           orderAlreadyFullyPaid;
+  final double         orderTotal;
+  final double         amountPaidBefore;
+  final bool           allowPartnerCollected;
   const _OrderCompletionSheet({
     required this.initialFees,
     required this.defaultCollectedBy,
     this.partnerName,
     this.partnerBalanceBefore,
     this.orderAlreadyFullyPaid = false,
+    this.orderTotal = 0,
+    this.amountPaidBefore = 0,
+    this.allowPartnerCollected = true,
   });
   @override
   State<_OrderCompletionSheet> createState() => _OrderCompletionSheetState();
@@ -93,11 +125,39 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
   /// modifiable via picker pour antidater une vente passée.
   late DateTime      _completedAt;
 
+  /// Montant encaissé du client maintenant (vente à crédit). Pré-rempli au
+  /// solde dû ; l'opérateur peut saisir moins → le reste devient une créance.
+  final _collectedNow = TextEditingController();
+
+  /// Solde dû avant cette clôture = total − acompte (jamais négatif).
+  double get _due =>
+      (widget.orderTotal - widget.amountPaidBefore).clamp(0, double.infinity);
+
+  /// `true` si la section « Encaissement du client » est pertinente : la
+  /// boutique encaisse (pas le partenaire) ET la commande n'est pas déjà
+  /// soldée ET il reste quelque chose à payer.
+  bool get _showCollect =>
+      _collectedBy == CollectedBy.boutique
+      && !widget.orderAlreadyFullyPaid
+      && _due > 0;
+
+  /// Montant saisi maintenant (0 si vide/invalide).
+  double get _collectedAmount =>
+      double.tryParse(_collectedNow.text.trim().replaceAll(',', '.')) ?? 0;
+
+  /// Reste à crédit après cette clôture (≥ 0).
+  double get _creditAfter =>
+      (_due - _collectedAmount).clamp(0, double.infinity);
+
   @override
   void initState() {
     super.initState();
-    _collectedBy = widget.defaultCollectedBy;
+    // Sans livraison partenaire, l'encaissement est forcément boutique.
+    _collectedBy = widget.allowPartnerCollected
+        ? widget.defaultCollectedBy
+        : CollectedBy.boutique;
     _completedAt = DateTime.now();
+    if (_due > 0) _collectedNow.text = _due.toStringAsFixed(0);
     _rows = widget.initialFees.map((f) => _FeeRow(
       id:      f.id,
       label:   TextEditingController(text: f.label),
@@ -134,6 +194,7 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
       r.label.dispose();
       r.amount.dispose();
     }
+    _collectedNow.dispose();
     super.dispose();
   }
 
@@ -158,7 +219,18 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
   double get _total => _rows.fold<double>(
       0, (s, r) => s + (double.tryParse(r.amount.text.trim()) ?? 0));
 
-  void _confirm() {
+  /// Premier libellé en doublon (insensible à la casse), ou null.
+  String? _duplicateLabel(List<OrderFee> fees) {
+    final seen = <String>{};
+    for (final f in fees) {
+      final key = f.label.trim().toLowerCase();
+      if (key.isEmpty) continue;
+      if (!seen.add(key)) return f.label.trim();
+    }
+    return null;
+  }
+
+  Future<void> _confirm() async {
     final fees = <OrderFee>[];
     for (final r in _rows) {
       final amt = double.tryParse(r.amount.text.trim()) ?? 0;
@@ -170,9 +242,184 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
         amount: amt,
       ));
     }
+
+    // Garde-fou anti-doublon : avertir (sans bloquer) si un libellé revient
+    // (ex. deux « Livraison ») → évite de déduire 2× le même frais.
+    final dup = _duplicateLabel(fees);
+    if (dup != null) {
+      final keep = await showDialog<bool>(
+        context: context,
+        builder: (dc) => AlertDialog(
+          title: const Text('Frais en double'),
+          content: Text(
+              'Un frais « $dup » existe déjà sur cette commande. '
+              'Voulez-vous quand même l\'ajouter (double comptage possible) ?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dc).pop(false),
+              child: const Text('Annuler'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.warning,
+                  foregroundColor: Colors.white),
+              onPressed: () => Navigator.of(dc).pop(true),
+              child: const Text('Ajouter quand même'),
+            ),
+          ],
+        ),
+      );
+      if (keep != true) return; // l'opérateur revient corriger
+    }
+
+    // Vente à crédit : si la boutique encaisse une commande pas encore soldée,
+    // on capture le total réellement encaissé (acompte + maintenant). Si <
+    // total, le reste devient une créance client. `null` sinon → clôture
+    // « entièrement payé » (comportement historique).
+    double? amountPaidTotal;
+    if (_showCollect) {
+      final entered = _collectedAmount;
+      if (entered > _due) {
+        // Sécurité : ne jamais encaisser plus que le solde dû.
+        return;
+      }
+      amountPaidTotal =
+          (widget.amountPaidBefore + entered).clamp(0, widget.orderTotal)
+              .toDouble();
+    }
+
+    if (!mounted) return;
     Navigator.of(context).pop(OrderCompletionResult(
       fees: fees, collectedBy: _collectedBy,
-      completedAt: _completedAt));
+      completedAt: _completedAt,
+      amountPaidTotal: amountPaidTotal));
+  }
+
+  /// Section « Encaissement du client » — cœur de la vente à crédit.
+  /// Récap (total / déjà encaissé / reste) + champ « encaissé maintenant »
+  /// pré-rempli au solde. Si l'opérateur saisit moins, un bandeau indique le
+  /// reste qui passe en créance client.
+  Widget _buildCollectSection(BuildContext context) {
+    final theme = Theme.of(context);
+    final sym = CurrencyFormatter.currentSymbol;
+    final fmt = NumberFormat('#,###', 'fr_FR');
+    final credit = _creditAfter;
+    final over = _collectedAmount > _due;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primarySurface,
+        borderRadius: BorderRadius.circular(10),
+        border:
+            Border.all(color: AppColors.primary.withValues(alpha: 0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('Encaissement du client',
+              style: AppTextStyles.captionBold.copyWith(
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
+                  color:
+                      theme.colorScheme.onSurface.withValues(alpha: 0.6))),
+          const SizedBox(height: 8),
+          _miniRow(theme, 'Total commande', '${fmt.format(widget.orderTotal)} $sym',
+              bold: true),
+          if (widget.amountPaidBefore > 0)
+            _miniRow(theme, 'Déjà encaissé (acompte)',
+                '${fmt.format(widget.amountPaidBefore)} $sym'),
+          _miniRow(theme, 'Reste à payer', '${fmt.format(_due)} $sym',
+              color: AppColors.warning, bold: true),
+          const SizedBox(height: 10),
+          Text('Encaissé maintenant',
+              style: AppTextStyles.captionBold.copyWith(
+                  letterSpacing: 0.5,
+                  color:
+                      theme.colorScheme.onSurface.withValues(alpha: 0.6))),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _collectedNow,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+            ],
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              hintText: '0',
+              suffixText: sym,
+              isDense: true,
+              filled: true,
+              fillColor: AppColors.inputFill,
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      BorderSide(color: theme.semantic.borderSubtle)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      BorderSide(color: theme.semantic.borderSubtle)),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      BorderSide(color: AppColors.primary, width: 1.5)),
+            ),
+            style: AppTextStyles.title,
+          ),
+          if (over) ...[
+            const SizedBox(height: 8),
+            Text('Maximum ${fmt.format(_due)} $sym (le reste à payer)',
+                style: AppTextStyles.captionHint
+                    .copyWith(color: theme.colorScheme.error)),
+          ] else if (credit > 0) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                    color: AppColors.warning.withValues(alpha: 0.3)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.account_balance_wallet_outlined,
+                    size: 15, color: AppColors.warning),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                      'Reste à crédit : ${fmt.format(credit)} $sym — '
+                      'enregistré comme créance du client, réglable plus tard.',
+                      style: AppTextStyles.captionBold.copyWith(
+                          color: theme.colorScheme.onSurface
+                              .withValues(alpha: 0.85))),
+                ),
+              ]),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _miniRow(ThemeData theme, String label, String value,
+      {bool bold = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(children: [
+        Expanded(
+          child: Text(label,
+              style: AppTextStyles.bodySm.copyWith(
+                  color: theme.colorScheme.onSurface
+                      .withValues(alpha: 0.7))),
+        ),
+        Text(value,
+            style: AppTextStyles.bodySm.copyWith(
+                fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+                color: color ?? theme.colorScheme.onSurface)),
+      ]),
+    );
   }
 
   @override
@@ -190,6 +437,11 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Section « Qui a encaissé ? » UNIQUEMENT si la commande est
+                // livrée par un partenaire. Sinon (livraison équipe boutique,
+                // retrait sur place…) l'encaissement est forcément boutique →
+                // pas de choix à faire, pas de bandeau bleu « à verser ».
+                if (widget.allowPartnerCollected) ...[
                 Text(
                   'Qui a encaissé le client ?',
                   style: AppTextStyles.captionBold.copyWith(
@@ -211,15 +463,15 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFECFDF5),
+                      color: AppColors.secondary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color: const Color(0xFF10B981)
+                          color: AppColors.secondary
                               .withValues(alpha: 0.3)),
                     ),
                     child: Row(children: [
                       const Icon(Icons.check_circle_rounded,
-                          size: 14, color: Color(0xFF10B981)),
+                          size: 14, color: AppColors.secondary),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -246,6 +498,16 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                   _PartnerBalanceHint(
                     balanceBefore: widget.partnerBalanceBefore!,
                   ),
+                ],
+                ], // fin section « Qui a encaissé ? » (partenaire uniquement)
+                // ── Encaissement du client (vente à crédit) ──────────
+                // Visible quand la boutique encaisse une commande pas encore
+                // soldée. L'opérateur saisit le montant réellement reçu ; le
+                // reste devient une créance client (réglable plus tard via le
+                // bouton « acompte »).
+                if (_showCollect) ...[
+                  const SizedBox(height: 16),
+                  _buildCollectSection(context),
                 ],
                 const SizedBox(height: 16),
                 // ── Picker date d'encaissement (antidatable) ─────────
@@ -301,7 +563,7 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                     Expanded(flex: 3, child: TextField(
                       controller: r.label,
                       style: AppTextStyles.body,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Libellé',
                         labelStyle: AppTextStyles.caption,
                         isDense: true,
@@ -313,14 +575,15 @@ class _OrderCompletionSheetState extends State<_OrderCompletionSheet> {
                     const SizedBox(width: 8),
                     Expanded(flex: 2, child: TextField(
                       controller: r.amount,
-                      keyboardType: TextInputType.text,
+                      keyboardType: const TextInputType
+                          .numberWithOptions(decimal: true),
                       inputFormatters: [
                         FilteringTextInputFormatter.allow(
                             RegExp(r'[0-9.]')),
                       ],
                       onChanged: (_) => setState(() {}),
                       style: AppTextStyles.body,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Montant',
                         labelStyle: AppTextStyles.caption,
                         isDense: true,
@@ -455,8 +718,8 @@ class _RadioRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final sem = Theme.of(context).semantic;
     final textColor = disabled
-        ? const Color(0xFFBBBBBB)
-        : (selected ? sem.brandText : const Color(0xFF111827));
+        ? AppColors.textHint
+        : (selected ? sem.brandText : AppColors.onSurface);
     return InkWell(
       onTap: disabled ? null : onTap,
       borderRadius: BorderRadius.circular(8),
@@ -505,8 +768,8 @@ class _PartnerBalanceHint extends StatelessWidget {
         ? AppColors.error
         : AppColors.secondary;
     final bg    = isDebt
-        ? const Color(0xFFFEF2F2)
-        : const Color(0xFFECFDF5);
+        ? AppColors.error.withValues(alpha: 0.12)
+        : AppColors.secondary.withValues(alpha: 0.12);
     final label = isDebt
         ? 'Vous lui devez ${CurrencyFormatter.format(balanceBefore.abs())} '
           '— sera déduit du montant qu\'il vous reversera'

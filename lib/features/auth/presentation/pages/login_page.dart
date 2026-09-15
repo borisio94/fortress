@@ -18,13 +18,10 @@ import '../bloc/auth_state.dart';
 /// décoratif gauche fixe + formulaire droite), sinon mobile centré.
 const double _kDesktopBreakpoint = 800;
 
-/// Fond du panneau gauche desktop : surface presque blanche, légèrement
-/// teintée par la couleur primaire active. 100 % dynamique → s'adapte
-/// automatiquement à la palette choisie (pas de Color(0xFF…) hardcodé).
-Color _panelBg(ColorScheme cs) => Color.alphaBlend(
-      cs.primary.withValues(alpha: 0.06),
-      cs.surface,
-    );
+/// Fond du panneau gauche desktop : exactement la surface du thème, sans
+/// teinte primaire, pour un fond identique à celui du formulaire de droite.
+/// 100 % dynamique → s'adapte à la palette choisie (pas de Color(0xFF…)).
+Color _panelBg(ColorScheme cs) => cs.surface;
 
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});

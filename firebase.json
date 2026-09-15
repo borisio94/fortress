@@ -1,4 +1,8 @@
 {
+  "functions": {
+    "source": "functions",
+    "ignore": ["node_modules", ".git", "firebase-debug.log", "*.local"]
+  },
   "hosting": {
     "public": "build/web",
     "ignore": [
@@ -8,11 +12,50 @@
     ],
     "rewrites": [
       {
+        "source": "/catalogue/**",
+        "destination": "/catalogue.html"
+      },
+      {
+        "source": "/track/**",
+        "destination": "/track.html"
+      },
+      {
+        "source": "/promo/**",
+        "destination": "/promo.html"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
     ],
     "headers": [
+      {
+        "source": "/catalogue/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/track/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/promo/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
       {
         "source": "**/*.@(woff2|png|jpg|jpeg|gif|svg|ico)",
         "headers": [
@@ -36,7 +79,7 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "no-cache"
+            "value": "public, max-age=60"
           }
         ]
       },
@@ -50,11 +93,29 @@
         ]
       },
       {
+        "source": "/catalogue.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/track.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
         "source": "/main.dart.js",
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "no-cache"
+            "value": "public, max-age=60"
           }
         ]
       },
@@ -72,7 +133,7 @@
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "no-cache"
+            "value": "public, max-age=60"
           }
         ]
       },

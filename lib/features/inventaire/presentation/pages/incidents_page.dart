@@ -476,7 +476,7 @@ class _ResolveSheetState extends State<_ResolveSheet> {
               padding: const EdgeInsets.symmetric(
                   horizontal: 12, vertical: 11),
               decoration: BoxDecoration(
-                color: const Color(0xFFF9FAFB),
+                color: AppColors.surface,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Theme.of(context).semantic.borderSubtle),
               ),
@@ -632,7 +632,7 @@ class _ResolutionTile extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 6),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? color.withValues(alpha:0.08) : const Color(0xFFF9FAFB),
+          color: selected ? color.withValues(alpha:0.08) : AppColors.surface,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: selected ? color : Theme.of(context).semantic.borderSubtle,
               width: selected ? 1.5 : 1),
@@ -675,7 +675,7 @@ class _Field extends StatelessWidget {
           hintStyle: AppTextStyles.bodySm
               .copyWith(color: const Color(0xFFBBBBBB)),
           prefixIcon: Icon(icon, size: 16, color: AppColors.textHint),
-          filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
+          filled: true, fillColor: AppColors.inputFill, isDense: true,
           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),

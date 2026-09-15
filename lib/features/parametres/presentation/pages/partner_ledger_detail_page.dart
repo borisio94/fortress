@@ -11,29 +11,44 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/widgets/back_dated_picker.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../../shared/providers/current_shop_provider.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../domain/entities/partner_ledger_entry.dart';
 
-/// Détail du compte d'un partenaire :
+/// Résout le nom d'un partenaire (StockLocation type=partner) depuis Hive.
+/// Top-level pour être partagé par la vue et son wrapper plein écran.
+String partnerNameOf(String id) {
+  try {
+    final raw = HiveBoxes.stockLocationsBox.get(id);
+    if (raw == null) return 'Partenaire';
+    final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
+    return loc.name;
+  } catch (_) { return 'Partenaire'; }
+}
+
+/// Vue réutilisable du livre de comptes d'un partenaire (SANS Scaffold) :
 /// - Solde actuel + bandeau "qui doit qui"
 /// - Bouton "Enregistrer un versement" (boutique ↔ partenaire)
 /// - Historique chronologique des mouvements (commandes + versements)
-class PartnerLedgerDetailPage extends ConsumerStatefulWidget {
+///
+/// Embarquée comme onglet « Solde » du hub partenaire ([PartnerHubDetailPage])
+/// ou enveloppée par [PartnerLedgerDetailPage] pour un accès plein écran.
+class PartnerLedgerView extends ConsumerStatefulWidget {
   final String shopId;
   final String partnerLocationId;
-  const PartnerLedgerDetailPage({
+  const PartnerLedgerView({
     super.key, required this.shopId, required this.partnerLocationId,
   });
   @override
-  ConsumerState<PartnerLedgerDetailPage> createState() =>
-      _PartnerLedgerDetailPageState();
+  ConsumerState<PartnerLedgerView> createState() =>
+      _PartnerLedgerViewState();
 }
 
-class _PartnerLedgerDetailPageState
-    extends ConsumerState<PartnerLedgerDetailPage> {
+class _PartnerLedgerViewState
+    extends ConsumerState<PartnerLedgerView> {
   late void Function(String, String) _listener;
 
   @override
@@ -53,14 +68,7 @@ class _PartnerLedgerDetailPageState
     super.dispose();
   }
 
-  String get _partnerName {
-    try {
-      final raw = HiveBoxes.stockLocationsBox.get(widget.partnerLocationId);
-      if (raw == null) return 'Partenaire';
-      final loc = StockLocation.fromMap(Map<String, dynamic>.from(raw));
-      return loc.name;
-    } catch (_) { return 'Partenaire'; }
-  }
+  String get _partnerName => partnerNameOf(widget.partnerLocationId);
 
   /// Confirme + supprime une entrée du partner_ledger. Utile pour
   /// corriger une saisie erronée (ex: faux saleCollected créé par le bug
@@ -141,72 +149,41 @@ class _PartnerLedgerDetailPageState
     }
   }
 
-  /// Solde le compte d'un coup : crée un versement `remittance` égal à
-  /// l'opposé du solde courant → solde ramené à 0. Pratique quand la dette
-  /// est intégralement réglée sans avoir à ressaisir le montant exact.
-  Future<void> _settleDebt(double balance) async {
-    if (balance == 0) return;
-    final partnerOwes = balance > 0;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Marquer la dette réglée ?'),
-        content: Text(
-          partnerOwes
-              ? 'Confirme que ${_partnerName} a versé '
-                '${CurrencyFormatter.format(balance.abs())} à la '
-                'boutique. Le solde sera remis à zéro.'
-              : 'Confirme que la boutique a versé '
-                '${CurrencyFormatter.format(balance.abs())} à '
-                '${_partnerName}. Le solde sera remis à zéro.',
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Annuler')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Confirmer')),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    // amount = -balance → SUM ramené à 0 quel que soit le sens.
-    await PartnerLedgerService.addEntry(
-      shopId:            widget.shopId,
-      partnerLocationId: widget.partnerLocationId,
-      type:              PartnerLedgerEntryType.remittance,
-      amount:            -balance,
-      note:              'Dette soldée (règlement intégral)',
-    );
-    if (mounted) AppSnack.success(context, 'Dette réglée — solde à zéro.');
-  }
-
-  Future<void> _registerRemittance() async {
+  /// Règlement de la boutique VERS le partenaire (paiement des charges /
+  /// livraisons / courses refusées qu'on lui doit). Le versement ENTRANT
+  /// (partenaire→boutique) a été retiré d'ici : il se fait désormais par
+  /// commande, via le bouton bleu « Versement reçu » sur la carte. Le sens
+  /// est donc figé à boutique→partenaire. Pré-rempli avec ce que la boutique
+  /// doit (solde négatif), ajustable.
+  Future<void> _settlePartner(double balance) async {
+    final owed = balance < 0 ? balance.abs() : 0.0;
     final res = await showFormSheet<_RemittanceResult>(
       context: context,
-      builder: (_) => _RemittanceSheet(partnerName: _partnerName),
+      builder: (_) => _RemittanceSheet(
+        partnerName: _partnerName,
+        lockedDirection: _RemittanceDirection.boutiqueToPartner,
+        initialAmount: owed > 0 ? owed : null,
+      ),
     );
     if (res == null || !mounted) return;
-    // Convention : direction = partnerToBoutique → +amount (réduit la dette
-    // que le partenaire avait envers nous) ; boutiqueToPartner → -amount.
-    final signed = res.direction == _RemittanceDirection.partnerToBoutique
-        ? -res.amount.abs()  // diminue le crédit (partenaire a payé)
-        : res.amount.abs();  // augmente la dette (boutique a payé)
-    // Petit raisonnement : si solde était +100 (partenaire nous doit 100)
-    // et que partenaire verse 100, on doit ajouter -100 → solde = 0.
-    // À l'inverse, si solde était -50 (on lui doit 50) et qu'on lui verse
-    // 50, on ajoute +50 → solde = 0.
+    // Boutique → partenaire = +amount dans LES DEUX cas : la boutique paie,
+    // le solde monte. Un règlement ramène vers 0 une dette de la boutique ;
+    // une avance pousse au-delà et crée une créance sur le partenaire. Même
+    // arithmétique, deux intentions — seul le `type` les distingue.
+    final isAdvance = res.nature == _RemittanceNature.advance;
     await PartnerLedgerService.addEntry(
       shopId:            widget.shopId,
       partnerLocationId: widget.partnerLocationId,
-      type:              PartnerLedgerEntryType.remittance,
-      amount:            signed,
+      type:              isAdvance
+                            ? PartnerLedgerEntryType.advance
+                            : PartnerLedgerEntryType.remittance,
+      amount:            res.amount.abs(),
       note:              res.note?.isEmpty == true ? null : res.note,
       createdAt:         res.createdAt,
     );
     if (mounted) {
-      AppSnack.success(context, 'Versement enregistré.');
+      AppSnack.success(context,
+          isAdvance ? 'Avance enregistrée.' : 'Règlement enregistré.');
     }
   }
 
@@ -251,13 +228,16 @@ class _PartnerLedgerDetailPageState
         : (boutiqueOwes
             ? 'Vous devez au partenaire'
             : 'Comptes à jour');
+    // Ancienneté de la plus vieille vente encaissée et pas encore reversée.
+    // Absente quand tout est couvert, ou quand le solde positif ne tient
+    // qu'à une avance consentie — qui n'est pas un retard.
+    final ageDays = PartnerLedgerService
+        .debtAgeByPartner(widget.shopId)[widget.partnerLocationId];
+    final alertDays =
+        ref.watch(currentShopProvider)?.partnerDebtAlertDays ?? 30;
+    final isLate = ageDays != null && ageDays > alertDays;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_partnerName,
-            style: const TextStyle(fontWeight: FontWeight.w700)),
-      ),
-      body: Column(children: [
+    return Column(children: [
         // Bandeau solde
         Container(
           width: double.infinity,
@@ -276,6 +256,22 @@ class _PartnerLedgerDetailPageState
                 CurrencyFormatter.format(balance.abs()),
                 style: AppTextStyles.display.copyWith(color: color),
               ),
+              if (ageDays != null) ...[
+                const SizedBox(height: 6),
+                Row(children: [
+                  Icon(Icons.schedule_rounded,
+                      size: 13,
+                      color: isLate ? AppColors.error : AppColors.textHint),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: Text(
+                        'Plus ancienne vente non reversée : $ageDays j'
+                        '${isLate ? ' · au-delà de $alertDays j' : ''}',
+                        style: AppTextStyles.caption.copyWith(
+                            color: isLate ? AppColors.error : null)),
+                  ),
+                ]),
+              ],
             ],
           ),
         ),
@@ -283,11 +279,14 @@ class _PartnerLedgerDetailPageState
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: Column(children: [
             Row(children: [
+              // « Régler le partenaire » = paiement boutique→partenaire (solde
+              // des charges/livraisons dues). Le versement entrant
+              // (partenaire→boutique) se fait désormais par commande.
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: _registerRemittance,
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('Versement'),
+                  onPressed: () => _settlePartner(balance),
+                  icon: const Icon(Icons.south_west_rounded, size: 18),
+                  label: const Text('Régler le partenaire'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
@@ -310,23 +309,6 @@ class _PartnerLedgerDetailPageState
                 ),
               ),
             ]),
-            if (balance != 0) ...[
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _settleDebt(balance),
-                  icon: const Icon(Icons.check_circle_rounded, size: 18),
-                  label: const Text('Marquer réglée'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.primary,
-                    side: BorderSide(
-                        color: AppColors.primary.withValues(alpha: 0.5)),
-                    minimumSize: const Size(0, 44),
-                  ),
-                ),
-              ),
-            ],
           ]),
         ),
         const SizedBox(height: 4),
@@ -348,9 +330,28 @@ class _PartnerLedgerDetailPageState
                   ),
                 ),
         ),
-      ]),
-    );
+      ]);
   }
+}
+
+/// Page plein écran autonome (route directe `/parametres/partner-accounts`
+/// → détail legacy). Le hub partenaire embarque directement
+/// [PartnerLedgerView] dans un onglet, sans cet AppBar.
+class PartnerLedgerDetailPage extends StatelessWidget {
+  final String shopId;
+  final String partnerLocationId;
+  const PartnerLedgerDetailPage({
+    super.key, required this.shopId, required this.partnerLocationId,
+  });
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(
+          title: Text(partnerNameOf(partnerLocationId),
+              style: const TextStyle(fontWeight: FontWeight.w700)),
+        ),
+        body: PartnerLedgerView(
+            shopId: shopId, partnerLocationId: partnerLocationId),
+      );
 }
 
 class _MovementTile extends StatelessWidget {
@@ -450,6 +451,7 @@ class _MovementTile extends StatelessWidget {
         PartnerLedgerEntryType.deliveryOwed  => Icons.local_shipping_outlined,
         PartnerLedgerEntryType.remittance    => Icons.payments_outlined,
         PartnerLedgerEntryType.partnerCharge => Icons.receipt_long_outlined,
+        PartnerLedgerEntryType.advance       => Icons.savings_outlined,
       };
 
   String _fmtDate(DateTime d) {
@@ -463,33 +465,62 @@ class _MovementTile extends StatelessWidget {
 
 enum _RemittanceDirection { partnerToBoutique, boutiqueToPartner }
 
+/// Nature d'un versement SORTANT (boutique → partenaire). Le mouvement
+/// d'argent est le même dans les deux cas, seule l'intention change :
+///   * [settlement] SOLDE une dette que la boutique avait envers lui ;
+///   * [advance] en CRÉE une à sa charge.
+/// Le solde du partenaire est identique — la distinction sert à relire
+/// l'historique.
+enum _RemittanceNature { settlement, advance }
+
 class _RemittanceResult {
   final double amount;
   final _RemittanceDirection direction;
+  final _RemittanceNature nature;
   final String? note;
   /// Date du versement (antidatable). Si null, le caller stamp `now()`.
   final DateTime? createdAt;
   const _RemittanceResult({
-    required this.amount, required this.direction, this.note,
-    this.createdAt,
+    required this.amount, required this.direction,
+    this.nature = _RemittanceNature.settlement,
+    this.note, this.createdAt,
   });
 }
 
 class _RemittanceSheet extends StatefulWidget {
   final String partnerName;
-  const _RemittanceSheet({required this.partnerName});
+  /// Si fourni, le sens du versement est figé (sélecteur masqué). Utilisé
+  /// pour « Régler le partenaire » (boutique→partenaire uniquement) — le
+  /// versement entrant (partenaire→boutique) se fait désormais par commande.
+  final _RemittanceDirection? lockedDirection;
+  /// Montant pré-rempli (ex. ce que la boutique doit au partenaire).
+  final double? initialAmount;
+  const _RemittanceSheet({
+    required this.partnerName,
+    this.lockedDirection,
+    this.initialAmount,
+  });
   @override
   State<_RemittanceSheet> createState() => _RemittanceSheetState();
 }
 
 class _RemittanceSheetState extends State<_RemittanceSheet> {
-  _RemittanceDirection _direction = _RemittanceDirection.partnerToBoutique;
+  late _RemittanceDirection _direction =
+      widget.lockedDirection ?? _RemittanceDirection.partnerToBoutique;
+  _RemittanceNature _nature = _RemittanceNature.settlement;
   final _amountCtrl = TextEditingController();
   final _noteCtrl   = TextEditingController();
   String? _error;
   /// Date du versement (antidatable). Défaut = now(). Modifiable via picker
   /// pour numériser un versement passé.
   DateTime _date = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    final amt = widget.initialAmount;
+    if (amt != null && amt > 0) _amountCtrl.text = amt.toStringAsFixed(0);
+  }
 
   @override
   void dispose() {
@@ -507,9 +538,23 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
     Navigator.of(context).pop(_RemittanceResult(
       amount:    amt,
       direction: _direction,
+      nature:    _nature,
       note:      _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
       createdAt: _date,
     ));
+  }
+
+  /// Bascule la nature du versement. Le champ montant est VIDÉ au passage :
+  /// il était pré-rempli avec la dette de la boutique, chiffre qui n'a aucun
+  /// sens pour une avance. Un montant pré-rempli faux est plus dangereux
+  /// qu'un champ vide — il serait validé sans être relu.
+  void _setNature(_RemittanceNature n) {
+    if (n == _nature) return;
+    setState(() {
+      _nature = n;
+      _amountCtrl.clear();
+      _error = null;
+    });
   }
 
   Future<void> _pickDate() async {
@@ -523,8 +568,13 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final locked = widget.lockedDirection != null;
     return AdaptiveFormFrame(
-      title: 'Enregistrer un versement',
+      title: !locked
+          ? 'Enregistrer un versement'
+          : (_nature == _RemittanceNature.advance
+              ? 'Avance au partenaire'
+              : 'Régler le partenaire'),
       icon:  Icons.payments_outlined,
       body: Column(
         mainAxisSize: MainAxisSize.min,
@@ -535,22 +585,49 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                _SectionLabel('Sens du versement'),
-                _DirRow(
-                  selected: _direction == _RemittanceDirection.partnerToBoutique,
-                  label: '${widget.partnerName} → Boutique',
-                  hint:  'Le partenaire vous remet de l\'argent',
-                  onTap: () => setState(() =>
-                      _direction = _RemittanceDirection.partnerToBoutique),
-                ),
-                _DirRow(
-                  selected: _direction == _RemittanceDirection.boutiqueToPartner,
-                  label: 'Boutique → ${widget.partnerName}',
-                  hint:  'Vous payez le partenaire (frais de livraison…)',
-                  onTap: () => setState(() =>
-                      _direction = _RemittanceDirection.boutiqueToPartner),
-                ),
-                const SizedBox(height: 14),
+                // Sélecteur de sens masqué quand le sens est figé (« Régler
+                // le partenaire » = boutique→partenaire uniquement).
+                if (!locked) ...[
+                  _SectionLabel('Sens du versement'),
+                  _DirRow(
+                    selected:
+                        _direction == _RemittanceDirection.partnerToBoutique,
+                    label: '${widget.partnerName} → Boutique',
+                    hint:  'Le partenaire vous remet de l\'argent',
+                    onTap: () => setState(() =>
+                        _direction = _RemittanceDirection.partnerToBoutique),
+                  ),
+                  _DirRow(
+                    selected:
+                        _direction == _RemittanceDirection.boutiqueToPartner,
+                    label: 'Boutique → ${widget.partnerName}',
+                    hint:  'Vous payez le partenaire (frais de livraison…)',
+                    onTap: () => setState(() =>
+                        _direction = _RemittanceDirection.boutiqueToPartner),
+                  ),
+                  const SizedBox(height: 14),
+                ] else ...[
+                  // Le sens est figé (boutique → partenaire) ; ce qui reste
+                  // à choisir, c'est l'INTENTION. L'encart figé qui tenait
+                  // cette place annonçait « règlement de ce que vous lui
+                  // devez » — phrase fausse dès qu'il s'agit d'une avance.
+                  const _SectionLabel('Nature du versement'),
+                  _DirRow(
+                    selected: _nature == _RemittanceNature.settlement,
+                    label: 'Règlement d\'une dette',
+                    hint:  'Vous payez ce que vous devez à '
+                           '${widget.partnerName}',
+                    onTap: () => _setNature(_RemittanceNature.settlement),
+                  ),
+                  _DirRow(
+                    selected: _nature == _RemittanceNature.advance,
+                    label: 'Avance commerciale',
+                    hint:  'Vous versez d\'avance ; '
+                           '${widget.partnerName} vous le devra',
+                    onTap: () => _setNature(_RemittanceNature.advance),
+                  ),
+                  const SizedBox(height: 14),
+                ],
                 _SectionLabel('Montant (FCFA)'),
                 TextField(
                   controller: _amountCtrl,
@@ -583,7 +660,7 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF9FAFB),
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.fromBorderSide(
                           BorderSide(color: Theme.of(context).semantic.borderSubtle)),
@@ -761,7 +838,7 @@ class _ChargeSheetState extends State<_ChargeSheet> {
                           decoration: BoxDecoration(
                             color: _category == c
                                 ? sem.brandSurface
-                                : const Color(0xFFF9FAFB),
+                                : AppColors.surface,
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
                                 color: _category == c
@@ -814,7 +891,7 @@ class _ChargeSheetState extends State<_ChargeSheet> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF9FAFB),
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.fromBorderSide(
                           BorderSide(color: Theme.of(context).semantic.borderSubtle)),
@@ -933,7 +1010,7 @@ class _DirRow extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 6),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? sem.brandSurface : const Color(0xFFF9FAFB),
+          color: selected ? sem.brandSurface : AppColors.surface,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
               color: selected ? sem.brand.withValues(alpha: 0.4)
@@ -944,7 +1021,7 @@ class _DirRow extends StatelessWidget {
                   ? Icons.radio_button_checked
                   : Icons.radio_button_unchecked,
               size: 18,
-              color: selected ? sem.brand : const Color(0xFF9CA3AF)),
+              color: selected ? sem.brand : AppColors.textHint),
           const SizedBox(width: 10),
           Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1071,7 +1148,7 @@ class _EditEntrySheetState extends State<_EditEntrySheet> {
                             decoration: BoxDecoration(
                               color: _category == c
                                   ? sem.brandSurface
-                                  : const Color(0xFFF9FAFB),
+                                  : AppColors.surface,
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
                                   color: _category == c
@@ -1124,7 +1201,7 @@ class _EditEntrySheetState extends State<_EditEntrySheet> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF9FAFB),
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.fromBorderSide(
                           BorderSide(color: Theme.of(context).semantic.borderSubtle)),

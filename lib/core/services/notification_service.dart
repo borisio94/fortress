@@ -12,6 +12,8 @@ enum NotifKind {
   orderCompleted,
   orderCancelled,
   orderRejected,
+  /// Une tournee vient de passer « prete » : le serveur doit aller la chercher.
+  kitchenReady,
   // Tickets de messagerie hiérarchique (cf. phase 4).
   ticketNew,        // un membre vient d'ouvrir un ticket à mon niveau
   ticketEscalated,  // un ticket vient de monter à mon niveau
@@ -27,6 +29,7 @@ extension NotifKindX on NotifKind {
         NotifKind.orderCompleted  => 'order_completed',
         NotifKind.orderCancelled  => 'order_cancelled',
         NotifKind.orderRejected   => 'order_rejected',
+        NotifKind.kitchenReady    => 'kitchen_ready',
         NotifKind.ticketNew       => 'ticket_new',
         NotifKind.ticketEscalated => 'ticket_escalated',
         NotifKind.ticketReply     => 'ticket_reply',
@@ -45,6 +48,11 @@ extension NotifKindX on NotifKind {
         NotifKind.orderCompleted  => 'order_state',
         NotifKind.orderCancelled  => 'order_state',
         NotifKind.orderRejected   => 'order_state',
+        // Catégorie DISTINCTE des transitions de statut : une commande peut
+        // être prête à servir alors qu'elle est déjà passée par d'autres
+        // états, et l'alerte de service ne doit pas écraser — ni être écrasée
+        // par — une notification de clôture ou d'annulation.
+        NotifKind.kitchenReady    => 'kitchen_ready',
         NotifKind.ticketNew       => 'ticket',
         NotifKind.ticketEscalated => 'ticket_escal',
         NotifKind.ticketReply     => 'ticket_reply',  // chaque message = sa propre notif

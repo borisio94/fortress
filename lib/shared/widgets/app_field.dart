@@ -178,7 +178,7 @@ class _AppFieldState extends State<AppField> {
     }
     return _hasValue
         ? AppColors.primary.withValues(alpha:0.5)
-        : const Color(0xFFE5E7EB);
+        : AppColors.inputBorder;
   }
 
   double get _borderWidth {
@@ -221,7 +221,7 @@ class _AppFieldState extends State<AppField> {
         // Séparateur
         Container(
           width: 1, height: 22,
-          color: const Color(0xFFE5E7EB),
+          color: AppColors.divider,
           margin: const EdgeInsets.symmetric(horizontal: 4),
         ),
         // Saisie
@@ -270,8 +270,8 @@ class _AppFieldState extends State<AppField> {
   // ── Mode normal ───────────────────────────────────────────────────────────
   Widget _buildNormalField() {
     final fillColor = widget.style == AppFieldStyle.white
-        ? Colors.white
-        : const Color(0xFFF9FAFB);
+        ? AppColors.surface
+        : AppColors.inputFill;
 
     return TextFormField(
       controller:   widget.controller,
@@ -300,7 +300,7 @@ class _AppFieldState extends State<AppField> {
         isDense:   widget.isDense,
         contentPadding:
         const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-        border:        _border(const Color(0xFFE5E7EB)),
+        border:        _border(AppColors.inputBorder),
         enabledBorder: _border(_borderColor, width: _borderWidth),
         focusedBorder: _border(AppColors.primary, width: 1.5),
         errorBorder:   _border(AppColors.error),
@@ -329,20 +329,20 @@ class _CountryPicker extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Row(children: [
         Text(c.isoCode,
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
-                color: Color(0xFF374151))),
+                color: AppColors.onSurface)),
         const SizedBox(width: 8),
         Text(c.dialCode,
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
-                color: Color(0xFF374151))),
+                color: AppColors.onSurface)),
         const SizedBox(width: 6),
         Expanded(child: Text(c.nameFr,
-            style: const TextStyle(
-                fontSize: 12, color: Color(0xFF6B7280)),
+            style: TextStyle(
+                fontSize: 12, color: AppColors.textSecondary),
             overflow: TextOverflow.ellipsis)),
       ]),
     )).toList(),
@@ -352,13 +352,13 @@ class _CountryPicker extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Text('${selected.isoCode} ${selected.dialCode}',
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF374151))),
+                    color: AppColors.onSurface)),
             const SizedBox(width: 2),
-            const Icon(Icons.keyboard_arrow_down_rounded,
-                size: 14, color: Color(0xFF9CA3AF)),
+            Icon(Icons.keyboard_arrow_down_rounded,
+                size: 14, color: AppColors.textHint),
           ]),
     ),
   );
