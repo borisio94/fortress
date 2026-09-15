@@ -54,6 +54,8 @@ class ParametresPage extends ConsumerWidget {
         context.push('/shop/$shopId/parametres/section/$key');
 
     return ListView(
+        // Défilable même contenu court : geste « tirer pour actualiser ».
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: [
           _ProfileHeader(user: user, shop: shop, perms: perms),

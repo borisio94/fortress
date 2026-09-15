@@ -28,6 +28,7 @@ import 'sync_status_banner.dart';
 import 'order_source_badge.dart';
 import 'pin_lock_banner.dart';
 import 'shop_logo_avatar.dart';
+import 'shop_pull_to_refresh.dart';
 import '../../core/config/app_modes.dart';
 import '../../core/config/restaurant_mode.dart';
 import '../../features/restaurant/presentation/widgets/resto_topbar.dart';
@@ -413,7 +414,8 @@ class _MobileShell extends StatelessWidget {
         // StockNavChips supprimés round 13 — doublon avec le menu drawer
         // (Inventaire → Produits / Emplacements / Incidents). La nav passe
         // désormais uniquement par le drawer pour éviter la redondance.
-        Expanded(child: body),
+        // Tirer vers le bas actualise la boutique, sur toutes les pages.
+        Expanded(child: ShopPullToRefresh(shopId: shopId, child: body)),
       ]),
       // Bottom nav (manipulation à une main) : 4 modules principaux + onglet
       // « Plus » qui ouvre le drawer latéral pour les modules secondaires
@@ -1196,7 +1198,9 @@ class _DesktopShell extends StatelessWidget {
               const SizedBox(height: _kRestoBlockGap),
               ...banners,
               Expanded(
-                child: _RestoShellBlock(fill: true, child: body),
+                child: _RestoShellBlock(
+                    fill: true,
+                    child: ShopPullToRefresh(shopId: shopId, child: body)),
               ),
             ])),
           ]),
@@ -1214,7 +1218,7 @@ class _DesktopShell extends StatelessWidget {
           // StockNavChips supprimés round 13 — doublon avec la sidebar
           // (Inventaire → Produits / Emplacements / Incidents). La nav
           // passe uniquement par la sidebar pour éviter la redondance.
-          Expanded(child: body),
+          Expanded(child: ShopPullToRefresh(shopId: shopId, child: body)),
         ])),
       ]),
     );
@@ -1920,6 +1924,8 @@ class _DesktopTopbar extends StatelessWidget {
           ],
         ],
         const Spacer(),
+        // Pas de geste « tirer » à la souris : bouton équivalent.
+        ShopRefreshButton(shopId: shopId),
         const OfflineChip(),
         _CartBadgeBtn(shopId: shopId),
         // Cloche notifications réservée admin + owner.

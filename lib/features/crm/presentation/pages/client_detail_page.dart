@@ -185,7 +185,10 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
           onPressed: () => _showEdit(context, client),
         ),
       ],
-      body: ListView(padding: EdgeInsets.zero, children: [
+      // Défilable même contenu court : geste « tirer pour actualiser ».
+      body: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.zero, children: [
         // ── Hero ────────────────────────────────────────────────────
         _HeroHeader(client: client, color: color, initial: initial,
             daysAgo: daysAgo),

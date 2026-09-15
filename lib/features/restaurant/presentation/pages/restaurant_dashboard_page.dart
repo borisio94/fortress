@@ -92,6 +92,8 @@ class _RestaurantDashboardPageState
       shopId: shopId,
       title: 'Tableau de bord',
       body: ListView(
+        // Défilable même contenu court : geste « tirer pour actualiser ».
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
           // ── Configuration incomplète ──────────────────────────────────

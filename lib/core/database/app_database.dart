@@ -1045,6 +1045,23 @@ class AppDatabase {
   static Future<void> pullAllForShop(String shopId) =>
       _initialPullForShop(shopId);
 
+  /// Actualisation MANUELLE d'une boutique (geste « tirer vers le bas »,
+  /// bouton Actualiser) : vide la file hors ligne PUIS tire toutes les tables.
+  ///
+  /// L'ordre n'est pas négociable (cf. `onAppResumed`) : `syncOrders` purge
+  /// les commandes locales absentes du serveur, et une commande créée hors
+  /// ligne pas encore poussée en fait partie. Tirer d'abord la ferait
+  /// disparaître.
+  ///
+  /// Retourne `false` si le backend est injoignable : rien n'est tiré, les
+  /// données locales restent affichées telles quelles.
+  static Future<bool> refreshShopData(String shopId) async {
+    if (!await isOnline()) return false;
+    await flushOfflineQueue();
+    await pullAllForShop(shopId);
+    return true;
+  }
+
   /// Re-sync rapide déclenché au RETOUR de l'app au premier plan (cf.
   /// observateur de cycle de vie dans `app.dart`).
   ///

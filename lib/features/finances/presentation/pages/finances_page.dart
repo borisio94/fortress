@@ -203,6 +203,8 @@ class _RevenusTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = context.l10n;
     return ListView(
+      // Défilable même contenu court : geste « tirer pour actualiser ».
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
         _RevenueSubKpis(data: data),
@@ -289,6 +291,8 @@ class _PertesTab extends ConsumerWidget {
         data.repairCost > 0;
 
     return ListView(
+      // Défilable même contenu court : geste « tirer pour actualiser ».
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
         KpiGrid(kpis: [
@@ -337,6 +341,8 @@ class _BilanTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
+      // Défilable même contenu court : geste « tirer pour actualiser ».
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
         _FinancialRecap(data: data),

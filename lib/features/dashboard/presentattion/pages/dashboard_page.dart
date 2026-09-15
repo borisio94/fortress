@@ -312,6 +312,9 @@ class _DashBodyState extends ConsumerState<_DashBody> {
         .maybeWhen(data: (v) => v, orElse: () => false);
 
     return ListView(
+      // Défilable même quand le contenu tient à l'écran : sans ça, le geste
+      // « tirer pour actualiser » du cadre ne se déclenche pas.
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
         // ── 1. Identité boutique ──────────────────────────────────────────

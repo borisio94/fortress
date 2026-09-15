@@ -519,10 +519,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     super.dispose();
   }
 
-  /// Pull-to-refresh : re-fetch toutes les tables métier depuis Supabase
-  /// puis force un rebuild (le getter `_orders` relit Hive à jour).
+  /// Pull-to-refresh : vide la file hors ligne, re-fetch toutes les tables
+  /// métier depuis Supabase puis force un rebuild (le getter `_orders` relit
+  /// Hive à jour).
   Future<void> _pullAndReload() async {
-    await AppDatabase.pullAllForShop(widget.shopId);
+    await AppDatabase.refreshShopData(widget.shopId);
     if (mounted) setState(() {});
   }
 

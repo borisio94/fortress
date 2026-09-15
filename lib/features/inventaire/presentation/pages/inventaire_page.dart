@@ -272,10 +272,10 @@ class _InventairePageState extends ConsumerState<InventairePage>
     }
   }
 
-  /// Pull-to-refresh : re-fetch toutes les tables métier depuis Supabase,
-  /// puis recharge la vue depuis Hive.
+  /// Pull-to-refresh : vide la file hors ligne, re-fetch toutes les tables
+  /// métier depuis Supabase, puis recharge la vue depuis Hive.
   Future<void> _pullAndReload() async {
-    await AppDatabase.pullAllForShop(widget.shopId);
+    await AppDatabase.refreshShopData(widget.shopId);
     if (mounted) _load();
   }
 
