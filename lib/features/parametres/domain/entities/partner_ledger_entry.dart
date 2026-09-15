@@ -9,9 +9,10 @@ import '../../../../core/storage/schema_migrator.dart';
 ///   * `deliveryOwed` (-)  : le partenaire a effectué une livraison → la
 ///     boutique lui doit les frais de livraison.
 ///   * `remittance`        : versement physique (boutique ↔ partenaire)
-///     enregistré manuellement, qui solde une partie du compte. Le signe
-///     dépend du sens (positif = partenaire verse à la boutique, négatif
-///     = boutique verse au partenaire).
+///     qui solde une partie du compte. Le signe suit la convention de solde
+///     ci-dessous : POSITIF = la boutique verse au partenaire (« Régler le
+///     partenaire », le solde remonte vers 0), NÉGATIF = le partenaire verse
+///     à la boutique (« Versement reçu », le solde descend vers 0).
 ///   * `advance` (+)       : avance commerciale versée au partenaire, qui
 ///     CRÉE une créance au lieu d'en solder une. Même sens et même signe
 ///     qu'un règlement — la distinction est narrative, pas comptable.

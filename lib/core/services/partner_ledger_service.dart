@@ -137,67 +137,126 @@ class PartnerLedgerService {
     }
   }
 
-  /// Dette partenaire PAR COMMANDE, calculée en UNE SEULE passe Hive
-  /// (offline-first) pour l'ensemble des [orderIds] visibles — jamais un
-  /// scan par commande. Clé du résultat = `orderId`. Une commande absente
-  /// de la map = aucune entrée ledger (pas de dette / pas de partenaire).
+  /// Dette de la boutique envers le partenaire, PAR COMMANDE, calculée en UNE
+  /// SEULE passe Hive (offline-first) pour les [orderIds] visibles. Clé du
+  /// résultat = `orderId` ; une commande absente de la map n'a aucune dette.
   ///
-  /// Pour chaque commande :
-  ///   * dette brute = Σ |amount| des entrées négatives (deliveryOwed /
-  ///     partnerCharge),
-  ///   * offsets     = Σ amount des entrées positives liées à la même
-  ///     commande (saleCollected / remittance),
-  ///   * `isCompensated` = **soit** le solde GLOBAL du partenaire ≥ 0
-  ///     (partenaire à jour : aucune dette nette → on masque toutes ses
-  ///     bannières, y compris si la commande est soldée par les ventes
-  ///     d'AUTRES commandes du même partenaire) **soit** les offsets de
-  ///     la commande couvrent déjà sa dette.
-  ///
-  /// Convention solde (cf. [PartnerLedgerEntry]) : `solde = SUM(amount)`
-  ///   > 0 partenaire doit à la boutique · < 0 boutique doit · = 0 à jour.
-  ///
-  /// Un seul parcours Hive (offline-first) ; re-calculé en live à chaque
-  /// changement ledger (Realtime + versement → notifyListeners). Aucune
-  /// donnée persistée : rien à migrer, pas de désynchro possible.
+  /// Le calcul lui-même est dans [computeOrderDebts] (pur, testable).
   static Map<String, PartnerDebtInfo> debtByOrder(
       String shopId, Iterable<String> orderIds) {
     final wanted = orderIds.where((e) => e.isNotEmpty).toSet();
     if (wanted.isEmpty) return const {};
-    final neg          = <String, double>{}; // dette brute / commande
-    final pos          = <String, double>{}; // offsets / commande
-    final orderPartner = <String, String>{}; // commande → partenaire
-    final partnerBal   = <String, double>{}; // solde GLOBAL / partenaire
-    // entriesForShop = un seul parcours du box Hive, déjà filtré
-    // soft-delete. On agrège tout ici en une passe.
-    for (final e in entriesForShop(shopId)) {
-      // Solde global du partenaire (TOUTES ses entrées, pas seulement
-      // les commandes visibles) — clé de la compensation par solde.
-      partnerBal.update(e.partnerLocationId, (v) => v + e.amount,
-          ifAbsent: () => e.amount);
-      final oid = e.orderId;
-      if (oid == null || !wanted.contains(oid)) continue;
-      orderPartner[oid] = e.partnerLocationId;
-      if (e.amount < 0) {
-        neg.update(oid, (v) => v + e.amount.abs(),
-            ifAbsent: () => e.amount.abs());
-      } else if (e.amount > 0) {
-        pos.update(oid, (v) => v + e.amount, ifAbsent: () => e.amount);
-      }
+    return computeOrderDebts(entriesForShop(shopId), wanted);
+  }
+
+  /// Tolérance d'arrondi : même seuil que [pendingRemittanceByOrder] et
+  /// [debtAgeByPartner], pour qu'un reliquat de centimes ne rouvre pas une
+  /// dette en réalité réglée.
+  static const double _kDebtTolerance = 0.5;
+
+  /// Reste dû par la boutique au partenaire, PAR COMMANDE — imputation FIFO.
+  ///
+  /// POURQUOI FIFO. Un règlement « Régler le partenaire » est GLOBAL (sans
+  /// `orderId`). L'ancienne règle masquait les bandeaux tant que le solde du
+  /// JOUR restait ≥ 0 : le moindre frais apparu ensuite rouvrait toutes les
+  /// dettes déjà réglées, avec leur montant d'origine (« dette fantôme »).
+  /// Désormais chaque crédit éteint les dettes LES PLUS ANCIENNES d'abord : un
+  /// nouveau frais n'apparaît que sur SA commande.
+  ///
+  /// Pour chaque partenaire, en deux temps :
+  ///   1. **Compensation dans la commande.** Ce que le partenaire a perçu sur
+  ///      une commande (écritures positives liées), diminué de ce qu'il en a
+  ///      déjà reversé (versements négatifs liés), couvre d'abord les frais
+  ///      de CETTE commande — il les a retenus à la source. Le reliquat,
+  ///      positif ou négatif, rejoint le pot commun.
+  ///   2. **Pot commun, imputé FIFO.** Pot = reliquats des commandes +
+  ///      crédits globaux (règlements et AVANCES de la boutique, positifs) −
+  ///      versements globaux du partenaire (négatifs hors frais). Il couvre
+  ///      les frais restants (`deliveryOwed`, `partnerCharge`), du plus ancien
+  ///      au plus récent. Un pot négatif ne couvre rien.
+  ///
+  /// GARANTIE (tant que le pot n'est pas négatif) : la somme des restes, y
+  /// compris ceux des charges sans commande, vaut exactement max(0, −solde)
+  /// du partenaire — ce que la boutique lui doit réellement.
+  ///
+  /// Les écritures supprimées (`deletedAt`) sont ignorées. Tri stable :
+  /// `createdAt` puis `id`.
+  static Map<String, PartnerDebtInfo> computeOrderDebts(
+      Iterable<PartnerLedgerEntry> entries, Set<String> orderIds) {
+    final byPartner = <String, List<PartnerLedgerEntry>>{};
+    for (final e in entries) {
+      if (e.deletedAt != null) continue;
+      byPartner.putIfAbsent(e.partnerLocationId, () => []).add(e);
     }
     final out = <String, PartnerDebtInfo>{};
-    for (final entry in neg.entries) {
-      final oid     = entry.key;
-      final debt    = entry.value;
-      final offset  = pos[oid] ?? 0;
-      final partner = orderPartner[oid];
-      final balance = partner == null ? 0.0 : (partnerBal[partner] ?? 0.0);
-      out[oid] = PartnerDebtInfo(
-        amount:        debt,
-        // Partenaire à jour globalement OU dette de la commande déjà
-        // couverte par ses propres encaissements/versements.
-        isCompensated: balance >= 0 || offset >= debt,
-      );
-    }
+    byPartner.forEach((_, list) {
+      bool isDebt(PartnerLedgerEntry e) =>
+          e.amount < 0
+          && (e.type == PartnerLedgerEntryType.deliveryOwed
+              || e.type == PartnerLedgerEntryType.partnerCharge);
+
+      final ownCredit = <String, double>{};          // commande → net perçu
+      final debts     = <PartnerLedgerEntry>[];
+      var pool = 0.0;
+      for (final e in list) {
+        if (isDebt(e)) {
+          debts.add(e);
+        } else if (e.orderId != null) {
+          ownCredit.update(e.orderId!, (v) => v + e.amount,
+              ifAbsent: () => e.amount);
+        } else {
+          pool += e.amount;                           // crédit/versement global
+        }
+      }
+      debts.sort((a, b) {
+        final c = a.createdAt.compareTo(b.createdAt);
+        return c != 0 ? c : a.id.compareTo(b.id);
+      });
+
+      // Reste dû de chaque dette, avant imputation.
+      final remaining = <String, double>{
+        for (final d in debts) d.id: d.amount.abs(),
+      };
+
+      // 1. Compensation dans la commande (dettes de la commande, FIFO).
+      final ordersWithCredit = ownCredit.keys.toList();
+      for (final oid in ordersWithCredit) {
+        var own = ownCredit[oid]!;
+        if (own > 0) {
+          for (final d in debts.where((d) => d.orderId == oid)) {
+            final take = own < remaining[d.id]! ? own : remaining[d.id]!;
+            remaining[d.id] = remaining[d.id]! - take;
+            own -= take;
+            if (own <= 0) break;
+          }
+        }
+        pool += own;                                  // reliquat (±)
+      }
+
+      // 2. Pot commun, du frais le plus ancien au plus récent.
+      if (pool > 0) {
+        for (final d in debts) {
+          final left = remaining[d.id]!;
+          if (left <= 0) continue;
+          final take = pool < left ? pool : left;
+          remaining[d.id] = left - take;
+          pool -= take;
+          if (pool <= 0) break;
+        }
+      }
+
+      // Restitution par commande visible.
+      for (final d in debts) {
+        final oid = d.orderId;
+        if (oid == null || !orderIds.contains(oid)) continue;
+        final prev = out[oid]?.amount ?? 0.0;
+        final amount = prev + remaining[d.id]!;
+        out[oid] = PartnerDebtInfo(
+          amount:        amount,
+          isCompensated: amount <= _kDebtTolerance,
+        );
+      }
+    });
     return out;
   }
 

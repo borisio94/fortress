@@ -6,12 +6,12 @@
 /// commande.
 ///
 /// Convention :
-///   * [amount]        = dette brute enregistrée pour la commande (somme
-///     des entrées négatives `deliveryOwed`/`partnerCharge`, en valeur
-///     absolue, ≥ 0).
-///   * [isCompensated] = `true` si des encaissements/versements liés à la
-///     même commande (entrées positives : `saleCollected`, `remittance`)
-///     couvrent au moins cette dette → la bannière ne doit plus s'afficher.
+///   * [amount]        = RESTE DÛ par la boutique pour la commande, après
+///     imputation FIFO des crédits du partenaire (cf.
+///     `PartnerLedgerService.computeOrderDebts`), ≥ 0. Ce n'est plus le
+///     frais d'origine : un frais réglé à moitié affiche la moitié restante.
+///   * [isCompensated] = `true` si ce reste est nul à la tolérance d'arrondi
+///     près → la bannière ne doit plus s'afficher.
 class PartnerDebtInfo {
   final double amount;
   final bool   isCompensated;
