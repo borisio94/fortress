@@ -161,7 +161,8 @@ class _RestaurantTablesPageState
   /// entière ferait disparaître l'addition des clients restés assis.
   Future<void> _editCovers(RestaurantTable table) async {
     final covers = await _askCovers(table,
-        title: 'Couverts — ${table.name}');
+        title: 'Couverts — ${table.name}',
+        confirmLabel: 'Enregistrer les couverts');
     if (covers == null || !mounted) return;
     final updated = await RestaurantTableService.updateCovers(table, covers);
     if (!mounted) return;
@@ -182,8 +183,13 @@ class _RestaurantTablesPageState
   /// Sélecteur de couverts (+/−) borné par la capacité de la table.
   ///
   /// Sert à l'ouverture du service ET à l'ajustement en cours de repas, quand
-  /// des convives s'en vont : [title] distingue les deux.
-  Future<int?> _askCovers(RestaurantTable table, {String? title}) {
+  /// des convives s'en vont : [title] et [confirmLabel] distinguent les deux.
+  ///
+  /// Le bouton portait « Ouvrir la table » dans les deux cas — y compris pour
+  /// ajuster les couverts d'une table déjà ouverte, c'est-à-dire, depuis que
+  /// l'ouverture de service passe par le Menu, dans tous les cas réels.
+  Future<int?> _askCovers(RestaurantTable table,
+      {String? title, String? confirmLabel}) {
     var covers = table.covers ?? table.capacity;
     return showAdaptiveFormSheet<int>(
       context: context,
@@ -223,26 +229,27 @@ class _RestaurantTablesPageState
                       ),
                       _StepperButton(
                         icon: Icons.add_rounded,
-                        // Dépassement de capacité autorisé (tables jointes),
-                        // mais plafonné pour éviter les saisies aberrantes.
-                        onTap: covers < table.capacity + 6
+                        // BORNÉ À LA CAPACITÉ. Le compteur montait jusqu'à
+                        // `capacity + 6` « pour les tables jointes », en
+                        // affichant un avertissement — puis `updateCovers`
+                        // re-clampait à la capacité, en silence. La valeur
+                        // saisie était écrasée sans un mot.
+                        //
+                        // Les tables jointes ne sont supportées nulle part
+                        // ailleurs : la prise de commande borne à la place
+                        // restante, `computeSeating` plafonne, et
+                        // `_coversLabel` calculerait des places négatives.
+                        // C'était une intention isolée, contredite par tout le
+                        // reste du module.
+                        onTap: covers < table.capacity
                             ? () => setSheetState(() => covers++)
                             : null,
                       ),
                     ],
                   ),
-                  if (covers > table.capacity) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      'Au-delà de la capacité de la table '
-                      '(${table.capacity} places).',
-                      style: AppTextStyles.caption
-                          .copyWith(color: theme.semantic.warning),
-                    ),
-                  ],
                   const SizedBox(height: 20),
                   AppPrimaryButton(
-                    label: 'Ouvrir la table',
+                    label: confirmLabel ?? 'Ouvrir la table',
                     icon: Icons.check_rounded,
                     fullWidth: true,
                     onTap: () => Navigator.of(ctx).pop(covers),

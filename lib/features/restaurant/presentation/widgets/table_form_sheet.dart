@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/services/restaurant_table_service.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
@@ -41,7 +42,11 @@ Future<TableWriteOutcome?> showTableForm({
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const AppFieldLabel('Nom de la table', required: true),
+            // PAS D'ASTÉRISQUE. Les deux champs arrivent pré-remplis et ont
+            // un repli : laissés vides, ils valent « T<n> » et 4. L'étoile
+            // rouge promettait un refus qui n'arrive jamais — l'aide dit le
+            // repli à sa place.
+            const AppFieldLabel('Nom de la table'),
             const SizedBox(height: 8),
             AppField(
               controller: nameCtrl,
@@ -49,8 +54,11 @@ Future<TableWriteOutcome?> showTableForm({
               autofocus: true,
               prefixIcon: Icons.label_outline_rounded,
             ),
+            const SizedBox(height: 6),
+            Text('Laissé vide, le nom sera « T$suggested ».',
+                style: AppTextStyles.caption),
             const SizedBox(height: 16),
-            const AppFieldLabel('Capacité (couverts)', required: true),
+            const AppFieldLabel('Capacité (couverts)'),
             const SizedBox(height: 8),
             AppField(
               controller: capCtrl,
@@ -59,6 +67,9 @@ Future<TableWriteOutcome?> showTableForm({
               keyboardType: TextInputType.number,
               prefixIcon: Icons.people_outline_rounded,
             ),
+            const SizedBox(height: 6),
+            Text('Laissée vide, elle sera de 4 couverts.',
+                style: AppTextStyles.caption),
             const SizedBox(height: 20),
             AppPrimaryButton(
               label: 'Créer la table',
