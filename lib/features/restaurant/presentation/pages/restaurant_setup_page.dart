@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/database/app_database.dart';
+import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/services/restaurant_setup_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -23,15 +25,34 @@ import '../widgets/resto_surfaces.dart';
 /// L'étape est RECALCULÉE à chaque rendu depuis Hive (cf.
 /// [RestaurantSetupService]) : aucun drapeau à maintenir, donc aucun risque
 /// qu'elle mente. Supprimer sa dernière table ramène ici.
-class RestaurantSetupPage extends StatefulWidget {
+///
+/// ─── QUI PEUT FAIRE QUOI ───────────────────────────────────────────────────
+///
+/// Cet écran ENCHAÎNE des gestes qui, partout ailleurs, sont gardés : composer
+/// la carte l'est sur l'écran Menu (`canAddProduct`), enregistrer un achat l'est
+/// au hub Finances. Rassemblés ici sans garde, ils rouvraient en grand ce que
+/// ces deux écrans ferment : un serveur créait un plat, fixait son prix, et
+/// inscrivait une dépense dans la comptabilité de l'établissement.
+///
+/// La page reste OUVERTE à tout membre — elle dit où en est l'établissement,
+/// et c'est une information de service. Ce sont les ÉTAPES qui portent les
+/// droits. Même parti pris que l'écran Menu : la porte est ouverte, les gestes
+/// sont gardés.
+///
+/// Les permissions sont celles des écrans d'origine, jamais `isShopAdmin` : un
+/// employé à qui le gérant a délégué `inventoryWrite` compose la carte ici
+/// comme il la compose au Menu. Un droit accordé ne doit pas dépendre de
+/// l'écran par lequel on passe.
+class RestaurantSetupPage extends ConsumerStatefulWidget {
   final String shopId;
   const RestaurantSetupPage({super.key, required this.shopId});
 
   @override
-  State<RestaurantSetupPage> createState() => _RestaurantSetupPageState();
+  ConsumerState<RestaurantSetupPage> createState() =>
+      _RestaurantSetupPageState();
 }
 
-class _RestaurantSetupPageState extends State<RestaurantSetupPage> {
+class _RestaurantSetupPageState extends ConsumerState<RestaurantSetupPage> {
   late final OnDataChanged _listener;
 
   @override
@@ -67,6 +88,14 @@ class _RestaurantSetupPageState extends State<RestaurantSetupPage> {
       context.push('/shop/${widget.shopId}/restaurant/tables');
 
   Future<void> _addDish() async {
+    // Filet, en plus du bouton qui n'est pas rendu : une méthode de State
+    // reste appelable autrement que par son bouton (évolution du rendu,
+    // raccourci, appel direct). La règle vit donc AUSSI au plus près du geste
+    // — c'est ce qui manquait ici.
+    if (!RestaurantSetupStep.needsMenuItem
+        .allowedFor(ref.read(permissionsProvider(widget.shopId)))) {
+      return;
+    }
     // `requireIngredient` n'est posé QUE sur ce parcours : ailleurs, un plat
     // sans ingrédient est parfaitement légitime (une bière, une bouteille
     // d'eau). L'exiger partout rendrait ces articles impossibles à créer.
@@ -81,6 +110,12 @@ class _RestaurantSetupPageState extends State<RestaurantSetupPage> {
   }
 
   Future<void> _recordCosts() async {
+    // Même filet que `_addDish` : une dépense engage la comptabilité de
+    // l'établissement, elle ne doit pas dépendre du seul rendu d'un bouton.
+    if (!RestaurantSetupStep.needsIngredientCost
+        .allowedFor(ref.read(permissionsProvider(widget.shopId)))) {
+      return;
+    }
     final pending =
         RestaurantSetupService.ingredientsWithoutCost(widget.shopId);
     if (pending.isEmpty) return;
@@ -113,6 +148,13 @@ class _RestaurantSetupPageState extends State<RestaurantSetupPage> {
     final dishDone = tableDone && step != RestaurantSetupStep.needsMenuItem;
     final pendingCosts =
         RestaurantSetupService.ingredientsWithoutCost(widget.shopId);
+    // Droits des étapes : définis une seule fois, à côté du calcul du parcours
+    // (cf. `RestaurantSetupStep.allowedFor`).
+    final perms = ref.watch(permissionsProvider(widget.shopId));
+    final canComposeMenu =
+        RestaurantSetupStep.needsMenuItem.allowedFor(perms);
+    final canRecordCosts =
+        RestaurantSetupStep.needsIngredientCost.allowedFor(perms);
 
     return AppScaffold(
       shopId: widget.shopId,
@@ -141,6 +183,8 @@ class _RestaurantSetupPageState extends State<RestaurantSetupPage> {
             ),
           ),
           const SizedBox(height: 22),
+          // Étape 1 volontairement ouverte à tout membre — le pourquoi est
+          // dans `RestaurantSetupStep.allowedFor`, avec les deux autres.
           _SetupStepCard(
             rank: 1,
             title: 'Créer une table',
@@ -167,6 +211,10 @@ class _RestaurantSetupPageState extends State<RestaurantSetupPage> {
             actionLabel: 'Créer mon premier plat',
             actionIcon: Icons.restaurant_menu_rounded,
             onAction: _addDish,
+            lockedNote: canComposeMenu
+                ? null
+                : 'Réservé au gérant : c\'est lui qui compose la carte et '
+                    'fixe les prix.',
           ),
           const SizedBox(height: 12),
           _SetupStepCard(
@@ -183,6 +231,10 @@ class _RestaurantSetupPageState extends State<RestaurantSetupPage> {
                 : 'Renseigner mon achat',
             actionIcon: Icons.receipt_long_outlined,
             onAction: _recordCosts,
+            lockedNote: canRecordCosts
+                ? null
+                : 'Réservé au gérant : lui seul enregistre ce que les '
+                    'ingrédients ont coûté.',
           ),
         ],
       ),
@@ -201,6 +253,16 @@ class _SetupStepCard extends StatelessWidget {
   final IconData actionIcon;
   final VoidCallback onAction;
 
+  /// Renseigné = l'utilisateur n'a pas le droit de faire cette étape. Le
+  /// bouton cède alors la place à cette phrase.
+  ///
+  /// Une PHRASE et pas un bouton grisé : une option désactivée invite à
+  /// demander pourquoi elle l'est, alors qu'elle ne le dira jamais. L'étape,
+  /// elle, reste affichée — un serveur doit pouvoir lire où en est
+  /// l'établissement, et la masquer ferait mentir le « 3 étapes » que deux
+  /// personnes doivent lire à l'identique.
+  final String? lockedNote;
+
   const _SetupStepCard({
     required this.rank,
     required this.title,
@@ -210,6 +272,7 @@ class _SetupStepCard extends StatelessWidget {
     required this.actionLabel,
     required this.actionIcon,
     required this.onAction,
+    this.lockedNote,
   });
 
   @override
@@ -265,12 +328,27 @@ class _SetupStepCard extends StatelessWidget {
           Text(description, style: AppTextStyles.caption),
           if (active) ...[
             const SizedBox(height: 14),
-            AppPrimaryButton(
-              label: actionLabel,
-              icon: actionIcon,
-              fullWidth: true,
-              onTap: onAction,
-            ),
+            if (lockedNote == null)
+              AppPrimaryButton(
+                label: actionLabel,
+                icon: actionIcon,
+                fullWidth: true,
+                onTap: onAction,
+              )
+            else
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.lock_outline_rounded,
+                      size: 15, color: cs.onSurfaceVariant),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(lockedNote!,
+                        style: AppTextStyles.caption
+                            .copyWith(color: cs.onSurfaceVariant)),
+                  ),
+                ],
+              ),
           ],
         ],
       ),

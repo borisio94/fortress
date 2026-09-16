@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 
 import '../../features/restaurant/domain/entities/ingredient.dart';
+import '../permisions/app_permissions.dart';
 import '../storage/local_storage_service.dart';
 import 'daily_expense_service.dart';
 import 'ingredient_service.dart';
@@ -34,6 +35,35 @@ enum RestaurantSetupStep {
   complete;
 
   bool get isComplete => this == RestaurantSetupStep.complete;
+
+  /// L'utilisateur a-t-il le droit de FAIRE cette étape ?
+  ///
+  /// L'écran de mise en route enchaîne des gestes gardés ailleurs : composer la
+  /// carte l'est sur l'écran Menu, enregistrer un achat l'est au hub Finances.
+  /// Rassemblés dans un parcours d'accueil sans garde, ils rouvraient les deux
+  /// à n'importe quel membre — un serveur créait un plat, fixait son prix et
+  /// inscrivait une dépense dans la comptabilité de l'établissement.
+  ///
+  /// La règle vit ICI, à côté du calcul des étapes, et non dans le widget :
+  /// l'écran l'applique pour décider s'il montre un bouton, et les actions
+  /// elles-mêmes la revérifient avant d'ouvrir leur feuille. Deux endroits, une
+  /// seule définition — recopiée, elle aurait fini par diverger, et c'est
+  /// précisément en divergeant que le trou est apparu.
+  ///
+  /// Les permissions sont celles des écrans d'origine, JAMAIS `isShopAdmin` :
+  /// un employé à qui le gérant a délégué `inventoryWrite` compose la carte au
+  /// Menu ; il doit la composer ici aussi. Un droit accordé ne peut pas
+  /// dépendre de l'écran par lequel on passe.
+  ///
+  /// Créer une table reste ouvert à tout membre, à dessein : le Plan de salle,
+  /// vers lequel cette étape ne fait que renvoyer, ne la garde pas non plus. La
+  /// fermer ici rendrait ce parcours plus strict que l'écran qu'il ouvre.
+  bool allowedFor(AppPermissions perms) => switch (this) {
+        RestaurantSetupStep.needsTable => true,
+        RestaurantSetupStep.needsMenuItem => perms.canAddProduct,
+        RestaurantSetupStep.needsIngredientCost => perms.canManageExpenses,
+        RestaurantSetupStep.complete => true,
+      };
 
   /// Rang de l'étape (1 à 3), pour le stepper.
   int get index1 => switch (this) {

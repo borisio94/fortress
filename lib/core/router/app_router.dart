@@ -334,10 +334,17 @@ String? _restaurantGuard(Ref ref, GoRouterState s, {bool adminOnly = false}) {
   // une contrainte : elle empêchait d'explorer l'application avant d'avoir
   // saisi quoi que ce soit, et enfermait quiconque voulait simplement regarder.
   //
-  // L'accompagnement subsiste, mais il PROPOSE au lieu d'imposer : l'entrée
-  // « Configuration » au menu et la bannière du tableau de bord restent
-  // visibles tant qu'il y a quelque chose à faire. Tout le reste est
-  // accessible dès la première connexion.
+  // L'accompagnement subsiste, mais il PROPOSE au lieu d'imposer : la bannière
+  // du tableau de bord et la carte de progression de l'écran Menu mènent à la
+  // configuration tant qu'il reste quelque chose à faire. Tout le reste est
+  // accessible dès la première connexion. (Il n'y a PAS d'entrée « Configuration »
+  // au menu, contrairement à ce que disait cette note.)
+  //
+  // `/restaurant/setup` reste donc ouverte à tout membre, À DESSEIN : elle dit
+  // où en est l'établissement, ce qui est une information de service. Ce sont
+  // ses ÉTAPES qui portent les droits — `canAddProduct` pour composer la carte,
+  // `canManageExpenses` pour les achats. La garder ici en `adminOnly` aurait
+  // écarté l'employé à qui le gérant a justement délégué `inventoryWrite`.
   if (!adminOnly) return null;
   final perms = ref.read(permissionsProvider(id));
   // On ne renvoie que si l'on SAIT que l'utilisateur est un membre non-admin.
