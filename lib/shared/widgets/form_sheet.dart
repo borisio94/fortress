@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_text_styles.dart';
-import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
 
 /// Affiche un bottom sheet de **formulaire** verrouillé : ne se ferme pas
 /// par tap-outside ni par swipe-down. La seule façon de le fermer est de
@@ -15,21 +14,26 @@ Future<T?> showFormSheet<T>({
   Color? backgroundColor,
   ShapeBorder? shape,
 }) {
-  // En mode restaurant, la feuille devient translucide pour laisser deviner le
-  // décor de salle, comme le panier. Ailleurs : surface pleine du thème.
-  final resto = restoDecorActive;
+  // FOND PLEIN, EN RESTAURATION COMME AILLEURS.
+  //
+  // La feuille était translucide en mode restaurant, « pour laisser deviner le
+  // décor de salle ». Mais ce qui passe derrière une feuille, ce n'est pas le
+  // décor : c'est la PAGE. On lisait au travers, sur toute la hauteur, le texte
+  // et les boutons de l'écran d'en dessous — deux interfaces superposées, avec
+  // deux boutons pleins presque au même endroit.
+  //
+  // Le voile de la barrière était allégé à 0,30 pour la même raison, ce qui
+  // n'arrangeait rien : le peu qui traversait n'était même pas assombri. Retour
+  // au défaut Material.
+  //
+  // Hors restauration, rien ne change : c'était déjà la surface pleine.
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: isScrollControlled,
     isDismissible: false,
     enableDrag: false,
-    backgroundColor: backgroundColor ??
-        (resto
-            ? restoModalFill(context)
-            : Theme.of(context).colorScheme.surface),
-    // Voile allégé sous la feuille : au défaut Material (0,54) le décor était
-    // écrasé et la translucidité de la feuille n'aurait rien montré.
-    barrierColor: resto ? Colors.black.withValues(alpha: 0.30) : null,
+    backgroundColor:
+        backgroundColor ?? Theme.of(context).colorScheme.surface,
     shape: shape ??
         const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),

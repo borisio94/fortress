@@ -55,6 +55,19 @@ Future<bool?> showDishForm({
           requireIngredient: requireIngredient),
     );
 
+/// Côté de la vignette photo. Carré : une photo de plat se cadre au centre, et
+/// un carré ne laisse pas croire qu'on attend une image en paysage.
+const double _kPhotoTile = 88;
+
+/// Placeholder du formulaire, remonté d'un cran de contraste.
+///
+/// `AppTextStyles.inputHint` est en `textHint`, qui vaut `slate-500` en mode
+/// sombre : sur le fond d'une feuille, « Poulet DG » et « 3500 » se lisaient
+/// comme un champ désactivé — on n'ose pas écrire dans un champ qui a l'air
+/// éteint. Getter et non constante : la couleur est adaptative clair/sombre.
+TextStyle get _kHintStyle =>
+    AppTextStyles.inputHint.copyWith(color: AppColors.textSecondary);
+
 /// Saisie d'un plat — version courte du formulaire produit.
 ///
 /// Cinq champs visibles (photo, nom, catégorie, prix, description), le reste
@@ -657,48 +670,77 @@ class _DishFormSheetState extends State<DishFormSheet> {
   /// [height] : la vignette est nettement plus haute à côté des champs
   /// (écran large) qu'empilée au-dessus d'eux — sinon elle laissait une bande
   /// vide sous elle, la colonne de droite étant bien plus haute.
-  Widget _photoPicker(BuildContext context, {double height = 160}) {
+  /// Vignette photo — carré de [_kPhotoTile], bordure pointillée quand elle est
+  /// vide.
+  ///
+  /// Elle occupait 190 px de large sur 210 de haut, soit le tiers de la feuille
+  /// pour un ornement facultatif : le prix, lui, arrivait sous la ligne de
+  /// flottaison. Réduite à une vignette, elle laisse la place aux deux champs
+  /// obligatoires.
+  ///
+  /// Le POINTILLÉ dit « à remplir » sans écrire un mot de plus — un trait plein
+  /// se lit comme un cadre vide, et c'est ainsi que la photo passait pour une
+  /// image qui n'a pas chargé.
+  Widget _photoPicker(BuildContext context) {
     final theme = Theme.of(context);
     final sem = theme.semantic;
     final cs = theme.colorScheme;
-    return InkWell(
-                onTap: _pickImage,
+    final filled = _imageBytes != null || _existingImageUrl != null;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          onTap: _pickImage,
+          borderRadius: BorderRadius.circular(12),
+          child: _DashedBorder(
+            // Une fois la photo posée, le pointillé n'a plus rien à demander.
+            enabled: !filled,
+            color: sem.borderSubtle,
+            radius: 12,
+            child: Container(
+              width: _kPhotoTile,
+              height: _kPhotoTile,
+              decoration: BoxDecoration(
+                color: sem.trackMuted,
                 borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  width: 190,
-                  height: height,
-                  decoration: BoxDecoration(
-                    color: sem.trackMuted,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: sem.borderSubtle),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: _imageBytes != null
-                      ? Image.memory(_imageBytes!, fit: BoxFit.cover)
-                      : (_existingImageUrl != null
-                          ? ProductImageCard(
-                              imageUrl: _existingImageUrl,
-                              fillParent: true,
-                              borderRadius: BorderRadius.zero,
-                            )
-                          : Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.photo_camera_outlined,
-                                    size: 26,
-                                    color: cs.onSurface
-                                        .withValues(alpha: 0.45)),
-                                const SizedBox(height: 6),
-                                Text('Ajouter une photo',
-                                    style: AppTextStyles.caption),
-                              ],
-                            )),
+                border: filled
+                    ? Border.all(color: sem.borderSubtle)
+                    : null,
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: _imageBytes != null
+                  ? Image.memory(_imageBytes!, fit: BoxFit.cover)
+                  : (_existingImageUrl != null
+                      ? ProductImageCard(
+                          imageUrl: _existingImageUrl,
+                          fillParent: true,
+                          borderRadius: BorderRadius.zero,
+                        )
+                      : Icon(Icons.photo_camera_outlined,
+                          size: 24,
+                          color: cs.onSurface.withValues(alpha: 0.45))),
+            ),
+          ),
         ),
+        const SizedBox(height: 6),
+        SizedBox(
+          width: _kPhotoTile,
+          child: Text('Photo',
+              textAlign: TextAlign.center,
+              style: AppTextStyles.microSecondary),
+        ),
+      ],
     );
   }
 
-  /// Champs d'identité du plat : nom, catégorie, secteur, prix. Extraits pour
-  /// pouvoir être rendus à droite de la photo.
+  /// Les DEUX champs obligatoires du plat, et eux seuls : nom puis prix.
+  ///
+  /// La catégorie et le secteur les suivaient ici même. Le prix arrivait donc en
+  /// quatrième position, alors que c'est — avec le nom — tout ce qu'il faut pour
+  /// mettre un plat à la carte. La catégorie est descendue en pleine largeur
+  /// sous ce bloc, le secteur dans le repli.
   List<Widget> _identityFields(BuildContext context) {
     return [
             // ── Nom ──────────────────────────────────────────────────
@@ -707,86 +749,26 @@ class _DishFormSheetState extends State<DishFormSheet> {
             AppField(
               controller: _nameCtrl,
               hint: 'Poulet DG',
+              hintStyle: _kHintStyle,
               autofocus: !_isEdit,
               prefixIcon: Icons.restaurant_rounded,
+              // Le champ porte lui-même l'avertissement : un message qui flotte
+              // sous un champ d'allure normale ne dit pas lequel il concerne.
+              borderColor:
+                  _dupName != null ? Theme.of(context).semantic.warning : null,
             ),
-            if (_dupName != null) ...[
-              const SizedBox(height: 7),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.info_outline_rounded,
-                      size: 14, color: Theme.of(context).semantic.warning),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      '« $_dupName » est déjà à la carte. Deux plats de même '
-                      'nom partagent le coût de leurs ingrédients et se '
-                      'confondent dans les rapports.',
-                      style: AppTextStyles.caption.copyWith(
-                          color: Theme.of(context).semantic.warning),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+            if (_dupName != null) _DupNameNotice(name: _dupName!),
             const SizedBox(height: 16),
 
-            // ── Catégorie ────────────────────────────────────────────
-            const AppFieldLabel('Catégorie', required: true),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final c in _categories)
-                  _Chip(
-                    label: c,
-                    selected: _category == c,
-                    onTap: () => setState(() => _category = c),
-                  ),
-                _Chip(
-                  label: '+ Nouvelle',
-                  selected: false,
-                  onTap: _addCategory,
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // ── Secteur (activité connexe) ───────────────────────────
-            // Masqué tant qu'aucune activité n'existe : une carte simple
-            // n'a pas à porter une notion de secteur inutilisée. Se crée
-            // depuis Finances › Activités.
-            if (_activities.isNotEmpty) ...[
-              const AppFieldLabel('Secteur'),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _Chip(
-                    label: 'Aucun',
-                    selected: _activityId == null,
-                    onTap: () => setState(() => _activityId = null),
-                  ),
-                  for (final a in _activities)
-                    _Chip(
-                      label: a.name,
-                      selected: _activityId == a.id,
-                      onTap: () => setState(() => _activityId = a.id),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // ── Prix ─────────────────────────────────────────────────
-            const AppFieldLabel('Prix', required: true),
+            // ── Prix de vente ────────────────────────────────────────
+            // Juste sous le nom : avec lui, c'est tout ce qu'il faut pour
+            // mettre un plat à la carte.
+            const AppFieldLabel('Prix de vente', required: true),
             const SizedBox(height: 8),
             AppField(
               controller: _priceCtrl,
               hint: '3500',
+              hintStyle: _kHintStyle,
               numbersOnly: true,
               keyboardType: TextInputType.number,
               prefixIcon: Icons.payments_outlined,
@@ -796,8 +778,80 @@ class _DishFormSheetState extends State<DishFormSheet> {
                     style: AppTextStyles.bodySmSecondary),
               ),
             ),
-            const SizedBox(height: 16),
     ];
+  }
+
+  /// Catégorie — sur toute la largeur, sous le bloc d'identité.
+  ///
+  /// Deux états, parce qu'un champ obligatoire et vide ne peut pas se contenter
+  /// d'une puce « + Nouvelle » posée seule : rien ne disait qu'il fallait agir,
+  /// ni que l'enregistrement serait refusé sans elle.
+  Widget _categoryField(BuildContext context) {
+    if (_categories.isEmpty) {
+      return _InfoBanner(
+        text: 'Aucune catégorie. Créez-en une pour ranger vos plats.',
+        actionLabel: 'Nouvelle',
+        onAction: _addCategory,
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const AppFieldLabel('Catégorie', required: true),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final c in _categories)
+              _Chip(
+                label: c,
+                selected: _category == c,
+                onTap: () => setState(() => _category = c),
+              ),
+            // Pointillée : elle n'est pas une catégorie de plus, elle en
+            // fabrique une. Le trait discontinu suffit à le dire.
+            _Chip(
+              label: '+ Nouvelle',
+              selected: false,
+              dashed: true,
+              onTap: _addCategory,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// Secteur d'activité — descendu dans le repli.
+  ///
+  /// Il était masqué en silence quand la boutique n'a aucune activité : on ne
+  /// pouvait donc pas savoir que ce réglage existe, ni où le créer. Il annonce
+  /// désormais où ça se passe.
+  Widget _activityField(BuildContext context) {
+    if (_activities.isEmpty) {
+      return Text(
+          'Aucun secteur défini. Ils se créent dans Finances → Activités, pour '
+          'séparer les chiffres du bar et de la cuisine.',
+          style: AppTextStyles.caption);
+    }
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _Chip(
+          label: 'Aucun',
+          selected: _activityId == null,
+          onTap: () => setState(() => _activityId = null),
+        ),
+        for (final a in _activities)
+          _Chip(
+            label: a.name,
+            selected: _activityId == a.id,
+            onTap: () => setState(() => _activityId = a.id),
+          ),
+      ],
+    );
   }
 
   @override
@@ -894,12 +948,18 @@ class _DishFormSheetState extends State<DishFormSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ══ BLOC 1 — identité du plat ═════════════════════════════
-            // Photo à gauche, nom / catégorie / secteur / prix à droite.
-            // Sous 560 px de large la colonne de droite deviendrait
-            // illisible : on empile alors comme avant.
+            // Vignette photo à gauche, les DEUX champs obligatoires à droite :
+            // nom puis prix. Rien d'autre — la catégorie suit en pleine
+            // largeur, le secteur est descendu dans le repli. Les deux champs
+            // sans lesquels l'enregistrement est refusé tiennent ainsi dans le
+            // premier regard.
+            //
+            // Le seuil de 560 px est conservé : sous cette largeur, une colonne
+            // de champs à côté d'une vignette redevient trop étroite pour un
+            // prix et un nom, et l'on empile.
             LayoutBuilder(builder: (_, c) {
               final side = c.maxWidth >= 560;
-              final photo = _photoPicker(context, height: side ? 210 : 160);
+              final photo = _photoPicker(context);
               final fields = Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -925,6 +985,13 @@ class _DishFormSheetState extends State<DishFormSheet> {
               );
             }),
 
+            // ── Catégorie ────────────────────────────────────────────
+            // Pleine largeur, sous le bloc : une liste de puces coincée dans
+            // une demi-colonne se replie sur trois lignes dès la troisième
+            // catégorie.
+            const SizedBox(height: 16),
+            _categoryField(context),
+
             // ══ BLOC 2 — description et réglages ══════════════════════
             const SizedBox(height: 22),
             Divider(height: 1, color: sem.borderSubtle),
@@ -936,6 +1003,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
             AppField(
               controller: _descCtrl,
               hint: 'Poulet, plantain, légumes sautés…',
+              hintStyle: _kHintStyle,
               maxLines: 2,
             ),
 
@@ -954,69 +1022,81 @@ class _DishFormSheetState extends State<DishFormSheet> {
                         size: 20,
                         color: cs.onSurface),
                     const SizedBox(width: 6),
-                    Text('Plus de réglages',
+                    // Le titre DIT CE QU'IL CACHE. « Plus de réglages »
+                    // n'annonçait rien : on l'ouvrait pour voir, ou jamais.
+                    Text('Coût, stock et visibilité',
                         style: AppTextStyles.bodySmBold
                             .copyWith(color: cs.onSurface)),
                   ],
                 ),
               ),
             ),
+            // LISTE et non empilement de champs : chaque réglage porte son
+            // titre en gras et son explication dessous, séparés par un filet.
+            // En vrac, le coût matière — le moins important des cinq — était
+            // le plus visible, parce que seul lui avait la forme d'un champ.
             if (_advanced) ...[
-              const AppFieldLabel('Coût matière'),
-              const SizedBox(height: 8),
-              AppField(
-                controller: _costCtrl,
-                hint: '0',
-                numbersOnly: true,
-                keyboardType: TextInputType.number,
-                prefixIcon: Icons.savings_outlined,
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  const Expanded(child: AppFieldLabel('Note')),
-                  for (var i = 1; i <= 5; i++)
-                    InkWell(
-                      // Re-tap sur l'étoile active remet la note à zéro.
-                      onTap: () => setState(
-                          () => _rating = _rating == i ? 0 : i),
-                      child: Icon(
-                        i <= _rating
-                            ? Icons.star_rounded
-                            : Icons.star_border_rounded,
-                        size: 24,
-                        color: i <= _rating
-                            ? sem.warning
-                            : cs.onSurface.withValues(alpha: 0.3),
-                      ),
+              const SizedBox(height: 4),
+              _SettingTile(
+                title: 'Coût matière',
+                hint: 'Utilisé tant qu\'aucun ingrédient n\'est rattaché. '
+                    'Le coût réel le remplacera dès vos premiers achats.',
+                trailing: SizedBox(
+                  width: 132,
+                  child: AppField(
+                    controller: _costCtrl,
+                    hint: '0',
+                    hintStyle: _kHintStyle,
+                    numbersOnly: true,
+                    isDense: true,
+                    keyboardType: TextInputType.number,
+                    suffixIcon: Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Text(CurrencyFormatter.currentSymbol,
+                          style: AppTextStyles.bodySmSecondary),
                     ),
-                ],
+                  ),
+                ),
               ),
-              const SizedBox(height: 6),
-              _Toggle(
-                label: 'Suivi du stock',
-                hint: 'À activer pour les boissons en bouteille, '
-                    'pas pour un plat cuisiné',
-                value: _trackStock,
-                onChanged: (v) => setState(() => _trackStock = v),
+              _SettingTile(
+                title: 'Suivre le stock',
+                hint: 'Pour les boissons en bouteille, pas pour un plat '
+                    'cuisiné.',
+                trailing: Switch(
+                  value: _trackStock,
+                  onChanged: (v) => setState(() => _trackStock = v),
+                ),
               ),
-              _Toggle(
-                label: 'Disponible à la vente',
-                // Dit maintenant les DEUX effets : la vitrine publique filtre
-                // elle aussi sur ce drapeau, un plat décoché y disparaît.
-                hint: 'Décochez pour retirer de la carte et de la vitrine en '
-                    'ligne. Le plat est conservé et se retrouve depuis '
-                    '« plats retirés ».',
-                value: _isActive,
-                onChanged: (v) => setState(() => _isActive = v),
+              _SettingTile(
+                title: 'Proposer à la vente',
+                // Décrit le comportement RÉEL : le plat quitte la carte ET la
+                // vitrine (la page publique filtre aussi sur ce drapeau), et il
+                // se retrouve derrière le bandeau de l'écran Menu, nommé ici
+                // exactement comme il s'affiche là-bas.
+                hint: 'Décoché, le plat quitte la carte et la vitrine en '
+                    'ligne. Il reste accessible depuis « plats retirés de la '
+                    'vente », sur l\'écran Menu.',
+                trailing: Switch(
+                  value: _isActive,
+                  onChanged: (v) => setState(() => _isActive = v),
+                ),
               ),
-              _Toggle(
-                label: 'Afficher sur ma vitrine en ligne',
-                hint: 'Page publique de votre établissement : photo, nom et '
-                    'prix visibles de tous. Décochez pour le garder à la '
-                    'carte de la salle uniquement.',
-                value: _isVisibleWeb,
-                onChanged: (v) => setState(() => _isVisibleWeb = v),
+              _SettingTile(
+                title: 'Afficher sur ma vitrine en ligne',
+                hint: 'La photo et le prix seront visibles publiquement.',
+                trailing: Switch(
+                  value: _isVisibleWeb,
+                  onChanged: (v) => setState(() => _isVisibleWeb = v),
+                ),
+              ),
+              // Le SECTEUR descend ici : il ne concerne que les
+              // établissements qui séparent leurs chiffres (bar / cuisine), et
+              // il encombrait le bloc d'identité de tous les autres.
+              _SettingTile(
+                title: 'Secteur',
+                hint: 'Sépare les chiffres du bar et de la cuisine dans vos '
+                    'rapports.',
+                below: _activityField(context),
               ),
             ],
 
@@ -1063,28 +1143,49 @@ class _DishFormSheetState extends State<DishFormSheet> {
               Text(
                   'Aucun ingrédient dans votre catalogue. Créez-en un pour '
                   'commencer à suivre le coût de ce plat.',
-                  style: AppTextStyles.captionHint)
+                  style: AppTextStyles.caption)
             else
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
                   for (final ing in _catalog)
+                    // SUCCESS plein + coche : ce sont des cases cochées, pas
+                    // un choix parmi d'autres. À 12 % d'accent et une bordure,
+                    // coché et non coché se ressemblaient trop pour qu'on voie
+                    // d'un coup d'œil ce que le plat contient.
                     _Chip(
                       label: ing.name,
                       selected:
                           _recipe.any((d) => d.ingredientId == ing.id),
+                      accent: Theme.of(context).semantic.success,
+                      selectedIcon: Icons.check_rounded,
                       onTap: () => _toggleIngredient(ing),
                     ),
                 ],
               ),
+            // BLOC À PART, sur une surface plus marquée : ces lignes ne sont
+            // pas une suite de champs du formulaire, ce sont les réglages des
+            // ingrédients qu'on vient de cocher juste au-dessus. Sans fond,
+            // elles flottaient sous les puces sans qu'on voie ce qui les lie.
             if (_recipe.isNotEmpty) ...[
               const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                decoration: BoxDecoration(
+                  color: sem.elevatedSurface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: sem.borderSubtle),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
               Text(
                   _hasSheetLine
                       ? 'Portions et quantités'
                       : 'Générosité des portions',
-                  style: AppTextStyles.caption),
+                  style: AppTextStyles.bodySmBold
+                      .copyWith(color: cs.onSurface)),
               const SizedBox(height: 2),
               Text(
                   _hasSheetLine
@@ -1095,8 +1196,8 @@ class _DishFormSheetState extends State<DishFormSheet> {
                           'gardent leur générosité de portion.'
                       : 'Laissez « Normale » sauf si ce plat en contient '
                           'nettement plus ou moins que vos autres plats.',
-                  style: AppTextStyles.captionHint),
-              const SizedBox(height: 8),
+                  style: AppTextStyles.caption),
+              const SizedBox(height: 10),
               for (final d in _recipe)
                 _PortionRow(
                   draft: d,
@@ -1115,23 +1216,27 @@ class _DishFormSheetState extends State<DishFormSheet> {
                     d.qty.dispose();
                   }),
                 ),
-              const SizedBox(height: 10),
-              _RecipeSummary(
-                cost: _allocatedCost,
-                price: double.tryParse(
-                        _priceCtrl.text.trim().replaceAll(',', '.')) ??
-                    0,
-                isNewDish: !_isEdit,
-              ),
-              // Tout décocher d'un coup — le ✕ de chaque ligne reste la voie
-              // normale pour en retirer UN.
-              Center(
-                child: TextButton.icon(
-                  onPressed: _saving ? null : _clearRecipe,
-                  icon: Icon(Icons.delete_sweep_outlined,
-                      size: 18, color: sem.danger),
-                  label: Text('Vider la composition',
-                      style: AppTextStyles.label.copyWith(color: sem.danger)),
+                    const SizedBox(height: 10),
+                    _RecipeSummary(
+                      cost: _allocatedCost,
+                      price: double.tryParse(
+                              _priceCtrl.text.trim().replaceAll(',', '.')) ??
+                          0,
+                      isNewDish: !_isEdit,
+                    ),
+                    // Tout décocher d'un coup — le ✕ de chaque ligne reste la
+                    // voie normale pour en retirer UN.
+                    Center(
+                      child: TextButton.icon(
+                        onPressed: _saving ? null : _clearRecipe,
+                        icon: Icon(Icons.delete_sweep_outlined,
+                            size: 18, color: sem.danger),
+                        label: Text('Vider la composition',
+                            style: AppTextStyles.label
+                                .copyWith(color: sem.danger)),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -1187,104 +1292,93 @@ class _DishFormSheetState extends State<DishFormSheet> {
 }
 
 /// Puce de sélection (catégorie ou groupe d'options).
+/// Puce de choix — sélectionnée en ACCENT PLEIN, sinon en simple contour.
+///
+/// L'état choisi se marquait par un fond d'accent à 12 % et une bordure : deux
+/// nuances de la même teinte, que l'œil doit comparer pour trancher. Sur une
+/// ligne de six catégories, on ne voyait plus laquelle était prise. Plein contre
+/// contour se lit sans comparer.
 class _Chip extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
 
+  /// Contour discontinu : la puce ne désigne pas un choix, elle en CRÉE un.
+  final bool dashed;
+
+  /// Teinte de l'état sélectionné. Défaut : la couleur du thème. Les
+  /// ingrédients d'une recette prennent `success` — ce sont des cases cochées,
+  /// pas un choix parmi d'autres.
+  final Color? accent;
+
+  /// Icône posée avant le libellé, une fois la puce sélectionnée.
+  final IconData? selectedIcon;
+
   const _Chip({
     required this.label,
     required this.selected,
     required this.onTap,
+    this.dashed = false,
+    this.accent,
+    this.selectedIcon,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final sem = theme.semantic;
+    final tint = accent ?? AppColors.primary;
+    // Noir ou blanc selon la teinte : un vert clair et un ambre ne portent pas
+    // le même texte. `estimateBrightnessForColor` évite de le deviner.
+    final onTint =
+        ThemeData.estimateBrightnessForColor(tint) == Brightness.dark
+            ? Colors.white
+            : Colors.black87;
+
+    final content = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (selected && selectedIcon != null) ...[
+          Icon(selectedIcon, size: 15, color: onTint),
+          const SizedBox(width: 6),
+        ],
+        Text(
+          label,
+          style: AppTextStyles.bodySm.copyWith(
+            color: selected ? onTint : theme.colorScheme.onSurface,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+
+    final box = AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+      decoration: BoxDecoration(
+        color: selected ? tint : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        // Le pointillé est peint par `_DashedBorder` : laisser AUSSI une
+        // bordure pleine ici dessinerait les deux l'une sur l'autre.
+        border: dashed
+            ? null
+            : Border.all(
+                color: selected ? tint : sem.borderSubtle,
+                width: selected ? 1.5 : 1,
+              ),
+      ),
+      child: content,
+    );
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.primary.withValues(alpha: 0.12)
-              : sem.trackMuted,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected ? AppColors.primary : sem.borderSubtle,
-            width: selected ? 1.5 : 1,
-          ),
-        ),
-        child: Text(
-          label,
-          style: AppTextStyles.bodySm.copyWith(
-            color: selected
-                ? AppColors.primary
-                : theme.colorScheme.onSurface,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-          ),
-        ),
-      ),
+      child: dashed
+          ? _DashedBorder(color: sem.borderSubtle, radius: 8, child: box)
+          : box,
     );
   }
 }
-
-/// Interrupteur avec libellé et explication.
-class _Toggle extends StatelessWidget {
-  final String label;
-  final String hint;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  const _Toggle({
-    required this.label,
-    required this.hint,
-    required this.value,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label,
-                    style: AppTextStyles.bodySmBold
-                        .copyWith(color: cs.onSurface)),
-                Text(hint, style: AppTextStyles.micro),
-              ],
-            ),
-          ),
-          Switch(value: value, onChanged: onChanged),
-        ],
-      ),
-    );
-  }
-}
-
-
-// ═══════════════════════════════════════════════════════════════════════
-//  COMPOSITION DU PLAT
-//
-//  Aucune quantité n'est saisie : on coche les ingrédients, et le coût de
-//  chacun est réparti entre les plats qui le portent au prorata des ventes
-//  (cf. `IngredientAllocationService`). Le poids de portion ne sert qu'à dire
-//  qu'une part est plus généreuse qu'une autre.
-// ═══════════════════════════════════════════════════════════════════════
-
-/// Lien plat ↔ ingrédient en cours d'édition (non encore persisté).
-///
-/// Mutable sur [portionWeight] seul : c'est la seule chose que l'écran fait
-/// varier, et recréer l'objet à chaque tap ferait perdre l'ordre de la liste.
 class _RecipeDraft {
   final String ingredientId;
   final String name;
@@ -1395,7 +1489,7 @@ class _PortionRow extends StatelessWidget {
                   decoration: InputDecoration(
                     isDense: true,
                     hintText: '0',
-                    hintStyle: AppTextStyles.inputHint,
+                    hintStyle: _kHintStyle,
                     contentPadding: const EdgeInsets.symmetric(
                         horizontal: 8, vertical: 8),
                     // Unité IMPOSÉE, jamais choisie : le module ne convertit
@@ -1890,6 +1984,238 @@ class _QuickIngredientSheetState extends State<_QuickIngredientSheet> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// BORDURE POINTILLÉE, peinte autour de [child].
+///
+/// Dit « à remplir » là où un trait plein dirait « vide ». Flutter n'a pas de
+/// `BorderStyle.dashed` : il faut peindre le chemin soi-même.
+///
+/// [enabled] à `false` rend le widget transparent — pratique pour une vignette
+/// qui perd son pointillé une fois la photo posée, sans changer d'arbre.
+class _DashedBorder extends StatelessWidget {
+  final Widget child;
+  final Color color;
+  final double radius;
+  final bool enabled;
+
+  const _DashedBorder({
+    required this.child,
+    required this.color,
+    required this.radius,
+    this.enabled = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!enabled) return child;
+    return CustomPaint(
+      foregroundPainter: _DashedPainter(color: color, radius: radius),
+      child: child,
+    );
+  }
+}
+
+class _DashedPainter extends CustomPainter {
+  final Color color;
+  final double radius;
+
+  const _DashedPainter({required this.color, required this.radius});
+
+  /// Tiret et espace. Des tirets courts sur un petit rayon donnent un pointillé
+  /// régulier ; plus longs, les angles arrondis les cassent en plein milieu.
+  static const double _dash = 4;
+  static const double _gap = 3.5;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+
+    final path = Path()
+      ..addRRect(RRect.fromRectAndRadius(
+        Offset.zero & size,
+        Radius.circular(radius),
+      ));
+
+    // Le chemin est parcouru métrique par métrique : c'est la seule façon de
+    // découper un tracé arrondi en segments de longueur égale.
+    for (final metric in path.computeMetrics()) {
+      var dist = 0.0;
+      while (dist < metric.length) {
+        final end = (dist + _dash).clamp(0.0, metric.length);
+        canvas.drawPath(metric.extractPath(dist, end), paint);
+        dist = end + _gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedPainter old) =>
+      old.color != color || old.radius != radius;
+}
+
+/// Avertissement de plat homonyme, sous le champ Nom.
+///
+/// Ton WARNING et non danger : ce n'est pas une erreur, l'enregistrement reste
+/// possible — deux plats de même nom sont parfois voulus. Le champ lui-même est
+/// bordé de la même teinte pendant que ce message est là (cf. `borderColor`
+/// d'`AppField`), pour qu'on sache lequel il concerne.
+class _DupNameNotice extends StatelessWidget {
+  final String name;
+
+  const _DupNameNotice({required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return Padding(
+      padding: const EdgeInsets.only(top: 7),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline_rounded, size: 14, color: sem.warning),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'Un plat nommé "$name" existe déjà à la carte.',
+              style: AppTextStyles.caption.copyWith(color: sem.warningText),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Bandeau d'information avec une action à droite.
+///
+/// Pour un champ obligatoire qu'on ne PEUT pas encore remplir : il ne suffit
+/// pas de proposer « + Nouvelle » au milieu de rien, il faut dire que c'est
+/// attendu. Fond d'accent atténué — on informe, on n'alarme pas.
+class _InfoBanner extends StatelessWidget {
+  final String text;
+  final String actionLabel;
+  final VoidCallback onAction;
+
+  const _InfoBanner({
+    required this.text,
+    required this.actionLabel,
+    required this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sem = theme.semantic;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: sem.brandSurface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline_rounded, size: 17, color: sem.brandText),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(text,
+                style:
+                    AppTextStyles.caption.copyWith(color: sem.brandText)),
+          ),
+          const SizedBox(width: 6),
+          TextButton(
+            onPressed: onAction,
+            // Hauteur explicite : le thème impose une largeur minimale infinie
+            // aux boutons, qui écraserait l'Expanded voisin.
+            style: TextButton.styleFrom(
+              minimumSize: const Size(0, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+            child: Text(actionLabel,
+                style: AppTextStyles.bodySmBold
+                    .copyWith(color: AppColors.primary)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Une ligne de la liste « Coût, stock et visibilité ».
+///
+/// Titre en gras, explication dessous, contrôle à droite — ou sous le texte
+/// quand le contrôle est large (`below`). Un filet fin sépare les lignes : il
+/// suffit à faire une liste, là où des cartes empilées feraient cinq blocs
+/// concurrents pour des réglages qu'on ne touche presque jamais.
+class _SettingTile extends StatelessWidget {
+  final String title;
+  final String hint;
+
+  /// Contrôle posé à droite du texte (interrupteur, petit champ).
+  final Widget? trailing;
+
+  /// Contrôle posé SOUS le texte, sur toute la largeur — pour ce qui ne tient
+  /// pas dans une marge droite, comme une rangée de puces.
+  final Widget? below;
+
+  const _SettingTile({
+    required this.title,
+    required this.hint,
+    this.trailing,
+    this.below,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sem = theme.semantic;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        border: Border(
+          // 0,5 px : un séparateur, pas un trait. À 1 px, cinq filets
+          // rapprochés dessinent une grille et attirent l'œil sur des réglages
+          // secondaires.
+          top: BorderSide(color: sem.borderSubtle, width: 0.5),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: AppTextStyles.bodySmBold
+                            .copyWith(color: theme.colorScheme.onSurface)),
+                    const SizedBox(height: 2),
+                    Text(hint, style: AppTextStyles.caption),
+                  ],
+                ),
+              ),
+              if (trailing != null) ...[
+                const SizedBox(width: 12),
+                trailing!,
+              ],
+            ],
+          ),
+          if (below != null) ...[
+            const SizedBox(height: 10),
+            below!,
+          ],
+        ],
       ),
     );
   }

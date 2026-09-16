@@ -215,14 +215,12 @@ Color restoGlassBorder(BuildContext context) =>
 /// pas remonter jusqu'à la boutique.
 bool restoDecorActive = false;
 
-/// Fond des surfaces MODALES en mode restaurant (feuilles, dialogues).
-///
-/// Plus opaque que les panneaux de contenu : une boîte de dialogue demande une
-/// décision, son texte doit primer sur le décor.
-Color restoModalFill(BuildContext context) =>
-    Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFF0B0F14).withValues(alpha: 0.90)
-        : Colors.white.withValues(alpha: 0.93);
+// `restoModalFill` a été SUPPRIMÉ : les surfaces modales du mode restaurant
+// (feuilles, dialogues) sont désormais OPAQUES, comme partout ailleurs dans
+// l'app. Même translucide à 90 %, une feuille laissait lire la page en dessous
+// — et ce n'était pas le décor de salle qui transparaissait, c'était l'écran
+// que la feuille recouvrait. Le fond se prend maintenant dans le thème, une
+// fois pour toutes, dans `showFormSheet`.
 
 /// Rend une couleur d'incrustation OPAQUE en la composant sur la surface du
 /// thème.
