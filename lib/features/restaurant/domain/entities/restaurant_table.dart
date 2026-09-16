@@ -94,6 +94,14 @@ class RestaurantTable {
   final String? reservationName;
   final DateTime createdAt;
 
+  /// Horodatage de suppression, `null` tant que la table est en service.
+  ///
+  /// SUPPRESSION DOUCE (hotfix_180) : la ligne survit, l'app la filtre à la
+  /// lecture. Une table est référencée par `orders.table_id` sur tout
+  /// l'historique des commandes qu'elle a servies — l'effacer pour de bon
+  /// laissait ces commandes pointer vers rien, sans recours.
+  final DateTime? deletedAt;
+
   const RestaurantTable({
     required this.id,
     required this.shopId,
@@ -107,9 +115,13 @@ class RestaurantTable {
     this.openedAt,
     this.reservationTime,
     this.reservationName,
+    this.deletedAt,
   });
 
   bool get isFree => status == RestaurantTableStatus.libre;
+
+  /// Table retirée du plan de salle. Filtrée par `tablesForShop`.
+  bool get isDeleted => deletedAt != null;
 
   /// Sentinelle interne : distingue « paramètre non fourni » de « mis à null »
   /// dans [copyWith]. Sans ça, impossible de libérer une table (remettre
@@ -121,6 +133,7 @@ class RestaurantTable {
     int? number,
     int? capacity,
     RestaurantTableStatus? status,
+    Object? deletedAt = _unset,
     Object? covers = _unset,
     Object? currentOrderId = _unset,
     Object? openedAt = _unset,
@@ -134,6 +147,8 @@ class RestaurantTable {
         name: name ?? this.name,
         capacity: capacity ?? this.capacity,
         status: status ?? this.status,
+        deletedAt:
+            deletedAt == _unset ? this.deletedAt : deletedAt as DateTime?,
         covers: covers == _unset ? this.covers : covers as int?,
         currentOrderId: currentOrderId == _unset
             ? this.currentOrderId
@@ -168,6 +183,7 @@ class RestaurantTable {
         'opened_at': openedAt?.toUtc().toIso8601String(),
         'reservation_time': reservationTime?.toUtc().toIso8601String(),
         'reservation_name': reservationName,
+        'deleted_at': deletedAt?.toUtc().toIso8601String(),
         'created_at': createdAt.toUtc().toIso8601String(),
       };
 
@@ -193,6 +209,10 @@ class RestaurantTable {
       openedAt: parseDate(m['opened_at']),
       reservationTime: parseDate(m['reservation_time']),
       reservationName: m['reservation_name']?.toString(),
+      // Pas de bump de `schema_version` pour cet ajout : la clé est optionnelle
+      // et son absence se lit `null`, c'est-à-dire « vivante » — exactement ce
+      // que valent les lignes écrites avant hotfix_180.
+      deletedAt: parseDate(m['deleted_at']),
       createdAt: parseDate(m['created_at']) ?? DateTime.now(),
     );
   }

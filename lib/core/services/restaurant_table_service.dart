@@ -22,14 +22,22 @@ class RestaurantTableService {
 
   static String _tableId() => 'rt_${DateTime.now().microsecondsSinceEpoch}';
 
-  /// Tables de la boutique, triées par numéro croissant.
+  /// Tables VIVANTES de la boutique, triées par numéro croissant.
+  ///
+  /// Les tables supprimées sont écartées ici, et nulle part ailleurs : c'est le
+  /// point de passage de tout le plan de salle.
   static List<RestaurantTable> tablesForShop(String shopId) {
     try {
       final list = <RestaurantTable>[];
       for (final raw in _raw().values) {
         if (raw['shop_id']?.toString() != shopId) continue;
         try {
-          list.add(RestaurantTable.fromMap(Map<String, dynamic>.from(raw)));
+          final t = RestaurantTable.fromMap(Map<String, dynamic>.from(raw));
+          // Supprimée : la ligne survit (hotfix_180) mais quitte le plan de
+          // salle. Le passthrough la réécrit à chaque resync — c'est ici, et
+          // seulement ici, qu'elle est écartée.
+          if (t.isDeleted) continue;
+          list.add(t);
         } catch (_) {/* ligne corrompue : ignorée, pas de crash de la page */}
       }
       list.sort((a, b) => a.number.compareTo(b.number));
@@ -70,6 +78,11 @@ class RestaurantTableService {
     return (total: total, seated: seated, free: free < 0 ? 0 : free);
   }
 
+  /// Table par identifiant, SUPPRIMÉES COMPRISES.
+  ///
+  /// Volontairement non filtré : c'est par là qu'une commande de l'historique
+  /// retrouve le nom de la table qu'elle a occupée. Les écrans de service, eux,
+  /// passent par `tablesForShop`, qui écarte les supprimées.
   static RestaurantTable? tableById(String id) {
     try {
       final raw = _raw().get(id);
@@ -233,13 +246,26 @@ class RestaurantTableService {
     return reserved;
   }
 
-  static Future<void> deleteTable(String id, String shopId) async {
-    try {
-      await _raw().delete(id);
-    } catch (e) {
-      debugPrint('[Restaurant] deleteTable Hive err: $e');
+  /// Retire une table du plan de salle — SUPPRESSION DOUCE.
+  ///
+  /// La ligne n'est pas effacée : elle est marquée `deleted_at` et disparaît de
+  /// `tablesForShop`. Une table est référencée par `orders.table_id` sur tout
+  /// l'historique des commandes qu'elle a servies, et la suppression dure ne se
+  /// rattrapait pas — `box.delete` en local, `DELETE` en base, sans tombstone.
+  ///
+  /// Le numéro redevient attribuable immédiatement : l'index unique est
+  /// partiel depuis hotfix_180 (`WHERE deleted_at IS NULL`), et `nextNumber`
+  /// ne compte que les tables vivantes.
+  ///
+  /// Renvoie `false` si la table est introuvable en local — l'appelant ne doit
+  /// alors pas annoncer une suppression qui n'a pas eu lieu.
+  static Future<bool> deleteTable(String id, String shopId) async {
+    final table = tableById(id);
+    if (table == null) {
+      debugPrint('[Restaurant] deleteTable: table $id introuvable');
+      return false;
     }
-    AppDatabase.bgDelete('restaurant_tables', val: id);
-    AppDatabase.notifyListeners('restaurant_tables', shopId);
+    await _persist(table.copyWith(deletedAt: DateTime.now()));
+    return true;
   }
 }

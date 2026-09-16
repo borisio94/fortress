@@ -114,6 +114,31 @@ class RestaurantOrderService {
     );
   }
 
+  /// TOUT ce qu'une table a servi depuis sa création — commandes clôturées
+  /// comprises.
+  ///
+  /// À ne pas confondre avec [tableSummary], qui ne compte que les comptes
+  /// ENCORE ouverts. Celui-ci sert à dire, avant de supprimer une table, ce
+  /// qu'elle a représenté : une table libre peut n'avoir jamais servi, ou avoir
+  /// porté deux cents additions.
+  ///
+  /// Les commandes supprimées sont exclues ; les annulées comptent — elles ont
+  /// bel et bien eu lieu à cette table.
+  static int servedCountFor(RestaurantTable table) {
+    try {
+      var n = 0;
+      for (final o in _ds.getOrders(table.shopId)) {
+        if (o.tableId != table.id) continue;
+        if (o.isDeleted) continue;
+        n++;
+      }
+      return n;
+    } catch (e) {
+      debugPrint('[Restaurant] servedCountFor err: $e');
+      return 0;
+    }
+  }
+
   /// Commande en cours d'une table, ou `null` si la table n'en a pas.
   ///
   /// Résout d'abord par `currentOrderId`, puis retombe sur une recherche par

@@ -383,17 +383,43 @@ class _RestaurantTablesPageState
           'Impossible : ${table.name} est en cours de service.');
       return;
     }
-    await AppConfirmDialog.show(
+    // Ce que la table a servi, dit AVANT de la retirer. Une table libre peut
+    // n'avoir jamais servi, ou avoir porté deux cents additions : la même
+    // question posée sans ce chiffre appelle la même réponse dans les deux cas.
+    final served = RestaurantOrderService.servedCountFor(table);
+    final ok = await AppConfirmDialog.show(
       context: context,
       icon: Icons.delete_outline_rounded,
       iconColor: Theme.of(context).semantic.danger,
       title: 'Supprimer ${table.name} ?',
+      body: Text(
+        served == 0
+            ? '${table.name} n\'a encore servi aucune commande.\n\n'
+                'Elle quitte le plan de salle ; son numéro redevient '
+                'disponible.'
+            : '${table.name} a servi $served commande'
+                '${served > 1 ? 's' : ''}.\n\n'
+                'Elle quitte le plan de salle, mais son historique reste '
+                'intact : les commandes gardent son nom. Son numéro redevient '
+                'disponible.',
+      ),
       cancelLabel: 'Annuler',
       confirmLabel: 'Supprimer',
       confirmColor: Theme.of(context).semantic.danger,
-      onConfirm: () =>
-          RestaurantTableService.deleteTable(table.id, widget.shopId),
+      onConfirm: () {},
     );
+    if (ok != true) return;
+    final removed =
+        await RestaurantTableService.deleteTable(table.id, widget.shopId);
+    if (!mounted) return;
+    // Le service dit ce qui s'est passé : annoncer une suppression qui n'a pas
+    // eu lieu laisserait chercher une table encore à l'écran.
+    if (removed) {
+      setState(() {});
+      AppSnack.success(context, '${table.name} retirée du plan de salle');
+    } else {
+      AppSnack.error(context, 'Suppression impossible : table introuvable.');
+    }
   }
 
   // ── Rendu ───────────────────────────────────────────────────────────────
