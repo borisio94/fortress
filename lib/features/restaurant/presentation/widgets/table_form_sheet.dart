@@ -16,8 +16,11 @@ import '../../../../shared/widgets/app_primary_button.dart';
 /// geste (`canEditShopInfo`), comme partout ailleurs dans ce dépôt. Un second
 /// appelant devra poser la même garde.
 ///
-/// Retourne `true` si une table a été créée.
-Future<bool> showTableForm({
+/// Retourne l'issue de l'écriture, ou `null` si la feuille a été fermée sans
+/// créer. L'appelant doit la regarder avant d'annoncer quoi que ce soit : une
+/// écriture locale refusée laisse la grille vide, et « Table créée » y était
+/// affiché quand même.
+Future<TableWriteOutcome?> showTableForm({
   required BuildContext context,
   required String shopId,
 }) async {
@@ -72,7 +75,7 @@ Future<bool> showTableForm({
   if (created != true) {
     nameCtrl.dispose();
     capCtrl.dispose();
-    return false;
+    return null;
   }
 
   final name = nameCtrl.text.trim();
@@ -82,10 +85,10 @@ Future<bool> showTableForm({
   nameCtrl.dispose();
   capCtrl.dispose();
 
-  await RestaurantTableService.addTable(
+  final result = await RestaurantTableService.addTable(
     shopId: shopId,
     name: name.isEmpty ? 'T$suggested' : name,
     capacity: capacity,
   );
-  return true;
+  return result.outcome;
 }

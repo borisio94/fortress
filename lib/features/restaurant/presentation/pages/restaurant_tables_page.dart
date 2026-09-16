@@ -369,9 +369,20 @@ class _RestaurantTablesPageState
     // Filet, en plus du bouton qui n'est pas rendu : une méthode de State reste
     // appelable autrement que par son bouton.
     if (!_canManageRoom) return;
-    final created = await showTableForm(context: context, shopId: widget.shopId);
-    if (!created || !mounted) return;
-    AppSnack.success(context, 'Table créée');
+    final outcome =
+        await showTableForm(context: context, shopId: widget.shopId);
+    if (outcome == null || !mounted) return;
+    setState(() {});
+    if (outcome == TableWriteOutcome.ok) {
+      AppSnack.success(context, 'Table créée');
+    } else {
+      // La table est partie au push, mais elle n'est PAS dans la grille : le
+      // dire, plutôt que de laisser chercher une table qu'on vient d'annoncer.
+      AppSnack.warning(
+          context,
+          'Table enregistrée, mais pas sur cet appareil. '
+          'Elle apparaîtra après synchronisation.');
+    }
   }
 
   Future<void> _deleteTable(RestaurantTable table) async {
@@ -409,16 +420,23 @@ class _RestaurantTablesPageState
       onConfirm: () {},
     );
     if (ok != true) return;
-    final removed =
+    final outcome =
         await RestaurantTableService.deleteTable(table.id, widget.shopId);
     if (!mounted) return;
+    setState(() {});
     // Le service dit ce qui s'est passé : annoncer une suppression qui n'a pas
     // eu lieu laisserait chercher une table encore à l'écran.
-    if (removed) {
-      setState(() {});
-      AppSnack.success(context, '${table.name} retirée du plan de salle');
-    } else {
-      AppSnack.error(context, 'Suppression impossible : table introuvable.');
+    switch (outcome) {
+      case TableWriteOutcome.ok:
+        AppSnack.success(context, '${table.name} retirée du plan de salle');
+      case TableWriteOutcome.notStoredLocally:
+        AppSnack.warning(
+            context,
+            '${table.name} a été retirée, mais cet appareil n\'a pas pu '
+            'enregistrer le changement. Il s\'appliquera après '
+            'synchronisation.');
+      case TableWriteOutcome.notFound:
+        AppSnack.error(context, 'Suppression impossible : table introuvable.');
     }
   }
 

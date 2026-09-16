@@ -7,6 +7,27 @@ import '../storage/hive_boxes.dart';
 import 'restaurant_tab_service.dart';
 import 'restaurant_order_service.dart';
 
+/// Ce qu'une écriture de table a RÉELLEMENT fait.
+///
+/// L'écriture locale était avalée par un `try/catch` muet : la page annonçait
+/// « Table créée » que Hive ait accepté la ligne ou non, et la grille — qui lit
+/// Hive — restait vide. On cherchait une table qu'on venait de voir naître.
+///
+/// Ce type ne rend PAS l'écriture bloquante : le push Supabase reste en
+/// arrière-plan, et son échec n'est pas une issue ici. Seul l'état LOCAL est
+/// rapporté, parce que c'est lui que l'utilisateur voit à l'instant même.
+enum TableWriteOutcome {
+  /// Écrite dans Hive. Le push distant suit son cours (direct ou en file).
+  ok,
+
+  /// Hive a refusé la ligne. Elle a tout de même été poussée : elle
+  /// reviendra au prochain resync, mais elle n'est PAS à l'écran maintenant.
+  notStoredLocally,
+
+  /// La table visée n'existe pas en local — rien n'a été tenté.
+  notFound,
+}
+
 /// Service Hive-first du plan de salle. Toute mutation est :
 ///   1. écrite IMMÉDIATEMENT dans Hive (offline-first),
 ///   2. poussée en arrière-plan vers Supabase (file offline si hors ligne),
@@ -108,7 +129,12 @@ class RestaurantTableService {
     return n;
   }
 
-  static Future<RestaurantTable> addTable({
+  /// Crée une table et rend l'issue de l'écriture LOCALE avec elle.
+  ///
+  /// La table est renvoyée dans tous les cas : même non écrite en local, elle
+  /// existe (elle est partie au push) et l'appelant peut la nommer dans son
+  /// message.
+  static Future<({RestaurantTable table, TableWriteOutcome outcome})> addTable({
     required String shopId,
     required String name,
     int capacity = 4,
@@ -122,22 +148,32 @@ class RestaurantTableService {
       capacity: capacity,
       createdAt: DateTime.now(),
     );
-    await _persist(table);
-    return table;
+    final outcome = await _persist(table);
+    return (table: table, outcome: outcome);
   }
 
   /// Écrit une table (création OU mise à jour). Hive d'abord, puis push.
-  static Future<void> save(RestaurantTable table) => _persist(table);
+  ///
+  /// Renvoie l'issue LOCALE : les appelants qui annoncent quelque chose à
+  /// l'utilisateur doivent la regarder.
+  static Future<TableWriteOutcome> save(RestaurantTable table) =>
+      _persist(table);
 
-  static Future<void> _persist(RestaurantTable table) async {
+  static Future<TableWriteOutcome> _persist(RestaurantTable table) async {
     final map = table.toMap();
+    var stored = true;
     try {
       await _raw().put(table.id, map);
     } catch (e) {
+      // Hive a refusé : la ligne n'est PAS à l'écran. On pousse quand même —
+      // c'est ce qui la sauve, et elle reviendra au prochain resync — mais on
+      // le dit, au lieu de laisser croire à un succès.
+      stored = false;
       debugPrint('[Restaurant] save Hive err: $e');
     }
     AppDatabase.bgUpsert('restaurant_tables', map);
     AppDatabase.notifyListeners('restaurant_tables', table.shopId);
+    return stored ? TableWriteOutcome.ok : TableWriteOutcome.notStoredLocally;
   }
 
   /// Ouvre le service sur une table libre : statut `occupee`, couverts posés
@@ -257,15 +293,15 @@ class RestaurantTableService {
   /// partiel depuis hotfix_180 (`WHERE deleted_at IS NULL`), et `nextNumber`
   /// ne compte que les tables vivantes.
   ///
-  /// Renvoie `false` si la table est introuvable en local — l'appelant ne doit
-  /// alors pas annoncer une suppression qui n'a pas eu lieu.
-  static Future<bool> deleteTable(String id, String shopId) async {
+  /// Renvoie l'issue de l'écriture : l'appelant ne doit pas annoncer une
+  /// suppression qui n'a pas eu lieu, ni taire une marque qui n'a pas pu être
+  /// posée localement.
+  static Future<TableWriteOutcome> deleteTable(String id, String shopId) async {
     final table = tableById(id);
     if (table == null) {
       debugPrint('[Restaurant] deleteTable: table $id introuvable');
-      return false;
+      return TableWriteOutcome.notFound;
     }
-    await _persist(table.copyWith(deletedAt: DateTime.now()));
-    return true;
+    return _persist(table.copyWith(deletedAt: DateTime.now()));
   }
 }
