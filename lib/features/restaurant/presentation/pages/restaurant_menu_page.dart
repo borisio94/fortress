@@ -71,6 +71,15 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   final _searchCtrl = TextEditingController();
   String _query = '';
 
+  /// La grille montre-t-elle les plats RETIRÉS au lieu de la carte ?
+  ///
+  /// Nécessaire parce que cet écran est le seul inventaire du restaurant : la
+  /// route `/inventaire` y mène, et l'item « Inventaire » e-commerce est masqué
+  /// pour le secteur. Sans ce mode, décocher « Disponible à la vente » ferait
+  /// disparaître le plat sans aucun moyen de le rouvrir — l'opération serait
+  /// irréversible depuis l'application.
+  bool _showRetired = false;
+
   @override
   void initState() {
     super.initState();
@@ -102,14 +111,31 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     super.dispose();
   }
 
-  List<Product> get _products =>
+  /// Le catalogue COMPLET de la boutique, plats retirés compris.
+  List<Product> get _allProducts =>
       LocalStorageService.getProductsForShop(widget.shopId);
+
+  /// LA CARTE : les plats réellement vendables.
+  ///
+  /// C'est le filtre que posent déjà toutes les autres surfaces de vente
+  /// (cf. `Product.isSellable`) et que cet écran était seul à ne pas poser : un
+  /// plat décoché s'affichait comme les autres, sans tampon, et se commandait.
+  List<Product> get _products =>
+      _allProducts.where((p) => p.isSellable).toList();
+
+  /// Les plats RETIRÉS de la vente. Ils restent au catalogue : c'est d'ici
+  /// qu'on les rouvre.
+  List<Product> get _retired =>
+      _allProducts.where((p) => !p.isSellable).toList();
+
+  /// Ce que la grille affiche en ce moment — la carte, ou les plats retirés.
+  List<Product> get _source => _showRetired ? _retired : _products;
 
   /// Catégories réellement portées par au moins un plat — une catégorie
   /// vide n'aurait aucun contenu à filtrer.
   List<String> get _categories {
     final used = <String>{};
-    for (final p in _products) {
+    for (final p in _source) {
       final c = p.categoryId;
       if (c != null && c.isNotEmpty) used.add(c);
     }
@@ -123,7 +149,7 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   /// reconnaissable d'un coup d'œil.
   Map<String, String?> get _categoryThumbs {
     final thumbs = <String, String?>{};
-    for (final p in _products) {
+    for (final p in _source) {
       final c = p.categoryId;
       if (c == null || c.isEmpty) continue;
       final url = p.mainImageUrl;
@@ -133,7 +159,7 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   }
 
   List<Product> get _visible {
-    var all = _products;
+    var all = _source;
     if (_category != null) {
       all = all.where((p) => p.categoryId == _category).toList();
     }
@@ -150,6 +176,15 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     final pid = p.id;
     if (pid == null || pid.isEmpty) {
       AppSnack.error(context, 'Plat non enregistré : ${p.name}');
+      return;
+    }
+    // Retiré de la vente : c'est un réglage PERMANENT, distinct de la dispo du
+    // jour ci-dessous. Le plat n'est déjà plus dans la grille — cette garde
+    // couvre les chemins qui ne passent pas par elle (liste en cache, plat
+    // décoché sur un autre appareil pendant que la carte est à l'écran).
+    if (!p.isSellable) {
+      AppSnack.error(
+          context, '« ${p.name} » est retiré de la vente.');
       return;
     }
     // Dispo du jour : un plat désactivé ou épuisé ne peut pas être commandé.
@@ -460,7 +495,10 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     // tri au-dessus d'un écran vide laissent croire que quelque chose est
     // filtré alors qu'il n'y a simplement rien. Elles reviennent au premier
     // plat enregistré.
-    final emptyMenu = _products.isEmpty;
+    final emptyMenu = _source.isEmpty;
+    // Des plats existent, mais tous retirés de la vente : ce n'est PAS une
+    // carte vide, et le dire ferait chercher une saisie déjà faite.
+    final allRetired = !_showRetired && _products.isEmpty && _retired.isNotEmpty;
     // Conséquence : sur une carte vide, la recherche et la catégorie encore
     // en mémoire ne décident plus du message — leurs commandes ne sont plus à
     // l'écran, on ne pourrait ni les effacer ni comprendre d'où sort
@@ -469,6 +507,20 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     final category = emptyMenu ? null : _category;
     return Column(
         children: [
+          // Porte de retour vers les plats retirés — et retour à la carte.
+          // Affiché même quand la grille est vide : c'est précisément le cas où
+          // l'on a besoin de savoir que les plats sont ailleurs.
+          if (_retired.isNotEmpty || _showRetired)
+            _RetiredBanner(
+              count: _retired.length,
+              showingRetired: _showRetired,
+              onToggle: () => setState(() {
+                _showRetired = !_showRetired;
+                // La catégorie du mode précédent n'existe probablement pas dans
+                // l'autre liste : la garder n'afficherait rien.
+                _category = null;
+              }),
+            ),
           if (!emptyMenu) ...[
             _SearchField(
               controller: _searchCtrl,
@@ -489,17 +541,27 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
                         : Icons.restaurant_rounded,
                     title: searching
                         ? 'Aucun plat trouvé'
-                        : category == null
-                            ? 'Carte vide'
-                            : 'Aucun plat dans « $category »',
+                        : _showRetired
+                            ? 'Aucun plat retiré'
+                            : allRetired
+                                ? 'Tous vos plats sont retirés'
+                                : category == null
+                                    ? 'Carte vide'
+                                    : 'Aucun plat dans « $category »',
                     subtitle: searching
                         ? 'Aucun plat ne correspond à « ${_query.trim()} ». '
                             'Essayez un autre mot ou changez de catégorie.'
-                        : category == null
-                            ? 'Ajoutez vos plats pour composer la carte de '
-                                'votre établissement.'
-                            : 'Choisissez une autre catégorie ou ajoutez '
-                                'un plat.',
+                        : _showRetired
+                            ? 'Toute votre carte est en vente.'
+                            : allRetired
+                                ? 'Vos plats existent, mais aucun n\'est en '
+                                    'vente. Ouvrez « plats retirés » pour en '
+                                    'remettre un à la carte.'
+                                : category == null
+                                    ? 'Ajoutez vos plats pour composer la '
+                                        'carte de votre établissement.'
+                                    : 'Choisissez une autre catégorie ou '
+                                        'ajoutez un plat.',
                     // Sans le droit de créer, l'état vide reste informatif :
                     // proposer un bouton qui refuserait ensuite serait pire
                     // que ne rien proposer.
@@ -517,6 +579,7 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
                 : _MenuGrid(
                     products: products,
                     shopId: widget.shopId,
+                    retired: _showRetired,
                     isAdmin: isAdmin,
                     canDelete: canDelete,
                     canEdit: canEdit,
@@ -528,6 +591,79 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
                   ),
           ),
         ],
+    );
+  }
+}
+
+/// PORTE VERS LES PLATS RETIRÉS DE LA VENTE, et retour.
+///
+/// Cet écran est le seul inventaire du restaurant : la route `/inventaire` y
+/// mène et l'item « Inventaire » e-commerce est masqué pour le secteur. Un plat
+/// décoché disparaît donc de la carte — ce qui est voulu, une carte de service
+/// ne montre que ce qui se vend — mais sans ce bandeau il disparaîtrait de
+/// l'application entière, et le décocher serait irréversible.
+///
+/// Invisible quand aucun plat n'est retiré : c'est une réparation, pas un
+/// filtre permanent, et rien ne doit s'ajouter à l'écran d'un restaurant dont
+/// toute la carte est en vente.
+class _RetiredBanner extends StatelessWidget {
+  final int count;
+  final bool showingRetired;
+  final VoidCallback onToggle;
+
+  const _RetiredBanner({
+    required this.count,
+    required this.showingRetired,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: onToggle,
+          borderRadius: BorderRadius.circular(12),
+          child: RestoGlassPanel(
+            radius: 12,
+            padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+            child: Row(children: [
+              Icon(
+                showingRetired
+                    ? Icons.arrow_back_rounded
+                    : Icons.visibility_off_outlined,
+                size: 17,
+                color: cs.onSurfaceVariant,
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  showingRetired
+                      ? 'Plats retirés de la vente'
+                      // Accord au pluriel : le bandeau s'affiche dès UN plat.
+                      : count == 1
+                          ? '1 plat retiré de la vente'
+                          : '$count plats retirés de la vente',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.bodySmBold.copyWith(color: cs.onSurface),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                showingRetired ? 'Revenir à la carte' : 'Voir',
+                style: AppTextStyles.caption.copyWith(color: cs.primary),
+              ),
+              Icon(Icons.chevron_right_rounded, size: 18, color: cs.primary),
+            ]),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -710,6 +846,9 @@ class _CategoryBar extends StatelessWidget {
 class _MenuGrid extends StatelessWidget {
   final List<Product> products;
   final String shopId;
+
+  /// La grille montre-t-elle des plats RETIRÉS de la vente ?
+  final bool retired;
   final bool isAdmin;
   final bool canDelete;
   final bool canEdit;
@@ -722,6 +861,7 @@ class _MenuGrid extends StatelessWidget {
   const _MenuGrid({
     required this.products,
     required this.shopId,
+    required this.retired,
     required this.isAdmin,
     required this.canDelete,
     required this.canEdit,
@@ -774,6 +914,7 @@ class _MenuGrid extends StatelessWidget {
         itemBuilder: (_, i) => _DishCard(
           product: products[i],
           shopId: shopId,
+          retired: retired,
           isAdmin: isAdmin,
           canDelete: canDelete,
           canEdit: canEdit,
@@ -807,6 +948,14 @@ const double _kAddBtn = 34;
 class _DishCard extends StatelessWidget {
   final Product product;
   final String shopId;
+
+  /// Plat RETIRÉ de la vente (`isActive == false`).
+  ///
+  /// Distinct de l'indisponibilité du jour, qui est locale au poste et remise à
+  /// zéro chaque matin : ici le retrait est permanent et synchronisé. D'où un
+  /// tampon à lui — « RETIRÉ » et non « INDISPONIBLE » —, sans quoi le serveur
+  /// ne saurait pas si c'est « pas aujourd'hui » ou « plus du tout ».
+  final bool retired;
   final bool isAdmin;
   final bool canDelete;
   final bool canEdit;
@@ -824,6 +973,7 @@ class _DishCard extends StatelessWidget {
   const _DishCard({
     required this.product,
     required this.shopId,
+    required this.retired,
     required this.isAdmin,
     required this.canDelete,
     required this.canEdit,
@@ -843,7 +993,9 @@ class _DishCard extends StatelessWidget {
     // l'activation du bouton Ajouter. Lu à chaque build → suit les setState
     // déclenchés par les actions admin et le décrément à la commande.
     final avail = DailyMenuService.read(shopId, product.id ?? '');
-    final available = avail.isAvailable;
+    // Un plat retiré n'est jamais « disponible », quelle que soit la dispo du
+    // jour : le réglage permanent l'emporte sur celui de la journée.
+    final available = !retired && avail.isAvailable;
 
     final ts = MediaQuery.textScalerOf(context);
     final desc = product.description?.trim() ?? '';
@@ -887,13 +1039,20 @@ class _DishCard extends StatelessWidget {
                             // jour (admin) et menu ⋮ (droit de suppression).
                             // Invisible pour un serveur sans ces droits, qui
                             // ne fait que prendre les commandes.
-                            if (isAdmin || canDelete || canEdit)
+                            // Sur un plat RETIRÉ, la barre se réduit au menu
+                            // ⋮ : la dispo du jour et le stock du jour ne
+                            // veulent plus rien dire sur un plat qui n'est plus
+                            // en vente, mais le supprimer ou rouvrir sa fiche,
+                            // si — c'est même tout l'objet de cette liste.
+                            if (retired
+                                ? (canEdit || canDelete)
+                                : (isAdmin || canDelete || canEdit))
                               _GlassPanel(
                                 padding:
                                     const EdgeInsets.fromLTRB(6, 1, 2, 1),
                                 child: Row(
                                   children: [
-                                    if (isAdmin) ...[
+                                    if (isAdmin && !retired) ...[
                                       SizedBox(
                                         height: 22,
                                         width: 34,
@@ -915,7 +1074,7 @@ class _DishCard extends StatelessWidget {
                                     ],
                                     const Spacer(),
                                     // Stock du jour — tap = éditer.
-                                    if (isAdmin)
+                                    if (isAdmin && !retired)
                                       InkWell(
                                         onTap: onEditCount,
                                         borderRadius:
@@ -982,7 +1141,7 @@ class _DishCard extends StatelessWidget {
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 10, vertical: 5),
                                 decoration: BoxDecoration(
-                                  color: (avail.isSoldOut
+                                  color: (!retired && avail.isSoldOut
                                           ? sem.danger
                                           : Colors.black)
                                       .withValues(alpha: 0.82),
@@ -993,9 +1152,11 @@ class _DishCard extends StatelessWidget {
                                       width: 1.5),
                                 ),
                                 child: Text(
-                                  avail.isSoldOut
-                                      ? 'ÉPUISÉ'
-                                      : 'INDISPONIBLE',
+                                  retired
+                                      ? 'RETIRÉ'
+                                      : avail.isSoldOut
+                                          ? 'ÉPUISÉ'
+                                          : 'INDISPONIBLE',
                                   style: AppTextStyles.captionBold.copyWith(
                                       color: Colors.white,
                                       fontWeight: FontWeight.w900,
@@ -1054,10 +1215,14 @@ class _DishCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      _AddButton(
-                        enabled: available,
-                        onAdd: onAdd,
-                      ),
+                      // Pas de bouton du tout sur un plat retiré — un bouton
+                      // grisé laisserait croire qu'il suffit d'insister, alors
+                      // que la réponse est dans la fiche du plat.
+                      if (!retired)
+                        _AddButton(
+                          enabled: available,
+                          onAdd: onAdd,
+                        ),
                     ],
                   ),
                 ],

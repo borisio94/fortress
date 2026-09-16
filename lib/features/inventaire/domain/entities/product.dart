@@ -424,6 +424,22 @@ class Product extends Equatable {
   /// reprise. Jamais vendable, jamais publiée, jamais comptée en alerte.
   bool get isDraft => status == ProductStatus.draft;
 
+  /// Ce produit peut-il être VENDU sur une surface de vente — grille de la
+  /// caisse, carte d'un restaurant ?
+  ///
+  /// La règle existait déjà, mais recopiée à la main partout où l'on vend :
+  /// `where((p) => p.isActive && !p.isDraft)`, trois fois dans la grille de la
+  /// caisse. Le module restaurant, lui, ne la posait nulle part — un plat
+  /// décoché restait à la carte, sans rien qui le signale, et se commandait.
+  ///
+  /// `isDeleted` est ajouté par ceinture : les lectures Hive l'excluent déjà,
+  /// mais une liste venue d'ailleurs (Supabase, super-admin) ne le ferait pas.
+  ///
+  /// À NE PAS utiliser pour l'inventaire, les exports ou le stock : un produit
+  /// retiré de la vente reste un produit, il faut pouvoir le compter, le
+  /// corriger et le remettre en vente.
+  bool get isSellable => isActive && !isDraft && !isDeleted;
+
   /// True si le produit est soft-deleted (cf. hotfix_085).
   bool get isDeleted => deletedAt != null;
 

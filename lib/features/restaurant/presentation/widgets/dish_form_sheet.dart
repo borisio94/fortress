@@ -136,6 +136,19 @@ class _DishFormSheetState extends State<DishFormSheet> {
   // bruit dans le journal que `track_stock` a précisément corrigés.
   bool _trackStock = false;
   bool _isActive = true;
+
+  /// Publication sur la vitrine publique de l'établissement.
+  ///
+  /// CHAMP À PART, et non plus la recopie de `_isActive`. Enregistrer un plat
+  /// publiait sa photo, son nom et son prix sur une page accessible à tous,
+  /// alors que le seul interrupteur du formulaire disait « Disponible à la
+  /// vente » et parlait de la carte. Personne ne choisissait : c'était un effet
+  /// de bord, et il se réappliquait à chaque enregistrement.
+  ///
+  /// Le défaut reste « publié » : la vitrine-menu existe (la page publique a un
+  /// rendu dédié aux établissements de restauration) et les cartes déjà en
+  /// ligne ne doivent pas disparaître parce qu'on a rendu le choix visible.
+  bool _isVisibleWeb = true;
   bool _advanced = false;
 
   bool _saving = false;
@@ -164,6 +177,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
       _rating = p.rating;
       _trackStock = p.trackStock;
       _isActive = p.isActive;
+      _isVisibleWeb = p.isVisibleWeb;
       final pid = p.id;
       if (pid != null) {
         // Charge la composition existante.
@@ -306,7 +320,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
         priceSellPos: price,
         priceSellWeb: price,
         isActive: _isActive,
-        isVisibleWeb: _isActive,
+        isVisibleWeb: _isVisibleWeb,
         trackStock: _trackStock,
         activityId: _activityId,
         rating: _rating,
@@ -758,9 +772,21 @@ class _DishFormSheetState extends State<DishFormSheet> {
               ),
               _Toggle(
                 label: 'Disponible à la vente',
-                hint: 'Décochez pour retirer temporairement de la carte',
+                // Dit maintenant les DEUX effets : la vitrine publique filtre
+                // elle aussi sur ce drapeau, un plat décoché y disparaît.
+                hint: 'Décochez pour retirer de la carte et de la vitrine en '
+                    'ligne. Le plat est conservé et se retrouve depuis '
+                    '« plats retirés ».',
                 value: _isActive,
                 onChanged: (v) => setState(() => _isActive = v),
+              ),
+              _Toggle(
+                label: 'Afficher sur ma vitrine en ligne',
+                hint: 'Page publique de votre établissement : photo, nom et '
+                    'prix visibles de tous. Décochez pour le garder à la '
+                    'carte de la salle uniquement.',
+                value: _isVisibleWeb,
+                onChanged: (v) => setState(() => _isVisibleWeb = v),
               ),
             ],
 
