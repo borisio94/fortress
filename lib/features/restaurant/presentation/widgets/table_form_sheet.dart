@@ -7,9 +7,14 @@ import '../../../../shared/widgets/app_primary_button.dart';
 
 /// Formulaire de création d'une table (nom + capacité).
 ///
-/// Extrait du plan de salle pour être ouvert aussi depuis l'écran de mise en
-/// route : deux copies du même formulaire auraient divergé dès la première
-/// évolution — un champ ajouté d'un côté, oublié de l'autre.
+/// Extrait du plan de salle, qui en est aujourd'hui le SEUL appelant : l'écran
+/// de mise en route n'ouvre pas ce formulaire, il pousse vers le plan de salle.
+/// Le fichier reste séparé parce que la feuille a sa propre vie, pas parce que
+/// deux écrans l'ouvriraient.
+///
+/// ⚠ N'EFFECTUE AUCUN CONTRÔLE DE PERMISSION : c'est l'appelant qui garde le
+/// geste (`canEditShopInfo`), comme partout ailleurs dans ce dépôt. Un second
+/// appelant devra poser la même garde.
 ///
 /// Retourne `true` si une table a été créée.
 Future<bool> showTableForm({

@@ -31,20 +31,44 @@ import '../../../../core/services/service_incident_service.dart';
 /// via `AppDatabase.addListener`, ce qui redéclenche un `setState` ici. Deux
 /// appareils (tablette salle / téléphone serveur) restent donc synchronisés.
 ///
-/// PR-1 se limite au cycle de vie de la TABLE (ouvrir un service, réserver,
-/// demander l'addition, libérer). La prise de commande par table arrive en
-/// PR-2 : le tap sur une table occupée ouvrira alors la commande en cours.
-class RestaurantTablesPage extends StatefulWidget {
+/// L'écran se limite au cycle de vie de la TABLE : demander l'addition,
+/// consulter les comptes, ajuster les couverts, libérer, créer et supprimer.
+/// La prise de commande, elle, passe entièrement par le Menu.
+///
+/// ─── QUI PEUT COMPOSER LE PLAN DE SALLE ────────────────────────────────────
+///
+/// L'écran reste OUVERT à tout membre : c'est l'écran de service de la salle,
+/// un serveur doit y lire l'état des tables. Mais COMPOSER le plan — créer une
+/// table, en supprimer une — demande `canEditShopInfo` : le plan de salle est
+/// une propriété de l'établissement, au même titre que son nom ou ses horaires,
+/// pas un geste de service.
+///
+/// Rien ne le gardait, ni ici, ni la route, ni le service : n'importe quel
+/// membre pouvait supprimer une table — et la suppression est dure.
+///
+/// Aucun des trois préréglages de restauration (serveur, caissier, cuisinier)
+/// ne porte cette permission ; le gérant peut la déléguer explicitement.
+class RestaurantTablesPage extends ConsumerStatefulWidget {
   final String shopId;
 
   const RestaurantTablesPage({super.key, required this.shopId});
 
   @override
-  State<RestaurantTablesPage> createState() => _RestaurantTablesPageState();
+  ConsumerState<RestaurantTablesPage> createState() =>
+      _RestaurantTablesPageState();
 }
 
-class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
+class _RestaurantTablesPageState
+    extends ConsumerState<RestaurantTablesPage> {
   late final OnDataChanged _listener;
+
+  /// Droit de composer le plan de salle — créer et supprimer une table.
+  ///
+  /// Les deux ensemble, à dessein : on ne laisse pas quelqu'un créer ce qu'il
+  /// ne pourra pas corriger. Lu à la demande plutôt que mémorisé, pour suivre
+  /// un changement de rôle sans recharger l'écran.
+  bool get _canManageRoom =>
+      ref.read(permissionsProvider(widget.shopId)).canEditShopInfo;
 
   @override
   void initState() {
@@ -317,7 +341,7 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
                   _releaseTable(table);
                 },
               ),
-            ] else
+            ] else if (_canManageRoom)
               ListTile(
                 leading: Icon(Icons.delete_outline_rounded,
                     color: theme.semantic.danger),
@@ -338,15 +362,22 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
 
   /// Formulaire de création d'une table.
   ///
-  /// Le formulaire lui-même vit dans `table_form_sheet.dart` : l'écran de mise
-  /// en route l'ouvre aussi, et deux copies auraient divergé.
+  /// Le formulaire vit dans `table_form_sheet.dart`, et cet écran est son SEUL
+  /// appelant. L'écran de mise en route n'ouvre pas ce formulaire : il pousse
+  /// vers cette page, qui reste donc l'unique endroit où une table se crée.
   Future<void> _createTable() async {
+    // Filet, en plus du bouton qui n'est pas rendu : une méthode de State reste
+    // appelable autrement que par son bouton.
+    if (!_canManageRoom) return;
     final created = await showTableForm(context: context, shopId: widget.shopId);
     if (!created || !mounted) return;
     AppSnack.success(context, 'Table créée');
   }
 
   Future<void> _deleteTable(RestaurantTable table) async {
+    // Même filet. La suppression est DURE : elle ne doit pas dépendre du seul
+    // rendu d'une entrée de menu.
+    if (!_canManageRoom) return;
     if (!table.isFree) {
       AppSnack.error(context,
           'Impossible : ${table.name} est en cours de service.');
@@ -370,13 +401,19 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
   @override
   Widget build(BuildContext context) {
     final tables = _tables;
+    // `watch` et non `read` ici : le rendu DÉPEND du droit, il doit se refaire
+    // si le rôle change (arrivée des permissions après un deep-link).
+    final canManage =
+        ref.watch(permissionsProvider(widget.shopId)).canEditShopInfo;
     return AppScaffold(
       title: 'Plan de salle',
       shopId: widget.shopId,
       // Masqué quand il n'y a aucune table : l'état vide porte déjà son
       // bouton de création, et deux options d'ajout simultanées se
-      // concurrenceraient à l'écran.
-      floatingActionButton: tables.isEmpty
+      // concurrenceraient à l'écran. Masqué aussi sans le droit de composer
+      // la salle — proposer un bouton qui refuserait ensuite serait pire que
+      // ne rien proposer (même parti pris que l'écran Menu).
+      floatingActionButton: (tables.isEmpty || !canManage)
           ? null
           : FloatingActionButton.extended(
               onPressed: _createTable,
@@ -387,21 +424,26 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
           ? RestoEmptyState(
               icon: Icons.restaurant_rounded,
               title: 'Aucune table',
-              subtitle: 'Créez vos tables pour composer le plan de salle '
-                  'de votre établissement.',
-              actionLabel: 'Créer une table',
-              onAction: _createTable,
+              subtitle: canManage
+                  ? 'Créez vos tables pour composer le plan de salle '
+                      'de votre établissement.'
+                  // Sans le droit, l'état vide reste informatif : il dit ce
+                  // qui manque et qui peut y remédier, sans bouton mort.
+                  : 'Le plan de salle n\'a pas encore été composé. '
+                      'Demandez au gérant d\'ajouter les tables.',
+              actionLabel: canManage ? 'Créer une table' : null,
+              onAction: canManage ? _createTable : null,
             )
           : Column(
               children: [
                 const _StatusLegend(),
-                Expanded(child: _buildGrid(tables)),
+                Expanded(child: _buildGrid(tables, canManage)),
               ],
             ),
     );
   }
 
-  Widget _buildGrid(List<RestaurantTable> tables) {
+  Widget _buildGrid(List<RestaurantTable> tables, bool canManage) {
     return LayoutBuilder(
       builder: (context, constraints) {
         // Grille fluide : ~240 dp par carte (contre 150), 2 colonnes minimum
@@ -420,10 +462,13 @@ class _RestaurantTablesPageState extends State<RestaurantTablesPage> {
           itemCount: tables.length,
           itemBuilder: (_, i) => _TableCard(
             table: tables[i],
-            // Actions sur la TABLE elle-même (renommer, libérer, addition,
-            // supprimer), par un bouton explicite dans le coin. La carte, elle,
-            // ne réagit plus au tap : elle ouvrait la prise de commande, et
-            // toute commande passe désormais par le Menu.
+            canManage: canManage,
+            // Actions sur la TABLE elle-même — addition, comptes, couverts,
+            // libérer, supprimer — par un bouton explicite dans le coin. Il n'y
+            // a PAS de renommage : le nom se fixe à la création et ne se
+            // modifie nulle part. La carte, elle, ne réagit plus au tap : elle
+            // ouvrait la prise de commande, et toute commande passe désormais
+            // par le Menu.
             onActions: () => _showTableActions(tables[i]),
           ),
         );
@@ -480,10 +525,16 @@ class _StatusLegend extends StatelessWidget {
 /// TABLE : addition, couverts, libération, suppression.
 class _TableCard extends StatelessWidget {
   final RestaurantTable table;
+
+  /// Droit de composer le plan de salle. Sur une table LIBRE, supprimer est la
+  /// seule action du menu : sans ce droit, le bouton ⋮ n'aurait plus rien à
+  /// proposer et disparaît — comme le fait déjà le menu d'un plat.
+  final bool canManage;
   final VoidCallback onActions;
 
   const _TableCard({
     required this.table,
+    required this.canManage,
     required this.onActions,
   });
 
@@ -594,6 +645,10 @@ class _TableCard extends StatelessWidget {
           // Seul élément cliquable de la carte, DANS le cadre bordé. Discret
           // mais toujours visible : enfoui derrière un appui long, il serait
           // introuvable sur le web.
+          //
+          // Une table en service garde toujours son menu — addition, comptes,
+          // couverts, libération sont des gestes de SERVICE, ouverts à tous.
+          if (!table.isFree || canManage)
           Positioned(
             top: 4,
             right: 4,

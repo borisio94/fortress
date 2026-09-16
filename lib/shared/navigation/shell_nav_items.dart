@@ -277,7 +277,8 @@ final List<ShellNavItem> kShellNavItems = [
     // LE lieu de création des tables — et le seul. La prise de commande est
     // passée au Menu (panier → type de service → cuisine), l'écran de service
     // faisait donc doublon. Ce qui reste ici est le cycle de vie de la TABLE :
-    // créer, renommer, réserver, ouvrir l'addition, libérer.
+    // créer, supprimer, ouvrir l'addition, ajuster les couverts, libérer.
+    // (Ni renommage ni réservation : aucun des deux n'a d'entrée dans l'app.)
     route:        (id) => '/shop/$id/restaurant/tables',
     // Les serveurs (rôle 'user') doivent pouvoir ouvrir le plan de salle :
     // on s'aligne sur la permission caisse plutôt que sur isShopAdmin.
