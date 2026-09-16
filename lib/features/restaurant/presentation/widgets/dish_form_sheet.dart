@@ -18,6 +18,7 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/image_validation.dart';
+import '../../../../core/utils/name_key.dart';
 import '../../../../features/inventaire/domain/entities/product.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_field.dart';
@@ -151,6 +152,54 @@ class _DishFormSheetState extends State<DishFormSheet> {
   bool _isVisibleWeb = true;
   bool _advanced = false;
 
+  /// Identifiant du plat EN COURS de création, conservé d'une tentative
+  /// d'enregistrement à l'autre.
+  ///
+  /// Il était recalculé à chaque appel (`'prod_${DateTime.now()...}'`). Après un
+  /// échec partiel — le plat écrit, la recette non — le formulaire restait
+  /// ouvert : ré-appuyer sur Enregistrer créait donc un SECOND plat au lieu de
+  /// réparer le premier. C'est ainsi que le formulaire fabriquait lui-même les
+  /// doublons qui faussent la répartition du coût.
+  String? _newProductId;
+
+  /// Nom du plat DÉJÀ à la carte qui porte le même nom que celui en cours de
+  /// saisie, `null` s'il n'y en a pas.
+  ///
+  /// AVERTISSEMENT et non blocage : deux plats homonymes sont parfois
+  /// légitimes — la même préparation en entrée et en plat, une déclinaison
+  /// qu'on n'a pas su nommer autrement. Mais c'est presque toujours une
+  /// inattention, et elle coûte cher : les ventes se répartissent entre deux
+  /// fiches, les rapports affichent deux lignes pour le même plat, et si l'une
+  /// des deux n'a pas de recette, le coût de ses ingrédients se reporte sur
+  /// l'autre.
+  ///
+  /// Contrôle LOCAL, sur le nom. `AppDatabase.saveProduct` en a bien un, mais
+  /// il est hors d'atteinte ici : sa partie « nom » exige le réseau (deux
+  /// requêtes) et sa partie locale ne regarde que les SKU — or un plat n'en a
+  /// pas. D'où `skipValidation: true` à l'enregistrement, qui reste justifié.
+  String? _dupName;
+
+  /// Ingrédients créés DEPUIS CE FORMULAIRE et dont la création a écrit un
+  /// achat en comptabilité.
+  ///
+  /// Créer un ingrédient avec un montant payé écrit une dépense sur-le-champ,
+  /// avant même que le plat n'existe. Abandonner ensuite le formulaire laissait
+  /// cette dépense rattachée à un ingrédient qui n'entre dans aucune recette :
+  /// la répartition ne trouve aucune assiette pour l'absorber, le montant part
+  /// dans `unallocated` et gonfle le food cost de l'établissement sans jamais
+  /// apparaître dans la marge d'un plat — donc sans que rien ne le signale.
+  ///
+  /// On ne les supprime PAS d'office : l'achat peut être réel, facture en main,
+  /// et le supprimer parce que l'utilisateur a renoncé au plat lui ferait
+  /// ressaisir une dépense qu'il a bel et bien engagée. C'est lui qui trancherait
+  /// à la fermeture.
+  ///
+  /// Les CATÉGORIES et les UNITÉS créées en route ne sont pas suivies : elles ne
+  /// portent aucun montant, n'entrent dans aucun calcul, et une catégorie sans
+  /// plat n'apparaît même pas sur la carte (`_categories` ne liste que celles
+  /// portées par un plat). Les annuler coûterait du code pour rien.
+  final List<Ingredient> _purchasedIngredients = [];
+
   bool _saving = false;
   String? _error;
 
@@ -200,6 +249,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
       }
     }
     _priceCtrl.addListener(_onMarginInputsChanged);
+    _nameCtrl.addListener(_onNameChanged);
   }
 
   @override
@@ -226,6 +276,35 @@ class _DishFormSheetState extends State<DishFormSheet> {
     final result = await validateAndReadImage(xFile, context);
     if (!mounted || !result.isValid) return;
     setState(() => _imageBytes = result.bytes);
+  }
+
+  /// Recherche d'un homonyme à chaque frappe.
+  ///
+  /// Pas d'anti-rebond, contrairement au contrôle de SKU de l'inventaire
+  /// e-commerce : celui-là interroge le réseau, celui-ci parcourt une liste
+  /// déjà en mémoire (cache produits de `LocalStorageService`).
+  void _onNameChanged() {
+    final dup = _findDuplicateName(_nameCtrl.text);
+    if (dup != _dupName) setState(() => _dupName = dup);
+  }
+
+  /// Le nom d'un plat existant identique à [raw], ou `null`.
+  ///
+  /// Renvoie le nom TEL QU'IL EST ÉCRIT dans la carte : « POULET dg » doit
+  /// pouvoir répondre « Poulet DG », sinon l'avertissement paraît absurde.
+  /// La comparaison est celle de `nameKey` : insensible à la casse, aux accents
+  /// et aux espaces en trop. Les plats SUPPRIMÉS sont hors-jeu —
+  /// `getProductsForShop` les exclut — car reprendre le nom d'un plat retiré du
+  /// catalogue est légitime.
+  String? _findDuplicateName(String raw) {
+    final key = nameKey(raw);
+    if (key.isEmpty) return null;
+    final selfId = widget.existing?.id;
+    for (final p in LocalStorageService.getProductsForShop(widget.shopId)) {
+      if (p.id != null && p.id == selfId) continue;
+      if (nameKey(p.name) == key) return p.name;
+    }
+    return null;
   }
 
   Future<void> _addCategory() async {
@@ -288,7 +367,9 @@ class _DishFormSheetState extends State<DishFormSheet> {
     try {
       final ts = DateTime.now().millisecondsSinceEpoch;
       final existing = widget.existing;
-      final productId = existing?.id ?? 'prod_$ts';
+      // `??=` : le premier essai fixe l'identifiant, les suivants le reprennent
+      // — une reprise après erreur RÉÉCRIT le même plat.
+      final productId = existing?.id ?? (_newProductId ??= 'prod_$ts');
       final cost = double.tryParse(
               _costCtrl.text.trim().replaceAll(',', '.')) ??
           0;
@@ -331,25 +412,51 @@ class _DishFormSheetState extends State<DishFormSheet> {
 
       await AppDatabase.saveProduct(product, skipValidation: true);
 
+      // ══ À PARTIR D'ICI, LE PLAT EXISTE EN BASE ════════════════════════
+      // Tout ce qui suit doit donc échouer SANS emporter l'enregistrement :
+      // laisser remonter une exception rendait la main sur un formulaire
+      // ouvert, alors que le plat était déjà écrit — sans sa recette, donc
+      // chiffré à zéro et faussant la répartition du coût des ingrédients.
+
       if (_imageBytes != null) {
-        await PendingImageUploadService.enqueue(
-          shopId: widget.shopId,
-          productId: productId,
-          variantIdx: 0,
-          bytes: _imageBytes!,
-          name: 'shops/${widget.shopId}/products/${ts}_0',
-          // Les bytes sortent de `validateAndReadImage` déjà ré-encodés en
-          // PNG : annoncer un autre type ferait enregistrer du PNG sous une
-          // extension mensongère.
-          mimeType: 'image/png',
-          isPrimary: true,
-        );
-        unawaited(PendingImageUploadService.flush());
+        // La photo est un ORNEMENT : `enqueue` écrit dans Hive sans filet
+        // (`box.add` nu, avec les octets de l'image dedans). Une box pleine ou
+        // fermée faisait perdre la recette d'un plat, pour une vignette.
+        try {
+          await PendingImageUploadService.enqueue(
+            shopId: widget.shopId,
+            productId: productId,
+            variantIdx: 0,
+            bytes: _imageBytes!,
+            name: 'shops/${widget.shopId}/products/${ts}_0',
+            // Les bytes sortent de `validateAndReadImage` déjà ré-encodés en
+            // PNG : annoncer un autre type ferait enregistrer du PNG sous une
+            // extension mensongère.
+            mimeType: 'image/png',
+            isPrimary: true,
+          );
+          unawaited(PendingImageUploadService.flush());
+        } catch (e) {
+          debugPrint('[DishForm] photo non mise en file : $e');
+        }
       }
 
-      await _syncRecipeLines(productId);
-
-      if (mounted) Navigator.of(context).pop(true);
+      final recipeSaved = await _trySyncRecipeLines(productId);
+      if (!mounted) return;
+      if (!recipeSaved) {
+        // Le plat est CONSERVÉ : la saisie ne doit pas être perdue, et le plat
+        // se rouvre pour compléter sa recette. Mais on le dit — sans recette il
+        // est chiffré à zéro, sa marge paraît excellente, et le coût de ses
+        // ingrédients se reporte sur les autres plats qui les portent.
+        AppSnack.warning(
+            context,
+            'Plat créé, mais sa recette n\'a pas pu être enregistrée. '
+            'Rouvrez-le pour la compléter.');
+      }
+      // Le plat existe : les ingrédients créés en cours de route ne sont plus
+      // orphelins, leurs achats sont désormais rattachés à une recette.
+      _purchasedIngredients.clear();
+      Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -361,6 +468,27 @@ class _DishFormSheetState extends State<DishFormSheet> {
   }
 
   // ── Composition du plat ────────────────────────────────────────────────
+
+  /// Écrit la recette, avec UN réessai.
+  ///
+  /// Renvoie `false` si les deux tentatives échouent. `_syncRecipeLines` est
+  /// idempotent — `addLink` met à jour la ligne existante au lieu d'en créer une
+  /// seconde — donc rejouer ne peut pas doubler une composition.
+  ///
+  /// Un seul réessai, pas une boucle : ce qui peut échouer ici est une écriture
+  /// Hive locale. Si elle échoue deux fois de suite, insister ne changera rien
+  /// et fera attendre quelqu'un en plein service.
+  Future<bool> _trySyncRecipeLines(String productId) async {
+    for (var attempt = 1; attempt <= 2; attempt++) {
+      try {
+        await _syncRecipeLines(productId);
+        return true;
+      } catch (e) {
+        debugPrint('[DishForm] recette, tentative $attempt : $e');
+      }
+    }
+    return false;
+  }
 
   /// Aligne les liens persistés sur le brouillon `_recipe` : (ré)écrit les
   /// présents, supprime ceux décochés.
@@ -430,6 +558,10 @@ class _DishFormSheetState extends State<DishFormSheet> {
       builder: (_) => _QuickIngredientSheet(shopId: widget.shopId),
     );
     if (ing == null || !mounted) return;
+    // A-t-il coûté quelque chose ? La feuille de création écrit la dépense
+    // elle-même ; on la relit plutôt que de faire remonter un second résultat,
+    // et c'est la base qui fait foi.
+    if (_purchasesFor(ing.id) > 0) _purchasedIngredients.add(ing);
     setState(() {
       _catalog.add(ing);
       _catalog.sort(
@@ -578,6 +710,26 @@ class _DishFormSheetState extends State<DishFormSheet> {
               autofocus: !_isEdit,
               prefixIcon: Icons.restaurant_rounded,
             ),
+            if (_dupName != null) ...[
+              const SizedBox(height: 7),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline_rounded,
+                      size: 14, color: Theme.of(context).semantic.warning),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '« $_dupName » est déjà à la carte. Deux plats de même '
+                      'nom partagent le coût de leurs ingrédients et se '
+                      'confondent dans les rapports.',
+                      style: AppTextStyles.caption.copyWith(
+                          color: Theme.of(context).semantic.warning),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 16),
 
             // ── Catégorie ────────────────────────────────────────────
@@ -650,6 +802,84 @@ class _DishFormSheetState extends State<DishFormSheet> {
 
   @override
   Widget build(BuildContext context) {
+    return PopScope<bool>(
+      // Bloqué UNIQUEMENT s'il y a un achat à trancher : le reste du temps la
+      // feuille se ferme comme avant, au doigt comme au bouton retour.
+      canPop: _purchasedIngredients.isEmpty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        await _resolveOrphanPurchases();
+      },
+      child: _buildForm(context),
+    );
+  }
+
+  /// Que faire des achats écrits pour un plat qu'on n'enregistre pas ?
+  ///
+  /// Posé À LA FERMETURE et non à la création : au moment où l'ingrédient est
+  /// créé, rien ne dit encore que le plat sera abandonné — et interrompre la
+  /// saisie pour une question hypothétique serait pire que le défaut qu'on
+  /// corrige.
+  Future<void> _resolveOrphanPurchases() async {
+    final total = _purchasedIngredients.fold<int>(
+        0, (s, i) => s + _purchasesFor(i.id));
+    final names = _purchasedIngredients.map((i) => i.name).join(', ');
+    final many = _purchasedIngredients.length > 1;
+
+    final keep = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.receipt_long_outlined,
+      iconColor: Theme.of(context).semantic.warning,
+      title: many ? 'Garder ces achats ?' : 'Garder cet achat ?',
+      body: Text(
+        'Vous avez enregistré ${CurrencyFormatter.format(total.toDouble())} '
+        'd\'achat${many ? 's' : ''} pour $names, mais ce plat n\'a pas été '
+        'créé.\n\n'
+        'Gardez-${many ? 'les' : 'le'} si vous avez réellement payé : '
+        '${many ? 'ils resteront' : 'il restera'} dans vos dépenses, en attente '
+        'd\'un plat à chiffrer. Sinon ${many ? 'ils seront supprimés' : 'il sera '
+        'supprimé'} avec ${many ? 'les ingrédients' : 'l\'ingrédient'}.',
+      ),
+      cancelLabel: 'Supprimer',
+      confirmLabel: 'Garder',
+      onConfirm: () {},
+    );
+    // `null` = la boîte a été fermée sans choisir : on reste dans le formulaire
+    // plutôt que de décider à sa place.
+    if (keep == null || !mounted) return;
+    if (keep != true) await _discardOrphanPurchases();
+    // Vidée dans les deux cas : la question a été posée, `canPop` laisse
+    // désormais passer.
+    _purchasedIngredients.clear();
+    if (mounted) Navigator.of(context).pop(false);
+  }
+
+  /// Supprime les achats ET les ingrédients qui les portent.
+  ///
+  /// Les deux ensemble : garder un ingrédient sans achat le ferait remonter en
+  /// orange dans la liste des ingrédients « sans dépense », pour une saisie que
+  /// l'utilisateur vient justement d'annuler.
+  Future<void> _discardOrphanPurchases() async {
+    for (final ing in _purchasedIngredients) {
+      for (final e in DailyExpenseService.forShop(widget.shopId)) {
+        if (e.ingredientId == ing.id) {
+          await DailyExpenseService.delete(e.id, widget.shopId);
+        }
+      }
+      await IngredientService.delete(ing.id, widget.shopId);
+    }
+  }
+
+  /// Total des achats déjà rattachés à cet ingrédient (FCFA).
+  int _purchasesFor(String ingredientId) {
+    var total = 0;
+    for (final e in DailyExpenseService.forShop(widget.shopId)) {
+      if (e.ingredientId == ingredientId) total += e.amount;
+    }
+    return total;
+  }
+
+  Widget _buildForm(BuildContext context) {
     final theme = Theme.of(context);
     final sem = theme.semantic;
     final cs = theme.colorScheme;
