@@ -8,6 +8,7 @@ import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/services/restaurant_setup_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../features/subscription/presentation/widgets/product_quota_guard.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
@@ -94,6 +95,16 @@ class _RestaurantSetupPageState extends ConsumerState<RestaurantSetupPage> {
     // — c'est ce qui manquait ici.
     if (!RestaurantSetupStep.needsMenuItem
         .allowedFor(ref.read(permissionsProvider(widget.shopId)))) {
+      return;
+    }
+    // Le plafond de l'abonnement, comme à l'écran Menu : ce parcours crée un
+    // produit, il ne peut pas être la porte de sortie du quota. Toujours le
+    // premier plat ici, mais l'écran reste atteignable après coup — supprimer
+    // sa dernière table y ramène un établissement déjà rempli.
+    if (!ProductQuotaGuard.ensureCanAdd(context,
+        plan: ref.read(currentPlanProvider),
+        shopId: widget.shopId,
+        label: ProductQuotaGuard.dishesLabel)) {
       return;
     }
     // `requireIngredient` n'est posé QUE sur ce parcours : ailleurs, un plat

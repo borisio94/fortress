@@ -15,6 +15,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../caisse/presentation/bloc/caisse_bloc.dart';
 import '../../../../features/inventaire/domain/entities/product.dart';
+import '../../../../features/subscription/presentation/widgets/product_quota_guard.dart';
 import '../../../../shared/providers/cart_pane_provider.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
@@ -204,6 +205,17 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   /// courte, sans quoi on saisirait un plat en 20 secondes pour retomber sur
   /// un écran à 6 sections dès qu'il faut corriger un prix.
   Future<void> _openDishForm([Product? product]) async {
+    // Le plafond de l'abonnement ne concerne QUE la création : corriger le prix
+    // d'un plat déjà à la carte ne prend aucun emplacement de plus. Sans cette
+    // condition, un restaurant au plafond ne pourrait plus toucher à sa propre
+    // carte — c'est-à-dire ne plus travailler.
+    if (product == null &&
+        !ProductQuotaGuard.ensureCanAdd(context,
+            plan: ref.read(currentPlanProvider),
+            shopId: widget.shopId,
+            label: ProductQuotaGuard.dishesLabel)) {
+      return;
+    }
     final saved = await showDishForm(
       context: context,
       shopId: widget.shopId,
