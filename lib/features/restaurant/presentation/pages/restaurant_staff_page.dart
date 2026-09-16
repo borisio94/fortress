@@ -73,11 +73,17 @@ class RestaurantStaffPage extends StatelessWidget {
             // cuisine, pas les comptes qui se connectent.
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Text(
-                  'Serveuses, cuisiniers, plongeurs — ils badgent avec un code '
-                  'à 4 chiffres et n\'ont pas de compte Fortress. Les comptes '
-                  'de connexion sont dans « Accès à l\'app ».',
-                  style: AppTextStyles.captionHint),
+              // Sur panneau : aucun texte du module ne se pose à nu sur la
+              // photo de salle (cf. la règle sur `restoGlassFill`).
+              child: RestoGlassPanel(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                radius: 12,
+                child: Text(
+                    'Serveuses, cuisiniers, plongeurs — ils badgent avec un '
+                    'code à 4 chiffres et n\'ont pas de compte Fortress. Les '
+                    'comptes de connexion sont dans « Accès à l\'app ».',
+                    style: AppTextStyles.captionHint),
+              ),
             ),
             Expanded(
               child: TabBarView(

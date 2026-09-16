@@ -170,14 +170,27 @@ class RestoGlassPanel extends StatelessWidget {
 /// Remplissage d'un panneau translucide. Exposé pour les widgets qui
 /// construisent déjà leur propre conteneur et ne peuvent pas envelopper.
 ///
+/// ─── RÈGLE DU MODULE : AUCUN TEXTE À NU SUR LA PHOTO ───────────────────────
+///
+/// Tout contenu textuel du mode restaurant repose sur une surface opaque à
+/// ~85 %, sans exception. Une salle photographiée a des zones très claires et
+/// des zones très sombres, et le recadrage change d'un écran à l'autre : le
+/// même paragraphe tombe sur une nappe blanche ici et sur un mur noir là. Le
+/// voile général du fond ne peut pas régler ça — il baisse le contraste de la
+/// photo partout de la même manière, alors que le problème est LOCAL. C'est
+/// donc la surface POSÉE SOUS LE TEXTE qui porte la lisibilité.
+///
+/// Concrètement, pour tout nouvel écran du module : le texte va dans un
+/// [RestoGlassPanel], ou dans un conteneur peint avec cette teinte. Un `Text`
+/// posé directement sur [RestoBackdrop] est un défaut, même s'il se lit sur la
+/// photo du moment.
+///
 /// En sombre, le panneau est TEINTÉ SOMBRE (et non blanc translucide) : un
 /// voile blanc par-dessus une photo de salle éclairée délaverait le texte clair
 /// posé dessus. C'est aussi ce que fait la maquette.
-/// Opacité montée en même temps que le voile baissait : c'est le panneau qui
-/// porte désormais toute la lisibilité du texte.
 Color restoGlassFill(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
-        ? const Color(0xFF0B0F14).withValues(alpha: 0.74)
+        ? const Color(0xFF0B0F14).withValues(alpha: 0.86)
         : Colors.white.withValues(alpha: 0.91);
 
 /// Bordure d'un panneau translucide.

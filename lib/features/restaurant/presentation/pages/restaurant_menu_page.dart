@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/database/app_database.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../../core/services/daily_menu_service.dart';
 import '../../../../core/services/restaurant_order_service.dart';
+import '../../../../core/services/restaurant_setup_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -23,6 +25,7 @@ import '../../../caisse/presentation/widgets/cart_widget.dart';
 import '../widgets/dish_details_sheet.dart';
 import '../widgets/dish_form_sheet.dart';
 import '../widgets/resto_empty_state.dart';
+import '../widgets/resto_surfaces.dart';
 
 /// La carte du restaurant — grille de plats avec filtres par catégorie.
 ///
@@ -33,6 +36,19 @@ import '../widgets/resto_empty_state.dart';
 /// Deux gestes distincts sur une même carte :
 ///   • tap sur la carte → fiche du plat (prix, photo, options, stock) ;
 ///   • bouton « Ajouter » → ajoute au panier à emporter en cours.
+/// Tables dont un changement doit redessiner cet écran.
+///
+/// `products` pour la carte elle-même ; les quatre autres pour la progression
+/// de mise en route affichée sur une carte vide — une table créée au plan de
+/// salle ou un achat d'ingrédient saisi aux finances cochent une étape d'ici.
+const _kWatchedTables = {
+  'products',
+  'restaurant_tables',
+  'recipe_ingredients',
+  'ingredients',
+  'daily_expenses',
+};
+
 class RestaurantMenuPage extends ConsumerStatefulWidget {
   final String shopId;
 
@@ -59,7 +75,10 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     super.initState();
     _listener = (table, sid) {
       if (!mounted) return;
-      if (table != 'products') return;
+      // Pas seulement `products` : l'état vide porte la progression de mise
+      // en route, qui se coche avec la première table et le premier achat
+      // d'ingrédient — saisis ailleurs, parfois depuis un autre appareil.
+      if (!_kWatchedTables.contains(table)) return;
       if (sid != widget.shopId && sid != '_all') return;
       setState(() {});
     };
@@ -422,19 +441,34 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     required bool canEdit,
     required bool canAdd,
   }) {
-    final searching = _query.trim().isNotEmpty;
+    // CARTE TOTALEMENT VIDE — pas « aucun résultat », mais aucun plat du tout.
+    //
+    // Dans ce cas la recherche et les filtres de catégorie disparaissent :
+    // chercher et trier zéro élément ne peut rien donner, et deux barres de
+    // tri au-dessus d'un écran vide laissent croire que quelque chose est
+    // filtré alors qu'il n'y a simplement rien. Elles reviennent au premier
+    // plat enregistré.
+    final emptyMenu = _products.isEmpty;
+    // Conséquence : sur une carte vide, la recherche et la catégorie encore
+    // en mémoire ne décident plus du message — leurs commandes ne sont plus à
+    // l'écran, on ne pourrait ni les effacer ni comprendre d'où sort
+    // « aucun plat trouvé ».
+    final searching = !emptyMenu && _query.trim().isNotEmpty;
+    final category = emptyMenu ? null : _category;
     return Column(
         children: [
-          _SearchField(
-            controller: _searchCtrl,
-            onChanged: (v) => setState(() => _query = v),
-          ),
-          _CategoryBar(
-            categories: _categories,
-            thumbs: _categoryThumbs,
-            selected: _category,
-            onSelect: (c) => setState(() => _category = c),
-          ),
+          if (!emptyMenu) ...[
+            _SearchField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _query = v),
+            ),
+            _CategoryBar(
+              categories: _categories,
+              thumbs: _categoryThumbs,
+              selected: _category,
+              onSelect: (c) => setState(() => _category = c),
+            ),
+          ],
           Expanded(
             child: products.isEmpty
                 ? RestoEmptyState(
@@ -443,13 +477,13 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
                         : Icons.restaurant_rounded,
                     title: searching
                         ? 'Aucun plat trouvé'
-                        : _category == null
+                        : category == null
                             ? 'Carte vide'
-                            : 'Aucun plat dans « $_category »',
+                            : 'Aucun plat dans « $category »',
                     subtitle: searching
                         ? 'Aucun plat ne correspond à « ${_query.trim()} ». '
                             'Essayez un autre mot ou changez de catégorie.'
-                        : _category == null
+                        : category == null
                             ? 'Ajoutez vos plats pour composer la carte de '
                                 'votre établissement.'
                             : 'Choisissez une autre catégorie ou ajoutez '
@@ -459,6 +493,14 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
                     // que ne rien proposer.
                     actionLabel: canAdd ? 'Ajouter un plat' : null,
                     onAction: canAdd ? _openDishForm : null,
+                    // Ce qu'il reste à faire, et seulement là où c'est utile :
+                    // sur une carte vide, pas quand une recherche ne trouve
+                    // rien — l'établissement est alors déjà en service.
+                    footer: emptyMenu &&
+                            !RestaurantSetupService.stepFor(widget.shopId)
+                                .isComplete
+                        ? _SetupProgressCard(shopId: widget.shopId)
+                        : null,
                   )
                 : _MenuGrid(
                     products: products,
@@ -1127,12 +1169,17 @@ const _kTextShadow = [
 /// Bandeau semi-opaque posé sur la photo pour rendre le texte lisible quelle
 /// que soit l'image du plat.
 ///
+/// Opacité alignée sur la règle du module (cf. `restoGlassFill`) : le texte du
+/// mode restaurant ne se pose JAMAIS à nu sur une photo, il lui faut une
+/// surface à ~85 %. À 45 %, la photo d'un plat clair — une assiette blanche,
+/// une nappe — repassait au travers du libellé « Dispo » et du compteur.
+///
 /// IMPORTANT — plus de `BackdropFilter` (flou) ici : sur Flutter web
 /// (CanvasKit), EMPILER plusieurs `BackdropFilter` par-dessus une image
 /// (`CachedNetworkImage`) casse le compositing et fait DISPARAÎTRE la photo
-/// (carte grise). On utilise donc un simple voile noir translucide (alpha
-/// relevé pour compenser l'absence de flou) + l'ombre portée du texte, qui
-/// suffisent au contraste et sont robustes sur toutes les plateformes.
+/// (carte grise). On utilise donc un simple voile noir translucide + l'ombre
+/// portée du texte, qui suffisent au contraste et sont robustes sur toutes les
+/// plateformes.
 class _GlassPanel extends StatelessWidget {
   final Widget child;
   final EdgeInsets padding;
@@ -1148,10 +1195,125 @@ class _GlassPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.45),
+        color: Colors.black.withValues(alpha: 0.85),
         borderRadius: borderRadius,
       ),
       child: Padding(padding: padding, child: child),
+    );
+  }
+}
+
+/// PROGRESSION DE MISE EN ROUTE, sous l'état vide de la carte.
+///
+/// La page Menu est l'écran d'atterrissage du restaurant : c'est le premier
+/// écran que voit un établissement qui vient d'être créé. Lui annoncer
+/// « Carte vide » est exact mais sans usage — il le sait déjà. Ce qu'il
+/// ignore, c'est ce qu'il reste à faire pour que la caisse et les finances
+/// aient quelque chose à afficher, et dans quel ordre.
+///
+/// Les étapes ne sont PAS recopiées ici : elles sont lues dans
+/// [RestaurantSetupService], le même calcul que l'écran Configuration et que
+/// la bannière du tableau de bord. Trois affichages, une seule vérité — une
+/// liste recopiée aurait fini par cocher une étape que le service, lui,
+/// considère encore à faire.
+class _SetupProgressCard extends StatelessWidget {
+  final String shopId;
+
+  const _SetupProgressCard({required this.shopId});
+
+  /// Libellés dans l'ordre des rangs de [RestaurantSetupStep].
+  static const _labels = [
+    'Créer une table',
+    'Créer un plat et sa recette',
+    'Enregistrer vos achats d\'ingrédients',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final sem = theme.semantic;
+    final step = RestaurantSetupService.stepFor(shopId);
+    // Étapes FRANCHIES : l'étape courante est celle qui reste à faire, donc
+    // tout ce qui la précède est acquis.
+    final done = step.isComplete
+        ? RestaurantSetupStep.totalSteps
+        : step.index1 - 1;
+
+    return RestoGlassPanel(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(Icons.rocket_launch_outlined, size: 18, color: cs.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('Mise en route',
+                  style:
+                      AppTextStyles.bodySmBold.copyWith(color: cs.onSurface)),
+            ),
+            Text('$done sur ${RestaurantSetupStep.totalSteps}',
+                style: AppTextStyles.captionBold.copyWith(color: cs.primary)),
+          ]),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: done / RestaurantSetupStep.totalSteps,
+              minHeight: 6,
+              backgroundColor: sem.trackMuted,
+              valueColor: AlwaysStoppedAnimation<Color>(cs.primary),
+            ),
+          ),
+          const SizedBox(height: 14),
+          for (var i = 0; i < _labels.length; i++) ...[
+            if (i > 0) const SizedBox(height: 8),
+            Row(children: [
+              Icon(
+                i < done
+                    ? Icons.check_circle_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                size: 16,
+                color: i < done ? sem.success : cs.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              // Trois états de lecture : fait (barré, atténué), à faire
+              // maintenant (appuyé), plus tard (neutre). Sans cette
+              // distinction, la liste dit ce qu'il reste mais pas par où
+              // commencer — c'est pourtant toute la question ici.
+              Expanded(
+                child: Text(
+                  _labels[i],
+                  style: i < done
+                      ? AppTextStyles.caption.copyWith(
+                          color: cs.onSurfaceVariant,
+                          decoration: TextDecoration.lineThrough)
+                      : i == done
+                          ? AppTextStyles.captionBold
+                              .copyWith(color: cs.onSurface)
+                          : AppTextStyles.caption,
+                ),
+              ),
+            ]),
+          ],
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () =>
+                  context.go('/shop/$shopId/restaurant/setup'),
+              icon: const Icon(Icons.checklist_rounded, size: 18),
+              label: const Text('Ouvrir la configuration'),
+              // Bouton SECONDAIRE, et volontairement : l'action principale de
+              // cet écran reste « Ajouter un plat », juste au-dessus. Le
+              // thème impose une largeur minimale infinie aux boutons pleins
+              // — d'où la hauteur explicite, sinon la ligne s'étire.
+              style: OutlinedButton.styleFrom(minimumSize: const Size(0, 40)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

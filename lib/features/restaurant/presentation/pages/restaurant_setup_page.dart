@@ -11,6 +11,7 @@ import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../widgets/dish_form_sheet.dart';
 import '../widgets/ingredient_cost_sheet.dart';
+import '../widgets/resto_surfaces.dart';
 
 /// MISE EN ROUTE D'UN RESTAURANT — trois étapes, dans l'ordre.
 ///
@@ -120,14 +121,25 @@ class _RestaurantSetupPageState extends State<RestaurantSetupPage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
         children: [
-          Text('Trois étapes pour ouvrir votre restaurant',
-              style: AppTextStyles.title),
-          const SizedBox(height: 6),
-          Text(
-              'Le reste de l\'application s\'ouvrira une fois ces trois points '
-              'faits — sans eux, la caisse et les finances n\'auraient rien à '
-              'afficher.',
-              style: AppTextStyles.captionHint),
+          // En-tête sur panneau, comme tout texte du module : écrit à nu, il
+          // reposait sur la photo de salle et changeait de lisibilité selon la
+          // zone de l'image (cf. la règle sur `restoGlassFill`).
+          RestoGlassPanel(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Trois étapes pour ouvrir votre restaurant',
+                    style: AppTextStyles.title),
+                const SizedBox(height: 6),
+                Text(
+                    'Le reste de l\'application s\'ouvrira une fois ces trois '
+                    'points faits — sans eux, la caisse et les finances '
+                    'n\'auraient rien à afficher.',
+                    style: AppTextStyles.captionHint),
+              ],
+            ),
+          ),
           const SizedBox(height: 22),
           _SetupStepCard(
             rank: 1,

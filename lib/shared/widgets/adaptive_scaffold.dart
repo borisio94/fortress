@@ -335,8 +335,21 @@ class _MobileShell extends StatelessWidget {
     // on retombe sur le style standard (surface blanche, texte sombre)
     // pour préserver le contraste lecture.
     final cs            = theme.colorScheme;
-    final appBarBg      = isSubPage ? cs.surface : cs.primary;
-    final appBarFg      = isSubPage ? cs.onSurface : cs.onPrimary;
+    // EN RESTAURATION, LA BARRE NE SE REMPLIT PAS DE LA COULEUR DU THÈME.
+    //
+    // Elle prend la teinte du chrome — la même que la barre du haut en desktop
+    // et que la barre latérale. Trois raisons :
+    //   * elle est translucide : le décor photographique traverse la bande du
+    //     haut au lieu d'être tranché net par un aplat opaque ;
+    //   * la couleur du thème (ambre, violet…) redevient une couleur d'ACCENT
+    //     — badges, bouton actif, sélection — au lieu d'être un fond. Étalée
+    //     sur toute la largeur, elle ne pouvait plus rien désigner ;
+    //   * mobile et desktop cessaient de se ressembler sur le même écran.
+    final isResto       = isRestaurantShop(shopId);
+    final appBarBg      = isResto
+        ? restoChromeFill(context)
+        : (isSubPage ? cs.surface : cs.primary);
+    final appBarFg      = (isResto || isSubPage) ? cs.onSurface : cs.onPrimary;
     final titleStyle    = isSubPage
         ? (isChildSubPage
             ? AppTextStyles.label.copyWith(
@@ -349,7 +362,7 @@ class _MobileShell extends StatelessWidget {
     return Scaffold(
       // Transparent en restauration : le fond photographique est monté sous ce
       // Scaffold (cf. AdaptiveScaffold.build).
-      backgroundColor: isRestaurantShop(shopId)
+      backgroundColor: isResto
           ? Colors.transparent
           : theme.scaffoldBackgroundColor,
       // Drawer latéral (spec round 9 prompt 5) — remplace la bottom nav.
@@ -368,6 +381,12 @@ class _MobileShell extends StatelessWidget {
         automaticallyImplyLeading: false,
         backgroundColor: appBarBg,
         foregroundColor: appBarFg,
+        // Sans ces trois-là, Material repeint la barre d'un aplat opaque dès
+        // que le contenu passe dessous — la translucidité du mode restaurant
+        // ne tiendrait que tant que la page n'est pas défilée.
+        elevation: isResto ? 0 : null,
+        scrolledUnderElevation: isResto ? 0 : null,
+        surfaceTintColor: isResto ? Colors.transparent : null,
         iconTheme: IconThemeData(color: appBarFg),
         actionsIconTheme: IconThemeData(color: appBarFg),
         // Hamburger retiré : la navigation passe désormais par la bottom nav

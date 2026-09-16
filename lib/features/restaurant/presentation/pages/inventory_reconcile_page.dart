@@ -11,6 +11,7 @@ import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../widgets/resto_empty_state.dart' show RestoEmptyState;
+import '../widgets/resto_surfaces.dart' show RestoGlassPanel;
 
 /// Réconciliation d'inventaire (module finances — Lot 2).
 ///
@@ -153,10 +154,16 @@ class _InventoryReconcilePageState extends State<InventoryReconcilePage> {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: Text(
-                      'Saisissez le stock réellement compté. '
-                      'Un champ laissé vide n\'est pas modifié.',
-                      style: AppTextStyles.captionHint),
+                  // Sur panneau : aucun texte du module ne se pose à nu sur la
+                  // photo de salle (cf. la règle sur `restoGlassFill`).
+                  child: RestoGlassPanel(
+                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                    radius: 12,
+                    child: Text(
+                        'Saisissez le stock réellement compté. '
+                        'Un champ laissé vide n\'est pas modifié.',
+                        style: AppTextStyles.captionHint),
+                  ),
                 ),
                 Expanded(
                   child: ListView.separated(
