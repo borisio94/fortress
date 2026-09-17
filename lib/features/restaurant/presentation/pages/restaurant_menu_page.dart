@@ -540,20 +540,6 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     return w < 720 ? w : (w / 3).clamp(320.0, 420.0);
   }
 
-  /// Le volet panier RECOUVRE-T-IL l'écran quand il s'ouvre ?
-  ///
-  /// Sous 720 dp, [_cartPaneWidth] rend la largeur entière : ajouter un plat
-  /// bascule alors sur un panier plein écran et la grille tombe à zéro. C'est
-  /// ce qui rend un tap de travers pendant un défilement coûteux — il faut
-  /// refermer le panier pour revenir à la carte.
-  ///
-  /// DÉRIVÉ de `_cartPaneWidth`, et surtout pas comparé une seconde fois à
-  /// 720 : deux constantes écrites à deux endroits divergent au premier
-  /// ajustement, et le jour où elles divergeraient, la carte offrirait l'ajout
-  /// d'un seul tap sur un écran où le panier recouvre tout.
-  bool _cartCoversScreen(BuildContext context) =>
-      _cartPaneWidth(context) >= MediaQuery.of(context).size.width;
-
   Widget _buildMenu(
     List<Product> products,
     bool isAdmin, {
@@ -671,9 +657,6 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
                     isAdmin: isAdmin,
                     canDelete: canDelete,
                     canEdit: canEdit,
-                    // Sur petit écran, l'image OUVRE LA FICHE au lieu
-                    // d'ajouter : voir `_cartCoversScreen`.
-                    imageAdds: !_cartCoversScreen(context),
                     onTap: (p) => _onDishTap(p, canEdit),
                     onAdd: _addToCart,
                     onToggleDispo: _toggleDispo,
@@ -955,10 +938,6 @@ class _MenuGrid extends StatelessWidget {
   final bool isAdmin;
   final bool canDelete;
   final bool canEdit;
-
-  /// Un tap sur la PHOTO ajoute-t-il au panier ? Sinon il ouvre la fiche, comme
-  /// le bloc texte, et seule la pastille `+` ajoute.
-  final bool imageAdds;
   final ValueChanged<Product> onTap;
   final ValueChanged<Product> onAdd;
   final void Function(Product, bool) onToggleDispo;
@@ -972,7 +951,6 @@ class _MenuGrid extends StatelessWidget {
     required this.isAdmin,
     required this.canDelete,
     required this.canEdit,
-    required this.imageAdds,
     required this.onTap,
     required this.onAdd,
     required this.onToggleDispo,
@@ -1041,7 +1019,6 @@ class _MenuGrid extends StatelessWidget {
           canDelete: canDelete,
           canEdit: canEdit,
           photoHeight: photoH,
-          imageAdds: imageAdds,
           onTap: () => onTap(products[i]),
           onAdd: () => onAdd(products[i]),
           onToggleDispo: (v) => onToggleDispo(products[i], v),
@@ -1119,15 +1096,27 @@ const ColorFilter _kGreyscale = ColorFilter.matrix(<double>[
 /// le stock étant passé sur la photo.
 ///
 /// La carte porte DEUX zones tactiles, et non plus une seule :
-///   • le BLOC TEXTE ouvre toujours la fiche du plat ;
-///   • la PHOTO ajoute au panier — sauf sur petit écran, où elle ouvre la
-///     fiche elle aussi (cf. [imageAdds]).
-/// Une pastille `+` posée sur la photo ajoute dans les deux cas.
+///   • la PHOTO ajoute au panier ;
+///   • le BLOC TEXTE ouvre la fiche du plat.
+///
+/// Plus de bouton d'ajout : la photo EST le bouton, sur toutes les largeurs.
+/// Le geste n'est donc annoncé par aucun signe — seuls le retour au toucher et,
+/// sur le web, l'infobulle au survol le révèlent. C'est assumé : un écran de
+/// service se prend en main une fois, et le bouton coûtait une pastille sur
+/// chaque photo de la grille.
+///
+/// CONSÉQUENCE À CONNAÎTRE : sous 720 dp, le volet panier recouvre l'écran
+/// entier quand il s'ouvre. Un tap de travers pendant un défilement y bascule
+/// donc sur le panier, qu'il faut refermer pour revenir à la carte. Le retour
+/// arrière existe — chaque ligne du volet porte une corbeille — mais il n'y a
+/// pas d'annulation en un geste : `AppSnack` n'expose pas de `SnackBarAction`.
 ///
 /// Le bloc texte, et pas seulement le menu ⋮ : celui-ci n'apparaît qu'à qui
 /// possède un droit d'édition ou de suppression, alors que la fiche en LECTURE
 /// existe pour le serveur qui n'en a aucun — c'est lui qui doit répondre au
-/// client demandant ce qu'il y a dans un plat.
+/// client demandant ce qu'il y a dans un plat. C'est aussi, pour un
+/// administrateur, le seul chemin vers le formulaire depuis la carte, puisque
+/// la photo ne l'ouvre plus.
 class _DishCard extends StatelessWidget {
   final Product product;
   final String shopId;
@@ -1145,19 +1134,6 @@ class _DishCard extends StatelessWidget {
   /// telle quelle dans la hauteur de tuile. Les deux doivent rester d'accord,
   /// sans quoi le bloc texte déborde.
   final double photoHeight;
-
-  /// Un tap sur la photo ajoute-t-il au panier ?
-  ///
-  /// Faux sous 720 dp, où l'ouverture du panier recouvre l'écran entier : une
-  /// zone d'ajout de 67 % de la carte y transformerait le moindre tap de
-  /// travers, pendant un défilement, en bascule sur un panier plein écran. La
-  /// photo y ouvre donc la fiche, comme le bloc texte, et seule la pastille
-  /// ajoute.
-  ///
-  /// Les deux gestes qu'on apprend restent vrais partout — pastille = ajouter,
-  /// texte = fiche. Sur grand écran un raccourci s'ajoute, là où il ne coûte
-  /// rien : le panier n'y prend qu'un tiers et la carte reste visible.
-  final bool imageAdds;
   final VoidCallback onTap;
   final VoidCallback onAdd;
   final ValueChanged<bool> onToggleDispo;
@@ -1172,7 +1148,6 @@ class _DishCard extends StatelessWidget {
     required this.canDelete,
     required this.canEdit,
     required this.photoHeight,
-    required this.imageAdds,
     required this.onTap,
     required this.onAdd,
     required this.onToggleDispo,
@@ -1236,10 +1211,10 @@ class _DishCard extends StatelessWidget {
 
     final photo = _photo(context);
     // L'image n'ajoute que si elle a quelque chose à ajouter : sur un plat
-    // indisponible elle ouvre la fiche, quelle que soit la largeur. Les trois
-    // gardes de `_addToCart` restent derrière de toute façon — elles couvrent
-    // les chemins qui ne passent pas par cet écran.
-    final tapAdds = imageAdds && available;
+    // indisponible elle ouvre la fiche. Les trois gardes de `_addToCart`
+    // restent derrière de toute façon — elles couvrent les chemins qui ne
+    // passent pas par cet écran.
+    final tapAdds = available;
 
     return Material(
       color: Colors.transparent,
@@ -1322,21 +1297,6 @@ class _DishCard extends StatelessWidget {
                           dispoEnabled: avail.enabled,
                         ),
                       ),
-                    ),
-                  // PASTILLE D'AJOUT, en vis-à-vis du menu ⋮ : même
-                  // taille, même voile, même cible de 36 px.
-                  //
-                  // Elle ANNONCE le geste que l'image exécute. Une photo
-                  // ne dit rien d'elle-même, et un tap sur l'image serait
-                  // resté introuvable sans un signe quelque part. C'est
-                  // toujours un bouton d'ajout — simplement déplacé sur
-                  // la photo, où il libère la ligne du prix, et flanqué
-                  // d'une cible bien plus large que ses 22 px visibles.
-                  if (available)
-                    Positioned(
-                      bottom: 0,
-                      right: 0,
-                      child: _AddBadge(onAdd: onAdd),
                     ),
                 ],
               ),
@@ -1642,52 +1602,6 @@ class _DishMenuBtn extends StatelessWidget {
             ]),
           ),
       ],
-    );
-  }
-}
-
-/// Pastille `+` posée en bas à droite de la photo.
-///
-/// Elle remplace le carré de 28 px qui occupait la ligne du prix. Ce n'est pas
-/// « un bouton en moins » — c'est le même bouton, déplacé là où il annonce le
-/// geste que la photo exécute, et rendu plus facile à atteindre : 22 px
-/// visibles, mais 36 px touchables, contre 28 auparavant.
-///
-/// Pas d'état éteint : la carte d'un plat indisponible ne la montre pas du
-/// tout. Le panier n'a donc jamais à refuser ce que l'écran vient de proposer.
-///
-/// L'accent plein et non le voile noir des deux autres pastilles : celles-ci
-/// informent, celle-ci agit, et la couleur de la boutique est ce qui distingue
-/// une action dans tout le reste de l'application.
-class _AddBadge extends StatelessWidget {
-  final VoidCallback onAdd;
-
-  const _AddBadge({required this.onAdd});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: _kBadgeTap,
-      height: _kBadgeTap,
-      child: Center(
-        child: Tooltip(
-          message: 'Ajouter au panier',
-          child: Material(
-            color: cs.primary,
-            shape: const CircleBorder(),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: onAdd,
-              child: SizedBox(
-                width: _kBadgeDot,
-                height: _kBadgeDot,
-                child: Icon(Icons.add_rounded, size: 16, color: cs.onPrimary),
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
