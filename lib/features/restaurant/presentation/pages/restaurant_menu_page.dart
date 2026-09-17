@@ -406,13 +406,15 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
       // Masqué quand la grille est vide : l'état vide porte déjà son propre
       // bouton d'ajout, et deux options d'ajout simultanées se
       // concurrenceraient à l'écran.
-      floatingActionButton: (products.isEmpty || !canAdd)
+      //
+      // Masqué AUSSI quand le panier est ouvert. Sur mobile le volet occupe
+      // toute la largeur (cf. `_cartPaneWidth`) : le bouton flottait alors
+      // par-dessus et recouvrait « Commander », le geste même que l'on
+      // cherche à provoquer. Ajouter un plat n'a de toute façon aucun sens
+      // pendant qu'on encaisse — la carte n'est plus à l'écran.
+      floatingActionButton: (products.isEmpty || !canAdd || _cartOpen(context))
           ? null
-          : FloatingActionButton.extended(
-              onPressed: _openDishForm,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Plat'),
-            ),
+          : _addDishButton(context),
       // VOLET PANIER À DROITE — ouvert dès le premier article, refermé dès le
       // dernier retiré. Il remplace la feuille modale : celle-ci recouvrait la
       // carte, obligeant à la fermer pour ajouter le plat suivant et à la
@@ -473,6 +475,39 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   /// Écart entre la carte et le volet panier — les deux sont des blocs
   /// distincts, pas deux moitiés d'une même surface.
   static const double _kCartGap = 10;
+
+  /// Le volet panier est-il déployé ?
+  ///
+  /// `select` et non `watch` : seule la bascule vide/non-vide nous intéresse.
+  /// Observer l'état entier ferait reconstruire toute la carte à chaque
+  /// changement de quantité, pour un bouton qui, lui, ne change pas.
+  bool _cartOpen(BuildContext context) {
+    final hasItems =
+        context.select<CaisseBloc, bool>((b) => b.state.items.isNotEmpty);
+    return hasItems && ref.watch(cartPaneVisibleProvider);
+  }
+
+  /// Bouton d'ajout d'un plat.
+  ///
+  /// Compact sur téléphone : la version pleine taille couvrait une carte
+  /// entière de la grille sur un écran de 5 pouces. Le libellé n'apparaît
+  /// qu'à partir d'une largeur confortable — sur mobile l'icône seule suffit,
+  /// le bouton étant au même endroit sur tous les écrans de l'app.
+  Widget _addDishButton(BuildContext context) {
+    final compact = MediaQuery.of(context).size.width < 600;
+    if (compact) {
+      return FloatingActionButton.small(
+        onPressed: _openDishForm,
+        tooltip: 'Ajouter un plat',
+        child: const Icon(Icons.add_rounded),
+      );
+    }
+    return FloatingActionButton.extended(
+      onPressed: _openDishForm,
+      icon: const Icon(Icons.add_rounded),
+      label: const Text('Plat'),
+    );
+  }
 
   /// Largeur du volet : assez pour lire une ligne d'article, jamais plus du
   /// tiers de l'écran — la carte doit rester l'écran principal.
