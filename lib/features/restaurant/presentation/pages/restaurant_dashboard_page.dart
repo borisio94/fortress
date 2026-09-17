@@ -1,10 +1,12 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/daily_menu_service.dart';
+import '../../../../core/services/restaurant_order_service.dart';
 import '../../../../core/services/ingredient_service.dart';
 import '../../../../core/services/restaurant_reporting_service.dart';
 import '../../../../core/services/restaurant_setup_service.dart';
@@ -13,9 +15,12 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
+import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/period_selector.dart';
 import '../../../../shared/widgets/product_image_card.dart';
+import '../../../caisse/presentation/bloc/caisse_bloc.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
+import '../../../inventaire/domain/entities/product.dart';
 import '../../data/restaurant_dashboard_providers.dart';
 import '../widgets/resto_kpi_tile.dart';
 import '../widgets/resto_surfaces.dart';
@@ -96,6 +101,11 @@ class _RestaurantDashboardPageState
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
+          // ── Contexte : boutique et service ────────────────────────────
+          // En TÊTE DU CORPS et non dans la barre du haut : le titre vient du
+          // châssis partagé avec l'e-commerce, et il ne prend qu'une chaîne.
+          _Greeting(shopId: shopId),
+          const SizedBox(height: 16),
           // ── Configuration incomplète ──────────────────────────────────
           // Le routeur redirige déjà vers /restaurant/setup ; cette bannière
           // couvre le cas où l'on atteint le tableau de bord par un chemin
@@ -104,10 +114,16 @@ class _RestaurantDashboardPageState
             _SetupBanner(shopId: shopId),
             const SizedBox(height: 16),
           ],
+          // ── Menu du jour ──────────────────────────────────────────────
+          // Remontée AVANT les indicateurs : c'est la seule carte de l'écran
+          // sur laquelle on AGIT — les autres se lisent. En service, ce qu'on
+          // veut d'abord c'est ajouter un plat, pas consulter un chiffre.
+          _DailyMenuCard(shopId: shopId),
+          const SizedBox(height: 16),
           // ── Bandeau principal : 4 indicateurs du service ──────────────
           _TopKpiRow(shopId: shopId, resto: resto, data: data, finance: finance),
           const SizedBox(height: 16),
-          // ── Trois panneaux : commandes · carte du jour · ingrédients ───
+          // ── Deux panneaux : commandes · ingrédients ────────────────────
           _ServiceRow(shopId: shopId, resto: resto),
           const SizedBox(height: 16),
           // ── Rapport financier ─────────────────────────────────────────
@@ -152,18 +168,26 @@ class _TopKpiRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final sem = Theme.of(context).semantic;
     final period = ref.watch(dashPeriodProvider);
+    // QUATRE tuiles, pas cinq : à cinq, la dernière restait seule sur sa
+    // deuxième ligne et la grille cassait. « Clients servis » est sorti — c'est
+    // le seul des cinq qui n'appelle aucun geste et ne mène nulle part, là où
+    // « Stock bas » passe en rouge et ouvre les finances.
+    //
+    // Chaque tuile porte un liseré vertical de sa NATURE : l'argent en vert,
+    // le service en couleur de marque, la salle en bleu, l'alerte en ambre.
     final tiles = <Widget>[
       _StatCard(
         // Le libellé suit le sélecteur de période : annoncer « du jour » sur
         // une plage mensuelle serait un mensonge à l'écran.
         title: 'Ventes · ${_periodLabel(period)}',
         value: CurrencyFormatter.format(finance.revenue),
-        accent: true,
+        stripe: sem.success,
         onTap: () => context.push('/shop/$shopId/caisse/orders'),
       ),
       _StatCard(
         title: 'Commandes en cours',
         value: resto.openCount.toString(),
+        stripe: Theme.of(context).colorScheme.primary,
         icon: Icons.receipt_long_rounded,
         onTap: () => context.push('/shop/$shopId/caisse/orders'),
       ),
@@ -176,6 +200,7 @@ class _TopKpiRow extends ConsumerWidget {
       _StatCard(
         title: 'Places libres',
         value: resto.freeSeats.toString(),
+        stripe: sem.info,
         suffix: 'sur ${resto.totalSeats}',
         // Salle pleine : l'information vaut d'être vue de loin, c'est elle qui
         // décide si l'on fait patienter ou si l'on refuse.
@@ -186,13 +211,9 @@ class _TopKpiRow extends ConsumerWidget {
         onTap: () => context.push('/shop/$shopId/restaurant/tables'),
       ),
       _StatCard(
-        title: 'Clients servis',
-        value: data.clientCount.toString(),
-        icon: Icons.people_alt_outlined,
-      ),
-      _StatCard(
         title: 'Stock bas',
         value: resto.lowStockCount.toString(),
+        stripe: sem.warning,
         suffix: resto.lowStockCount > 1 ? 'alertes' : 'alerte',
         valueColor: resto.lowStockCount > 0 ? sem.danger : null,
         icon: Icons.inventory_2_outlined,
@@ -220,15 +241,18 @@ class _TopKpiRow extends ConsumerWidget {
 
 /// Tuile d'indicateur : intitulé discret au-dessus, chiffre en grand dessous.
 ///
-/// [accent] souligne la tuile d'une barre à la couleur de marque — réservé à
-/// l'indicateur principal (les ventes), comme sur la maquette.
+/// [stripe] est un liseré VERTICAL de 3 px sur le bord gauche, à la couleur de
+/// la NATURE de l'indicateur — l'argent, le service, la salle, l'alerte. Une
+/// seule tuile portait auparavant une barre horizontale sous elle, réservée aux
+/// ventes : les quatre se distinguaient alors par leur seul intitulé, qu'il
+/// fallait lire. Un liseré se reconnaît sans lire.
 class _StatCard extends StatelessWidget {
   final String title;
   final String value;
   final String? suffix;
   final Color? valueColor;
   final IconData? icon;
-  final bool accent;
+  final Color? stripe;
   final VoidCallback? onTap;
 
   const _StatCard({
@@ -237,7 +261,7 @@ class _StatCard extends StatelessWidget {
     this.suffix,
     this.valueColor,
     this.icon,
-    this.accent = false,
+    this.stripe,
     this.onTap,
   });
 
@@ -247,10 +271,9 @@ class _StatCard extends StatelessWidget {
     final cs = theme.colorScheme;
 
     return Container(
-      // Relief : dégradé vertical, arête haute claire, ombre portée. Le
-      // `Material` passe en transparent par-dessus — il ne sert plus qu'à
-      // porter l'encre du toucher, sa couleur écraserait le dégradé.
-      decoration: restoReliefDecoration(context, radius: 14),
+      // Le `Material` passe en transparent par-dessus : il ne sert qu'à porter
+      // l'encre du toucher, sa couleur masquerait la surface.
+      decoration: _cardSurface(context, radius: 14),
       child: Material(
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(14),
@@ -260,7 +283,9 @@ class _StatCard extends StatelessWidget {
           child: Stack(
             children: [
               Padding(
-                padding: const EdgeInsets.all(14),
+                // Décalé à gauche de la largeur du liseré : sans ce retrait, le
+                // texte le toucherait.
+                padding: const EdgeInsets.fromLTRB(17, 14, 14, 14),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -308,17 +333,19 @@ class _StatCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (accent)
+              if (stripe != null)
                 Positioned(
-                  left: 14,
-                  right: 14,
+                  left: 0,
+                  top: 0,
                   bottom: 0,
                   child: Container(
-                    height: 3,
+                    width: 3,
                     decoration: BoxDecoration(
-                      color: cs.primary,
-                      borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(3)),
+                      color: stripe,
+                      // Arrondi du même côté que la carte, sinon le liseré
+                      // déborde de l'angle.
+                      borderRadius: const BorderRadius.horizontal(
+                          left: Radius.circular(14)),
                     ),
                   ),
                 ),
@@ -330,11 +357,82 @@ class _StatCard extends StatelessWidget {
   }
 }
 
+/// Ligne de CONTEXTE : où l'on est, et à quel moment du service.
+///
+/// Pas de salutation ici, à dessein : la barre du haut en porte déjà une
+/// (« Bienvenue, <prénom> 👋 »). Deux salutations à quelques pixels l'une de
+/// l'autre, avec le même emoji, se répéteraient sans rien ajouter. La barre
+/// salue la PERSONNE, ce bloc situe le LIEU et le MOMENT.
+///
+/// ─── LE SERVICE EST DÉDUIT DE L'HEURE ──────────────────────────────────────
+///
+/// L'application ne SAIT PAS dans quel service elle se trouve : il n'existe
+/// aucune donnée d'horaires, et « service midi » n'apparaît nulle part ailleurs
+/// que dans du texte libre saisi par l'utilisateur (motif de perte, note de
+/// dépense). Les créneaux ci-dessous sont donc une CONVENTION de notre part,
+/// pas une information du restaurant — un établissement de nuit la démentira.
+///
+/// Le jour où les horaires deviennent un réglage, c'est une colonne `shops`
+/// qu'il faudra lire ici, jamais un `ShopSettingsStore` local.
+class _Greeting extends StatelessWidget {
+  final String shopId;
+
+  const _Greeting({required this.shopId});
+
+  /// Créneau de service, selon la convention documentée ci-dessus.
+  static String _service(int hour) {
+    if (hour >= 6 && hour < 11) return 'service du matin';
+    if (hour >= 11 && hour < 15) return 'service du midi';
+    if (hour >= 18 && hour < 24) return 'service du soir';
+    return 'hors service';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final hour = DateTime.now().hour;
+    final shopName = LocalStorageService.getShop(shopId)?.name.trim() ?? '';
+
+    // UNE seule ligne quand la boutique est nommée : « Chez Mado · service du
+    // soir » se lit d'un trait. Deux lignes couperaient une phrase de cinq
+    // mots. Sans nom de boutique, il ne reste que le créneau.
+    //
+    // Échelon `label` (14) pour le lieu : l'échelle typographique de l'app ne
+    // compte pas de 15, et inventer une taille en dur pour un pixel d'écart
+    // casserait la règle qui tient tout le reste.
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: shopName.isEmpty
+              ? Text(_service(hour),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.label.copyWith(color: cs.onSurface))
+              : Text.rich(
+                  TextSpan(children: [
+                    TextSpan(
+                        text: shopName,
+                        style: AppTextStyles.label
+                            .copyWith(color: cs.onSurface)),
+                    TextSpan(
+                        text: ' · ${_service(hour)}',
+                        style: AppTextStyles.caption),
+                  ]),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+        ),
+      ],
+    );
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════
-//  RANGÉE DE SERVICE — commandes · carte du jour · ingrédients
+//  RANGÉE DE SERVICE — commandes · ingrédients
 // ═══════════════════════════════════════════════════════════════════════
 
-/// Les trois panneaux du service, côte à côte sur large écran, empilés sinon.
+/// Les deux panneaux du service, côte à côte sur large écran, empilés sinon.
 class _ServiceRow extends StatelessWidget {
   final String shopId;
   final RestaurantDashData resto;
@@ -344,44 +442,25 @@ class _ServiceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final orders = _OpenOrdersCard(shopId: shopId, resto: resto);
-    final menu = _DailyMenuCard(shopId: shopId);
     final stock = _IngredientsCard(shopId: shopId);
 
+    // DEUX cartes depuis que « Menu du jour » est remontée en tête d'écran :
+    // le palier à 1040 px, qui servait à loger trois colonnes, n'a plus d'objet.
     return LayoutBuilder(builder: (_, c) {
-      if (c.maxWidth >= 1040) {
+      if (c.maxWidth >= 700) {
         return IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(flex: 4, child: orders),
+              Expanded(flex: 3, child: orders),
               const SizedBox(width: 16),
-              Expanded(flex: 5, child: menu),
-              const SizedBox(width: 16),
-              Expanded(flex: 3, child: stock),
+              Expanded(flex: 2, child: stock),
             ],
           ),
         );
       }
-      if (c.maxWidth >= 700) {
-        return Column(children: [
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(child: orders),
-                const SizedBox(width: 16),
-                Expanded(child: stock),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          menu,
-        ]);
-      }
       return Column(children: [
         orders,
-        const SizedBox(height: 16),
-        menu,
         const SizedBox(height: 16),
         stock,
       ]);
@@ -475,31 +554,83 @@ class _OpenOrdersCard extends StatelessWidget {
   }
 }
 
-/// Carte du jour : les plats et leur disponibilité du moment.
+/// Menu du jour — une rangée de plats qu'on ajoute au panier d'un doigt.
+///
+/// ─── CE QUE « DU JOUR » VEUT DIRE ICI ──────────────────────────────────────
+///
+/// Les plats VENDABLES de la carte, les disponibles d'abord. Ce n'est pas une
+/// sélection composée par le gérant : `DailyMenuService` ne porte qu'une
+/// disponibilité — un interrupteur et un stock, locaux à l'appareil et remis à
+/// zéro chaque matin. Une vraie carte du jour demanderait une donnée de plus.
+///
+/// ─── LE TAP AJOUTE AU PANIER ───────────────────────────────────────────────
+///
+/// Le même geste que l'écran Menu, et le même panier : celui de la caisse,
+/// partagé par toute l'app. AUCUNE table n'est demandée ici — elle se choisit à
+/// la validation, dans « Type de commande ». Demander la table d'abord
+/// créerait un second parcours de prise de commande, alors que tout passe par
+/// le Menu depuis qu'on a supprimé l'écran de service.
+///
+/// Les trois gardes de l'écran Menu sont reprises telles quelles : identifiant
+/// présent, plat vendable, disponible aujourd'hui. Les omettre rouvrirait ce
+/// que ces contrôles ferment.
 class _DailyMenuCard extends StatelessWidget {
   final String shopId;
 
   const _DailyMenuCard({required this.shopId});
 
+  /// Au-delà, la rangée devient un second écran Menu. En deçà de la dizaine,
+  /// le défilement n'aurait pas d'objet.
+  static const int _maxDishes = 12;
+
+  /// Diamètre du cercle, et de sa pastille.
+  static const double _circle = 62;
+  static const double _badge = 21;
+
+  void _add(BuildContext context, Product p) {
+    final pid = p.id;
+    if (pid == null || pid.isEmpty) return;
+    if (!p.isSellable) {
+      AppSnack.error(context, '« ${p.name} » est retiré de la vente.');
+      return;
+    }
+    if (!DailyMenuService.read(shopId, pid).isAvailable) {
+      AppSnack.error(
+          context, '« ${p.name} » n\'est pas disponible aujourd\'hui.');
+      return;
+    }
+    context.read<CaisseBloc>().add(AddItemToCart(
+          RestaurantOrderService.buildItem(
+            productId: pid,
+            productName: p.name,
+            unitPrice: p.priceSellPos,
+            priceBuy: p.priceBuy,
+            imageUrl: p.mainImageUrl,
+          ),
+        ));
+    AppSnack.success(context, '${p.name} ajouté');
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final sem = Theme.of(context).semantic;
 
-    // Les plats vendables d'abord : en service, ce qu'on cherche c'est ce
-    // qu'on peut proposer maintenant.
+    // `isSellable` et non `isActive` seul : la règle des surfaces de vente
+    // exclut aussi les brouillons (cf. `Product.isSellable`).
     final dishes = LocalStorageService.getProductsForShop(shopId)
-        .where((p) => p.isActive && p.id != null)
+        .where((p) => p.isSellable && p.id != null)
         .toList();
     dishes.sort((a, b) {
       final av = DailyMenuService.read(shopId, a.id!).isAvailable ? 0 : 1;
       final bv = DailyMenuService.read(shopId, b.id!).isAvailable ? 0 : 1;
       return av != bv ? av - bv : a.name.compareTo(b.name);
     });
-    final shown = dishes.take(4).toList();
+    final shown = dishes.take(_maxDishes).toList();
+    final hasMore = dishes.length > shown.length;
 
     return _Card(
       title: 'Menu du jour',
+      subtitle: shown.isEmpty ? null : 'Touchez un plat pour l\'ajouter',
       trailing: TextButton(
         // La carte restaurant vit sur la route `/inventaire` (même route que
         // l'inventaire e-commerce, l'écran change selon le secteur).
@@ -513,79 +644,178 @@ class _DailyMenuCard extends StatelessWidget {
               message: 'Aucun plat sur la carte. Ajoutez-en depuis le Menu.',
             )
           : SizedBox(
-              height: 176,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: shown.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
-                itemBuilder: (_, i) {
-                  final p = shown[i];
-                  final avail = DailyMenuService.read(shopId, p.id!);
-                  return SizedBox(
-                    width: 132,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: restoGlassInner(context),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: sem.borderSubtle),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SizedBox(
-                            height: 104,
-                            width: double.infinity,
-                            child: Opacity(
-                              // Plat indisponible : photo grisée, comme sur la
-                              // carte — l'information doit se voir d'un coup
-                              // d'œil, pas seulement se lire.
-                              opacity: avail.isAvailable ? 1 : 0.45,
-                              child: ProductImageCard(
-                                imageUrl: p.mainImageUrl,
-                                fillParent: true,
-                                borderRadius: BorderRadius.zero,
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 9),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
-                                children: [
-                                  Text(p.name,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: AppTextStyles.bodySm
-                                          .copyWith(color: cs.onSurface)),
-                                  Text(
-                                      avail.isAvailable
-                                          ? CurrencyFormatter.format(
-                                              p.priceSellPos)
-                                          : (avail.isSoldOut
-                                              ? 'Épuisé'
-                                              : 'Indisponible'),
-                                      maxLines: 1,
-                                      style: AppTextStyles.captionBold
-                                          .copyWith(
-                                              color: avail.isAvailable
-                                                  ? cs.primary
-                                                  : sem.danger)),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
+              // Cercle + nom + prix, sans hauteur perdue.
+              height: _circle + 42,
+              child: Row(children: [
+                Expanded(
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: shown.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 14),
+                    itemBuilder: (_, i) => _DishBubble(
+                      product: shown[i],
+                      available: DailyMenuService.read(shopId, shown[i].id!)
+                          .isAvailable,
+                      soldOut:
+                          DailyMenuService.read(shopId, shown[i].id!).isSoldOut,
+                      diameter: _circle,
+                      badge: _badge,
+                      onTap: () => _add(context, shown[i]),
+                    ),
+                  ),
+                ),
+                // Il reste des plats hors écran : un chevron le dit, là où le
+                // bord coupé d'une vignette ne le dit qu'à moitié.
+                if (hasMore)
+                  Icon(Icons.chevron_right_rounded,
+                      size: 20,
+                      color: cs.onSurface.withValues(alpha: 0.35)),
+              ]),
+            ),
+    );
+  }
+}
+
+/// Un plat de la rangée : cercle photo, pastille « + », nom, prix.
+///
+/// Le cercle ENTIER est la cible du toucher, pas seulement la pastille : à
+/// 21 px, celle-ci est trop petite pour un doigt en plein service. Elle
+/// annonce l'action, elle ne la porte pas.
+class _DishBubble extends StatelessWidget {
+  final Product product;
+  final bool available;
+  final bool soldOut;
+  final double diameter;
+  final double badge;
+  final VoidCallback onTap;
+
+  const _DishBubble({
+    required this.product,
+    required this.available,
+    required this.soldOut,
+    required this.diameter,
+    required this.badge,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final sem = theme.semantic;
+
+    return SizedBox(
+      width: diameter + 16,
+      child: InkWell(
+        onTap: available ? onTap : null,
+        borderRadius: BorderRadius.circular(diameter),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: diameter,
+              height: diameter,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Opacity(
+                    // Indisponible : le cercle s'éteint. L'information doit se
+                    // voir d'un coup d'œil, pas seulement se lire.
+                    opacity: available ? 1 : 0.4,
+                    child: ClipOval(
+                      child: SizedBox(
+                        width: diameter,
+                        height: diameter,
+                        child: _DishAvatar(product: product),
                       ),
                     ),
-                  );
-                },
+                  ),
+                  // Pas de pastille sur un plat indisponible : proposer un
+                  // « + » qui refuserait ensuite serait pire que ne rien
+                  // proposer.
+                  if (available)
+                    Positioned(
+                      right: -2,
+                      bottom: -2,
+                      child: Container(
+                        width: badge,
+                        height: badge,
+                        decoration: BoxDecoration(
+                          color: cs.primary,
+                          shape: BoxShape.circle,
+                          // Liseré à la couleur de la carte : sans lui, la
+                          // pastille se confond avec le bord du cercle.
+                          border: Border.all(
+                              color: restoGlassFill(context), width: 2),
+                        ),
+                        child: Icon(Icons.add_rounded,
+                            size: 13, color: cs.onPrimary),
+                      ),
+                    ),
+                ],
               ),
             ),
+            const SizedBox(height: 6),
+            Text(product.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: AppTextStyles.caption.copyWith(color: cs.onSurface)),
+            Text(
+                available
+                    ? CurrencyFormatter.format(product.priceSellPos)
+                    : (soldOut ? 'Épuisé' : 'Indisponible'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.microBold.copyWith(
+                    color: available ? cs.primary : sem.danger)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Contenu du cercle : la photo du plat, ou son INITIALE.
+///
+/// Un plat sans photo tombait sur le placeholder générique de
+/// `ProductImageCard` — le même pour tous, ce qui rendait deux plats sans
+/// photo indistinguables dans une rangée. L'initiale, elle, les sépare, et la
+/// teinte dérivée du nom fait que le même plat garde la même couleur d'un
+/// écran à l'autre.
+class _DishAvatar extends StatelessWidget {
+  final Product product;
+
+  const _DishAvatar({required this.product});
+
+  /// Teinte stable, dérivée du nom. `hashCode` suffit : on ne cherche pas une
+  /// répartition parfaite, seulement qu'un plat garde SA couleur.
+  Color _tint(BuildContext context) {
+    final hue = (product.name.hashCode.abs() % 360).toDouble();
+    final base = HSLColor.fromColor(Theme.of(context).colorScheme.primary);
+    return HSLColor.fromAHSL(1, hue, 0.35, base.lightness).toColor();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = product.mainImageUrl;
+    if (url != null && url.isNotEmpty) {
+      return ProductImageCard(
+        imageUrl: url,
+        fillParent: true,
+        borderRadius: BorderRadius.zero,
+      );
+    }
+    final initial = product.name.trim().isEmpty
+        ? '?'
+        : product.name.trim().characters.first.toUpperCase();
+    final tint = _tint(context);
+    return ColoredBox(
+      color: tint.withValues(alpha: 0.18),
+      child: Center(
+        child: Text(initial,
+            style: AppTextStyles.subtitleBold.copyWith(color: tint)),
+      ),
     );
   }
 }
@@ -842,8 +1072,14 @@ class _FoodCostCard extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       // Arête haute teintée du NIVEAU de food cost : la carte s'annonce avant
       // d'être lue. Vert, orange ou rouge selon le seuil franchi.
-      decoration: restoReliefDecoration(context,
-          radius: 14, accent: color.withValues(alpha: 0.55)),
+      decoration: _cardSurface(context, radius: 14).copyWith(
+        border: Border(
+          top: BorderSide(color: color.withValues(alpha: 0.55), width: 2),
+          left: BorderSide(color: restoGlassBorder(context), width: 0.5),
+          right: BorderSide(color: restoGlassBorder(context), width: 0.5),
+          bottom: BorderSide(color: restoGlassBorder(context), width: 0.5),
+        ),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -994,10 +1230,10 @@ class _FinanceTile extends StatelessWidget {
     final negative = !hidden && curve == _Curve.profit && amount < 0;
 
     return Container(
-      decoration: restoReliefDecoration(context, radius: 14),
+      decoration: _cardSurface(context, radius: 14),
       child: Material(
-        // Transparent : la couleur du Material écraserait le dégradé du
-        // relief. Il ne porte plus que l'encre du toucher.
+        // Transparent : la couleur du Material masquerait la surface. Il ne
+        // porte plus que l'encre du toucher.
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
@@ -1924,10 +2160,7 @@ class _Card extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
-      // Panneau translucide EN RELIEF : le fond photographique du mode
-      // restaurant se devine toujours derrière les cartes (cf. RestoBackdrop),
-      // mais celles-ci sont désormais posées dessus, pas peintes dedans.
-      decoration: restoReliefDecoration(context),
+      decoration: _cardSurface(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1961,7 +2194,21 @@ class _Card extends StatelessWidget {
   }
 }
 
-/// État vide, à hauteur constante pour que la page ne saute pas au chargement.
+/// État vide d'une carte : UNE LIGNE, icône et phrase côte à côte.
+///
+/// Il occupait 150 px de haut, centré — la hauteur d'une carte pleine pour
+/// dire qu'il n'y a rien. Sur un restaurant qui démarre, sept cartes dans cet
+/// état donnaient quatre écrans de vide à faire défiler avant d'atteindre quoi
+/// que ce soit.
+///
+/// La hauteur constante était justifiée par « la page ne saute pas au
+/// chargement ». Elle saute de toute façon : les cartes pleines n'ont pas cette
+/// hauteur-là. Autant que le vide coûte ce qu'il vaut.
+///
+/// L'action éventuelle ne vit PAS ici : elle reste dans l'en-tête de la carte,
+/// en pastille compacte (cf. « Ajouter » du stock d'ingrédients) — un bouton
+/// sous une ligne de texte rendrait au bloc la hauteur qu'on vient de lui
+/// retirer.
 class _EmptyBlock extends StatelessWidget {
   final IconData icon;
   final String message;
@@ -1971,23 +2218,36 @@ class _EmptyBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return SizedBox(
-      height: 150,
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 32, color: cs.onSurface.withValues(alpha: 0.25)),
-            const SizedBox(height: 8),
-            Text(message,
-                textAlign: TextAlign.center,
-                style: AppTextStyles.bodySmSecondary),
-          ],
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 19, color: cs.onSurface.withValues(alpha: 0.35)),
+        const SizedBox(width: 9),
+        Expanded(
+          child: Text(message, style: AppTextStyles.bodySmSecondary),
         ),
-      ),
+      ],
     );
   }
 }
+
+/// Surface d'une carte du tableau de bord.
+///
+/// Translucide, bordure de 0,5 px, arrondi 17 — posée sur le motif du fond
+/// sans le masquer. Elle remplace le relief à trois ombres, qui avait été
+/// dessiné pour se détacher d'une PHOTO : le fond en dégradé et formes douces
+/// n'a plus besoin qu'on crie par-dessus.
+///
+/// PAS de flou d'arrière-plan, et c'est délibéré : cet écran porte huit cartes
+/// à la fois, et `RestoGlassPanel` documente déjà que le `BackdropFilter` coûte
+/// cher sur le web dès qu'il se répète. La translucidité du remplissage suffit
+/// à laisser deviner le motif.
+BoxDecoration _cardSurface(BuildContext context, {double radius = 17}) =>
+    BoxDecoration(
+      color: restoGlassFill(context),
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: restoGlassBorder(context), width: 0.5),
+    );
 
 /// Deux cartes côte à côte sur large écran, empilées sinon.
 class _TwoCol extends StatelessWidget {
