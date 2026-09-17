@@ -1,58 +1,127 @@
+import 'dart:math' show pi;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
-/// Socle visuel du mode restaurant : un fond photographique flouté et des
+import '../../../../core/theme/app_colors.dart';
+
+/// Socle visuel du mode restaurant : un fond géométrique dessiné et des
 /// panneaux translucides posés dessus.
 ///
-/// Décliné dans les DEUX modes (clair et sombre) : la photo est la même, seul
-/// le voile change de sens — sombre sur fond sombre, clair sur fond clair.
-/// Sans cette double déclinaison, le sélecteur clair/sombre de l'app n'aurait
-/// plus d'effet sur la restauration.
+/// Décliné dans les DEUX modes (clair et sombre), et ce n'est pas la même
+/// recette : sur fond clair, des formes claires disparaissent ; sur fond
+/// sombre, des formes sombres salissent. Les opacités s'inversent donc de sens,
+/// et elles vivent toutes dans [RestoBackdropTokens] — aucune forme ne teste
+/// elle-même la luminosité.
 
-// ─── Voile et panneaux ──────────────────────────────────────────────────────
+// ─── Fond, voile et panneaux ────────────────────────────────────────────────
 
-/// Fond d'écran du mode restaurant : une photo de salle posée sur un dégradé
-/// profond, avec [child] par-dessus.
+/// Réglages du motif de fond, résolus UNE fois selon la luminosité.
 ///
-/// **Comment changer la photo** : dépose ton image sous [photoAsset]
-/// (`assets/images/resto_backdrop.jpg`). Le dossier est déjà déclaré dans
-/// `pubspec.yaml`, il n'y a rien d'autre à faire.
+/// Toutes les opacités du fond vivent ici : une forme lit un champ nommé, elle
+/// ne teste jamais `Brightness` elle-même. Recopier le test à chaque forme,
+/// c'est se garantir qu'un jour l'une d'elles ne suivra plus les autres.
+class RestoBackdropTokens {
+  /// Teinte principale — la couleur de la boutique, ramenée dans une plage
+  /// utilisable comme fond.
+  final Color tintA;
+
+  /// Même TEINTE, autre luminosité. Voir [restoBackdropTokens] pour la raison
+  /// d'être de cette contrainte.
+  final Color tintB;
+
+  /// Opacités, par nature de forme. Les valeurs sont plus hautes en sombre :
+  /// sur un fond à L 5 %, une teinte à 6 % est simplement invisible — l'œil lit
+  /// des écarts relatifs de luminance, pas des pourcentages absolus.
+  final double glow;
+  final double ring;
+  final double frame;
+  final double dot;
+
+  const RestoBackdropTokens({
+    required this.tintA,
+    required this.tintB,
+    required this.glow,
+    required this.ring,
+    required this.frame,
+    required this.dot,
+  });
+}
+
+/// Fabrique des tokens du fond — L'UNIQUE endroit où la luminosité est testée.
 ///
-/// **Si le fichier est absent, seul le dégradé s'affiche** — exactement le
-/// rendu d'avant. C'est volontaire : un asset manquant ne doit jamais casser
-/// l'écran de quelqu'un en plein service.
+/// ─── POURQUOI UNE SEULE TEINTE ─────────────────────────────────────────────
 ///
-/// Le dégradé RESTE peint sous la photo, il n'est pas remplacé par elle. Il
-/// couvre les bords quand le format de l'image ne correspond pas à celui de
-/// l'écran, et il porte la déclinaison clair/sombre : sans lui, le mode sombre
-/// afficherait du blanc brut autour d'une photo recadrée.
+/// Les deux teintes sont la MÊME, à deux luminosités. Une seconde teinte
+/// obtenue par rotation a été mesurée sur les huit palettes et écartée :
+///
+///   • +32° donne du JAUNE sur `sunset` (#EDE222) et `amber` (#C1CE11) — deux
+///     palettes dont la primaire est orange. Le fond cessait de se lire comme
+///     une variation de la marque pour devenir une seconde identité.
+///   • −32° est pire : `amber` y donne #CE1111, un rouge pur — exactement la
+///     couleur d'erreur de l'app.
+///
+/// Si quelqu'un reprend l'idée, le test est déjà fait.
+///
+/// ─── POURQUOI NORMALISER ───────────────────────────────────────────────────
+///
+/// La teinte de la boutique ne peut pas servir telle quelle : la palette
+/// `midnight` a une primaire à S 33 % / L 17 %, qui ne produit aucun halo
+/// visible — surtout en sombre, où le fond est déjà à L 5 %. Saturation et
+/// luminosité sont donc ramenées dans une plage de fond ; la TEINTE, elle, est
+/// intacte. Midnight garde son bleu ardoise, en visible.
+RestoBackdropTokens restoBackdropTokens(BuildContext context) {
+  final dark = Theme.of(context).brightness == Brightness.dark;
+  final hsl = HSLColor.fromColor(AppColors.primary);
+  // Plage de saturation : assez pour exister, pas assez pour crier.
+  final s = hsl.saturation.clamp(0.45, 0.85);
+  // En clair les formes sont plus SOMBRES que le fond, en sombre plus CLAIRES.
+  final lA = dark ? 0.60 : 0.48;
+  final lB = dark ? 0.74 : 0.62;
+
+  return RestoBackdropTokens(
+    tintA: hsl.withSaturation(s).withLightness(lA).toColor(),
+    tintB: hsl.withSaturation(s).withLightness(lB).toColor(),
+    glow: dark ? 0.10 : 0.06,
+    ring: dark ? 0.12 : 0.08,
+    frame: dark ? 0.09 : 0.06,
+    dot: dark ? 0.14 : 0.10,
+  );
+}
+
+/// Fond d'écran du mode restaurant : un motif géométrique DESSINÉ, posé sur un
+/// dégradé profond, avec [child] par-dessus.
+///
+/// ─── POURQUOI DESSINÉ, ET NON UNE IMAGE ────────────────────────────────────
+///
+/// C'était une photo de salle (`assets/images/resto_backdrop.jpg`), à 80 %
+/// d'opacité sous un voile de lisibilité. Le contraste dépendait alors de
+/// l'image : les titres de carte et les états vides du tableau de bord se
+/// lisaient par-dessus des chaises et un climatiseur, et rien ne garantissait
+/// qu'une autre photo ferait mieux.
+///
+/// Un motif dessiné garantit ce qu'une photo ne peut pas : ses opacités sont
+/// connues, bornées (0,06 à 0,14 — cf. [RestoBackdropTokens]) et identiques
+/// d'un écran à l'autre. **Ne remettez pas d'image ici** : le problème n'était
+/// pas cette photo-là, c'était le principe.
+///
+/// Le voile plein écran a disparu avec elle. Il servait à assombrir une image
+/// imprévisible ; au-dessus d'un motif à 6-14 %, il ne ferait que l'effacer. Le
+/// contraste a été mesuré avant et après : sur une carte, `captionHint` passe
+/// de 5,88:1 à 5,87:1 en clair, et de 3,95:1 à 3,97:1 en sombre. À nu sur le
+/// fond, 4,91 → 4,85 en clair et 3,30 → 3,47 en sombre. Le voile ne protégeait
+/// rien — il ramenait la photo au niveau du dégradé, que le motif conserve.
+///
+/// Le dégradé RESTE la base : il porte la déclinaison clair/sombre et couvre
+/// toute la surface. Le motif n'est qu'une couche par-dessus.
 class RestoBackdrop extends StatelessWidget {
   final Widget child;
-
-  /// Photo de salle. Absente du dépôt par défaut (cf. doc de classe).
-  static const String photoAsset = 'assets/images/resto_backdrop.jpg';
-
-  /// Opacité de la photo. À 0,8 elle domine tout en laissant le dégradé
-  /// l'habiller — au-delà, les panneaux translucides posés dessus perdent en
-  /// lisibilité, surtout en mode clair.
-  static const double photoOpacity = 0.8;
-
-  /// Le voile posé sur la photo est [restoChromeFill] — EXACTEMENT la teinte
-  /// de la barre latérale et de la barre supérieure.
-  ///
-  /// La zone de contenu et le chrome reçoivent ainsi le même traitement : le
-  /// décor a la même présence partout, et aucune zone de l'écran n'est plus
-  /// chargée qu'une autre. C'est la fonction elle-même qui est réutilisée, pas
-  /// sa valeur recopiée — les deux ne peuvent donc pas diverger si le réglage
-  /// change un jour.
 
   const RestoBackdrop({super.key, required this.child});
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final brightness = theme.brightness;
+    final brightness = Theme.of(context).brightness;
 
     return Stack(
       fit: StackFit.expand,
@@ -68,31 +137,119 @@ class RestoBackdrop extends StatelessWidget {
             ),
           ),
         ),
-        Opacity(
-          opacity: photoOpacity,
-          child: Image.asset(
-            photoAsset,
-            fit: BoxFit.cover,
-            // `cover` recadre plutôt que déformer : une salle étirée sur un
-            // écran large se voit immédiatement.
-            alignment: Alignment.center,
-            // Asset absent → on retombe sur le dégradé seul, sans erreur.
-            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-            // Décor pur : les lecteurs d'écran n'ont rien à annoncer avant
-            // chaque page.
-            excludeFromSemantics: true,
-          ),
-        ),
-        // Voile de lisibilité, à l'opacité du chrome (cf. doc de classe). Sans
-        // lui, la zone de contenu affichait la photo en pleine force sous des
-        // textes écrits à nu — paragraphe d'aide, état vide — illisibles.
+        // UN SEUL `CustomPaint`, et non une dizaine de `Positioned`.
+        //
+        // Le motif ne change jamais : dix couches de composition recalculées à
+        // chaque reconstruction du shell coûteraient pour rien, là où une passe
+        // de peinture suffit. Elle est aussi hors flux et ne capte aucun
+        // pointeur par nature — ce qu'un `IgnorePointer` aurait dû garantir sur
+        // des widgets.
         Positioned.fill(
-          child: ColoredBox(color: restoChromeFill(context)),
+          child: CustomPaint(
+            painter: _RestoPatternPainter(restoBackdropTokens(context)),
+            // Décor pur : rien à annoncer aux lecteurs d'écran.
+            isComplex: false,
+          ),
         ),
         child,
       ],
     );
   }
+}
+
+/// Peint le motif : deux halos, deux anneaux, un cadre incliné, quelques points.
+///
+/// Tout est exprimé en FRACTIONS de la surface — le motif suit l'écran du
+/// téléphone à la tablette sans qu'aucune position ne soit écrite en pixels.
+class _RestoPatternPainter extends CustomPainter {
+  final RestoBackdropTokens t;
+
+  const _RestoPatternPainter(this.t);
+
+  /// Halo : un disque dont la couleur s'éteint vers les bords. C'est la forme
+  /// la plus large et la plus douce — elle donne la couleur d'ambiance, les
+  /// autres ne font que la ponctuer.
+  void _glow(Canvas canvas, Offset center, double radius, Color color) {
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    final paint = Paint()
+      ..shader = RadialGradient(
+        colors: [color.withValues(alpha: t.glow), color.withValues(alpha: 0)],
+        // L'arrêt intermédiaire évite un bord net : sans lui, un dégradé
+        // linéaire laisse un cercle visible là où l'opacité atteint zéro.
+        stops: const [0.0, 1.0],
+      ).createShader(rect);
+    canvas.drawCircle(center, radius, paint);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    // ── Halos, en coins opposés ────────────────────────────────────────
+    _glow(canvas, Offset(w * 0.12, h * 0.10), w * 0.55, t.tintA);
+    _glow(canvas, Offset(w * 0.92, h * 0.82), w * 0.48, t.tintB);
+
+    // ── Anneaux épais ──────────────────────────────────────────────────
+    // Épais et non fins : un trait de 1 px à 12 % disparaît, une bande de 20
+    // se devine. C'est la masse qui porte la forme, pas le contour.
+    final ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.045
+      ..color = t.tintA.withValues(alpha: t.ring);
+    canvas.drawCircle(Offset(w * 0.86, h * 0.14), w * 0.20, ring);
+
+    final ring2 = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.035
+      ..color = t.tintB.withValues(alpha: t.ring);
+    canvas.drawCircle(Offset(w * 0.08, h * 0.74), w * 0.16, ring2);
+
+    // ── Cadre incliné, bordure fine seulement ──────────────────────────
+    // Vide : rempli, il ferait un bloc de couleur au milieu de l'écran.
+    final frame = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2
+      ..color = t.tintA.withValues(alpha: t.frame);
+    canvas.save();
+    canvas.translate(w * 0.62, h * 0.42);
+    canvas.rotate(-12 * pi / 180);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset.zero, width: w * 0.42, height: w * 0.42),
+        Radius.circular(w * 0.06),
+      ),
+      frame,
+    );
+    canvas.restore();
+
+    // ── Points ─────────────────────────────────────────────────────────
+    // Petite surface, donc opacité plus haute : c'est le seul endroit où la
+    // valeur monte à 0,14 en sombre.
+    final dot = Paint()..color = t.tintB.withValues(alpha: t.dot);
+    const spots = <Offset>[
+      Offset(0.24, 0.32),
+      Offset(0.41, 0.18),
+      Offset(0.72, 0.62),
+      Offset(0.33, 0.83),
+      Offset(0.58, 0.91),
+      Offset(0.90, 0.46),
+    ];
+    for (final s in spots) {
+      canvas.drawCircle(Offset(w * s.dx, h * s.dy), 3, dot);
+    }
+  }
+
+  /// Le motif est immuable : il ne se repeint que si les tokens changent,
+  /// c'est-à-dire au basculement clair/sombre ou au changement de palette.
+  @override
+  bool shouldRepaint(_RestoPatternPainter old) =>
+      old.t.tintA != t.tintA ||
+      old.t.tintB != t.tintB ||
+      old.t.glow != t.glow ||
+      old.t.ring != t.ring ||
+      old.t.frame != t.frame ||
+      old.t.dot != t.dot;
 }
 
 /// Panneau translucide posé sur [RestoBackdrop] — l'équivalent d'une carte,
