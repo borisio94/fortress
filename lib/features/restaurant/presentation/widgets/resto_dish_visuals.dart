@@ -14,6 +14,31 @@ import 'resto_surfaces.dart';
 /// d'un écran à l'autre, ce qui est précisément ce que la dérivation cherche à
 /// éviter.
 
+/// Teinte stable d'un plat, dérivée de son NOM.
+///
+/// `hashCode` suffit : on ne cherche pas une répartition parfaite des teintes,
+/// seulement qu'un plat garde SA couleur. Saturation et clarté sont prises sur
+/// l'accent de la boutique, donc la famille de couleurs reste celle du thème.
+///
+/// Exposée — et non recopiée — parce que deux écrans s'en servent avec des
+/// FORMES différentes : le tableau de bord pose l'initiale dans un cercle de
+/// 62 px, la carte du menu la pose sur un aplat plein cadre. Seule la teinte
+/// est commune, et deux copies auraient divergé dès la première retouche : le
+/// même plat n'aurait plus eu la même couleur d'un écran à l'autre, ce qui est
+/// exactement ce que la dérivation cherche à éviter.
+Color restoDishTint(BuildContext context, Product product) {
+  final hue = (product.name.hashCode.abs() % 360).toDouble();
+  final base = HSLColor.fromColor(Theme.of(context).colorScheme.primary);
+  return HSLColor.fromAHSL(1, hue, 0.35, base.lightness).toColor();
+}
+
+/// Lettre qui représente un plat sans photo. `?` si le nom est vide — un plat
+/// peut être enregistré à la hâte et renommé après.
+String restoDishInitial(Product product) {
+  final name = product.name.trim();
+  return name.isEmpty ? '?' : name.characters.first.toUpperCase();
+}
+
 /// Contenu d'une vignette de plat : sa photo, ou son INITIALE.
 ///
 /// Un plat sans photo tombait sur le placeholder générique de
@@ -37,14 +62,6 @@ class RestoDishAvatar extends StatelessWidget {
     this.initialStyle,
   });
 
-  /// Teinte stable, dérivée du nom. `hashCode` suffit : on ne cherche pas une
-  /// répartition parfaite, seulement qu'un plat garde SA couleur.
-  Color _tint(BuildContext context) {
-    final hue = (product.name.hashCode.abs() % 360).toDouble();
-    final base = HSLColor.fromColor(Theme.of(context).colorScheme.primary);
-    return HSLColor.fromAHSL(1, hue, 0.35, base.lightness).toColor();
-  }
-
   @override
   Widget build(BuildContext context) {
     final url = product.mainImageUrl;
@@ -55,14 +72,11 @@ class RestoDishAvatar extends StatelessWidget {
         borderRadius: BorderRadius.zero,
       );
     }
-    final initial = product.name.trim().isEmpty
-        ? '?'
-        : product.name.trim().characters.first.toUpperCase();
-    final tint = _tint(context);
+    final tint = restoDishTint(context, product);
     return ColoredBox(
       color: tint.withValues(alpha: 0.18),
       child: Center(
-        child: Text(initial,
+        child: Text(restoDishInitial(product),
             style: (initialStyle ?? AppTextStyles.subtitleBold)
                 .copyWith(color: tint)),
       ),
