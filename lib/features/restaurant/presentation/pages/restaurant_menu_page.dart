@@ -540,6 +540,20 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     return w < 720 ? w : (w / 3).clamp(320.0, 420.0);
   }
 
+  /// Le volet panier RECOUVRE-T-IL l'écran quand il s'ouvre ?
+  ///
+  /// Sous 720 dp, [_cartPaneWidth] rend la largeur entière : ajouter un plat
+  /// bascule alors sur un panier plein écran et la grille tombe à zéro. C'est
+  /// ce qui rend un tap de travers pendant un défilement coûteux — il faut
+  /// refermer le panier pour revenir à la carte.
+  ///
+  /// DÉRIVÉ de `_cartPaneWidth`, et surtout pas comparé une seconde fois à
+  /// 720 : deux constantes écrites à deux endroits divergent au premier
+  /// ajustement, et le jour où elles divergeraient, la carte offrirait l'ajout
+  /// d'un seul tap sur un écran où le panier recouvre tout.
+  bool _cartCoversScreen(BuildContext context) =>
+      _cartPaneWidth(context) >= MediaQuery.of(context).size.width;
+
   Widget _buildMenu(
     List<Product> products,
     bool isAdmin, {
@@ -657,6 +671,9 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
                     isAdmin: isAdmin,
                     canDelete: canDelete,
                     canEdit: canEdit,
+                    // Sur petit écran, l'image OUVRE LA FICHE au lieu
+                    // d'ajouter : voir `_cartCoversScreen`.
+                    imageAdds: !_cartCoversScreen(context),
                     onTap: (p) => _onDishTap(p, canEdit),
                     onAdd: _addToCart,
                     onToggleDispo: _toggleDispo,
@@ -938,6 +955,10 @@ class _MenuGrid extends StatelessWidget {
   final bool isAdmin;
   final bool canDelete;
   final bool canEdit;
+
+  /// Un tap sur la PHOTO ajoute-t-il au panier ? Sinon il ouvre la fiche, comme
+  /// le bloc texte, et seule la pastille `+` ajoute.
+  final bool imageAdds;
   final ValueChanged<Product> onTap;
   final ValueChanged<Product> onAdd;
   final void Function(Product, bool) onToggleDispo;
@@ -951,6 +972,7 @@ class _MenuGrid extends StatelessWidget {
     required this.isAdmin,
     required this.canDelete,
     required this.canEdit,
+    required this.imageAdds,
     required this.onTap,
     required this.onAdd,
     required this.onToggleDispo,
@@ -999,7 +1021,7 @@ class _MenuGrid extends StatelessWidget {
           + ts.scale(12) * 1.45 // nom (1 ligne)
           + 4
           + ts.scale(10) * 1.3 // ligne d'état, réservée
-          + (ts.scale(13) * 1.5 > _kAddBtn ? ts.scale(13) * 1.5 : _kAddBtn)
+          + ts.scale(13) * 1.5 // prix, seul sur sa ligne
           + 11; // padding bas
 
       return GridView.builder(
@@ -1019,6 +1041,7 @@ class _MenuGrid extends StatelessWidget {
           canDelete: canDelete,
           canEdit: canEdit,
           photoHeight: photoH,
+          imageAdds: imageAdds,
           onTap: () => onTap(products[i]),
           onAdd: () => onAdd(products[i]),
           onToggleDispo: (v) => onToggleDispo(products[i], v),
@@ -1040,7 +1063,6 @@ class _MenuGrid extends StatelessWidget {
 const double _kPhotoRatio = 0.78;
 const double _kPhotoMinH = 104;
 const double _kPhotoMaxH = 168;
-const double _kAddBtn = 28;
 const double _kCardRadius = 19;
 
 /// Pastilles posées SUR la photo : stock à gauche, menu ⋮ à droite.
@@ -1096,8 +1118,16 @@ const ColorFilter _kGreyscale = ColorFilter.matrix(<double>[
 /// catégorie étant déjà lisible dans le filtre actif au-dessus de la grille et
 /// le stock étant passé sur la photo.
 ///
-/// Deux gestes distincts, inchangés : tap sur la carte → fiche du plat ;
-/// bouton d'ajout → panier.
+/// La carte porte DEUX zones tactiles, et non plus une seule :
+///   • le BLOC TEXTE ouvre toujours la fiche du plat ;
+///   • la PHOTO ajoute au panier — sauf sur petit écran, où elle ouvre la
+///     fiche elle aussi (cf. [imageAdds]).
+/// Une pastille `+` posée sur la photo ajoute dans les deux cas.
+///
+/// Le bloc texte, et pas seulement le menu ⋮ : celui-ci n'apparaît qu'à qui
+/// possède un droit d'édition ou de suppression, alors que la fiche en LECTURE
+/// existe pour le serveur qui n'en a aucun — c'est lui qui doit répondre au
+/// client demandant ce qu'il y a dans un plat.
 class _DishCard extends StatelessWidget {
   final Product product;
   final String shopId;
@@ -1115,6 +1145,19 @@ class _DishCard extends StatelessWidget {
   /// telle quelle dans la hauteur de tuile. Les deux doivent rester d'accord,
   /// sans quoi le bloc texte déborde.
   final double photoHeight;
+
+  /// Un tap sur la photo ajoute-t-il au panier ?
+  ///
+  /// Faux sous 720 dp, où l'ouverture du panier recouvre l'écran entier : une
+  /// zone d'ajout de 67 % de la carte y transformerait le moindre tap de
+  /// travers, pendant un défilement, en bascule sur un panier plein écran. La
+  /// photo y ouvre donc la fiche, comme le bloc texte, et seule la pastille
+  /// ajoute.
+  ///
+  /// Les deux gestes qu'on apprend restent vrais partout — pastille = ajouter,
+  /// texte = fiche. Sur grand écran un raccourci s'ajoute, là où il ne coûte
+  /// rien : le panier n'y prend qu'un tiers et la carte reste visible.
+  final bool imageAdds;
   final VoidCallback onTap;
   final VoidCallback onAdd;
   final ValueChanged<bool> onToggleDispo;
@@ -1129,6 +1172,7 @@ class _DishCard extends StatelessWidget {
     required this.canDelete,
     required this.canEdit,
     required this.photoHeight,
+    required this.imageAdds,
     required this.onTap,
     required this.onAdd,
     required this.onToggleDispo,
@@ -1191,198 +1235,233 @@ class _DishCard extends StatelessWidget {
     final available = !retired && avail.isAvailable;
 
     final photo = _photo(context);
+    // L'image n'ajoute que si elle a quelque chose à ajouter : sur un plat
+    // indisponible elle ouvre la fiche, quelle que soit la largeur. Les trois
+    // gardes de `_addToCart` restent derrière de toute façon — elles couvrent
+    // les chemins qui ne passent pas par cet écran.
+    final tapAdds = imageAdds && available;
 
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(_kCardRadius),
-      child: Stack(
-        fit: StackFit.passthrough,
-        children: [
-          InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(_kCardRadius),
-            child: Container(
-              decoration: restoCardSurface(context, radius: _kCardRadius),
-              // Le clip de la CARTE arrondit les coins hauts de la photo — la
-              // photo n'a donc pas à porter son propre rayon — et garde les
-              // coins bas arrondis sur la surface.
-              clipBehavior: Clip.antiAlias,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: Container(
+        decoration: restoCardSurface(context, radius: _kCardRadius),
+        // Le clip de la CARTE arrondit les coins hauts de la photo — la photo
+        // n'a donc pas à porter son propre rayon — et garde les coins bas
+        // arrondis sur la surface.
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── PHOTO EN PLEIN CADRE ───────────────────────────────
+            SizedBox(
+              height: photoHeight,
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  // ── PHOTO EN PLEIN CADRE ───────────────────────────────
-                  SizedBox(
-                    height: photoHeight,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        // Plat indisponible : la photo passe en GRIS. Elle est
-                        // la plus grande surface de la carte, donc la seule
-                        // chose qui se voie de l'autre bout de la salle — ce
-                        // que faisait le tampon incliné en barrant le nom.
-                        available
-                            ? photo
-                            : ColorFiltered(
-                                colorFilter: _kGreyscale, child: photo),
-                        Positioned(
-                          top: 6,
-                          left: 6,
-                          child: _StockBadge(
-                            value: avail.count == null ? '∞' : '${avail.count}',
-                            soldOut: !available,
-                          ),
+                  // Plat indisponible : la photo passe en GRIS. Elle est
+                  // la plus grande surface de la carte, donc la seule
+                  // chose qui se voie de l'autre bout de la salle — ce
+                  // que faisait le tampon incliné en barrant le nom.
+                  available
+                      ? photo
+                      : ColorFiltered(
+                          colorFilter: _kGreyscale, child: photo),
+                  // ZONE TACTILE DE LA PHOTO, posée PAR-DESSUS l'image.
+                  //
+                  // Un `InkWell` peint son encre sur le `Material` le
+                  // plus proche, donc SOUS son enfant : enveloppé autour
+                  // de la carte, son retour au toucher disparaissait
+                  // derrière la photo. Un `Material` transparent placé
+                  // ici, au-dessus de l'image, rend l'encre visible sur
+                  // la photo — et c'est justement ce qui annonce qu'il
+                  // s'y passe quelque chose.
+                  Positioned.fill(
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: Tooltip(
+                        message: tapAdds
+                            ? 'Ajouter au panier'
+                            : 'Voir la fiche du plat',
+                        child: InkWell(
+                          onTap: tapAdds ? onAdd : onTap,
+                          child: const SizedBox.expand(),
                         ),
-                        // Sur un plat RETIRÉ, la dispo du jour et son stock ne
-                        // veulent plus rien dire — mais rouvrir sa fiche ou le
-                        // supprimer, si : c'est même tout l'objet de la liste
-                        // des plats retirés.
-                        if (retired
-                            ? (canEdit || canDelete)
-                            : (isAdmin || canEdit || canDelete))
-                          Positioned(
-                            top: 0,
-                            right: 0,
-                            child: SizedBox(
-                              width: _kBadgeTap,
-                              height: _kBadgeTap,
-                              child: _DishMenuBtn(
-                                onEdit: canEdit ? onTap : null,
-                                onDelete: canDelete ? onDelete : null,
-                                onToggleDispo: isAdmin && !retired
-                                    ? () => onToggleDispo(!avail.enabled)
-                                    : null,
-                                onEditCount:
-                                    isAdmin && !retired ? onEditCount : null,
-                                dispoEnabled: avail.enabled,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-
-                  // ── BLOC TEXTE ─────────────────────────────────────────
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(11, 9, 11, 11),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            product.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: AppTextStyles.bodySmBold.copyWith(
-                                color: available
-                                    ? cs.onSurface
-                                    : cs.onSurfaceVariant),
-                          ),
-
-                          // ── LIGNE D'ÉTAT ─────────────────────────────
-                          // Absente quand le plat est disponible, et c'est
-                          // voulu : la grille lui réserve quand même sa
-                          // hauteur, et le `Spacer` ci-dessous mange la place
-                          // inutilisée. Les cartes gardent donc la même
-                          // hauteur sans qu'un trou se creuse sous le nom.
-                          if (!available) ...[
-                            const SizedBox(height: 4),
-                            if (retired)
-                              Text('Retiré de la vente',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppTextStyles.micro
-                                      .copyWith(color: cs.onSurfaceVariant))
-                            else
-                              // TAPABLE pour l'admin, et c'est le point :
-                              // rendre un plat indisponible est un geste
-                              // réfléchi qui passe par le menu ⋮, mais le
-                              // remettre à la carte arrive dans la minute — un
-                              // arrivage, une erreur de manipulation. Le chemin
-                              // le plus court sert le cas le plus fréquent. Un
-                              // appui long serait introuvable sur le web, comme
-                              // l'a déjà tranché le Plan de salle.
-                              //
-                              // DEUX causes d'indisponibilité, deux remèdes :
-                              // un plat ÉPUISÉ est resté `enabled` avec un
-                              // compteur à zéro — rebasculer l'interrupteur ne
-                              // ferait rien, il faut lui rendre du stock. Un
-                              // plat retiré du jour, lui, se rallume.
-                              InkWell(
-                                onTap: isAdmin
-                                    ? (avail.isSoldOut
-                                        ? onEditCount
-                                        : () => onToggleDispo(true))
-                                    : null,
-                                borderRadius: BorderRadius.circular(6),
-                                child: Text(
-                                  // Les deux libellés finissent par
-                                  // « aujourd'hui » : ce sont des états du
-                                  // jour, qui tomberont demain matin, et leur
-                                  // premier mot dit le remède. Épuisé : il
-                                  // manque du stock. Retiré : il manque une
-                                  // décision. « Retiré aujourd'hui » se
-                                  // distingue ainsi de « Retiré de la vente »,
-                                  // qui est le retrait permanent.
-                                  avail.isSoldOut
-                                      ? 'Épuisé aujourd’hui'
-                                      : 'Retiré aujourd’hui',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  // LE TOKEN SUIT SON FOND, et c'est la seule
-                                  // règle : `warningText` ici, sur la surface
-                                  // claire de la carte (6,7:1 en clair, ~9:1 en
-                                  // sombre) ; `warning` sur la pastille de
-                                  // stock, posée sur un voile noir, où
-                                  // `warningText` ne tiendrait que 2,2:1.
-                                  // Ce n'est pas « toujours la variante Text » :
-                                  // `warning` est calibré pour un fond sombre
-                                  // ou une icône, `warningText` pour un fond
-                                  // clair. Même règle pour `danger` et
-                                  // `success`.
-                                  style: AppTextStyles.microBold
-                                      .copyWith(color: sem.warningText),
-                                ),
-                              ),
-                          ],
-                          const Spacer(),
-
-                          // ── PRIX ET AJOUT ────────────────────────────
-                          Row(
-                            children: [
-                              Expanded(
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  alignment: Alignment.centerLeft,
-                                  child: Text(
-                                    CurrencyFormatter.format(
-                                        product.priceSellPos),
-                                    maxLines: 1,
-                                    style: AppTextStyles.bodyBold.copyWith(
-                                        color: available
-                                            ? cs.primary
-                                            : cs.onSurfaceVariant),
-                                  ),
-                                ),
-                              ),
-                              // Pas de bouton du tout quand le plat n'est pas
-                              // disponible : un bouton grisé laisse croire
-                              // qu'il suffit d'insister, et un bouton actif qui
-                              // refuserait ensuite serait pire encore.
-                              if (available) ...[
-                                const SizedBox(width: 6),
-                                _AddButton(onAdd: onAdd),
-                              ],
-                            ],
-                          ),
-                        ],
                       ),
                     ),
                   ),
+                  Positioned(
+                    top: 6,
+                    left: 6,
+                    child: _StockBadge(
+                      value: avail.count == null ? '∞' : '${avail.count}',
+                      soldOut: !available,
+                    ),
+                  ),
+                  // Sur un plat RETIRÉ, la dispo du jour et son stock ne
+                  // veulent plus rien dire — mais rouvrir sa fiche ou le
+                  // supprimer, si : c'est même tout l'objet de la liste
+                  // des plats retirés.
+                  if (retired
+                      ? (canEdit || canDelete)
+                      : (isAdmin || canEdit || canDelete))
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: SizedBox(
+                        width: _kBadgeTap,
+                        height: _kBadgeTap,
+                        child: _DishMenuBtn(
+                          onEdit: canEdit ? onTap : null,
+                          onDelete: canDelete ? onDelete : null,
+                          onToggleDispo: isAdmin && !retired
+                              ? () => onToggleDispo(!avail.enabled)
+                              : null,
+                          onEditCount:
+                              isAdmin && !retired ? onEditCount : null,
+                          dispoEnabled: avail.enabled,
+                        ),
+                      ),
+                    ),
+                  // PASTILLE D'AJOUT, en vis-à-vis du menu ⋮ : même
+                  // taille, même voile, même cible de 36 px.
+                  //
+                  // Elle ANNONCE le geste que l'image exécute. Une photo
+                  // ne dit rien d'elle-même, et un tap sur l'image serait
+                  // resté introuvable sans un signe quelque part. C'est
+                  // toujours un bouton d'ajout — simplement déplacé sur
+                  // la photo, où il libère la ligne du prix, et flanqué
+                  // d'une cible bien plus large que ses 22 px visibles.
+                  if (available)
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: _AddBadge(onAdd: onAdd),
+                    ),
                 ],
               ),
             ),
-          ),
-        ],
+
+            // ── BLOC TEXTE ─────────────────────────────────────────
+            //
+            // Tapable, et c'est le SEUL chemin vers la fiche d'un plat
+            // pour qui n'a ni droit d'édition ni droit de suppression :
+            // le menu ⋮ ne s'affiche pas pour lui. Or c'est le serveur
+            // qui doit lire la composition d'un plat quand le client
+            // demande ce qu'il y a dedans.
+            Expanded(
+              child: InkWell(
+                onTap: onTap,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(11, 9, 11, 11),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        product.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySmBold.copyWith(
+                            color: available
+                                ? cs.onSurface
+                                : cs.onSurfaceVariant),
+                      ),
+
+                      // ── LIGNE D'ÉTAT ─────────────────────────────
+                      // Absente quand le plat est disponible, et c'est
+                      // voulu : la grille lui réserve quand même sa
+                      // hauteur, et le `Spacer` ci-dessous mange la place
+                      // inutilisée. Les cartes gardent donc la même
+                      // hauteur sans qu'un trou se creuse sous le nom.
+                      if (!available) ...[
+                        const SizedBox(height: 4),
+                        if (retired)
+                          Text('Retiré de la vente',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.micro
+                                  .copyWith(color: cs.onSurfaceVariant))
+                        else
+                          // TAPABLE pour l'admin, et c'est le point :
+                          // rendre un plat indisponible est un geste
+                          // réfléchi qui passe par le menu ⋮, mais le
+                          // remettre à la carte arrive dans la minute — un
+                          // arrivage, une erreur de manipulation. Le chemin
+                          // le plus court sert le cas le plus fréquent. Un
+                          // appui long serait introuvable sur le web, comme
+                          // l'a déjà tranché le Plan de salle.
+                          //
+                          // DEUX causes d'indisponibilité, deux remèdes :
+                          // un plat ÉPUISÉ est resté `enabled` avec un
+                          // compteur à zéro — rebasculer l'interrupteur ne
+                          // ferait rien, il faut lui rendre du stock. Un
+                          // plat retiré du jour, lui, se rallume.
+                          InkWell(
+                            onTap: isAdmin
+                                ? (avail.isSoldOut
+                                    ? onEditCount
+                                    : () => onToggleDispo(true))
+                                : null,
+                            borderRadius: BorderRadius.circular(6),
+                            child: Text(
+                              // Les deux libellés finissent par
+                              // « aujourd'hui » : ce sont des états du
+                              // jour, qui tomberont demain matin, et leur
+                              // premier mot dit le remède. Épuisé : il
+                              // manque du stock. Retiré : il manque une
+                              // décision. « Retiré aujourd'hui » se
+                              // distingue ainsi de « Retiré de la vente »,
+                              // qui est le retrait permanent.
+                              avail.isSoldOut
+                                  ? 'Épuisé aujourd’hui'
+                                  : 'Retiré aujourd’hui',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              // LE TOKEN SUIT SON FOND, et c'est la seule
+                              // règle : `warningText` ici, sur la surface
+                              // claire de la carte (6,7:1 en clair, ~9:1 en
+                              // sombre) ; `warning` sur la pastille de
+                              // stock, posée sur un voile noir, où
+                              // `warningText` ne tiendrait que 2,2:1.
+                              // Ce n'est pas « toujours la variante Text » :
+                              // `warning` est calibré pour un fond sombre
+                              // ou une icône, `warningText` pour un fond
+                              // clair. Même règle pour `danger` et
+                              // `success`.
+                              style: AppTextStyles.microBold
+                                  .copyWith(color: sem.warningText),
+                            ),
+                          ),
+                      ],
+                      const Spacer(),
+
+                      // ── PRIX ET AJOUT ────────────────────────────
+                      Row(
+                        children: [
+                          Expanded(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                CurrencyFormatter.format(
+                                    product.priceSellPos),
+                                maxLines: 1,
+                                style: AppTextStyles.bodyBold.copyWith(
+                                    color: available
+                                        ? cs.primary
+                                        : cs.onSurfaceVariant),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1567,36 +1646,45 @@ class _DishMenuBtn extends StatelessWidget {
   }
 }
 
-/// Bouton « ajouter au panier » — carré arrondi de 28 px à la couleur de la
-/// boutique, icône `+`.
+/// Pastille `+` posée en bas à droite de la photo.
 ///
-/// Plus d'état éteint : la carte d'un plat indisponible ne le montre plus du
-/// tout. Le bouton n'a donc plus qu'un seul rendu, et le panier n'a plus
-/// besoin de refuser ce que l'écran vient de proposer.
+/// Elle remplace le carré de 28 px qui occupait la ligne du prix. Ce n'est pas
+/// « un bouton en moins » — c'est le même bouton, déplacé là où il annonce le
+/// geste que la photo exécute, et rendu plus facile à atteindre : 22 px
+/// visibles, mais 36 px touchables, contre 28 auparavant.
 ///
-/// L'icône passe du caddie au `+` : à 13 px de glyphe, un caddie n'est plus
-/// qu'une tache, et le geste n'est pas « voir le panier » mais « en ajouter
-/// un ».
-class _AddButton extends StatelessWidget {
+/// Pas d'état éteint : la carte d'un plat indisponible ne la montre pas du
+/// tout. Le panier n'a donc jamais à refuser ce que l'écran vient de proposer.
+///
+/// L'accent plein et non le voile noir des deux autres pastilles : celles-ci
+/// informent, celle-ci agit, et la couleur de la boutique est ce qui distingue
+/// une action dans tout le reste de l'application.
+class _AddBadge extends StatelessWidget {
   final VoidCallback onAdd;
 
-  const _AddButton({required this.onAdd});
+  const _AddBadge({required this.onAdd});
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: 'Ajouter au panier',
-      child: Material(
-        color: cs.primary,
-        borderRadius: BorderRadius.circular(9),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onAdd,
-          child: SizedBox(
-            width: _kAddBtn,
-            height: _kAddBtn,
-            child: Icon(Icons.add_rounded, size: 18, color: cs.onPrimary),
+    return SizedBox(
+      width: _kBadgeTap,
+      height: _kBadgeTap,
+      child: Center(
+        child: Tooltip(
+          message: 'Ajouter au panier',
+          child: Material(
+            color: cs.primary,
+            shape: const CircleBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onAdd,
+              child: SizedBox(
+                width: _kBadgeDot,
+                height: _kBadgeDot,
+                child: Icon(Icons.add_rounded, size: 16, color: cs.onPrimary),
+              ),
+            ),
           ),
         ),
       ),
