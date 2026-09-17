@@ -21,10 +21,10 @@ import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
-import '../../../../shared/widgets/product_image_card.dart';
 import '../../../caisse/presentation/widgets/cart_widget.dart';
 import '../widgets/dish_details_sheet.dart';
 import '../widgets/dish_form_sheet.dart';
+import '../widgets/resto_dish_visuals.dart';
 import '../widgets/resto_empty_state.dart';
 import '../widgets/resto_surfaces.dart';
 
@@ -142,20 +142,22 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     return used.toList()..sort();
   }
 
-  /// Vignette ronde de chaque catégorie : la photo du premier plat qui en
-  /// porte une. Les catégories sont de simples chaînes côté données — elles
-  /// n'ont pas d'image propre — et un rond gris uniforme sur toute la barre
-  /// n'apporterait rien. La photo d'un plat de la catégorie, elle, la rend
-  /// reconnaissable d'un coup d'œil.
-  Map<String, String?> get _categoryThumbs {
-    final thumbs = <String, String?>{};
+  /// Nombre de plats par catégorie, plus le total sous la clé `null`.
+  ///
+  /// Remplace les vignettes photo de l'ancienne barre : à la taille d'une
+  /// pastille, une photo de plat n'est plus qu'une tache de couleur, alors
+  /// qu'un compte dit exactement ce qu'on trouvera en filtrant.
+  ///
+  /// Compté sur `_source` et non sur la carte entière : en mode « plats
+  /// retirés », les nombres doivent décrire ce qui est à l'écran.
+  Map<String?, int> get _categoryCounts {
+    final counts = <String?, int>{null: _source.length};
     for (final p in _source) {
       final c = p.categoryId;
       if (c == null || c.isEmpty) continue;
-      final url = p.mainImageUrl;
-      if (thumbs[c] == null && url != null && url.isNotEmpty) thumbs[c] = url;
+      counts[c] = (counts[c] ?? 0) + 1;
     }
-    return thumbs;
+    return counts;
   }
 
   List<Product> get _visible {
@@ -487,25 +489,46 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     return hasItems && ref.watch(cartPaneVisibleProvider);
   }
 
-  /// Bouton d'ajout d'un plat.
+  /// Bouton d'ajout d'un plat — UN SEUL rendu, quelle que soit la largeur.
   ///
-  /// Compact sur téléphone : la version pleine taille couvrait une carte
-  /// entière de la grille sur un écran de 5 pouces. Le libellé n'apparaît
-  /// qu'à partir d'une largeur confortable — sur mobile l'icône seule suffit,
-  /// le bouton étant au même endroit sur tous les écrans de l'app.
+  /// Il changeait de forme à 600 px : pastille de 40 px en dessous, bouton
+  /// allongé « + Plat » au-dessus. Le libellé n'apprenait rien que l'icône ne
+  /// dise déjà, et la version allongée passait par-dessus le bouton
+  /// « Commander » du volet panier — le correctif de `7a6a417` n'a traité que
+  /// le recouvrement, pas le fait qu'un même bouton ait deux silhouettes.
+  ///
+  /// Ni `FloatingActionButton` ni sa variante `.small` : le premier impose
+  /// 56 px, la seconde 40, et aucun des deux n'expose la couleur de son ombre.
+  /// Un `Material` en cercle donne les 48 px demandés et une ombre teintée à
+  /// l'accent de la boutique, qui pose le bouton sur le fond à motifs au lieu
+  /// de l'en détacher par un gris.
   Widget _addDishButton(BuildContext context) {
-    final compact = MediaQuery.of(context).size.width < 600;
-    if (compact) {
-      return FloatingActionButton.small(
-        onPressed: _openDishForm,
-        tooltip: 'Ajouter un plat',
-        child: const Icon(Icons.add_rounded),
-      );
-    }
-    return FloatingActionButton.extended(
-      onPressed: _openDishForm,
-      icon: const Icon(Icons.add_rounded),
-      label: const Text('Plat'),
+    final cs = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: 'Ajouter un plat',
+      child: Container(
+        width: _kFabSize,
+        height: _kFabSize,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: cs.primary.withValues(alpha: 0.35),
+              blurRadius: 14,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Material(
+          color: cs.primary,
+          shape: const CircleBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: _openDishForm,
+            child: Icon(Icons.add_rounded, size: 22, color: cs.onPrimary),
+          ),
+        ),
+      ),
     );
   }
 
@@ -542,6 +565,21 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     final category = emptyMenu ? null : _category;
     return Column(
         children: [
+          // En-tête EN TÊTE DU CORPS et non dans la barre du haut : le titre
+          // vient du châssis partagé avec l'e-commerce, qui ne prend qu'une
+          // chaîne — deux lignes n'y entreraient pas sans toucher au shell de
+          // toute l'application. Même parti pris qu'au tableau de bord.
+          //
+          // Masqué sur une carte vide, pour la même raison que la recherche et
+          // les filtres : « Notre carte · 0 plat » juste au-dessus du panneau
+          // « Carte vide » dirait deux fois la même chose, dont une fois en
+          // laissant croire qu'il y a une carte.
+          if (!emptyMenu)
+            _MenuHeader(
+              dishCount: _source.length,
+              categoryCount: _categories.length,
+              retired: _showRetired,
+            ),
           // Porte de retour vers les plats retirés — et retour à la carte.
           // Affiché même quand la grille est vide : c'est précisément le cas où
           // l'on a besoin de savoir que les plats sont ailleurs.
@@ -563,7 +601,7 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
             ),
             _CategoryBar(
               categories: _categories,
-              thumbs: _categoryThumbs,
+              counts: _categoryCounts,
               selected: _category,
               onSelect: (c) => setState(() => _category = c),
             ),
@@ -767,111 +805,123 @@ class _SearchField extends StatelessWidget {
     );
   }
 }
-/// Barre de filtres par catégorie — pilules à vignette ronde.
+/// Barre de filtres par catégorie — pastilles de MÊME HAUTEUR, avec compteur.
 ///
-/// Chaque pilule porte la photo d'un plat de la catégorie, ce qui la rend
-/// identifiable sans lire. La pilule active se remplit de la couleur
-/// principale de la boutique ; les autres restent sur une surface neutre
-/// bordée, lisible en clair comme en sombre.
+/// La vignette ronde a disparu. C'était elle qui dimensionnait la pastille
+/// (`dot = height - 12`), et sa hauteur suivait le `textScaler` : de 64 à 96 px
+/// selon les réglages système, avec des pastilles inégales selon qu'une
+/// catégorie avait une photo ou une icône de repli.
+///
+/// À 17 px, une photo de plat n'est de toute façon plus identifiable : c'est
+/// une tache de couleur. Le COMPTEUR la remplace et dit quelque chose d'exact —
+/// « Plats · 8 ». La hauteur devient uniforme par construction, sans clamp ni
+/// calcul.
 class _CategoryBar extends StatelessWidget {
   final List<String> categories;
-  final Map<String, String?> thumbs;
+
+  /// Nombre de plats par catégorie, et sous la clé `null` le total.
+  final Map<String?, int> counts;
   final String? selected;
   final ValueChanged<String?> onSelect;
 
   const _CategoryBar({
     required this.categories,
-    required this.thumbs,
+    required this.counts,
     required this.selected,
     required this.onSelect,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Hauteur pilotée par le textScaler : à 200 %, une hauteur figée
-    // rognerait le libellé.
-    final h = MediaQuery.textScalerOf(context).scale(44).clamp(44.0, 76.0);
-    return SizedBox(
-      height: h + 20,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-        children: [
-          _chip(context, label: 'Tout', value: null, height: h),
-          for (final c in categories)
-            _chip(context, label: c, value: c, height: h, thumb: thumbs[c]),
-        ],
-      ),
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: Row(children: [
+        _chip(context, label: 'Tout', value: null),
+        for (final c in categories) _chip(context, label: c, value: c),
+      ]),
     );
   }
 
-  Widget _chip(
-    BuildContext context, {
-    required String label,
-    required String? value,
-    required double height,
-    String? thumb,
-  }) {
+  Widget _chip(BuildContext context,
+      {required String label, required String? value}) {
     final theme = Theme.of(context);
-    final sem = theme.semantic;
     final sel = selected == value;
     final radius = BorderRadius.circular(999);
-    final fg =
-        sel ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface;
-    // Vignette légèrement plus petite que la pilule → l'anneau de fond reste
-    // visible tout autour, comme sur les pastilles de la maquette.
-    final dot = height - 12;
+    final fg = sel ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface;
+    final n = counts[value] ?? 0;
 
     return Padding(
-      padding: const EdgeInsets.only(right: 9),
+      padding: const EdgeInsets.only(right: 8),
       child: Material(
-        color: sel ? theme.colorScheme.primary : sem.elevatedSurface,
+        // Active : accent plein. Inactive : la surface des cartes, qui laisse
+        // deviner le motif du fond comme le reste de l'écran.
+        color: sel ? theme.colorScheme.primary : restoGlassFill(context),
         borderRadius: radius,
         child: InkWell(
           onTap: () => onSelect(value),
           borderRadius: radius,
           child: Container(
-            height: height,
-            padding: const EdgeInsets.fromLTRB(6, 0, 18, 0),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
             decoration: BoxDecoration(
               borderRadius: radius,
               border: Border.all(
-                  color: sel ? theme.colorScheme.primary : sem.borderSubtle),
+                color: sel
+                    ? theme.colorScheme.primary
+                    : restoGlassBorder(context),
+                width: 0.5,
+              ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ClipOval(
-                  child: SizedBox(
-                    width: dot,
-                    height: dot,
-                    child: thumb == null || thumb.isEmpty
-                        ? ColoredBox(
-                            color: sem.trackMuted,
-                            child: Icon(
-                              value == null
-                                  ? Icons.grid_view_rounded
-                                  : Icons.restaurant_rounded,
-                              size: dot * 0.5,
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          )
-                        : ProductImageCard(
-                            imageUrl: thumb,
-                            width: dot,
-                            height: dot,
-                          ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  label,
-                  style: AppTextStyles.bodySmBold.copyWith(color: fg),
-                ),
-              ],
-            ),
+            // Le compteur est DANS le libellé, pas dans une pastille à côté :
+            // une seconde forme ferait varier la largeur sans rien apprendre
+            // de plus.
+            child: Text('$label · $n',
+                style: AppTextStyles.bodySmBold.copyWith(color: fg)),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// En-tête de la carte : son nom, et ce qu'elle contient — compté en direct.
+class _MenuHeader extends StatelessWidget {
+  final int dishCount;
+  final int categoryCount;
+
+  /// La grille montre les plats RETIRÉS : l'en-tête doit le dire, sans quoi
+  /// « Notre carte · 3 plats » contredirait ce qu'on a sous les yeux.
+  final bool retired;
+
+  const _MenuHeader({
+    required this.dishCount,
+    required this.categoryCount,
+    required this.retired,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final plats = '$dishCount plat${dishCount > 1 ? 's' : ''}';
+    final cats = '$categoryCount catégorie${categoryCount > 1 ? 's' : ''}';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Échelon `label` (14) : l'échelle typographique de l'app ne compte
+          // pas de 15, et inventer une taille en dur pour un pixel d'écart
+          // casserait la règle qui tient tout le reste.
+          Text(retired ? 'Plats retirés' : 'Notre carte',
+              style: AppTextStyles.label.copyWith(color: cs.onSurface)),
+          const SizedBox(height: 2),
+          Text(
+              // Les catégories n'ont de sens que sur la carte : sur la liste
+              // des plats retirés, elles ne filtrent rien d'utile.
+              retired ? plats : '$plats · $cats',
+              style: AppTextStyles.caption),
+        ],
       ),
     );
   }
@@ -909,14 +959,6 @@ class _MenuGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Bandeau de description affiché seulement si AU MOINS un plat visible en
-    // porte une : sur une carte sans descriptions, réserver deux lignes vides
-    // sous chaque nom creuserait un trou sur toute la grille.
-    final showDesc = products.any((p) {
-      final d = p.description;
-      return d != null && d.trim().isNotEmpty;
-    });
-
     return LayoutBuilder(builder: (_, c) {
       const hPad = 16.0, gap = 14.0;
       final inner = c.maxWidth - hPad * 2;
@@ -924,18 +966,25 @@ class _MenuGrid extends StatelessWidget {
       final cols = (inner / 231).floor().clamp(2, 6);
       final cardW = (inner - gap * (cols - 1)) / cols;
 
-      // Hauteur de carte CALCULÉE, pas devinée : photo à ratio fixe + bloc
-      // texte dimensionné au textScaler courant. Un `childAspectRatio` figé
-      // ferait déborder le bloc texte dès que l'utilisateur agrandit la
-      // police dans les préférences.
+      // Hauteur de carte CALCULÉE, pas devinée, et désormais INDÉPENDANTE de
+      // sa largeur : la photo n'occupe plus toute la carte à ratio fixe, c'est
+      // une vignette de diamètre constant. Une carte large ne devient donc plus
+      // une carte haute — sur tablette, l'ancienne formule étirait une photo de
+      // 300 px de haut pour trois lignes de texte.
+      //
+      // Le reste suit le textScaler : un `childAspectRatio` figé ferait
+      // déborder le bloc texte dès que l'utilisateur agrandit la police dans
+      // les préférences.
       final ts = MediaQuery.textScalerOf(context);
-      final photoH = (cardW - _kPhotoInset * 2) * 0.72 + _kPhotoInset * 2;
-      final infoH = 8 // padding haut
-          + ts.scale(13) * 1.5 // nom (1 ligne)
-          + (showDesc ? 3 + ts.scale(11) * 1.35 * 2 : 0) // description
-          + 8 // respiration
-          + (ts.scale(16) * 1.35 > _kAddBtn ? ts.scale(16) * 1.35 : _kAddBtn)
-          + 10; // padding bas
+      final cardH = 14 // padding haut
+          + _kDishCircle // vignette ronde
+          + 8
+          + ts.scale(12) * 1.45 // nom (1 ligne)
+          + 2
+          + ts.scale(10) * 1.3 + 2 // catégorie · stock (padding du tap inclus)
+          + 10 // respiration minimale
+          + (ts.scale(13) * 1.5 > _kAddBtn ? ts.scale(13) * 1.5 : _kAddBtn)
+          + 12; // padding bas
 
       return GridView.builder(
         padding: const EdgeInsets.fromLTRB(hPad, 4, hPad, 96),
@@ -943,7 +992,7 @@ class _MenuGrid extends StatelessWidget {
           crossAxisCount: cols,
           mainAxisSpacing: gap,
           crossAxisSpacing: gap,
-          childAspectRatio: cardW / (photoH + infoH),
+          childAspectRatio: cardW / cardH,
         ),
         itemCount: products.length,
         itemBuilder: (_, i) => _DishCard(
@@ -953,7 +1002,6 @@ class _MenuGrid extends StatelessWidget {
           isAdmin: isAdmin,
           canDelete: canDelete,
           canEdit: canEdit,
-          showDescription: showDesc,
           onTap: () => onTap(products[i]),
           onAdd: () => onAdd(products[i]),
           onToggleDispo: (v) => onToggleDispo(products[i], v),
@@ -965,21 +1013,46 @@ class _MenuGrid extends StatelessWidget {
   }
 }
 
-/// Marge de la photo à l'intérieur de la carte (la photo est encartée, pas
-/// à fleur de bord) et diamètre du bouton rond d'ajout. Partagés entre le
-/// calcul de hauteur de la grille et le rendu de la carte — les deux DOIVENT
-/// rester d'accord, sans quoi le bloc texte déborde.
-const double _kPhotoInset = 6;
-const double _kAddBtn = 34;
+/// Géométrie de la carte de plat. Partagée entre le calcul de hauteur de la
+/// grille et le rendu de la carte — les deux DOIVENT rester d'accord, sans
+/// quoi le bloc texte déborde.
+const double _kDishCircle = 70;
+const double _kAddBtn = 28;
+const double _kCardRadius = 19;
 
-/// Carte d'un plat : photo encartée en haut, informations dessous sur la
-/// surface de la carte.
+/// Diamètre du bouton flottant « ajouter un plat ».
+const double _kFabSize = 48;
+
+/// Matrice de désaturation — la vignette d'un plat indisponible passe en gris.
 ///
-/// La photo n'est plus le fond des textes — seuls les éléments qui doivent
-/// rester collés à l'image (barre admin, étoiles, tampon « épuisé ») lui sont
-/// superposés, sur bandeau sombre. Le nom, la description et le prix sont
-/// posés sur `elevatedSurface` et suivent donc les couleurs du thème : ils
-/// restent lisibles en clair comme en sombre, quelle que soit la photo.
+/// Trois lignes identiques calées sur les coefficients de luminance de la
+/// recommandation ITU-R BT.709, ceux-là mêmes qui servent au calcul de
+/// contraste : la vignette perd sa couleur sans changer de clarté, donc sans
+/// devenir plus sombre que les cartes voisines.
+const ColorFilter _kGreyscale = ColorFilter.matrix(<double>[
+  0.2126, 0.7152, 0.0722, 0, 0, //
+  0.2126, 0.7152, 0.0722, 0, 0, //
+  0.2126, 0.7152, 0.0722, 0, 0, //
+  0, 0, 0, 1, 0, //
+]);
+
+/// Carte d'un plat — vignette ronde centrée, informations dessous.
+///
+/// La photo occupait toute la largeur de la carte et portait par-dessus trois
+/// couches de contrôles : un panneau de verre avec l'interrupteur de
+/// disponibilité, le compteur de stock et le menu ⋮, des étoiles sur un second
+/// panneau, et un tampon incliné « ÉPUISÉ » qui barrait le nom du plat. Aucun
+/// de ces éléments n'avait à voir avec l'image, et tous avaient besoin d'un
+/// fond opaque pour rester lisibles par-dessus.
+///
+/// Ici la photo redevient ce qu'elle est à cette taille : une VIGNETTE qui
+/// identifie le plat sans prétendre l'illustrer. Les contrôles quittent
+/// l'image — le ⋮ passe au coin de la carte, la dispo du jour et le stock
+/// passent DANS ce menu — et l'information tient en trois lignes lisibles sur
+/// la surface translucide commune aux écrans restaurant.
+///
+/// Deux gestes distincts, inchangés : tap sur la carte → fiche du plat ;
+/// bouton d'ajout → panier.
 class _DishCard extends StatelessWidget {
   final Product product;
   final String shopId;
@@ -987,18 +1060,11 @@ class _DishCard extends StatelessWidget {
   /// Plat RETIRÉ de la vente (`isActive == false`).
   ///
   /// Distinct de l'indisponibilité du jour, qui est locale au poste et remise à
-  /// zéro chaque matin : ici le retrait est permanent et synchronisé. D'où un
-  /// tampon à lui — « RETIRÉ » et non « INDISPONIBLE » —, sans quoi le serveur
-  /// ne saurait pas si c'est « pas aujourd'hui » ou « plus du tout ».
+  /// zéro chaque matin : ici le retrait est permanent et synchronisé.
   final bool retired;
   final bool isAdmin;
   final bool canDelete;
   final bool canEdit;
-
-  /// Réserve les deux lignes de description. Décidé au niveau de la grille
-  /// pour que toutes les cartes gardent la même hauteur de bloc texte, donc
-  /// des prix alignés d'une carte à l'autre.
-  final bool showDescription;
   final VoidCallback onTap;
   final VoidCallback onAdd;
   final ValueChanged<bool> onToggleDispo;
@@ -1012,7 +1078,6 @@ class _DishCard extends StatelessWidget {
     required this.isAdmin,
     required this.canDelete,
     required this.canEdit,
-    required this.showDescription,
     required this.onTap,
     required this.onAdd,
     required this.onToggleDispo,
@@ -1023,219 +1088,149 @@ class _DishCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final sem = theme.semantic;
-    // Dispo du jour (état local) : pilote le voile « épuisé », le tampon et
-    // l'activation du bouton Ajouter. Lu à chaque build → suit les setState
-    // déclenchés par les actions admin et le décrément à la commande.
+    // Dispo du jour (état local) : pilote le grisage de la vignette, la ligne
+    // d'état et la présence du bouton d'ajout. Lu à chaque build → suit les
+    // setState déclenchés par les actions admin et le décrément à la commande.
     final avail = DailyMenuService.read(shopId, product.id ?? '');
     // Un plat retiré n'est jamais « disponible », quelle que soit la dispo du
     // jour : le réglage permanent l'emporte sur celui de la journée.
     final available = !retired && avail.isAvailable;
 
-    final ts = MediaQuery.textScalerOf(context);
-    final desc = product.description?.trim() ?? '';
+    // `categoryId` porte le libellé de la catégorie dans ce module — c'est
+    // déjà lui qu'affichent les pastilles de filtre.
+    final category = (product.categoryId ?? '').trim();
+    final stock = avail.count == null ? '∞' : '${avail.count}';
+
+    final vignette = SizedBox(
+      width: _kDishCircle,
+      height: _kDishCircle,
+      child: ClipOval(
+        child: DecoratedBox(
+          // Liseré clair PAR-DESSUS la vignette : il la détache de la carte
+          // sans empiéter sur son contenu, y compris sur une photo sombre.
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+                color: Colors.white.withValues(alpha: 0.10), width: 2),
+          ),
+          child: RestoDishAvatar(
+            product: product,
+            initialStyle: AppTextStyles.title,
+          ),
+        ),
+      ),
+    );
 
     return Material(
-      color: sem.elevatedSurface,
-      borderRadius: BorderRadius.circular(16),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // ── PHOTO ENCARTÉE ───────────────────────────────────────────
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(_kPhotoInset),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      ProductImageCard(
-                        imageUrl: product.mainImageUrl,
-                        fillParent: true,
-                        borderRadius: BorderRadius.zero,
-                      ),
-                      // Voile RENFORCÉ quand le plat est indisponible →
-                      // photo « éteinte ». Sous les contrôles, qui restent
-                      // lisibles.
-                      if (!available)
-                        Positioned.fill(
-                          child: ColoredBox(
-                              color: Colors.black.withValues(alpha: 0.45)),
-                        ),
-                      Positioned.fill(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            // Barre de contrôle en tête de photo : dispo du
-                            // jour (admin) et menu ⋮ (droit de suppression).
-                            // Invisible pour un serveur sans ces droits, qui
-                            // ne fait que prendre les commandes.
-                            // Sur un plat RETIRÉ, la barre se réduit au menu
-                            // ⋮ : la dispo du jour et le stock du jour ne
-                            // veulent plus rien dire sur un plat qui n'est plus
-                            // en vente, mais le supprimer ou rouvrir sa fiche,
-                            // si — c'est même tout l'objet de cette liste.
-                            if (retired
-                                ? (canEdit || canDelete)
-                                : (isAdmin || canDelete || canEdit))
-                              _GlassPanel(
-                                padding:
-                                    const EdgeInsets.fromLTRB(6, 1, 2, 1),
-                                child: Row(
-                                  children: [
-                                    if (isAdmin && !retired) ...[
-                                      SizedBox(
-                                        height: 22,
-                                        width: 34,
-                                        child: FittedBox(
-                                          fit: BoxFit.contain,
-                                          // Couleurs pilotées par le
-                                          // switchTheme global.
-                                          child: Switch(
-                                            value: avail.enabled,
-                                            onChanged: onToggleDispo,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(avail.enabled ? 'Dispo' : 'Off',
-                                          style: AppTextStyles.micro.copyWith(
-                                              color: Colors.white,
-                                              shadows: _kTextShadow)),
-                                    ],
-                                    const Spacer(),
-                                    // Stock du jour — tap = éditer.
-                                    if (isAdmin && !retired)
-                                      InkWell(
-                                        onTap: onEditCount,
-                                        borderRadius:
-                                            BorderRadius.circular(6),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 5, vertical: 3),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              const Icon(
-                                                  Icons.inventory_2_outlined,
-                                                  size: 13,
-                                                  color: Colors.white),
-                                              const SizedBox(width: 3),
-                                              Text(
-                                                avail.count == null
-                                                    ? '∞'
-                                                    : '${avail.count}',
-                                                style: AppTextStyles.microBold
-                                                    .copyWith(
-                                                        color: Colors.white,
-                                                        shadows:
-                                                            _kTextShadow),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    if (canEdit || canDelete)
-                                      _DishMenuBtn(
-                                        onEdit: canEdit ? onTap : null,
-                                        onDelete: canDelete ? onDelete : null,
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            const Spacer(),
-                            // Étoiles posées en bas à gauche de la photo,
-                            // sur bandeau sombre — la note reste visible sans
-                            // manger une ligne du bloc texte.
-                            if (product.rating > 0)
-                              Align(
-                                alignment: Alignment.bottomLeft,
-                                child: _GlassPanel(
-                                  borderRadius: BorderRadius.circular(999),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 3),
-                                  child: _Stars(rating: product.rating),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      // Tampon « ÉPUISÉ / INDISPONIBLE » incliné.
-                      // `IgnorePointer` : ne bloque ni le tap carte
-                      // (édition) ni la barre admin au-dessus.
-                      if (!available)
-                        IgnorePointer(
-                          child: Center(
-                            child: Transform.rotate(
-                              angle: -0.12,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: (!retired && avail.isSoldOut
-                                          ? sem.danger
-                                          : Colors.black)
-                                      .withValues(alpha: 0.82),
-                                  borderRadius: BorderRadius.circular(7),
-                                  border: Border.all(
-                                      color: Colors.white
-                                          .withValues(alpha: 0.85),
-                                      width: 1.5),
-                                ),
-                                child: Text(
-                                  retired
-                                      ? 'RETIRÉ'
-                                      : avail.isSoldOut
-                                          ? 'ÉPUISÉ'
-                                          : 'INDISPONIBLE',
-                                  style: AppTextStyles.captionBold.copyWith(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w900,
-                                      letterSpacing: 1),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            // ── BLOC TEXTE ───────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(_kCardRadius),
+      child: Stack(
+        fit: StackFit.passthrough,
+        children: [
+          InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(_kCardRadius),
+            child: Container(
+              decoration: restoCardSurface(context, radius: _kCardRadius),
+              padding: const EdgeInsets.fromLTRB(10, 14, 10, 12),
               child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // ── VIGNETTE ───────────────────────────────────────────
+                  // Plat indisponible : elle passe en GRIS. C'est la seule
+                  // chose qui se voit d'un coup d'œil de l'autre bout de la
+                  // salle, ce que faisait le tampon incliné en barrant le nom.
+                  available
+                      ? vignette
+                      : ColorFiltered(
+                          colorFilter: _kGreyscale, child: vignette),
+                  const SizedBox(height: 8),
+
+                  // ── NOM ────────────────────────────────────────────────
                   Text(
                     product.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: AppTextStyles.bodyBold,
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.bodySmBold.copyWith(
+                        color: available ? cs.onSurface : cs.onSurfaceVariant),
                   ),
-                  if (showDescription) ...[
-                    const SizedBox(height: 3),
-                    // Hauteur RÉSERVÉE à deux lignes, même quand ce plat n'a
-                    // pas de description : sans elle, les prix ne seraient
-                    // plus alignés d'une carte à l'autre.
-                    SizedBox(
-                      height: ts.scale(11) * 1.35 * 2,
-                      child: Text(
-                        desc,
-                        maxLines: 2,
+                  const SizedBox(height: 2),
+
+                  // ── CATÉGORIE · STOCK, ou l'état du jour ───────────────
+                  if (available)
+                    Text(
+                      category.isEmpty ? stock : '$category · $stock',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: AppTextStyles.micro,
+                    )
+                  else if (retired)
+                    Text('Retiré de la vente',
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.caption,
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.micro
+                            .copyWith(color: cs.onSurfaceVariant))
+                  else
+                    // TAPABLE pour l'admin, et c'est le point : rendre un plat
+                    // indisponible est un geste réfléchi qui passe par le menu
+                    // ⋮, mais le remettre à la carte arrive dans la minute —
+                    // un arrivage, une erreur de manipulation. Le chemin le
+                    // plus court sert le cas le plus fréquent. Un appui long
+                    // serait introuvable sur le web, comme l'a déjà tranché le
+                    // Plan de salle.
+                    //
+                    // DEUX causes d'indisponibilité, deux remèdes : un plat
+                    // ÉPUISÉ est resté `enabled` avec un compteur à zéro —
+                    // rebasculer l'interrupteur ne ferait rien, il faut lui
+                    // rendre du stock. Un plat retiré du jour, lui, se rallume.
+                    InkWell(
+                      onTap: isAdmin
+                          ? (avail.isSoldOut
+                              ? onEditCount
+                              : () => onToggleDispo(true))
+                          : null,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 1),
+                        child: Text(
+                          // DEUX libellés, parce que le tap ne fait pas la
+                          // même chose : ils se terminent tous deux par
+                          // « aujourd'hui » — ce sont des états du jour, qui
+                          // tomberont demain matin — et leur premier mot dit
+                          // le remède. Épuisé : il manque du stock. Retiré :
+                          // il manque une décision.
+                          //
+                          // « Retiré aujourd'hui » se distingue ainsi de
+                          // « Retiré de la vente », qui est le retrait
+                          // permanent de la liste des plats retirés.
+                          avail.isSoldOut
+                              ? 'Épuisé aujourd’hui'
+                              : 'Retiré aujourd’hui',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          // `warningText`, JAMAIS `warning`, pour du texte :
+                          // `warning` est le token des ICÔNES et des chips
+                          // colorés sur fond neutre — sa propre déclaration le
+                          // dit — et il plafonne à 2,1:1 sur la surface claire
+                          // d'une carte. La déclinaison texte tient 6,7:1 en
+                          // clair et ~9:1 en sombre. Même règle pour `danger`
+                          // et `success` : la variante `*Text` dès qu'il s'agit
+                          // de lettres.
+                          style: AppTextStyles.microBold
+                              .copyWith(color: sem.warningText),
+                        ),
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 8),
-                  // Prix à gauche, bouton rond d'ajout à droite.
+                  const Spacer(),
+
+                  // ── PRIX ET AJOUT ──────────────────────────────────────
                   Row(
                     children: [
                       Expanded(
@@ -1245,60 +1240,147 @@ class _DishCard extends StatelessWidget {
                           child: Text(
                             CurrencyFormatter.format(product.priceSellPos),
                             maxLines: 1,
-                            style: AppTextStyles.subtitleBold,
+                            style: AppTextStyles.bodyBold.copyWith(
+                                color: available
+                                    ? cs.primary
+                                    : cs.onSurfaceVariant),
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      // Pas de bouton du tout sur un plat retiré — un bouton
-                      // grisé laisserait croire qu'il suffit d'insister, alors
-                      // que la réponse est dans la fiche du plat.
-                      if (!retired)
-                        _AddButton(
-                          enabled: available,
-                          onAdd: onAdd,
-                        ),
+                      // Pas de bouton du tout quand le plat n'est pas
+                      // disponible : un bouton grisé laisse croire qu'il suffit
+                      // d'insister, et un bouton actif qui refuserait ensuite
+                      // serait pire encore.
+                      if (available) ...[
+                        const SizedBox(width: 6),
+                        _AddButton(onAdd: onAdd),
+                      ],
                     ],
                   ),
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+          // ── ⋮ AU COIN DE LA CARTE ─────────────────────────────────────
+          // Il n'a jamais rien eu à voir avec l'image, et l'y poser obligeait à
+          // un panneau de verre pour le rendre lisible.
+          //
+          // Sur un plat RETIRÉ, la dispo du jour et son stock ne veulent plus
+          // rien dire — mais rouvrir sa fiche ou le supprimer, si : c'est même
+          // tout l'objet de cette liste.
+          if (retired
+              ? (canEdit || canDelete)
+              : (isAdmin || canEdit || canDelete))
+            Positioned(
+              top: 3,
+              right: 3,
+              child: _DishMenuBtn(
+                onEdit: canEdit ? onTap : null,
+                onDelete: canDelete ? onDelete : null,
+                onToggleDispo: isAdmin && !retired
+                    ? () => onToggleDispo(!avail.enabled)
+                    : null,
+                onEditCount: isAdmin && !retired ? onEditCount : null,
+                dispoEnabled: avail.enabled,
+              ),
+            ),
+        ],
       ),
     );
   }
 }
 
-/// Menu ⋮ posé sur la photo du plat : modifier · supprimer.
+/// Menu ⋮ au coin de la carte : dispo du jour · stock · modifier · supprimer.
 ///
 /// Même parti pris que le Plan de salle : un seul point d'entrée discret pour
 /// les actions qui touchent à la fiche, à l'écart des gestes de service (tap =
 /// ouvrir, bouton rond = ajouter au panier). Sans lui, retirer un plat
 /// obligeait à ouvrir la fiche et à la faire défiler jusqu'à son dernier
 /// bouton.
+///
+/// Il accueille désormais aussi la DISPO DU JOUR et le STOCK DU JOUR, qui
+/// vivaient sur la photo — un interrupteur miniature de 22 px et un compteur,
+/// posés sur un bandeau noir, sur la moitié haute de chaque image de la
+/// grille. Ce sont des réglages : leur place est dans un menu, pas en travers
+/// de ce qu'on regarde.
+///
+/// La remise à la carte, elle, reste accessible d'un seul tap sur la ligne
+/// « Épuisé aujourd'hui » : c'est le geste pressé, il ne passe pas par ici.
 class _DishMenuBtn extends StatelessWidget {
   /// `null` = droit absent → l'entrée n'est pas proposée. Un menu qui montre
   /// une option grisée invite à demander pourquoi ; un menu qui ne la montre
   /// pas ne pose pas la question.
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
+  final VoidCallback? onToggleDispo;
+  final VoidCallback? onEditCount;
 
-  const _DishMenuBtn({required this.onEdit, required this.onDelete});
+  /// Sert au seul libellé de l'entrée : « Rendre indisponible » ou « Remettre
+  /// à la carte ». Dire l'action plutôt que l'état évite l'ambiguïté d'un
+  /// interrupteur, dont on ne sait jamais s'il montre ce qui est ou ce qui
+  /// arrivera si on le touche.
+  final bool dispoEnabled;
+
+  const _DishMenuBtn({
+    required this.onEdit,
+    required this.onDelete,
+    required this.onToggleDispo,
+    required this.onEditCount,
+    required this.dispoEnabled,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final sem = Theme.of(context).semantic;
+    final theme = Theme.of(context);
+    final sem = theme.semantic;
     return PopupMenuButton<int>(
       tooltip: 'Actions sur le plat',
       padding: EdgeInsets.zero,
       splashRadius: 16,
       iconSize: 16,
-      constraints: const BoxConstraints(minWidth: 168),
-      icon: const Icon(Icons.more_vert_rounded,
-          size: 16, color: Colors.white, shadows: _kTextShadow),
-      onSelected: (v) => v == 0 ? onEdit?.call() : onDelete?.call(),
+      constraints: const BoxConstraints(minWidth: 210),
+      // Plus d'ombre portée ni de blanc forcé : l'icône n'est plus posée sur
+      // une photo mais sur la surface de la carte, où elle suit le thème.
+      icon: Icon(Icons.more_vert_rounded,
+          size: 16, color: theme.colorScheme.onSurfaceVariant),
+      onSelected: (v) {
+        switch (v) {
+          case 0:
+            onEdit?.call();
+          case 1:
+            onDelete?.call();
+          case 2:
+            onToggleDispo?.call();
+          case 3:
+            onEditCount?.call();
+        }
+      },
       itemBuilder: (_) => [
+        if (onToggleDispo != null)
+          PopupMenuItem<int>(
+            value: 2,
+            height: 40,
+            child: Row(children: [
+              Icon(
+                  dispoEnabled
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  size: 16),
+              const SizedBox(width: 10),
+              Text(dispoEnabled ? 'Rendre indisponible' : 'Remettre à la carte',
+                  style: AppTextStyles.bodySm),
+            ]),
+          ),
+        if (onEditCount != null)
+          const PopupMenuItem<int>(
+            value: 3,
+            height: 40,
+            child: Row(children: [
+              Icon(Icons.inventory_2_outlined, size: 16),
+              SizedBox(width: 10),
+              Text('Stock du jour', style: AppTextStyles.bodySm),
+            ]),
+          ),
         if (onEdit != null)
           const PopupMenuItem<int>(
             value: 0,
@@ -1325,39 +1407,36 @@ class _DishMenuBtn extends StatelessWidget {
   }
 }
 
-/// Bouton rond « ajouter au panier » — pastille pleine à la couleur de la
-/// boutique, éteinte sur surface neutre quand le plat n'est pas disponible.
+/// Bouton « ajouter au panier » — carré arrondi de 28 px à la couleur de la
+/// boutique, icône `+`.
+///
+/// Plus d'état éteint : la carte d'un plat indisponible ne le montre plus du
+/// tout. Le bouton n'a donc plus qu'un seul rendu, et le panier n'a plus
+/// besoin de refuser ce que l'écran vient de proposer.
+///
+/// L'icône passe du caddie au `+` : à 13 px de glyphe, un caddie n'est plus
+/// qu'une tache, et le geste n'est pas « voir le panier » mais « en ajouter
+/// un ».
 class _AddButton extends StatelessWidget {
-  final bool enabled;
   final VoidCallback onAdd;
 
-  const _AddButton({required this.enabled, required this.onAdd});
+  const _AddButton({required this.onAdd});
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final sem = theme.semantic;
-
+    final cs = Theme.of(context).colorScheme;
     return Tooltip(
-      message: enabled ? 'Ajouter au panier' : 'Plat indisponible',
+      message: 'Ajouter au panier',
       child: Material(
-        color: enabled ? theme.colorScheme.primary : sem.trackMuted,
-        shape: const CircleBorder(),
+        color: cs.primary,
+        borderRadius: BorderRadius.circular(9),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: enabled ? onAdd : null,
+          onTap: onAdd,
           child: SizedBox(
             width: _kAddBtn,
             height: _kAddBtn,
-            child: Icon(
-              enabled
-                  ? Icons.shopping_cart_rounded
-                  : Icons.remove_shopping_cart_rounded,
-              size: _kAddBtn * 0.48,
-              color: enabled
-                  ? theme.colorScheme.onPrimary
-                  : theme.colorScheme.onSurfaceVariant,
-            ),
+            child: Icon(Icons.add_rounded, size: 18, color: cs.onPrimary),
           ),
         ),
       ),
@@ -1369,50 +1448,6 @@ class _AddButton extends StatelessWidget {
 class _CountResult {
   final int? count;
   const _CountResult(this.count);
-}
-
-/// Ombre portée commune aux textes et aux étoiles posés sur la photo.
-/// Deuxième filet de sécurité derrière le flou : même sur un fond clair et
-/// contrasté, le glyphe garde un liseré sombre qui le détache.
-const _kTextShadow = [
-  Shadow(color: Colors.black87, blurRadius: 4, offset: Offset(0, 1)),
-];
-
-/// Bandeau semi-opaque posé sur la photo pour rendre le texte lisible quelle
-/// que soit l'image du plat.
-///
-/// Opacité alignée sur la règle du module (cf. `restoGlassFill`) : le texte du
-/// mode restaurant ne se pose JAMAIS à nu sur une photo, il lui faut une
-/// surface à ~85 %. À 45 %, la photo d'un plat clair — une assiette blanche,
-/// une nappe — repassait au travers du libellé « Dispo » et du compteur.
-///
-/// IMPORTANT — plus de `BackdropFilter` (flou) ici : sur Flutter web
-/// (CanvasKit), EMPILER plusieurs `BackdropFilter` par-dessus une image
-/// (`CachedNetworkImage`) casse le compositing et fait DISPARAÎTRE la photo
-/// (carte grise). On utilise donc un simple voile noir translucide + l'ombre
-/// portée du texte, qui suffisent au contraste et sont robustes sur toutes les
-/// plateformes.
-class _GlassPanel extends StatelessWidget {
-  final Widget child;
-  final EdgeInsets padding;
-  final BorderRadius? borderRadius;
-
-  const _GlassPanel({
-    required this.child,
-    required this.padding,
-    this.borderRadius,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.85),
-        borderRadius: borderRadius,
-      ),
-      child: Padding(padding: padding, child: child),
-    );
-  }
 }
 
 /// PROGRESSION DE MISE EN ROUTE, sous l'état vide de la carte.
@@ -1526,37 +1561,6 @@ class _SetupProgressCard extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// Note du plat en étoiles (`Product.rating`, 0–5).
-///
-/// Teintées à la couleur principale du thème, pleine opacité + ombre
-/// portée : à 70 % elles disparaissaient sur les photos claires. Pleines et
-/// vides partagent la même teinte, seule l'icône (pleine / contour) les
-/// distingue.
-class _Stars extends StatelessWidget {
-  final int rating;
-  const _Stars({required this.rating});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
-    // Taille passée par le `textScaler` : les étoiles grandissent avec le
-    // texte quand l'utilisateur augmente la taille dans les préférences.
-    final size = MediaQuery.textScalerOf(context).scale(14);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (var i = 1; i <= 5; i++)
-          Icon(
-            i <= rating ? Icons.star_rounded : Icons.star_border_rounded,
-            size: size,
-            color: color,
-            shadows: _kTextShadow,
-          ),
-      ],
     );
   }
 }

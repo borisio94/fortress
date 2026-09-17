@@ -22,6 +22,7 @@ import '../../../caisse/presentation/bloc/caisse_bloc.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
 import '../../../inventaire/domain/entities/product.dart';
 import '../../data/restaurant_dashboard_providers.dart';
+import '../widgets/resto_dish_visuals.dart';
 import '../widgets/resto_kpi_tile.dart';
 import '../widgets/resto_surfaces.dart';
 
@@ -273,7 +274,7 @@ class _StatCard extends StatelessWidget {
     return Container(
       // Le `Material` passe en transparent par-dessus : il ne sert qu'à porter
       // l'encre du toucher, sa couleur masquerait la surface.
-      decoration: _cardSurface(context, radius: 14),
+      decoration: restoCardSurface(context, radius: 14),
       child: Material(
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(14),
@@ -726,7 +727,7 @@ class _DishBubble extends StatelessWidget {
                       child: SizedBox(
                         width: diameter,
                         height: diameter,
-                        child: _DishAvatar(product: product),
+                        child: RestoDishAvatar(product: product),
                       ),
                     ),
                   ),
@@ -771,50 +772,6 @@ class _DishBubble extends StatelessWidget {
                     color: available ? cs.primary : sem.danger)),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// Contenu du cercle : la photo du plat, ou son INITIALE.
-///
-/// Un plat sans photo tombait sur le placeholder générique de
-/// `ProductImageCard` — le même pour tous, ce qui rendait deux plats sans
-/// photo indistinguables dans une rangée. L'initiale, elle, les sépare, et la
-/// teinte dérivée du nom fait que le même plat garde la même couleur d'un
-/// écran à l'autre.
-class _DishAvatar extends StatelessWidget {
-  final Product product;
-
-  const _DishAvatar({required this.product});
-
-  /// Teinte stable, dérivée du nom. `hashCode` suffit : on ne cherche pas une
-  /// répartition parfaite, seulement qu'un plat garde SA couleur.
-  Color _tint(BuildContext context) {
-    final hue = (product.name.hashCode.abs() % 360).toDouble();
-    final base = HSLColor.fromColor(Theme.of(context).colorScheme.primary);
-    return HSLColor.fromAHSL(1, hue, 0.35, base.lightness).toColor();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final url = product.mainImageUrl;
-    if (url != null && url.isNotEmpty) {
-      return ProductImageCard(
-        imageUrl: url,
-        fillParent: true,
-        borderRadius: BorderRadius.zero,
-      );
-    }
-    final initial = product.name.trim().isEmpty
-        ? '?'
-        : product.name.trim().characters.first.toUpperCase();
-    final tint = _tint(context);
-    return ColoredBox(
-      color: tint.withValues(alpha: 0.18),
-      child: Center(
-        child: Text(initial,
-            style: AppTextStyles.subtitleBold.copyWith(color: tint)),
       ),
     );
   }
@@ -1072,7 +1029,7 @@ class _FoodCostCard extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       // Arête haute teintée du NIVEAU de food cost : la carte s'annonce avant
       // d'être lue. Vert, orange ou rouge selon le seuil franchi.
-      decoration: _cardSurface(context, radius: 14).copyWith(
+      decoration: restoCardSurface(context, radius: 14).copyWith(
         border: Border(
           top: BorderSide(color: color.withValues(alpha: 0.55), width: 2),
           left: BorderSide(color: restoGlassBorder(context), width: 0.5),
@@ -1230,7 +1187,7 @@ class _FinanceTile extends StatelessWidget {
     final negative = !hidden && curve == _Curve.profit && amount < 0;
 
     return Container(
-      decoration: _cardSurface(context, radius: 14),
+      decoration: restoCardSurface(context, radius: 14),
       child: Material(
         // Transparent : la couleur du Material masquerait la surface. Il ne
         // porte plus que l'encre du toucher.
@@ -2160,7 +2117,7 @@ class _Card extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
-      decoration: _cardSurface(context),
+      decoration: restoCardSurface(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2230,24 +2187,6 @@ class _EmptyBlock extends StatelessWidget {
     );
   }
 }
-
-/// Surface d'une carte du tableau de bord.
-///
-/// Translucide, bordure de 0,5 px, arrondi 17 — posée sur le motif du fond
-/// sans le masquer. Elle remplace le relief à trois ombres, qui avait été
-/// dessiné pour se détacher d'une PHOTO : le fond en dégradé et formes douces
-/// n'a plus besoin qu'on crie par-dessus.
-///
-/// PAS de flou d'arrière-plan, et c'est délibéré : cet écran porte huit cartes
-/// à la fois, et `RestoGlassPanel` documente déjà que le `BackdropFilter` coûte
-/// cher sur le web dès qu'il se répète. La translucidité du remplissage suffit
-/// à laisser deviner le motif.
-BoxDecoration _cardSurface(BuildContext context, {double radius = 17}) =>
-    BoxDecoration(
-      color: restoGlassFill(context),
-      borderRadius: BorderRadius.circular(radius),
-      border: Border.all(color: restoGlassBorder(context), width: 0.5),
-    );
 
 /// Deux cartes côte à côte sur large écran, empilées sinon.
 class _TwoCol extends StatelessWidget {
