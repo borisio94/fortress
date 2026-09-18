@@ -150,6 +150,11 @@ Les sept canaux de sortie d'espèces sont branchés : dépenses et achats
 marché, consigne rendue, avances sur salaire, quinzaines, salaires versés,
 heures supplémentaires payées le jour même, primes de concours.
 
+⚠ Constaté le 18/09/2026 : `StaffService.cashOut` n'en connaît que DEUX dans
+`HEAD` — avances en espèces et salaires payés en espèces. Les autres
+dépendent du chantier « Notation de l'équipe », non commité. Cette section
+décrit donc un état que le dépôt n'a pas encore.
+
 Contrôle aveugle : le montant système n'est jamais affiché avant la saisie
 du comptage réel.
 
@@ -159,9 +164,12 @@ du comptage réel.
 
 À traiter, dans cet ordre de gravité.
 
-**Les avances sur salaire sortent du net et n'entrent jamais au bilan.** La
-masse salariale est sous-évaluée. Idem pour les heures supplémentaires payées
-en espèces le soir même.
+**Les heures supplémentaires payées en espèces le soir même n'entrent pas au
+bilan.** ⚠ Non traitable en l'état : `OvertimeSettlement` vit dans
+`shift_evaluation.dart`, un fichier NON SUIVI par git appartenant au chantier
+« Notation de l'équipe ». Dans `HEAD`, `staff_service.dart` ne contient aucune
+occurrence de `overtime` — la notion entière est absente du dépôt. À reprendre
+quand ce chantier sera commité.
 
 **Un plat sans coût verdit le food cost.** Son CA est compté, son coût non :
 le taux baisse et la carte annonce une bonne maîtrise des matières. L'indicateur
@@ -341,6 +349,42 @@ primes, vers le bas avec les absences.
 un mois passé où un employé a depuis quitté la maison, l'estimation le
 sous-estime. En pratique les mois passés ont leurs fiches ; l'estimation sert
 surtout au mois en cours, où l'effectif est à jour.
+
+---
+
+### Une avance sur salaire ne pesait jamais sur le bénéfice
+
+*Corrigé le 18/09/2026 — lot 5, pour sa moitié « avances ».*
+*Commit : « fix(restaurant): une avance déjà versée compte dans la masse
+salariale ».*
+
+`computeNet` retranche les avances, et c'est juste pour le SALARIÉ : qui a pris
+50 000 F le 10 n'en touche que 50 000 à la fin du mois. Mais le restaurant, lui,
+a bien dépensé 100 000 F. Le bilan sommait les nets : **250 000 F pour une
+équipe qui en avait coûté 300 000**, et un bénéfice surévalué du montant exact
+sorti en avance.
+
+L'argent était pourtant bien parti, et le reste du logiciel le savait :
+`StaffService.cashOut` compte les avances en espèces pour que la clôture de
+caisse ne crie pas au manquant. Seul le bilan les ignorait.
+
+**Décision prise** : *la paie du bilan est le COÛT DU TRAVAIL, pas l'argent
+versé le jour de la paie.* L'autre option — garder la paie au montant versé et
+sortir l'avance en charge distincte — aurait exigé d'ajouter une ligne à la
+formule du bénéfice de la section 5.
+
+**Ce qui a tranché** vient du lot 4 : l'estimation contractuelle
+(`payrollEstimateFor`) somme les salaires de base, donc rend déjà le coût du
+travail. Sans cette correction, la masse salariale **changeait de nature** au
+moment où le gérant générait ses fiches — 300 000 avant, 250 000 après, pour la
+même équipe.
+
+**Correction** : `Payslip.laborCost` vaut `netSalary + advancesDeducted`, et
+`payrollTotal` le somme. L'affichage du bulletin, lui, continue de montrer le
+net — le salarié touche bien net d'avance.
+
+**Cet écart n'est refermé qu'à moitié.** Les heures supplémentaires payées en
+espèces restent en section 8 : la notion n'existe pas dans le dépôt.
 
 ---
 

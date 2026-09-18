@@ -64,6 +64,28 @@ class Payslip {
 
   bool get isPaid => paidAt != null;
 
+  /// Ce que ce bulletin a COÛTÉ au restaurant — net versé PLUS les avances
+  /// déjà décaissées.
+  ///
+  /// [netSalary] retranche les avances, et c'est juste pour le SALARIÉ : qui a
+  /// pris 50 000 F le 10 n'en touche que 50 000 à la fin. Mais le restaurant,
+  /// lui, a bien dépensé 100 000 F. Le bilan sommait les nets : il affichait
+  /// 250 000 F pour une équipe qui en avait coûté 300 000, et surévaluait le
+  /// bénéfice du montant exact sorti en avance.
+  ///
+  /// L'argent était pourtant bien parti, et le reste du logiciel le savait :
+  /// `StaffService.cashOut` compte les avances en espèces pour que la clôture
+  /// de caisse ne crie pas au manquant. Seul le bilan les ignorait.
+  ///
+  /// C'est aussi ce que rend l'estimation contractuelle (`payrollEstimateFor`,
+  /// qui somme les salaires de base) : sans cette correction, la masse
+  /// salariale changeait de nature au moment où le gérant générait ses fiches —
+  /// coût du travail avant, argent versé après.
+  ///
+  /// À NE PAS UTILISER pour afficher un bulletin : le salarié touche bien son
+  /// net. Ce getter sert au BILAN, pas à la fiche de paie.
+  int get laborCost => netSalary + advancesDeducted;
+
   /// LE calcul de la paie. Fonction pure — c'est le montant qu'un employé
   /// reçoit, il ne doit avoir qu'une seule définition.
   ///

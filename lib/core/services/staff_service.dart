@@ -486,10 +486,11 @@ class StaffService {
     return total;
   }
 
-  /// Masse salariale nette d'un mois — alimente le bilan (Lot E).
+  /// Masse salariale d'un mois pour le BILAN — le coût du travail, pas
+  /// l'argent versé le jour de la paie (cf. `Payslip.laborCost`).
   static int payrollTotal(String shopId, String month) => payslips(shopId,
           month: month)
-      .fold(0, (s, p) => s + p.netSalary);
+      .fold(0, (s, p) => s + p.laborCost);
 
   /// Masse salariale ESTIMÉE d'un mois, d'après les CONTRATS.
   ///
