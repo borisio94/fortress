@@ -87,6 +87,14 @@ class RestaurantFinanceReport {
   /// Charges fixes imputables à la période (FCFA).
   final int charges;
 
+  /// La paie retenue vient-elle des CONTRATS et non des fiches ?
+  ///
+  /// Vrai dès qu'un seul des mois couverts n'a pas ses fiches. L'écran doit le
+  /// dire : un bénéfice calculé sur une paie estimée n'a pas le même statut
+  /// qu'un bénéfice calculé sur des fiches arrêtées, et le chiffre bougera à
+  /// l'établissement de celles-ci.
+  final bool payrollEstimated;
+
   /// Pertes de la période (FCFA) : matière perdue RECALCULÉE sur la période
   /// (assiettes au coût unitaire de la période, manques d'inventaire
   /// plafonnés) + pertes non rattachées à leur montant saisi.
@@ -145,6 +153,7 @@ class RestaurantFinanceReport {
     required this.sectors,
     this.realFoodCost = 0,
     this.operatingCost = 0,
+    this.payrollEstimated = false,
     this.purchasedMaterialLosses = 0,
     this.lossLines = const [],
   });
@@ -638,11 +647,20 @@ class RestaurantReportingService {
 
     // ── Masse salariale (Lot D) ────────────────────────────────────────
     var payroll = 0.0;
+    var payrollEstimated = false;
     final payrollSeries = List<double>.filled(n, 0);
     try {
       for (final month in _monthsIn(range)) {
-        final amount = StaffService.payrollTotal(shopId, month);
+        // Les FICHES si elles existent, les contrats sinon : un salaire non
+        // encore arrêté est dû quand même, et l'ignorer surévaluait le
+        // bénéfice jusqu'au jour où le gérant générait ses fiches — le chiffre
+        // s'effondrait alors d'un coup, sans qu'aucune vente n'ait changé.
+        final paie = StaffService.payrollOrEstimate(shopId, month);
+        final amount = paie.amount;
         if (amount <= 0) continue;
+        // Un SEUL mois estimé suffit à marquer la période : sur une fenêtre à
+        // cheval, le total mêle alors des fiches et une estimation.
+        if (paie.estimated) payrollEstimated = true;
         final d = payrollDaysOf(month, range);
         if (d.days.isEmpty || d.inMonth <= 0) continue;
         final daily = amount / d.inMonth;
@@ -719,6 +737,7 @@ class RestaurantReportingService {
       losses: losses,
       lossLines: lossLines,
       payroll: payroll.round(),
+      payrollEstimated: payrollEstimated,
       revenueSeries: revenueSeries,
       expenseSeries: expenseSeries,
       lossSeries: lossSeries,

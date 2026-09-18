@@ -491,6 +491,75 @@ class StaffService {
           month: month)
       .fold(0, (s, p) => s + p.netSalary);
 
+  /// Masse salariale ESTIMÉE d'un mois, d'après les CONTRATS.
+  ///
+  /// Sans fiche de paie, la masse salariale du mois valait zéro : un restaurant
+  /// à 300 000 F de salaires affichait, le 18 du mois, un bénéfice surévalué de
+  /// 180 000 F — puis le voyait s'effondrer d'un coup le jour où le gérant
+  /// générait ses fiches, sans qu'aucune vente n'ait changé. Un salaire non
+  /// encore arrêté est dû quand même.
+  ///
+  /// ELLE NE GÉNÈRE RIEN. [generatePayslip] solde les avances, les heures
+  /// supplémentaires et les pénalités : ce sont des écritures irréversibles
+  /// qu'un simple affichage n'a pas à déclencher. L'estimation reste en
+  /// lecture seule, et la vraie fiche la remplace dès qu'elle existe.
+  ///
+  /// C'est une APPROXIMATION assumée : elle ignore primes, heures
+  /// supplémentaires, absences et retenues, qui ne sont connues qu'à
+  /// l'établissement de la fiche. Le chiffre bougera donc à ce moment-là —
+  /// vers le haut avec les primes, vers le bas avec les absences.
+  ///
+  /// LIMITE : `isActive` est l'état d'AUJOURD'HUI, pas un historique. Sur un
+  /// mois passé où un employé a depuis quitté la maison, l'estimation le
+  /// sous-estime. En pratique les mois passés ont leurs fiches ; l'estimation
+  /// sert surtout au mois en cours, où l'effectif est à jour.
+  ///
+  /// Fonction pure — la liste est fournie par l'appelant — pour être
+  /// vérifiable sans Hive.
+  static int payrollEstimateFor(List<StaffMember> members, String month) {
+    final parts = month.split('-');
+    if (parts.length < 2) return 0;
+    final y = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    if (y == null || m == null) return 0;
+    final start = DateTime(y, m);
+    final end = DateTime(y, m + 1);
+    final inMonth = end.difference(start).inDays;
+    if (inMonth <= 0) return 0;
+
+    var total = 0;
+    for (final s in members) {
+      if (!s.isActive || s.baseSalary <= 0) continue;
+      // Embauché après la fin du mois : il n'y était pas.
+      if (!s.hireDate.isBefore(end)) continue;
+      // PRORATA D'EMBAUCHE : arrivé le 21 d'un mois de 30 jours, il coûte dix
+      // jours et non un mois. Arrivé avant le mois, il le coûte en entier.
+      if (s.hireDate.isBefore(start)) {
+        total += s.baseSalary;
+      } else {
+        final worked = inMonth - s.hireDate.day + 1;
+        total += s.baseSalary * worked ~/ inMonth;
+      }
+    }
+    return total;
+  }
+
+  /// Masse salariale du mois : les FICHES si elles existent, l'estimation
+  /// contractuelle sinon.
+  ///
+  /// `estimated` dit lequel des deux, pour que l'écran puisse le signaler : un
+  /// bénéfice calculé sur une paie estimée n'a pas le même statut qu'un
+  /// bénéfice calculé sur des fiches arrêtées.
+  static ({int amount, bool estimated}) payrollOrEstimate(
+      String shopId, String month) {
+    final real = payrollTotal(shopId, month);
+    if (real > 0) return (amount: real, estimated: false);
+    return (
+      amount: payrollEstimateFor(forShop(shopId), month),
+      estimated: true
+    );
+  }
+
   // ── Écriture commune ────────────────────────────────────────────────────
 
   static Future<void> _put(Box<Map> box, String table, String shopId,

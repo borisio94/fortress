@@ -935,9 +935,14 @@ class _FinanceKpiRowState extends State<_FinanceKpiRow> {
         amount: report.expenses,
         // « dont matières » suit la même règle que le bénéfice : les achats
         // réels dès qu'ils sont saisis, l'estimation des recettes sinon.
+        // « estimée » quand la paie vient des contrats et non des fiches :
+        // sans ce mot, un bénéfice bâti sur une approximation se lit comme un
+        // bénéfice arrêté. Le chiffre bougera à l'établissement des fiches —
+        // vers le haut avec les primes, vers le bas avec les absences.
         hint: 'dont matières '
             '${CurrencyFormatter.format(report.foodCost)}'
-            '${report.payroll > 0 ? ' · paie ${CurrencyFormatter.format(report.payroll.toDouble())}' : ''}',
+            '${report.payroll > 0 ? ' · paie ${CurrencyFormatter.format(report.payroll.toDouble())}'
+                '${report.payrollEstimated ? ' estimée' : ''}' : ''}',
         hidden: !_revealed,
         onTap: () => setState(() => _revealed = !_revealed),
       ),

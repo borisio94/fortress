@@ -159,11 +159,6 @@ du comptage réel.
 
 À traiter, dans cet ordre de gravité.
 
-**Tant que la fiche de paie n'est pas générée, la paie vaut 0** et le bénéfice
-est gonflé. Le salaire contractuel des employés actifs (`StaffMember.baseSalary`,
-`isActive`) existe pourtant et pourrait servir de repli — reste à décider si un
-salaire non encore arrêté doit peser sur le bénéfice.
-
 **Les avances sur salaire sortent du net et n'entrent jamais au bilan.** La
 masse salariale est sous-évaluée. Idem pour les heures supplémentaires payées
 en espèces le soir même.
@@ -306,6 +301,46 @@ La paie est aussi **étalée** sur les jours couverts au lieu d'être posée d'u
 bloc sur la fin du mois : puisqu'elle se compte au jour, la courbe doit le
 montrer. Le bloc unique dessinait un pic qui faisait croire à une dépense ce
 jour-là.
+
+---
+
+### La paie valait zéro tant que la fiche n'était pas générée
+
+*Corrigé le 18/09/2026 — lot 4.*
+*Commit : « fix(restaurant): un salaire non encore arrêté pèse quand même sur
+le bénéfice ».*
+
+Un restaurant à 300 000 F de salaires mensuels affichait, le 18 du mois, un
+bénéfice surévalué de 180 000 F. Puis le chiffre s'effondrait d'un coup le jour
+où le gérant générait ses fiches — et, depuis le lot 3, l'effondrement se
+propageait rétroactivement sur tout le mois par le prorata, sans qu'aucune
+vente n'ait changé.
+
+**Ce que l'inspection a révélé** : `generatePayslip` n'est pas un calcul mais
+une ÉCRITURE. Elle solde les avances, marque les heures supplémentaires
+réglées, recouvre les pénalités et déduit les absences. Le repli ne pouvait
+donc en aucun cas passer par une génération automatique : il devait rester en
+lecture seule.
+
+**Décision prise** : *un salaire non encore arrêté est dû quand même, et il est
+affiché comme estimé.* Ni A seul — un chiffre estimé qui se lit comme arrêté —
+ni B seul — un bénéfice faux, seulement signalé à qui lit la mention.
+
+**Correction** : `payrollEstimateFor` somme les salaires de base des employés
+actifs, proratisés par `hireDate` pour qui arrive en cours de mois, sur les
+jours réels du mois. `payrollOrEstimate` rend les fiches quand elles existent,
+l'estimation sinon, et dit lequel des deux. Le tableau de bord écrit alors
+« paie X **estimée** ».
+
+**Ce que l'estimation ignore, et c'est assumé** : primes, heures
+supplémentaires, absences et retenues ne sont connues qu'à l'établissement de
+la fiche. Le chiffre bougera donc à ce moment-là — vers le haut avec les
+primes, vers le bas avec les absences.
+
+**Limite connue** : `isActive` est l'état d'aujourd'hui, pas un historique. Sur
+un mois passé où un employé a depuis quitté la maison, l'estimation le
+sous-estime. En pratique les mois passés ont leurs fiches ; l'estimation sert
+surtout au mois en cours, où l'effectif est à jour.
 
 ---
 
