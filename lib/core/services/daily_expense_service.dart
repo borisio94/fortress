@@ -56,6 +56,40 @@ class DailyExpenseService {
       forShop(shopId, from: from, to: to, kind: ExpenseKind.achatMarche)
           .fold(0, (s, e) => s + e.amount);
 
+  /// Cette dépense alimente-t-elle la RÉPARTITION du coût matières ?
+  ///
+  /// DEUX conditions, et la première a longtemps manqué.
+  ///
+  /// 1. LA CATÉGORIE décide, pas le rattachement. Seul un achat de matières
+  ///    premières finit dans une assiette — c'est la règle de la section 1 de
+  ///    la définition financière. Un transport, même rattaché au poulet qu'il
+  ///    a servi à rapporter, reste une charge d'exploitation.
+  ///
+  ///    Sans cette condition, une telle ligne était comptée DEUX FOIS : une
+  ///    fois répartie sur le coût des plats, une fois en exploitation parce
+  ///    qu'elle n'était pas un « achat marché ». Un transport de 30 000 F
+  ///    pesait 60 000 F sur le bénéfice, et le coût théorique ainsi gonflé
+  ///    relevait le seuil de bascule vers les achats réels — donc maintenait
+  ///    le bilan dans le seul mode où le double comptage frappe.
+  ///
+  ///    Retenir le transport dans le coût du plat aurait été défendable — un
+  ///    ingrédient coûte ce qu'il coûte rendu en cuisine — mais rendait le food
+  ///    cost incomparable d'une boutique à l'autre, selon qu'elle rattache ou
+  ///    non ses frais de transport. Décision prise le 18/09/2026.
+  ///
+  /// 2. `ingredient_id` sert aussi de lien vers une FOURNITURE (`si_…`) :
+  ///    emballages, gaz, entretien. Une colonne dédiée aurait exigé une
+  ///    migration pour le même service, les identifiants étant déjà préfixés
+  ///    par nature — c'est la convention du projet. Mais aucun plat ne
+  ///    contient du gaz : leur montant partirait intégralement en « non
+  ///    réparti » et gonflerait un écart qui sert à détecter le gaspillage.
+  static bool feedsIngredientAllocation(DailyExpense e) {
+    if (!e.isFoodCost) return false;
+    final id = e.ingredientId;
+    if (id == null || id.isEmpty) return false;
+    return id.startsWith('ig_');
+  }
+
   /// CE QUE CHAQUE INGRÉDIENT A COÛTÉ sur la période — `ingredientId → FCFA`.
   ///
   /// C'est l'entrée du calcul de coût par plat : sans peser quoi que ce soit,
@@ -71,19 +105,8 @@ class DailyExpenseService {
   }) {
     final out = <String, int>{};
     for (final e in forShop(shopId, from: from, to: to)) {
-      final id = e.ingredientId;
-      if (id == null || id.isEmpty) continue;
-      // `ingredient_id` sert aussi de lien vers une FOURNITURE (`si_…`) :
-      // emballages, gaz, entretien. Une colonne dédiée aurait exigé une
-      // migration pour le même service, les identifiants étant déjà préfixés
-      // par nature — c'est la convention du projet.
-      //
-      // Mais ces achats-là n'ont RIEN à faire dans la répartition du coût
-      // matières : aucun plat ne contient du gaz, leur montant partirait
-      // intégralement en « non réparti » et gonflerait un écart qui sert à
-      // détecter le gaspillage. On les écarte donc ici, à la source.
-      if (!id.startsWith('ig_')) continue;
-      out[id] = (out[id] ?? 0) + e.amount;
+      if (!feedsIngredientAllocation(e)) continue;
+      out[e.ingredientId!] = (out[e.ingredientId!] ?? 0) + e.amount;
     }
     return out;
   }

@@ -167,10 +167,6 @@ salaire mensuel complet. Et tant que la fiche n'est pas générée, la paie vaut
 masse salariale est sous-évaluée. Idem pour les heures supplémentaires payées
 en espèces le soir même.
 
-**Une dépense rattachée à un ingrédient mais classée autrement qu'« achat
-marché » est comptée deux fois** — dans le coût des plats et dans les charges
-d'exploitation.
-
 **Un plat sans coût verdit le food cost.** Son CA est compté, son coût non :
 le taux baisse et la carte annonce une bonne maîtrise des matières. L'indicateur
 rassure au moment où il devrait alerter.
@@ -193,7 +189,9 @@ avec le commit qui l'a refermé et ce qu'on a appris en le refermant.
 
 Le commit est désigné par son TITRE et non par son empreinte : un commit ne peut
 pas contenir sa propre empreinte, elle est calculée sur son contenu. Les titres
-de cette section se retrouvent par `git log --grep`.
+de cette section se retrouvent par `git log --grep`, et sont donc cités
+LITTÉRALEMENT — y compris le lot 1, dont le titre est sans accents : le
+normaliser ici le rendrait introuvable.
 
 ### La courbe et la tuile du tableau de bord divergeaient
 
@@ -229,6 +227,44 @@ l'autre — pour qu'une branche puisse en ignorer une sans ignorer l'autre.
 Effet de bord utile : `partialFoodCostEntry`, qui prévient que des achats sont
 saisis mais trop partiels pour porter le bilan, est enfin cohérent avec ce que
 montre la courbe.
+
+---
+
+### Une dépense rattachée à un ingrédient était comptée deux fois
+
+*Corrigé le 18/09/2026 — lot 2.*
+*Commit : « fix(restaurant): une dépense rattachée à un ingrédient cesse
+d'être comptée deux fois ».*
+
+La répartition retenait toute ligne portant un identifiant d'ingrédient, **quelle
+que soit sa catégorie**, pendant que le bilan comptait cette même ligne en
+charge d'exploitation parce qu'elle n'était pas un « achat marché ». Un
+transport de 30 000 F rattaché au poulet pesait 60 000 F sur le bénéfice.
+
+Le défaut s'auto-entretenait : le coût théorique ainsi gonflé relevait le seuil
+de bascule vers les achats réels, donc maintenait le bilan dans le mode
+théorique — le seul où le double comptage frappe.
+
+**Comment la donnée apparaissait** : le formulaire ne propose le rattachement
+que sur « achat marché », mais l'enregistrement envoyait `ingredientId` sans
+condition. On créait un achat marché rattaché, on changeait la catégorie, le
+champ disparaissait de l'écran — et le lien restait, invisible.
+
+**Décision prise** : *la catégorie décide, pas le rattachement.* Seul un achat de
+matières premières finit dans une assiette, ce que dit déjà la section 1.
+Retenir le transport dans le coût du plat était défendable — un ingrédient
+coûte ce qu'il coûte rendu en cuisine — mais rendait le food cost incomparable
+d'une boutique à l'autre, selon qu'elle rattache ou non ses frais de transport.
+Sur l'exemple ci-dessus, le taux passait de 10 % à 25 % pour les mêmes achats.
+
+**Correction** : `feedsIngredientAllocation` exige désormais la catégorie
+« achat marché » ; et le formulaire efface le rattachement dès qu'on quitte
+cette catégorie — un réglage qu'on ne voit plus ne doit plus exister.
+
+**Invariant tenu par un test**, vérifié sur TOUTES les catégories : aucune
+dépense n'est à la fois répartie sur les plats et comptée en exploitation. Une
+catégorie ajoutée demain sans y penser rouvrirait le double comptage ; le test
+l'attrape sans qu'on ait à s'en souvenir.
 
 ---
 

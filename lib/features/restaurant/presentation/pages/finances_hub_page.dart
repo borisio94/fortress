@@ -2054,7 +2054,16 @@ class _DailyExpenseEditorState extends State<_DailyExpenseEditor> {
                   ChoiceChip(
                     label: Text(k.label),
                     selected: _kind == k,
-                    onSelected: (_) => setState(() => _kind = k),
+                    // Le rattachement à un ingrédient S'EFFACE quand on quitte
+                    // « achat marché ». Son champ disparaît alors de l'écran,
+                    // mais la valeur, elle, partait toujours à
+                    // l'enregistrement : on créait un lien invisible, que le
+                    // bilan comptait ensuite des deux côtés. Un réglage qu'on
+                    // ne voit plus ne doit plus exister.
+                    onSelected: (_) => setState(() {
+                      _kind = k;
+                      if (!k.isFoodCost) _ingredientId = null;
+                    }),
                   ),
               ],
             ),
