@@ -171,10 +171,6 @@ bilan.** ⚠ Non traitable en l'état : `OvertimeSettlement` vit dans
 occurrence de `overtime` — la notion entière est absente du dépôt. À reprendre
 quand ce chantier sera commité.
 
-**Un plat sans coût verdit le food cost.** Son CA est compté, son coût non :
-le taux baisse et la carte annonce une bonne maîtrise des matières. L'indicateur
-rassure au moment où il devrait alerter.
-
 **La comparaison théorique / réel ne mesure pas le gaspillage** en mode
 répartition : le théorique est calculé depuis les achats eux-mêmes. L'écart
 mesure ce qui n'a pas été rattaché ou réparti.
@@ -385,6 +381,46 @@ net — le salarié touche bien net d'avance.
 
 **Cet écart n'est refermé qu'à moitié.** Les heures supplémentaires payées en
 espèces restent en section 8 : la notion n'existe pas dans le dépôt.
+
+---
+
+### Un plat sans coût verdissait le food cost
+
+*Corrigé le 18/09/2026 — lot 6.*
+*Commit : « fix(restaurant): le food cost cesse de verdir quand le coût d'un
+plat manque ».*
+
+Le taux théorique divisait le coût des plats CHIFFRÉS par le chiffre d'affaires
+ENTIER. Les plats sans coût connu — typiquement les boissons, sans fiche recette
+ni prix d'achat saisi — apportaient du dénominateur sans apporter de numérateur.
+
+Sur 150 000 F de coût pour 500 000 F de ventes chiffrées et 500 000 F de ventes
+muettes, le taux affichait **15 % au lieu de 30**, et la carte annonçait « sous
+les 30 % — bonne maîtrise des matières ».
+
+Le défaut s'aggravait à mesure que la donnée manquait : à 80 % de ventes non
+chiffrées, le taux tombait à 6 %. **L'indicateur était d'autant plus vert que le
+restaurant en savait moins sur ses coûts** — il rassurait au moment où il aurait
+dû alerter.
+
+**Périmètre** : le défaut ne frappait qu'en mode THÉORIQUE. En mode réel,
+`netRealFoodCost` vient des achats, qui couvrent tous les plats.
+
+**Décision prise** : *le taux se calcule sur les ventes dont le coût est connu,
+et la couverture est affichée.* Ni A seul — un taux de 30 % qui semble porter
+sur toute la carte alors qu'il en couvre la moitié — ni B seul, qui laissait
+l'indicateur vert faire son office auprès de qui ne lit pas la mention.
+
+**Correction** : `coveredRevenue` mesure le chiffre d'affaires des plats dont le
+coût est connu, `costedRevenue` sert de dénominateur au taux théorique, et
+`costCoverage` expose la part couverte. Le tableau de bord écrit alors « ce taux
+ne porte que sur X % de vos ventes ».
+
+**Ce qui n'est PAS corrigé, et ne peut pas l'être** : le bénéfice reste
+surévalué du coût manquant. On ne peut pas inventer un coût qu'aucune donnée ne
+porte. Seul le renseignement des fiches recettes ou du prix d'achat des plats
+concernés le comblera — et la mention de couverture est précisément là pour y
+inviter.
 
 ---
 

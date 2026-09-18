@@ -87,6 +87,12 @@ class RestaurantFinanceReport {
   /// Charges fixes imputables à la période (FCFA).
   final int charges;
 
+  /// Chiffre d'affaires des plats dont le COÛT EST CONNU.
+  ///
+  /// `null` quand l'appelant ne le renseigne pas : le taux retombe alors sur le
+  /// chiffre d'affaires entier, comme avant.
+  final double? coveredRevenue;
+
   /// La paie retenue vient-elle des CONTRATS et non des fiches ?
   ///
   /// Vrai dès qu'un seul des mois couverts n'a pas ses fiches. L'écran doit le
@@ -154,6 +160,7 @@ class RestaurantFinanceReport {
     this.realFoodCost = 0,
     this.operatingCost = 0,
     this.payrollEstimated = false,
+    this.coveredRevenue,
     this.purchasedMaterialLosses = 0,
     this.lossLines = const [],
   });
@@ -278,9 +285,31 @@ class RestaurantFinanceReport {
   /// Taux de marge brute en % du chiffre d'affaires.
   double get marginRate => revenue <= 0 ? 0 : (grossMargin / revenue) * 100;
 
+  /// Ventes sur lesquelles le taux théorique a un sens.
+  ///
+  /// Le taux divisait le coût des plats CHIFFRÉS par le chiffre d'affaires
+  /// ENTIER. Les plats sans coût connu — typiquement les boissons, sans fiche
+  /// recette ni prix d'achat saisi — apportaient donc du dénominateur sans
+  /// apporter de numérateur : sur 150 000 F de coût pour 500 000 F de ventes
+  /// chiffrées et 500 000 F de ventes muettes, le taux affichait 15 % au lieu
+  /// de 30, et la carte annonçait une bonne maîtrise des matières.
+  ///
+  /// Le défaut s'aggravait à mesure que la donnée manquait : à 80 % de ventes
+  /// non chiffrées, le taux tombait à 6 %. L'indicateur était d'autant plus
+  /// vert que le restaurant en savait moins sur ses coûts — il rassurait au
+  /// moment où il aurait dû alerter.
+  ///
+  /// Repli sur le chiffre d'affaires entier quand l'appelant ne renseigne
+  /// rien : un rapport construit à la main garde l'ancien calcul.
+  double get costedRevenue => coveredRevenue ?? revenue;
+
+  /// Part du chiffre d'affaires dont le coût matière est connu — de 0 à 1.
+  double get costCoverage =>
+      revenue <= 0 ? 1 : (costedRevenue / revenue).clamp(0.0, 1.0);
+
   /// FOOD COST % théorique — coût des recettes rapporté aux ventes.
   double get theoreticalFoodCostRate =>
-      revenue <= 0 ? 0 : (materialCost / revenue) * 100;
+      costedRevenue <= 0 ? 0 : (materialCost / costedRevenue) * 100;
 
   /// FOOD COST % réel — achats de matières rapportés aux ventes.
   double get realFoodCostRate =>
@@ -364,6 +393,11 @@ class RestaurantReportingService {
     // chiffré juste après, sur ce décompte.
     final soldByProduct = <String, double>{};
     final soldByProductBucket = <String, List<double>>{};
+    // Chiffre d'affaires PAR PRODUIT : sert à mesurer la part des ventes dont
+    // le coût est connu, donc le périmètre sur lequel le taux de food cost a
+    // un sens. Les accompagnements n'y figurent pas — leur prix est déjà
+    // compris dans la ligne du plat.
+    final revenueByProduct = <String, double>{};
     // Prix d'achat figé dans la ligne : le seul repli quand le produit a été
     // supprimé du catalogue depuis la vente.
     final frozenCost = <String, double>{};
@@ -428,6 +462,7 @@ class RestaurantReportingService {
           final key = sectorOf[pid] ?? '';
 
           revenueSeries[b] += lineRevenue;
+          revenueByProduct[pid] = (revenueByProduct[pid] ?? 0) + lineRevenue;
           sectorRevenue[key] = (sectorRevenue[key] ?? 0) + lineRevenue;
           (sectorRevenueSeries[key] ??=
               List<double>.filled(n, 0))[b] += lineRevenue;
@@ -515,10 +550,18 @@ class RestaurantReportingService {
     final sectorCost = <String, double>{};
     final sectorCostSeries = <String, List<double>>{};
 
+    // Ventes dont le coût est connu. Un plat sans ingrédient réparti, sans
+    // coût matière saisi et sans prix d'achat figé n'entre pas dans le coût
+    // matières — mais son chiffre d'affaires, lui, est bien compté. Il faut
+    // donc savoir combien il pèse, sinon le taux de food cost se dilue dans des
+    // ventes sur lesquelles on ne sait rien.
+    var coveredRevenue = 0.0;
+
     for (final entry in soldByProductBucket.entries) {
       final pid = entry.key;
       final unitCost = unitCostOf(pid);
       if (unitCost <= 0) continue;
+      coveredRevenue += revenueByProduct[pid] ?? 0;
 
       final key = sectorOf[pid] ?? '';
       final costSeries = sectorCostSeries[key] ??= List<double>.filled(n, 0);
@@ -738,6 +781,7 @@ class RestaurantReportingService {
       lossLines: lossLines,
       payroll: payroll.round(),
       payrollEstimated: payrollEstimated,
+      coveredRevenue: coveredRevenue,
       revenueSeries: revenueSeries,
       expenseSeries: expenseSeries,
       lossSeries: lossSeries,

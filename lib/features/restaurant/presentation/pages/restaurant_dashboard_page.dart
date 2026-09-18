@@ -1120,6 +1120,20 @@ class _FoodCostCard extends StatelessWidget {
                 'dans Finances → Dépenses pour obtenir le coût réel.',
                 style: AppTextStyles.captionHint),
           ],
+          // COUVERTURE DU TAUX — un indicateur ne doit pas rassurer parce
+          // qu'il manque des données. Le taux ne porte que sur les ventes dont
+          // le coût est connu ; sans ce message, il se lirait comme portant sur
+          // toute la carte, et serait d'autant plus vert que le restaurant en
+          // sait moins sur ses coûts.
+          if (report.costCoverage < 0.999) ...[
+            const SizedBox(height: 6),
+            Text(
+                'Ce taux ne porte que sur '
+                '${(report.costCoverage * 100).round()} % de vos ventes : '
+                'le reste vient de plats dont le coût matière n\'est pas '
+                'renseigné.',
+                style: AppTextStyles.caption.copyWith(color: sem.warning)),
+          ],
         ],
       ),
     );
