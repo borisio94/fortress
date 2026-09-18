@@ -186,4 +186,92 @@ void main() {
       expect(s.margin, s.revenue - s.materialCost);
     });
   });
+
+  // ── LA COURBE NE PEUT PAS CONTREDIRE LA TUILE ────────────────────────
+  //
+  // Le bilan retient SOIT le coût théorique des recettes, SOIT les achats
+  // réellement saisis — jamais les deux. Cette bascule était décidée à deux
+  // endroits, avec deux règles différentes : le total exigeait que les achats
+  // couvrent la moitié du théorique, la courbe basculait dès un franc saisi.
+  //
+  // L'invariant qui l'interdit désormais : la somme de la série des dépenses
+  // égale le total des dépenses. Une courbe ne raconte pas autre chose que le
+  // chiffre affiché à côté d'elle.
+  group('Série des dépenses — accord avec le total', () {
+    /// Construit les deux faces du même mois et rend l'écart entre elles.
+    ///
+    /// Les séries sont à un seul bucket : la question porte sur la RÈGLE de
+    /// bascule, pas sur la ventilation dans le temps.
+    ({double serie, double total}) faces({
+      required double theoretical,
+      required int realPurchases,
+      required int operating,
+      double purchasedLosses = 0,
+    }) {
+      final report = RestaurantFinanceReport(
+        range: _range,
+        labels: const ['1/7'],
+        revenue: 1000000,
+        materialCost: theoretical,
+        realFoodCost: realPurchases,
+        purchasedMaterialLosses: purchasedLosses,
+        operatingCost: operating,
+        charges: 0,
+        losses: 0,
+        payroll: 0,
+        revenueSeries: const [1000000],
+        expenseSeries: const [0],
+        lossSeries: const [0],
+        sectors: const [],
+      );
+      final serie = RestaurantFinanceReport.expenseSeriesOf(
+        usesReal: report.usesRealFoodCost,
+        realFoodSeries: [realPurchases.toDouble()],
+        operatingSeries: [operating.toDouble()],
+        materialSeries: [theoretical],
+        purchasedLossSeries: [purchasedLosses],
+        chargeSeries: const [0],
+        payrollSeries: const [0],
+      ).fold<double>(0, (s, v) => s + v);
+      return (serie: serie, total: report.expenses);
+    }
+
+    test('achats saisis SOUS la moitié du théorique : la courbe suit le total',
+        () {
+      // Le cas qui faisait diverger les deux chiffres de 280 000 F : 20 000 F
+      // d'achats déclarés dans un mois où les ventes ont consommé 300 000 F de
+      // matières. Le total reste au théorique — les achats sont trop partiels
+      // pour être crédibles — et la courbe doit rester avec lui.
+      final f = faces(theoretical: 300000, realPurchases: 20000, operating: 50000);
+      expect(f.total, 350000);
+      expect(f.serie, f.total);
+    });
+
+    test('aucun achat saisi : les deux restent au théorique', () {
+      final f = faces(theoretical: 300000, realPurchases: 0, operating: 50000);
+      expect(f.serie, f.total);
+    });
+
+    test('achats au-dessus du seuil : les deux passent au réel', () {
+      final f =
+          faces(theoretical: 300000, realPurchases: 200000, operating: 50000);
+      expect(f.total, 250000);
+      expect(f.serie, f.total);
+    });
+
+    test('la matière perdue est retirée des achats des DEUX côtés', () {
+      // Seconde divergence, distincte de la première : le total lisait les
+      // achats NETS de la matière perdue qu'ils contiennent, la courbe les
+      // lisait BRUTS. Ici 200 000 F d'achats dont 120 000 F partis en pertes :
+      // le net tombe à 80 000, sous la moitié de 300 000, donc le bilan
+      // revient au théorique. Une lecture brute l'aurait laissé au réel.
+      final f = faces(
+          theoretical: 300000,
+          realPurchases: 200000,
+          operating: 50000,
+          purchasedLosses: 120000);
+      expect(f.total, 350000, reason: 'net = 80 000 < 150 000 → théorique');
+      expect(f.serie, f.total);
+    });
+  });
 }

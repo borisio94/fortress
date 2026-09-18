@@ -152,10 +152,22 @@ class RestaurantFinanceReport {
   /// Achats de matières MOINS la matière perdue qu'ils contiennent — la
   /// matière réellement passée dans les assiettes vendues. Voie (b) : food
   /// cost + pertes = achats.
-  double get netRealFoodCost {
-    final v = realFoodCost - purchasedMaterialLosses;
+  ///
+  /// Forme statique : la construction du bilan en a besoin AVANT que l'objet
+  /// existe. Une seconde lecture des achats, brute celle-là, avait fait diverger
+  /// la courbe du total.
+  static double netRealFoodCostOf({
+    required double real,
+    required double purchasedLosses,
+  }) {
+    final v = real - purchasedLosses;
     return v > 0 ? v : 0;
   }
+
+  double get netRealFoodCost => netRealFoodCostOf(
+        real: realFoodCost.toDouble(),
+        purchasedLosses: purchasedMaterialLosses,
+      );
 
   /// Part MINIMALE du coût théorique que les achats saisis doivent couvrir
   /// pour que le bilan bascule sur le réel.
@@ -172,15 +184,66 @@ class RestaurantFinanceReport {
   /// Oui si aucun coût théorique n'est calculable (pas de fiches recettes :
   /// le réel est alors la seule mesure disponible), ou si les achats couvrent
   /// au moins [realFoodCostCoverage] du théorique.
-  bool get usesRealFoodCost =>
-      netRealFoodCost > 0 &&
-      (materialCost <= 0 ||
-          netRealFoodCost >= materialCost * realFoodCostCoverage);
+  ///
+  /// UNE SEULE définition de cette décision, et c'est tout l'objet de cette
+  /// fonction : le total la prenait ici, la série des dépenses la reprenait
+  /// pour son compte avec une autre règle — basculer dès un franc saisi. Sur un
+  /// mois à 300 000 F de matières théoriques et 20 000 F d'achats déclarés, le
+  /// total affichait 350 000 F de dépenses et la courbe 70 000 F. Deux chiffres
+  /// du même écran, 280 000 F d'écart.
+  static bool usesRealFoodCostFor({
+    required double netReal,
+    required double theoretical,
+  }) =>
+      netReal > 0 &&
+      (theoretical <= 0 || netReal >= theoretical * realFoodCostCoverage);
+
+  bool get usesRealFoodCost => usesRealFoodCostFor(
+        netReal: netRealFoodCost,
+        theoretical: materialCost,
+      );
 
   /// Des achats ont été saisis, mais trop peu pour être crédibles face à ce que
   /// les ventes ont consommé. Le bilan reste sur le théorique et l'écran doit
   /// le dire — sinon le gérant croit ses achats pris en compte.
   bool get partialFoodCostEntry => netRealFoodCost > 0 && !usesRealFoodCost;
+
+  /// Série des dépenses, bucket par bucket — la courbe posée sous le bénéfice.
+  ///
+  /// Extraite de `build()` pour être vérifiable : elle DOIT totaliser
+  /// [expenses], faute de quoi la courbe raconte autre chose que le chiffre
+  /// affiché juste à côté. C'est un invariant, pas une coïncidence, et il est
+  /// tenu par un test.
+  ///
+  /// LES ACHATS DE MATIÈRES SONT À PART des autres dépenses quotidiennes, et
+  /// c'est indispensable : les deux branches reposent sur « jamais les deux
+  /// coûts à la fois ». Tant que la série théorique recevait un total mêlant
+  /// achats et exploitation, elle ajoutait au coût théorique les achats
+  /// qu'elle venait précisément de décider d'ignorer — 20 000 F comptés deux
+  /// fois sur l'exemple ci-dessus. Le défaut restait invisible tant que la
+  /// bascule se faisait dès le premier franc, puisque la branche théorique
+  /// n'était alors atteinte qu'avec zéro achat.
+  ///
+  /// En réel, la matière perdue sort des achats : elle figure déjà dans la
+  /// série des pertes, l'y laisser la compterait deux fois.
+  static List<double> expenseSeriesOf({
+    required bool usesReal,
+    required List<double> realFoodSeries,
+    required List<double> operatingSeries,
+    required List<double> materialSeries,
+    required List<double> purchasedLossSeries,
+    required List<double> chargeSeries,
+    required List<double> payrollSeries,
+  }) =>
+      [
+        for (var i = 0; i < operatingSeries.length; i++)
+          (usesReal
+                  ? realFoodSeries[i] - purchasedLossSeries[i]
+                  : materialSeries[i]) +
+              operatingSeries[i] +
+              chargeSeries[i] +
+              payrollSeries[i],
+      ];
 
   /// Coût des matières retenu pour le bénéfice : le réel s'il est saisi, le
   /// théorique sinon.
@@ -546,23 +609,28 @@ class RestaurantReportingService {
     // ── Dépenses quotidiennes (Lot E) ──────────────────────────────────
     // Elles sont datées au JOUR et entrent dans la série des dépenses au même
     // titre que les charges : c'est de l'argent réellement sorti.
+    // DEUX séries et non une : les achats de matières suivent le sort du coût
+    // matières — retenus ou ignorés selon la bascule — tandis que l'exploitation
+    // compte toujours. Les mêler rendait la branche théorique de la courbe
+    // fausse (cf. `expenseSeriesOf`).
     var realFoodCost = 0;
     var operatingCost = 0;
-    final dailySeries = List<double>.filled(n, 0);
+    final realFoodSeries = List<double>.filled(n, 0);
+    final operatingSeries = List<double>.filled(n, 0);
     try {
       for (final e in DailyExpenseService.forShop(shopId)) {
         if (_outside(e.expenseDate, range)) continue;
+        final b = range.bucketOf(e.expenseDate);
         if (e.isFoodCost) {
           realFoodCost += e.amount;
+          realFoodSeries[b] += e.amount.toDouble();
         } else if (e.isCharge) {
           operatingCost += e.amount;
-        } else {
-          // Remboursement de consigne : sortie de caisse, PAS une charge. Le
-          // client récupère l'argent qu'il avait versé — l'imputer au bénéfice
-          // ferait payer au restaurant une somme qui ne lui a jamais appartenu.
-          continue;
+          operatingSeries[b] += e.amount.toDouble();
         }
-        dailySeries[range.bucketOf(e.expenseDate)] += e.amount.toDouble();
+        // Remboursement de consigne : sortie de caisse, PAS une charge. Le
+        // client récupère l'argent qu'il avait versé — l'imputer au bénéfice
+        // ferait payer au restaurant une somme qui ne lui a jamais appartenu.
       }
     } catch (e) {
       debugPrint('[RestoReport] dépenses err: $e');
@@ -618,7 +686,25 @@ class RestaurantReportingService {
     // La série des dépenses suit la même règle que le total : matières
     // RÉELLES si elles sont saisies, théoriques sinon. Sans ça, la courbe
     // raconterait autre chose que le bénéfice affiché juste à côté.
-    final useReal = realFoodCost > 0;
+    //
+    // Le prédicat est APPELÉ, pas réécrit : c'est le seul moyen qu'il ne
+    // reparte pas en deux versions à la prochaine retouche.
+    final useReal = RestaurantFinanceReport.usesRealFoodCostFor(
+      netReal: RestaurantFinanceReport.netRealFoodCostOf(
+        real: realFoodCost.toDouble(),
+        purchasedLosses: purchasedMaterialLosses,
+      ),
+      theoretical: materialSeries.fold<double>(0, (s, v) => s + v),
+    );
+    final expenseSeries = RestaurantFinanceReport.expenseSeriesOf(
+      usesReal: useReal,
+      realFoodSeries: realFoodSeries,
+      operatingSeries: operatingSeries,
+      materialSeries: materialSeries,
+      purchasedLossSeries: purchasedLossSeries,
+      chargeSeries: chargeSeries,
+      payrollSeries: payrollSeries,
+    );
 
     return RestaurantFinanceReport(
       range: range,
@@ -633,16 +719,7 @@ class RestaurantReportingService {
       lossLines: lossLines,
       payroll: payroll,
       revenueSeries: revenueSeries,
-      expenseSeries: [
-        for (var i = 0; i < n; i++)
-          // En réel, la matière perdue sort des achats : elle est déjà dans
-          // la série des pertes.
-          (useReal
-                  ? dailySeries[i] - purchasedLossSeries[i]
-                  : materialSeries[i] + dailySeries[i]) +
-              chargeSeries[i] +
-              payrollSeries[i],
-      ],
+      expenseSeries: expenseSeries,
       lossSeries: lossSeries,
       sectors: sectors,
     );
