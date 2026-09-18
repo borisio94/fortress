@@ -637,23 +637,24 @@ class RestaurantReportingService {
     }
 
     // ── Masse salariale (Lot D) ────────────────────────────────────────
-    // Fiches de paie des mois COUVERTS par la période. Une paie est mensuelle :
-    // l'imputer au jour le jour n'aurait aucun sens, elle est rattachée au
-    // bucket de la fin de son mois.
-    var payroll = 0;
+    var payroll = 0.0;
     final payrollSeries = List<double>.filled(n, 0);
     try {
       for (final month in _monthsIn(range)) {
         final amount = StaffService.payrollTotal(shopId, month);
         if (amount <= 0) continue;
-        payroll += amount;
-        // Dernier jour du mois, ramené dans la fenêtre : sur une période à
-        // cheval, la paie doit tomber dans un bucket qui existe.
-        final parts = month.split('-');
-        final endOfMonth =
-            DateTime(int.parse(parts[0]), int.parse(parts[1]) + 1, 0);
-        final at = endOfMonth.isAfter(range.to) ? range.to : endOfMonth;
-        payrollSeries[range.bucketOf(at)] += amount.toDouble();
+        final d = payrollDaysOf(month, range);
+        if (d.days.isEmpty || d.inMonth <= 0) continue;
+        final daily = amount / d.inMonth;
+        payroll += daily * d.days.length;
+        // ÉTALÉE sur les jours couverts, et non posée d'un bloc sur la fin du
+        // mois : puisque la paie se compte désormais au jour, la courbe doit
+        // le montrer. Un bloc unique dessinait un pic qui faisait croire à une
+        // dépense ce jour-là. La somme de la série reste égale au total, c'est
+        // l'invariant que tient le test des dépenses.
+        for (final day in d.days) {
+          payrollSeries[range.bucketOf(day)] += daily;
+        }
       }
     } catch (e) {
       debugPrint('[RestoReport] paie err: $e');
@@ -717,7 +718,7 @@ class RestaurantReportingService {
       charges: charges,
       losses: losses,
       lossLines: lossLines,
-      payroll: payroll,
+      payroll: payroll.round(),
       revenueSeries: revenueSeries,
       expenseSeries: expenseSeries,
       lossSeries: lossSeries,
@@ -743,6 +744,53 @@ class RestaurantReportingService {
     final custom = (it['custom_price'] as num?)?.toDouble();
     final discount = (it['discount'] as num?)?.toDouble() ?? 0;
     return (custom ?? unit) * qty * (1 - discount / 100);
+  }
+
+  /// Jours du mois `yyyy-MM` que la fenêtre COUVRE, et nombre de jours de ce
+  /// mois — de quoi imputer une paie mensuelle au prorata.
+  ///
+  /// Les bornes sont demi-ouvertes sur la fin, contrairement à [_outside] : une
+  /// fenêtre « aujourd'hui » va de minuit à minuit le lendemain, et compter ce
+  /// lendemain donnerait DEUX jours de paie pour une journée.
+  static ({List<DateTime> days, int inMonth}) payrollDaysOf(
+      String month, DashRange range) {
+    final parts = month.split('-');
+    final y = int.parse(parts[0]);
+    final m = int.parse(parts[1]);
+    final start = DateTime(y, m);
+    final end = DateTime(y, m + 1);
+    final inMonth = end.difference(start).inDays;
+
+    final days = <DateTime>[];
+    for (var d = start; d.isBefore(end); d = DateTime(y, m, d.day + 1)) {
+      if (d.isBefore(range.from) || !d.isBefore(range.to)) continue;
+      days.add(d);
+    }
+    return (days: days, inMonth: inMonth);
+  }
+
+  /// Part de la paie de `month` imputable à la fenêtre — de 0 à 1.
+  ///
+  /// AU PRORATA DES JOURS, et non « tout ou rien ». Chaque mois touché par la
+  /// fenêtre apportait sa paie ENTIÈRE : « aujourd'hui » retirait un salaire
+  /// mensuel complet du bénéfice, et une fenêtre à cheval sur deux mois en
+  /// retirait deux — y compris celle qui s'appelle « Mois », qui vaut 30 jours
+  /// glissants et chevauche donc presque toujours. Sur une masse salariale de
+  /// 300 000 F, elle en comptait 600 000.
+  ///
+  /// Le prorata est le seul calcul qui vaille quelle que soit la fenêtre, y
+  /// compris ces 30 jours glissants : il ne dépend d'aucun seuil à deviner.
+  /// Masquer le bénéfice sous le mois — l'autre option — n'aurait pas corrigé
+  /// le chevauchement, et aurait exigé de décider à partir de quelle durée une
+  /// fenêtre « est » un mois. Cette question aura une réponse quand les trois
+  /// fenêtres du module seront unifiées (section 6 de la définition).
+  ///
+  /// Les jours du mois RÉEL servent de dénominateur : une journée de février
+  /// pèse plus lourd qu'une journée de janvier.
+  static double payrollShareOf(String month, DashRange range) {
+    final d = payrollDaysOf(month, range);
+    if (d.inMonth <= 0) return 0;
+    return d.days.length / d.inMonth;
   }
 
   /// Mois `YYYY-MM` couverts par la période, du plus ancien au plus récent.

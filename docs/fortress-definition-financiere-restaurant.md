@@ -159,9 +159,10 @@ du comptage réel.
 
 À traiter, dans cet ordre de gravité.
 
-**La paie du mois entier tombe sur toute période.** « Aujourd'hui » retire un
-salaire mensuel complet. Et tant que la fiche n'est pas générée, la paie vaut
-0 et le bénéfice est gonflé.
+**Tant que la fiche de paie n'est pas générée, la paie vaut 0** et le bénéfice
+est gonflé. Le salaire contractuel des employés actifs (`StaffMember.baseSalary`,
+`isActive`) existe pourtant et pourrait servir de repli — reste à décider si un
+salaire non encore arrêté doit peser sur le bénéfice.
 
 **Les avances sur salaire sortent du net et n'entrent jamais au bilan.** La
 masse salariale est sous-évaluée. Idem pour les heures supplémentaires payées
@@ -265,6 +266,46 @@ cette catégorie — un réglage qu'on ne voit plus ne doit plus exister.
 dépense n'est à la fois répartie sur les plats et comptée en exploitation. Une
 catégorie ajoutée demain sans y penser rouvrirait le double comptage ; le test
 l'attrape sans qu'on ait à s'en souvenir.
+
+---
+
+### Une paie mensuelle tombait entière sur une journée
+
+*Corrigé le 18/09/2026 — lot 3.*
+*Commit : « fix(restaurant): une paie mensuelle cesse de tomber entière sur une
+journée ».*
+
+Chaque mois touché par la fenêtre apportait sa paie ENTIÈRE. « Aujourd'hui »
+retirait donc un salaire mensuel complet du bénéfice — sur une masse salariale
+de 300 000 F et un chiffre d'affaires de 50 000 F par jour, le tableau de bord
+annonçait une perte massive chaque matin.
+
+**Ce que la correction a révélé, et que cette section ne disait pas :** le
+défaut ne se limitait pas aux fenêtres courtes. `DashPeriod.month` ne vaut pas
+le mois civil mais **30 jours glissants**, et chevauche donc presque toujours
+deux mois : la fenêtre nommée « Mois » comptait **deux** salaires mensuels
+complets, 600 000 F là où il en était sorti 300 000. Le trimestre en comptait
+quatre.
+
+**Décision prise** : *la paie d'un mois se répartit sur ses jours, et la fenêtre
+en prend sa part.* L'autre option — ne pas afficher de bénéfice net sous le
+mois — a été écartée pour deux raisons : elle ne corrigeait pas le
+chevauchement, puisqu'au-dessus du seuil elle comptait toujours les paies
+entières ; et elle exigeait de décider à partir de quelle durée une fenêtre
+« est » un mois, arbitraire de plus tant que les trois fenêtres de la section 6
+ne sont pas unifiées. Cette question aura une réponse à ce moment-là, et le
+masquage pourra se poser alors.
+
+**Correction** : `payrollShareOf` rend la part du mois couverte par la fenêtre,
+au prorata des jours RÉELS du mois — une journée de février pèse plus lourd
+qu'une journée de janvier. Les bornes sont demi-ouvertes sur la fin : une
+fenêtre « aujourd'hui » va de minuit à minuit, et compter le lendemain donnait
+deux jours de paie pour une journée.
+
+La paie est aussi **étalée** sur les jours couverts au lieu d'être posée d'un
+bloc sur la fin du mois : puisqu'elle se compte au jour, la courbe doit le
+montrer. Le bloc unique dessinait un pic qui faisait croire à une dépense ce
+jour-là.
 
 ---
 
