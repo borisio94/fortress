@@ -54,6 +54,34 @@ frais de service.
 **Les drapeaux de service** — envoyé en cuisine, prêt, servi, terminé — sont
 indépendants du CA. Une commande servie et non payée ne compte pas.
 
+### Les trois montants
+
+Une même commande porte **trois montants différents**, et les confondre est la
+source d'écarts que personne n'explique. Ils ne sont pas en désaccord : ils
+répondent à trois questions distinctes.
+
+| Montant | Question | Calcul | Où il sert |
+|---|---|---|---|
+| **Facturé** | ce que le client doit | `Sale.total` = articles − remise + TVA + livraison + frais | facture, reçu, export |
+| **Encaissé** | ce qui est entré dans le tiroir | part réellement payée, espèces uniquement pour la caisse | clôture X/Z |
+| **Recette** | ce qui compte comme chiffre d'affaires | la formule ci-dessus, livraison et consignes exclues | bénéfice, food cost, marges |
+
+**Ils diffèrent, et c'est normal.** Le facturé dépasse la recette du montant des
+livraisons et des consignes. L'encaissé est inférieur au facturé tant qu'un
+client n'a pas soldé. Un restaurant qui vend 500 000 F de plats, 40 000 F de
+livraisons et 15 000 F de consignes facture 555 000 F, encaisse 555 000 F si
+tout est payé, et déclare 500 000 F de chiffre d'affaires.
+
+**Ce qu'il faut en retenir** : ne JAMAIS rapprocher deux écrans qui n'affichent
+pas le même montant sans dire lequel chacun montre. Un export qui somme le
+facturé ne tombera jamais d'accord avec un tableau de bord qui affiche la
+recette, et aucun des deux n'est faux.
+
+**Règle** : tout écran qui affiche un total d'argent doit pouvoir dire lequel
+des trois il montre. Un libellé « Montant » seul est une erreur — c'est
+exactement pourquoi l'export des commandes porte « Montant CA » et « Montant
+perte » en plus de « Montant ».
+
 ---
 
 ## 3. Le coût matière
@@ -536,3 +564,64 @@ Trois choses à rendre lisibles :
 - sur quelle fenêtre chaque chiffre est calculé ;
 - quand un indicateur est vert parce qu'il manque des données, et non parce
   que la gestion est bonne.
+
+---
+
+## 11. Ce qui doit survivre
+
+Les dix sections précédentes définissent des CALCULS. Aucune ne dit à quelle
+condition leurs entrées existent encore. Un bilan juste sur des données
+absentes reste un bilan faux.
+
+### Les tables qui ne doivent jamais être abandonnées
+
+La file de synchronisation hors-ligne abandonne une opération après dix
+tentatives, ou immédiatement sur une erreur permanente — **sauf** pour les
+tables inscrites dans `neverDropTables` et `criticalTables`
+(`app_database.dart`). Une opération abandonnée reste dans Hive sur l'appareil
+qui l'a saisie et n'existe nulle part ailleurs.
+
+**Règle** : *toute table qui porte de l'argent, ou qui sert à en calculer,
+figure dans les deux listes.* Elle n'a pas à être « importante » pour
+l'utilisateur — il suffit qu'un chiffre du bilan ou de la caisse en dépende.
+
+Pour le restaurant, cela désigne :
+
+`daily_expenses` · `losses` · `payments` · `payroll` · `salary_advances` ·
+`time_records` · `cash_closures` · `ingredients` · `recipe_ingredients` ·
+`fixed_charges` · `bottle_deposits` · `stock_items` · `staff_penalties` ·
+`staff_absences` · `staff_contests` · `staff_ratings`
+
+**État au 19/09/2026 : AUCUNE n'y figure.** Les deux listes protègent
+`orders`, `sales`, `expenses`, `partner_ledger_entries` et
+`restaurant_tables` — dont une seule concerne le restaurant, et elle n'est pas
+financière : c'est le plan de salle.
+
+⚠ **Piège de nommage** : `expenses` est protégée, mais c'est la table de
+l'e-commerce. Les dépenses du restaurant vivent dans `daily_expenses`, avec sa
+propre boîte Hive, et ne sont PAS protégées. Deux noms proches, deux sorts
+opposés.
+
+### Ce qu'affiche un bilan incomplet
+
+La section 10 demande de signaler « quand un indicateur est vert parce qu'il
+manque des données ». Cette exigence ne couvrait jusqu'ici que les manques
+CONNUS — un plat sans coût, une paie non arrêtée, des achats partiellement
+saisis. Trois mentions existent à ce titre : `partialFoodCostEntry`, « paie
+estimée », « ce taux ne porte que sur X % de vos ventes ».
+
+**Il existe un second genre de manque, et rien ne le couvre** : la donnée qui
+aurait dû être là. Une table jamais descendue sur cet appareil rend une boîte
+Hive VIDE — le calcul réussit, l'agrégat vaut zéro, et le bilan a exactement
+l'apparence d'un bilan juste. Les blocs de lecture du reporting attrapent leurs
+exceptions, les journalisent et poursuivent : un `debugPrint` invisible en
+production est la seule trace.
+
+**Règle** : *un bilan qui ne peut pas garantir la complétude de ses entrées
+doit le dire, et ne jamais présenter un zéro comme une mesure.* Un domaine dont
+la lecture a échoué, ou dont la table n'a jamais été synchronisée sur cet
+appareil, n'affiche pas « 0 F » — il affiche qu'il ne sait pas.
+
+La distinction à tenir, et elle est concrète : **zéro dépense parce qu'il n'y en
+a pas** est une information ; **zéro dépense parce que la table est vide** est
+une absence d'information. Les deux s'écrivent aujourd'hui de la même façon.
