@@ -539,6 +539,9 @@ class RestaurantReportingService {
     final periodLosses = <Loss>[];
     final wastedByProduct = <String, double>{};
     final withdrawalRequests = <String, int>{};
+    // Manques portant sur une FOURNITURE : ils ne se répartissent pas sur les
+    // plats, mais sortent de la charge d'exploitation où leur achat figure.
+    final supplyRequests = <String, int>{};
     try {
       for (final l in LossService.forShop(shopId)) {
         if (_outside(l.date, range)) continue;
@@ -555,9 +558,28 @@ class RestaurantReportingService {
           withdrawalRequests[ig] = (withdrawalRequests[ig] ?? 0) + l.amount;
         }
       }
+      // Une perte de fourniture n'est PAS « matière » — aucun plat ne contient
+      // de barquette — donc elle est passée dans la branche « charge »
+      // ci-dessus. Elle a pourtant son propre retrait, sur l'exploitation.
+      for (final l in periodLosses) {
+        final si = l.ingredientId;
+        if (si == null || !si.startsWith('si_')) continue;
+        if (l.isMaterial) continue;
+        supplyRequests[si] = (supplyRequests[si] ?? 0) + l.amount;
+      }
     } catch (e) {
       debugPrint('[RestoReport] pertes err: $e');
     }
+
+    // Manques de fournitures retenus, plafonnés à ce qui a été acheté sur la
+    // période. Calculé ICI parce que la valorisation des pertes, plus bas, en a
+    // besoin pour savoir combien retirer de l'exploitation — la perte, elle,
+    // garde toujours son montant déclaré.
+    final supplyWithdrawn = supplyWithdrawalsOf(
+      requests: supplyRequests,
+      purchases: DailyExpenseService.spendBySupply(shopId,
+          from: range.from, to: range.to),
+    );
 
     final allocation = DishCostService.forSales(shopId,
         from: range.from,
@@ -643,13 +665,36 @@ class RestaurantReportingService {
     // Matière perdue qui figure dans les achats — à retirer du réel.
     var purchasedMaterialLosses = 0.0;
     final purchasedLossSeries = List<double>.filled(n, 0);
+    // Manque de fourniture retiré de l'exploitation, par bucket : le total ET
+    // la courbe doivent bouger ensemble, c'est l'invariant du lot 1.
+    final supplyLossSeries = List<double>.filled(n, 0);
 
     for (final l in periodLosses) {
       final lb = range.bucketOf(l.date);
       var value = 0.0;
       var purchased = 0.0;
 
-      if (!l.isMaterial) {
+      final si = l.ingredientId;
+      final isSupplyLoss =
+          !l.isMaterial && si != null && si.startsWith('si_');
+
+      if (isSupplyLoss) {
+        // LA PERTE GARDE SON MONTANT. C'est le RETRAIT qui est plafonné, pas
+        // elle : quand l'achat est antérieur à la période, la charge de ce
+        // mois ne contient pas cette fourniture, il n'y a donc aucun double
+        // comptage à corriger — et faire disparaître la perte réparerait un
+        // problème qui n'existe pas. Un test l'a établi contre le premier jet
+        // de ce lot, où la perte valait ce qui avait pu être retiré.
+        //
+        // Réparti au prorata quand plusieurs manques visent la même
+        // fourniture, comme pour les ingrédients.
+        value = l.amount.toDouble();
+        final requested = supplyRequests[si] ?? 0;
+        final taken = supplyWithdrawn[si] ?? 0;
+        if (requested > 0 && taken > 0) {
+          supplyLossSeries[lb] += taken * l.amount / requested;
+        }
+      } else if (!l.isMaterial) {
         value = l.amount.toDouble();
       } else {
         for (final p in l.items) {
@@ -718,6 +763,17 @@ class RestaurantReportingService {
     } catch (e) {
       debugPrint('[RestoReport] dépenses err: $e');
     }
+
+    // LE MANQUE SORT DES ACHATS. Sans ce retrait, le réassort de barquettes
+    // pèse en charge et le manque constaté pèse en perte : 38 000 F retirés du
+    // bénéfice pour 30 000 F dépensés. Même voie que pour les ingrédients, où
+    // le manque est retiré des achats avant partage.
+    for (var i = 0; i < n; i++) {
+      operatingSeries[i] -= supplyLossSeries[i];
+    }
+    final supplyWithdrawnTotal =
+        supplyWithdrawn.values.fold<int>(0, (s, v) => s + v);
+    operatingCost -= supplyWithdrawnTotal;
 
     // ── Masse salariale (Lot D) ────────────────────────────────────────
     var payroll = 0.0;
@@ -819,6 +875,41 @@ class RestaurantReportingService {
       lossSeries: lossSeries,
       sectors: sectors,
     );
+  }
+
+  /// Manques de FOURNITURES retenus, plafonnés aux achats de la période.
+  ///
+  /// Un réassort de barquettes entre en charge d'exploitation. L'inventaire
+  /// constate ensuite qu'il en manque : cet écart tombait en perte, à son
+  /// montant, alors que les barquettes manquantes font partie de celles déjà
+  /// payées. 30 000 F d'achats plus 8 000 F de manque retiraient 38 000 F du
+  /// bénéfice pour 30 000 F dépensés.
+  ///
+  /// Les INGRÉDIENTS ne connaissent pas ce défaut : leur manque est retiré des
+  /// achats avant partage, plafonné à ces achats. Seules les fournitures en
+  /// étaient exclues, parce qu'elles ne sont pas réparties sur les plats — ce
+  /// qui n'est pas une raison pour les payer deux fois.
+  ///
+  /// PLAFONNÉ, comme pour les ingrédients : un manque plus gros que ce qui a
+  /// été acheté sur la période rendrait la charge négative, et le bénéfice
+  /// gonflerait d'un stock jamais acheté. Le dépassement est journalisé.
+  static Map<String, int> supplyWithdrawalsOf({
+    required Map<String, int> requests,
+    required Map<String, int> purchases,
+  }) {
+    final out = <String, int>{};
+    for (final e in requests.entries) {
+      if (e.value <= 0) continue;
+      final available = purchases[e.key] ?? 0;
+      final taken = e.value < available ? e.value : available;
+      if (taken < e.value) {
+        debugPrint('[RestoReport] manque de fourniture plafonné — ${e.key} : '
+            '${e.value} F déclarés, $available F achetés sur la période, '
+            '${e.value - taken} F ignorés');
+      }
+      if (taken > 0) out[e.key] = taken;
+    }
+    return out;
   }
 
   /// Ingrédient dont un manque est retiré des achats, `null` sinon. Une

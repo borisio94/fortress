@@ -90,6 +90,38 @@ class DailyExpenseService {
     return id.startsWith('ig_');
   }
 
+  /// Cette dépense est-elle l'ACHAT D'UNE FOURNITURE ?
+  ///
+  /// Emballages, gaz, entretien : `ingredient_id` porte un `si_…`. Ces achats
+  /// ne sont jamais répartis sur les plats — aucun plat ne contient du gaz —
+  /// mais ils pèsent en charge d'exploitation, et un écart d'inventaire sur
+  /// l'un d'eux doit pouvoir être retiré de là.
+  static bool feedsSupplyDeduction(DailyExpense e) {
+    if (e.isFoodCost || !e.isCharge) return false;
+    final id = e.ingredientId;
+    if (id == null || id.isEmpty) return false;
+    return id.startsWith('si_');
+  }
+
+  /// Ce que chaque FOURNITURE a coûté sur la période — `si_… → FCFA`.
+  ///
+  /// Jumelle de [spendByIngredient], pour l'autre nature de rattachement. Elle
+  /// ne sert pas à répartir quoi que ce soit sur les plats : elle dit combien
+  /// on peut retirer de la charge d'exploitation quand l'inventaire constate
+  /// qu'il manque des barquettes déjà payées.
+  static Map<String, int> spendBySupply(
+    String shopId, {
+    DateTime? from,
+    DateTime? to,
+  }) {
+    final out = <String, int>{};
+    for (final e in forShop(shopId, from: from, to: to)) {
+      if (!feedsSupplyDeduction(e)) continue;
+      out[e.ingredientId!] = (out[e.ingredientId!] ?? 0) + e.amount;
+    }
+    return out;
+  }
+
   /// CE QUE CHAQUE INGRÉDIENT A COÛTÉ sur la période — `ingredientId → FCFA`.
   ///
   /// C'est l'entrée du calcul de coût par plat : sans peser quoi que ce soit,

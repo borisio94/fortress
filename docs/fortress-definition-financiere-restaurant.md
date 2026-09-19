@@ -165,9 +165,6 @@ du comptage réel.
 
 À traiter, dans cet ordre de gravité.
 
-**Les fournitures — emballages, gaz — sont comptées deux fois** sur un écart
-d'inventaire : leur achat est déjà en charge d'exploitation.
-
 **La livraison est encaissée sans charge de livreur.**
 
 ---
@@ -484,6 +481,46 @@ messages distincts : le non-rattaché nommé pour ce qu'il est, puis le reliquat
 qui seul conserve les trois causes historiques.
 
 **Le chiffre ne change pas** : seule son interprétation est corrigée.
+
+---
+
+### Une fourniture manquante se payait deux fois
+
+*Corrigé le 19/09/2026 — lot 9.*
+*Commit : « fix(restaurant): un manque de fourniture sort des achats au lieu de
+s'y ajouter ».*
+
+Un réassort de barquettes entre en charge d'exploitation. L'inventaire constate
+ensuite qu'il en manque : cet écart tombait en perte, **à son montant**, alors
+que les barquettes manquantes font partie de celles déjà payées. 30 000 F
+d'achats plus 8 000 F de manque retiraient **38 000 F du bénéfice pour 30 000 F
+dépensés**.
+
+Les INGRÉDIENTS ne connaissaient pas ce défaut : leur manque est retiré des
+achats avant partage, plafonné à ces achats — la voie (b) de la section 4.
+Seules les fournitures en étaient exclues, parce qu'elles ne sont pas réparties
+sur les plats. Ce qui n'est pas une raison pour les payer deux fois.
+
+**Correction** : `spendBySupply` trace les achats par fourniture — jumelle de
+`spendByIngredient`, pour l'autre nature de rattachement —, `supplyWithdrawalsOf`
+plafonne le manque à ces achats, et l'exploitation baisse d'autant. Le retrait
+touche le total **et** la série, sans quoi l'invariant du lot 1
+(`somme(expenseSeries) == expenses`) casserait.
+
+**CE QUE LE PREMIER JET A EU FAUX, et qu'un test existant a rattrapé** : j'avais
+fait valoir la perte ce qui avait pu être retiré, par symétrie avec les
+ingrédients. `restaurant_loss_attachment_test.dart` l'a refusé — un manque de
+gaz de 2 000 F sans achat de gaz sur la période tombait à 0 et **disparaissait
+de l'affichage**.
+
+Le test avait raison : quand l'achat est **antérieur** à la période, la charge
+de ce mois ne contient pas cette fourniture, il n'y a donc aucun double
+comptage à corriger. Faire disparaître la perte réparait un problème inexistant.
+
+**La règle retenue** : *le plafonnement porte sur le RETRAIT, jamais sur la
+valeur de la perte.* Achat dans la période — l'exploitation baisse, la perte
+reste, le total est juste. Achat antérieur — rien n'est retiré, la perte est
+comptée, ce qui est correct puisque cette période ne l'a pas payée.
 
 ---
 
