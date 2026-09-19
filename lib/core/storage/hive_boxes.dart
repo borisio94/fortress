@@ -135,6 +135,15 @@ class HiveBoxes {
   static const String payroll              = 'payroll_box';
   /// Dépenses quotidiennes (achat marché, gaz, entretien…) — Lot E, hotfix_149.
   static const String dailyExpenses        = 'daily_expenses_box';
+  // ── Tenue de l'équipe (hotfix_165) — casse, notation, primes spéciales.
+  /// Casse imputée à un employé (table `staff_penalties`).
+  static const String staffPenalties        = 'staff_penalties_box';
+  /// Événements de notation, jamais la note (table `staff_ratings`).
+  static const String staffRatings          = 'staff_ratings_box';
+  /// Primes spéciales à durée déterminée (table `staff_contests`).
+  static const String staffContests         = 'staff_contests_box';
+  /// Mises à pied et congés payés (table `staff_absences`, hotfix_166).
+  static const String staffAbsences         = 'staff_absences_box';
 
   static Future<void> init() async {
     debugPrint('[Hive] HBX-A init() entered, kIsWeb=$kIsWeb');
@@ -211,6 +220,10 @@ class HiveBoxes {
       await _safeOpenMap(timeRecords);
       await _safeOpenMap(salaryAdvances);
       await _safeOpenMap(payroll);
+      await _safeOpenMap(staffPenalties);
+      await _safeOpenMap(staffRatings);
+      await _safeOpenMap(staffContests);
+      await _safeOpenMap(staffAbsences);
       await _safeOpenMap(dailyExpenses);
       debugPrint('[Hive] HBX-D all boxes opened (some may have failed)');
     } catch (e, st) {
@@ -291,6 +304,7 @@ class HiveBoxes {
     ingredients, recipeIngredients, restaurantActivities, stockItems,
     fixedCharges, losses, payments, bottleDeposits, cashClosures,
     employees, timeRecords, salaryAdvances, payroll, dailyExpenses,
+    staffPenalties, staffRatings, staffContests, staffAbsences,
   ];
 
   static Future<void> _safeClose(String boxName) async {
@@ -406,5 +420,9 @@ class HiveBoxes {
   static Box<Map>   get timeRecordsBox        => Hive.box<Map>(timeRecords);
   static Box<Map>   get salaryAdvancesBox     => Hive.box<Map>(salaryAdvances);
   static Box<Map>   get payrollBox            => Hive.box<Map>(payroll);
+  static Box<Map>   get staffPenaltiesBox     => Hive.box<Map>(staffPenalties);
+  static Box<Map>   get staffRatingsBox       => Hive.box<Map>(staffRatings);
+  static Box<Map>   get staffContestsBox      => Hive.box<Map>(staffContests);
+  static Box<Map>   get staffAbsencesBox      => Hive.box<Map>(staffAbsences);
   static Box<Map>   get dailyExpensesBox      => Hive.box<Map>(dailyExpenses);
 }

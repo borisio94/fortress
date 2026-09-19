@@ -10,6 +10,7 @@ import '../../../../core/services/restaurant_order_service.dart';
 import '../../../../core/services/ingredient_service.dart';
 import '../../../../core/services/restaurant_reporting_service.dart';
 import '../../../../core/services/restaurant_setup_service.dart';
+import '../../../../core/services/staff_score_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -22,9 +23,12 @@ import '../../../caisse/presentation/bloc/caisse_bloc.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
 import '../../../inventaire/domain/entities/product.dart';
 import '../../data/restaurant_dashboard_providers.dart';
+import '../../domain/entities/staff_rating.dart';
 import '../widgets/resto_dish_visuals.dart';
 import '../widgets/resto_kpi_tile.dart';
 import '../widgets/resto_surfaces.dart';
+import '../widgets/resto_table_listener.dart';
+import '../widgets/staff_score_gauge.dart';
 
 /// Tableau de bord dédié à la restauration.
 ///
@@ -126,6 +130,13 @@ class _RestaurantDashboardPageState
           const SizedBox(height: 16),
           // ── Deux panneaux : commandes · ingrédients ────────────────────
           _ServiceRow(shopId: shopId, resto: resto),
+          const SizedBox(height: 16),
+          // ── Notation de l'équipe ──────────────────────────────────────
+          // Placée AVANT les chiffres financiers, et non reléguée en bas : un
+          // serveur à 4 sur 10 coûte plus cher au restaurant qu'un point de
+          // marge, et c'est la seule information de cet écran sur laquelle on
+          // peut agir le soir même.
+          _StaffScoreCard(shopId: shopId),
           const SizedBox(height: 16),
           // ── Rapport financier ─────────────────────────────────────────
           _FinanceKpiRow(report: finance),
@@ -2117,6 +2128,113 @@ class _ArrowBtn extends StatelessWidget {
 }
 
 /// Carte de section — titre, sous-titre, contrôle à droite.
+/// NOTATION DE L'ÉQUIPE — le classement du mois, meilleur en tête.
+///
+/// Cinq personnes au plus : au-delà, la carte devient une liste et le tableau
+/// de bord cesse d'être un tableau de bord. Le lien mène à l'onglet complet.
+///
+/// Les employés SOUS LE SEUIL remontent en tête, avant le classement : c'est
+/// l'information qui appelle une décision, et elle se perdrait au milieu d'un
+/// palmarès trié par mérite — c'est-à-dire tout en bas.
+class _StaffScoreCard extends StatefulWidget {
+  final String shopId;
+  const _StaffScoreCard({required this.shopId});
+
+  @override
+  State<_StaffScoreCard> createState() => _StaffScoreCardState();
+}
+
+class _StaffScoreCardState extends RestoTableListenerState<_StaffScoreCard> {
+  @override
+  List<String> get tables => const ['staff_ratings', 'employees'];
+  @override
+  String get shopId => widget.shopId;
+
+  static const int _maxRows = 5;
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    final ranking = StaffScoreService.ranking(widget.shopId);
+    if (ranking.isEmpty) return const SizedBox.shrink();
+
+    final urgent = ranking.where((e) => e.score.needsReplacement).toList();
+    final shown = ranking.take(_maxRows).toList();
+
+    return _Card(
+      title: 'Notation de l\'équipe',
+      subtitle: urgent.isEmpty
+          ? 'Chacun démarre le mois à ${StaffScore.baseScore} points'
+          : '${urgent.length} à remplacer d\'urgence',
+      trailing: TextButton(
+        onPressed: () =>
+            context.push('/shop/${widget.shopId}/restaurant/personnel'),
+        child: const Text('Voir tout'),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (urgent.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: sem.danger.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: sem.danger.withValues(alpha: 0.35)),
+              ),
+              child: Row(children: [
+                Icon(Icons.warning_amber_rounded, size: 16, color: sem.danger),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                      urgent.map((e) => e.member.fullName).join(', '),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySm.copyWith(color: sem.danger)),
+                ),
+              ]),
+            ),
+          ],
+          const SizedBox(height: 10),
+          for (var i = 0; i < shown.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 22,
+                    child: i == 0
+                        ? const Icon(Icons.emoji_events_rounded,
+                            size: 16, color: Color(0xFFD4A017))
+                        : Text('${i + 1}',
+                            style: AppTextStyles.micro),
+                  ),
+                  Expanded(
+                    flex: 4,
+                    child: Text(shown[i].member.fullName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySm),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    flex: 5,
+                    child: StaffScoreGauge(score: shown[i].score, dense: true),
+                  ),
+                ],
+              ),
+            ),
+          if (ranking.length > _maxRows)
+            Text('+ ${ranking.length - _maxRows} autre'
+                '${ranking.length - _maxRows > 1 ? 's' : ''}',
+                style: AppTextStyles.micro),
+        ],
+      ),
+    );
+  }
+}
+
 class _Card extends StatelessWidget {
   final String title;
   final String? subtitle;

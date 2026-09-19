@@ -246,6 +246,24 @@ void main() {
       final raw = m.toMap()..['pin_salt'] = '';
       expect(StaffMember.fromMap(raw).hasPin, isFalse);
     });
+
+    // Personnel SANS compte (hotfix_162) : veilleur, homme de ménage… Ils ne
+    // se connectent jamais mais leur paie se tient ici.
+    test('le drapeau « a un compte » survit à l\'aller-retour', () {
+      final sans = m.copyWith(hasAppAccess: false);
+      expect(StaffMember.fromMap(sans.toMap()).hasAppAccess, isFalse);
+      expect(StaffMember.fromMap(m.toMap()).hasAppAccess, isTrue);
+    });
+
+    test('une fiche antérieure au drapeau est réputée avoir un compte', () {
+      // C'était la seule façon d'en créer une : la personne devait être
+      // choisie parmi les comptes. La supposer sans compte ferait basculer
+      // tout l'historique du côté « personnel seul ».
+      final legacy = m.toMap()
+        ..remove('has_app_access')
+        ..['schema_version'] = 1;
+      expect(StaffMember.fromMap(legacy).hasAppAccess, isTrue);
+    });
   });
 
   group('Sorties d\'espèces du personnel', () {
@@ -343,4 +361,141 @@ void main() {
       expect(SalaryAdvance.fromMap(a.toMap()).isDeducted, isTrue);
     });
   });
+
+  // ── Unicité d'une fiche ───────────────────────────────────────────────────
+  //
+  // Ce qui est en jeu : une personne inscrite deux fois touche deux demi-mois
+  // et pointe tantôt sur une fiche tantôt sur l'autre. Deux repères la
+  // désignent sans ambiguïté — son code de pointage et son numéro — et c'est
+  // sur eux que la saisie refuse le doublon.
+
+  group('StaffService.phoneKey', () {
+    test('la mise en forme ne compte pas', () {
+      expect(StaffService.phoneKey('699 12 34 56'),
+          StaffService.phoneKey('699-12.34.56'));
+    });
+
+    test('l\'indicatif tapé une fois sur deux ne crée pas un second numéro', () {
+      expect(StaffService.phoneKey('+237 699 12 34 56'),
+          StaffService.phoneKey('699123456'));
+      expect(StaffService.phoneKey('237699123456'),
+          StaffService.phoneKey('699123456'));
+    });
+
+    test('sans chiffre, la clé est vide', () {
+      expect(StaffService.phoneKey(null), '');
+      expect(StaffService.phoneKey('   '), '');
+      expect(StaffService.phoneKey('néant'), '');
+    });
+
+    test('deux numéros différents restent différents', () {
+      expect(StaffService.phoneKey('699123456') ==
+          StaffService.phoneKey('699123457'), isFalse);
+    });
+  });
+
+  group('StaffService.phoneOwnerIn', () {
+    final awa = _member(id: 'em_1', name: 'Awa', phone: '699 12 34 56');
+    final bineta = _member(id: 'em_2', name: 'Bineta', phone: '677 00 11 22');
+
+    test('repère la même personne malgré une autre mise en forme', () {
+      final owner =
+          StaffService.phoneOwnerIn([awa, bineta], '+237699123456');
+      expect(owner?.fullName, 'Awa');
+    });
+
+    test('modifier sa propre fiche ne se bloque pas soi-même', () {
+      expect(
+        StaffService.phoneOwnerIn([awa, bineta], '699123456',
+            exceptId: 'em_1'),
+        isNull,
+      );
+    });
+
+    test('les fiches archivées comptent aussi', () {
+      // Une fiche archivée se réactive d'un bouton : autoriser le doublon
+      // maintenant, c'est le découvrir au pire moment.
+      final parti =
+          _member(id: 'em_9', name: 'Moussa', phone: '699123456',
+              isActive: false);
+      expect(StaffService.phoneOwnerIn([parti], '699 12 34 56')?.fullName,
+          'Moussa');
+    });
+
+    test('un contact non renseigné n\'entre en collision avec rien', () {
+      final sansNumero = _member(id: 'em_3', name: 'Ali');
+      expect(StaffService.phoneOwnerIn([sansNumero, awa], ''), isNull);
+      expect(StaffService.phoneOwnerIn([sansNumero, awa], null), isNull);
+    });
+
+    test('un numéro libre passe', () {
+      expect(StaffService.phoneOwnerIn([awa, bineta], '690000000'), isNull);
+    });
+  });
+
+  group('StaffService.pinOwnerIn', () {
+    final awa = _member(id: 'em_1', name: 'Awa', pin: '1234');
+    final bineta = _member(id: 'em_2', name: 'Bineta', pin: '5678');
+
+    test('reconnaît le code malgré des sels différents', () {
+      // Chaque code est haché avec son propre sel : aucune valeur commune à
+      // comparer, il faut rejouer le hachage employé par employé.
+      expect(awa.pinSalt == bineta.pinSalt, isFalse);
+      expect(StaffService.pinOwnerIn([awa, bineta], '5678')?.fullName,
+          'Bineta');
+    });
+
+    test('un code libre passe', () {
+      expect(StaffService.pinOwnerIn([awa, bineta], '4321'), isNull);
+    });
+
+    test('modifier sa propre fiche ne se bloque pas soi-même', () {
+      expect(
+        StaffService.pinOwnerIn([awa, bineta], '1234', exceptId: 'em_1'),
+        isNull,
+      );
+    });
+
+    test('les fiches archivées comptent aussi', () {
+      // Régression : le contrôle ne balayait que les actifs, donc le code d'un
+      // employé archivé pouvait être redonné — et la collision éclatait à sa
+      // réactivation, quand plus personne ne faisait le lien.
+      final parti =
+          _member(id: 'em_9', name: 'Moussa', pin: '1234', isActive: false);
+      expect(StaffService.pinOwnerIn([parti], '1234')?.fullName, 'Moussa');
+    });
+
+    test('les fiches sans code sont ignorées', () {
+      final sansCode = _member(id: 'em_3', name: 'Ali');
+      expect(StaffService.pinOwnerIn([sansCode], '1234'), isNull);
+    });
+
+    test('un code mal formé ne désigne personne', () {
+      expect(StaffService.pinOwnerIn([awa], '12'), isNull);
+      expect(StaffService.pinOwnerIn([awa], ''), isNull);
+    });
+  });
+}
+
+/// Fiche de test — le sel dérive de l'id pour que deux employés n'aient jamais
+/// le même, comme en production.
+StaffMember _member({
+  required String id,
+  required String name,
+  String? phone,
+  String? pin,
+  bool isActive = true,
+}) {
+  final salt = 'sel_$id';
+  return StaffMember(
+    id: id,
+    shopId: 'shop_1',
+    fullName: name,
+    hireDate: DateTime(2026, 1, 1),
+    createdAt: DateTime(2026, 1, 1),
+    phone: phone,
+    isActive: isActive,
+    pinHash: pin == null ? null : StaffService.hashPin(pin, salt),
+    pinSalt: pin == null ? null : salt,
+  );
 }

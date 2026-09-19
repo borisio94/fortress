@@ -27,10 +27,36 @@ class Payslip {
   /// Avances déjà versées et retenues sur cette fiche.
   final int advancesDeducted;
 
-  /// Minutes pointées sur le mois. INFORMATIF : aucune prime d'heures
-  /// supplémentaires n'est calculée automatiquement — le taux dépend d'un
-  /// accord que l'application ne connaît pas. Le gérant le saisit en [bonuses].
+  /// Minutes pointées sur le mois.
   final int minutesWorked;
+
+  /// HEURES SUPPLÉMENTAIRES reportées sur cette fiche (hotfix_165).
+  ///
+  /// Séparées de [bonuses] et non fondues dedans : ce sont deux choses que
+  /// l'employé lit différemment. Une prime est un geste du patron ; des heures
+  /// supplémentaires sont un dû, calculé à partir de minutes pointées et d'un
+  /// taux — et c'est la première ligne qu'il vérifie. Les additionner en un
+  /// seul nombre rendrait la fiche incontestable, donc suspecte.
+  final int overtimeAmount;
+
+  /// Minutes supplémentaires que ce montant paie — la mention qui rend la
+  /// ligne vérifiable.
+  final int overtimeMinutes;
+
+  /// Retenues pour CASSE, distinctes de [deductions] que le gérant saisit à la
+  /// main. Une retenue automatique doit pouvoir être retrouvée dans la liste
+  /// des pénalités, ligne par ligne.
+  final int penaltiesDeducted;
+
+  /// Retenues pour MISE À PIED SANS SOLDE (hotfix_166), et le nombre de jours
+  /// qu'elles couvrent.
+  ///
+  /// Encore une ligne à part, pour la même raison que les deux précédentes :
+  /// trois retenues de natures différentes fondues en un seul nombre donnent
+  /// une fiche que personne ne peut vérifier. Ici la mention des jours est ce
+  /// qui rend la retenue recalculable — salaire mensuel ÷ 30 × jours.
+  final int absencesDeducted;
+  final int absenceDays;
 
   final int netSalary;
 
@@ -56,6 +82,11 @@ class Payslip {
     this.deductions = 0,
     this.advancesDeducted = 0,
     this.minutesWorked = 0,
+    this.overtimeAmount = 0,
+    this.overtimeMinutes = 0,
+    this.penaltiesDeducted = 0,
+    this.absencesDeducted = 0,
+    this.absenceDays = 0,
     this.netSalary = 0,
     this.paidAt,
     this.paidCash = true,
@@ -98,8 +129,17 @@ class Payslip {
     int bonuses = 0,
     int deductions = 0,
     int advances = 0,
+    int overtime = 0,
+    int penalties = 0,
+    int absences = 0,
   }) {
-    final net = baseSalary + bonuses - deductions - advances;
+    final net = baseSalary +
+        bonuses +
+        overtime -
+        deductions -
+        penalties -
+        absences -
+        advances;
     return net < 0 ? 0 : net;
   }
 
@@ -107,6 +147,11 @@ class Payslip {
     int? bonuses,
     int? deductions,
     int? advancesDeducted,
+    int? overtimeAmount,
+    int? overtimeMinutes,
+    int? penaltiesDeducted,
+    int? absencesDeducted,
+    int? absenceDays,
     int? netSalary,
     DateTime? paidAt,
     bool? paidCash,
@@ -124,13 +169,23 @@ class Payslip {
         deductions: deductions ?? this.deductions,
         advancesDeducted: advancesDeducted ?? this.advancesDeducted,
         minutesWorked: minutesWorked,
+        overtimeAmount: overtimeAmount ?? this.overtimeAmount,
+        overtimeMinutes: overtimeMinutes ?? this.overtimeMinutes,
+        penaltiesDeducted: penaltiesDeducted ?? this.penaltiesDeducted,
+        absencesDeducted: absencesDeducted ?? this.absencesDeducted,
+        absenceDays: absenceDays ?? this.absenceDays,
         netSalary: netSalary ?? this.netSalary,
         paidAt: paidAt ?? this.paidAt,
         paidCash: paidCash ?? this.paidCash,
         notes: notes ?? this.notes,
       );
 
-  static const int currentSchemaVersion = 1;
+  // v2 — heures supplémentaires et casse détaillées (hotfix_165).
+  // v3 — retenue de mise à pied (hotfix_166).
+  // Les deux sont purement ADDITIVES : une fiche antérieure porte ces lignes à
+  // zéro, et son net STOCKÉ reste celui qui a été versé — c'est bien ce qu'on
+  // veut d'un document déjà remis.
+  static const int currentSchemaVersion = 3;
   static const SchemaMigrator _migrator = SchemaMigrator(
     currentVersion: currentSchemaVersion,
     steps: {},
@@ -148,6 +203,11 @@ class Payslip {
         'deductions': deductions,
         'advances_deducted': advancesDeducted,
         'minutes_worked': minutesWorked,
+        'overtime_amount': overtimeAmount,
+        'overtime_minutes': overtimeMinutes,
+        'penalties_deducted': penaltiesDeducted,
+        'absences_deducted': absencesDeducted,
+        'absence_days': absenceDays,
         'net_salary': netSalary,
         'paid_at': paidAt?.toUtc().toIso8601String(),
         'paid_cash': paidCash,
@@ -161,6 +221,9 @@ class Payslip {
     final bonuses = (m['bonuses'] as num?)?.toInt() ?? 0;
     final deductions = (m['deductions'] as num?)?.toInt() ?? 0;
     final advances = (m['advances_deducted'] as num?)?.toInt() ?? 0;
+    final overtime = (m['overtime_amount'] as num?)?.toInt() ?? 0;
+    final penalties = (m['penalties_deducted'] as num?)?.toInt() ?? 0;
+    final absences = (m['absences_deducted'] as num?)?.toInt() ?? 0;
     return Payslip(
       id: m['id'].toString(),
       shopId: m['shop_id'].toString(),
@@ -172,6 +235,11 @@ class Payslip {
       deductions: deductions,
       advancesDeducted: advances,
       minutesWorked: (m['minutes_worked'] as num?)?.toInt() ?? 0,
+      overtimeAmount: overtime,
+      overtimeMinutes: (m['overtime_minutes'] as num?)?.toInt() ?? 0,
+      penaltiesDeducted: penalties,
+      absencesDeducted: absences,
+      absenceDays: (m['absence_days'] as num?)?.toInt() ?? 0,
       // Le net STOCKÉ fait foi (c'est ce qui a été versé) ; on ne le
       // reconstruit que s'il manque.
       netSalary: (m['net_salary'] as num?)?.toInt() ??
@@ -180,6 +248,9 @@ class Payslip {
             bonuses: bonuses,
             deductions: deductions,
             advances: advances,
+            overtime: overtime,
+            penalties: penalties,
+            absences: absences,
           ),
       paidAt: _parseDate(m['paid_at']),
       paidCash: m['paid_cash'] as bool? ?? true,

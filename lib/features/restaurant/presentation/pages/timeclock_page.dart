@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import '../../../../core/services/staff_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
+import '../../../../shared/widgets/app_primary_button.dart';
+import '../../domain/entities/staff_absence.dart';
 import '../../domain/entities/staff_member.dart';
 import '../../domain/entities/time_record.dart';
 
@@ -83,16 +86,118 @@ class _TimeclockPageState extends State<TimeclockPage> {
           isError: true);
       return;
     }
+    // MISE À PIED OU CONGÉ EN COURS — on refuse le badge, en disant pourquoi.
+    //
+    // Laisser pointer créerait des heures à quelqu'un qui n'est pas censé
+    // travailler : un employé suspendu se ferait payer sa sanction, et
+    // l'incohérence ne se découvrirait qu'à la paie, sans personne pour se
+    // souvenir de ce qui s'était passé ce soir-là.
+    final absence = StaffService.absenceOn(widget.shopId, member.id);
+    if (absence != null) {
+      _show('${absence.kind.label} en cours',
+          '${_firstName(member)}, vous êtes absent jusqu\'au '
+          '${_dayLabel(absence.endDate)}. Voyez le gérant.',
+          isError: true);
+      return;
+    }
+
     final result = await StaffService.punch(member);
     if (!mounted) return;
     if (result.isEntry) {
+      final end = result.record.scheduledEnd;
       _show('Bonjour ${_firstName(member)}',
-          'Service commencé à ${_hhmm(result.record.clockIn)}');
-    } else {
-      final minutes = result.record.durationMinutes ?? 0;
-      _show('Bonne fin de service, ${_firstName(member)}',
-          '${TimeRecord.formatMinutes(minutes)} travaillées aujourd\'hui');
+          'Service commencé à ${_hhmm(result.record.clockIn)}'
+          '${end == null ? '' : ' · fin prévue ${_hhmm(end)}'}');
+      return;
     }
+
+    final minutes = result.record.durationMinutes ?? 0;
+    final verdict = result.verdict;
+
+    // DÉPART ANTICIPÉ — l'excuse se demande ICI, à la personne concernée, au
+    // moment où elle part. Reconstituée trois jours plus tard par le gérant,
+    // elle ne vaudrait rien : personne ne se souvient de la raison exacte, et
+    // c'est le souvenir du gérant qui ferait foi contre celui de l'employé.
+    if (verdict.isEarly) {
+      _show('À bientôt, ${_firstName(member)}',
+          'Vous partez ${TimeRecord.formatMinutes(verdict.earlyMinutes)} '
+          'avant la fermeture.');
+      await _askExcuse(member, result.record, verdict.earlyMinutes);
+      return;
+    }
+
+    if (verdict.isOvertime) {
+      _show('Merci ${_firstName(member)}',
+          '${TimeRecord.formatMinutes(minutes)} travaillées · '
+          '${TimeRecord.formatMinutes(verdict.overtimeMinutes)} '
+          'supplémentaires enregistrées');
+      return;
+    }
+
+    _show('Bonne fin de service, ${_firstName(member)}',
+        '${TimeRecord.formatMinutes(minutes)} travaillées aujourd\'hui');
+  }
+
+  /// Demande l'excuse du départ anticipé, sur la badgeuse elle-même.
+  ///
+  /// Facultative : on peut partir sans se justifier, et le pointage le dira.
+  /// L'imposer ferait taper n'importe quoi pour se débarrasser de l'écran, ce
+  /// qui vaut moins que rien du tout.
+  Future<void> _askExcuse(
+      StaffMember member, TimeRecord record, int earlyMinutes) async {
+    final excuse = TextEditingController();
+    final text = await showAdaptiveFormSheet<String>(
+      context: context,
+      builder: (sheetCtx) => AdaptiveFormFrame(
+        title: 'Pourquoi partez-vous plus tôt ?',
+        subtitle: '${member.fullName} · '
+            '${TimeRecord.formatMinutes(earlyMinutes)} avant la fermeture',
+        icon: Icons.logout_rounded,
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                  'Le gérant lira votre explication et dira s\'il l\'accepte. '
+                  'Vous pouvez aussi passer sans rien écrire.',
+                  style: AppTextStyles.captionHint),
+              const SizedBox(height: 12),
+              TextField(
+                controller: excuse,
+                autofocus: true,
+                maxLines: 2,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Votre explication',
+                  hintText: 'Rendez-vous à l\'hôpital, enfant malade…',
+                ),
+              ),
+              const SizedBox(height: 18),
+              AppPrimaryButton(
+                label: 'Envoyer',
+                icon: Icons.send_rounded,
+                fullWidth: true,
+                onTap: () =>
+                    Navigator.of(sheetCtx).pop(excuse.text.trim()),
+              ),
+              const SizedBox(height: 4),
+              Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(sheetCtx).pop(''),
+                  child: const Text('Passer'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (text == null || text.isEmpty || !mounted) return;
+    await StaffService.attachExcuse(record, text);
+    if (!mounted) return;
+    _show('Explication transmise', 'Le gérant en sera informé.');
   }
 
   void _show(String message, String? detail, {bool isError = false}) {
@@ -112,6 +217,10 @@ class _TimeclockPageState extends State<TimeclockPage> {
 
   static String _firstName(StaffMember m) =>
       m.fullName.trim().split(' ').first;
+
+  static String _dayLabel(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/'
+      '${d.month.toString().padLeft(2, '0')}';
 
   static String _hhmm(DateTime? d) {
     final t = d ?? DateTime.now();

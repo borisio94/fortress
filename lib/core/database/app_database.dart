@@ -645,6 +645,11 @@ class AppDatabase {
         await syncTimeRecords(shopId);
         await syncSalaryAdvances(shopId);
         await syncPayroll(shopId);
+        await syncStaffPenalties(shopId);
+        await syncStaffRatings(shopId);
+        await syncStaffContests(shopId);
+        await syncStaffAbsences(shopId);
+        await syncStaffSettings(shopId);
         await syncDailyExpenses(shopId);
         await syncPartnerLedger(shopId);
         await syncStockLocations();
@@ -753,6 +758,18 @@ class AppDatabase {
         callback: (_) async {
           await syncMetadata(shopId);
           _notify('units', shopId);
+        })
+        // Postes de l'établissement (hotfix_160) : la liste modifiée sur un
+        // appareil doit apparaître sur les autres sans redémarrage.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'job_titles',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (_) async {
+          await syncMetadata(shopId);
+          _notify('job_titles', shopId);
         })
         .onPostgresChanges(
         event: PostgresChangeEvent.insert,
@@ -984,6 +1001,43 @@ class AppDatabase {
             column: 'shop_id', value: shopId),
         callback: (p) => _i._onTablePassthroughChange(
             p, HiveBoxes.payrollBox, 'payroll', shopId))
+        // ── Tenue de l'équipe (hotfix_165). Realtime indispensable : l'excuse
+        //    d'un départ anticipé se saisit sur la badgeuse, et c'est le
+        //    téléphone du gérant qui doit la voir arriver pour la trancher.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'staff_penalties',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.staffPenaltiesBox, 'staff_penalties', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'staff_ratings',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.staffRatingsBox, 'staff_ratings', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'staff_contests',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.staffContestsBox, 'staff_contests', shopId))
+        // Une mise à pied prononcée depuis le téléphone du gérant doit
+        // atteindre la badgeuse AVANT que l'intéressé n'y tape son code.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'staff_absences',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.staffAbsencesBox, 'staff_absences', shopId))
         // ── Dépenses quotidiennes (Lot E) : saisies au marché, lues à la
         //    caisse (elles sortent du tiroir) et au bilan.
         .onPostgresChanges(
@@ -1179,6 +1233,11 @@ class AppDatabase {
       task('syncTimeRecords', () => syncTimeRecords(shopId)),
       task('syncSalaryAdvances', () => syncSalaryAdvances(shopId)),
       task('syncPayroll', () => syncPayroll(shopId)),
+      task('syncStaffPenalties', () => syncStaffPenalties(shopId)),
+      task('syncStaffRatings', () => syncStaffRatings(shopId)),
+      task('syncStaffContests', () => syncStaffContests(shopId)),
+      task('syncStaffAbsences', () => syncStaffAbsences(shopId)),
+      task('syncStaffSettings', () => syncStaffSettings(shopId)),
       task('syncDailyExpenses', () => syncDailyExpenses(shopId)),
       task('syncActivityLogs', () async {
         await syncActivityLogs(shopId);
@@ -1607,8 +1666,22 @@ class AppDatabase {
           } else {
             await _db.from(table).upsert(data);
           }
-        case 'delete': await _db.from(table).delete()
-            .eq(op['col'] as String, op['val']);
+        // DELETE — un filtre d'égalité par défaut (`col`/`val`), ou plusieurs
+        // via `match`. Le second est indispensable dès que la colonne filtrée
+        // n'est pas unique à l'échelle de la base : supprimer le poste
+        // « Serveur » par son seul nom l'effacerait dans TOUTES les boutiques
+        // de l'utilisateur, pas seulement la sienne.
+        case 'delete':
+          final dmatch = (op['match'] as Map?)?.cast<String, dynamic>();
+          if (dmatch != null && dmatch.isNotEmpty) {
+            var dq = _db.from(table).delete();
+            for (final e in dmatch.entries) {
+              dq = dq.eq(e.key, e.value);
+            }
+            await dq;
+          } else {
+            await _db.from(table).delete().eq(op['col'] as String, op['val']);
+          }
         case 'insert': await _db.from(table).insert(data);
         // UPDATE ciblé par filtres d'égalité (op['match']). Un seul ordre
         // serveur met à jour toutes les lignes correspondantes — utilisé
@@ -4349,6 +4422,33 @@ end \$\$;""",
       _syncTablePassthrough(tableName: 'payroll',
           shopId: shopId, box: HiveBoxes.payrollBox);
 
+  // ── Tenue de l'équipe (hotfix_165) ─────────────────────────────────────
+  //
+  // Casse, notation et primes spéciales. Chacune est isolée : tant que le SQL
+  // n'est pas appliqué, la table n'existe pas (42P01) et sa synchro échoue —
+  // elle ne doit pas emporter avec elle le personnel et la paie, qui eux
+  // fonctionnent depuis hotfix_148.
+
+  static Future<void> syncStaffPenalties(String shopId) =>
+      _syncTablePassthrough(tableName: 'staff_penalties',
+          shopId: shopId, box: HiveBoxes.staffPenaltiesBox,
+          orderBy: 'incident_date');
+
+  static Future<void> syncStaffRatings(String shopId) =>
+      _syncTablePassthrough(tableName: 'staff_ratings',
+          shopId: shopId, box: HiveBoxes.staffRatingsBox);
+
+  static Future<void> syncStaffContests(String shopId) =>
+      _syncTablePassthrough(tableName: 'staff_contests',
+          shopId: shopId, box: HiveBoxes.staffContestsBox,
+          orderBy: 'end_date');
+
+  // ── Absences décidées : mise à pied, congé payé (hotfix_166) ───────────
+  static Future<void> syncStaffAbsences(String shopId) =>
+      _syncTablePassthrough(tableName: 'staff_absences',
+          shopId: shopId, box: HiveBoxes.staffAbsencesBox,
+          orderBy: 'start_date');
+
   // ── Dépenses quotidiennes (Lot E restaurant — hotfix_149) ──────────────
   static Future<void> syncDailyExpenses(String shopId) =>
       _syncTablePassthrough(tableName: 'daily_expenses',
@@ -5325,6 +5425,224 @@ end \$\$;""",
     );
   }
 
+  // ══ POSTES DE L'ÉTABLISSEMENT (hotfix_160) ════════════════════════
+  //
+  // Serveur, Cuisinier, Livreur… La liste appartient à la boutique : chaque
+  // établissement a ses propres postes, et doit pouvoir en ajouter, en
+  // renommer et en supprimer. Même mécanique que les marques et les unités —
+  // (shop_id, name), écriture Hive immédiate puis push en arrière-plan.
+
+  static const String _jobTitlesTable = 'job_titles';
+
+  static String _jobTitlesKey(String shopId) => 'job_titles_$shopId';
+
+  static Future<void> _putJobTitles(String shopId, List<String> list) =>
+      HiveBoxes.settingsBox.put(_jobTitlesKey(shopId), list);
+
+  static String _jobPermsKey(String shopId) => 'job_title_perms_$shopId';
+
+  static Future<void> _putJobPerms(
+          String shopId, Map<String, String> perms) =>
+      HiveBoxes.settingsBox.put(_jobPermsKey(shopId), perms);
+
+  /// Taux horaire des heures supplémentaires, par poste (hotfix_165).
+  static String _jobRatesKey(String shopId) => 'job_title_rates_$shopId';
+
+  static Future<void> _putJobRates(String shopId, Map<String, int> rates) =>
+      HiveBoxes.settingsBox.put(_jobRatesKey(shopId), rates);
+
+  /// Ajoute un poste, avec ou sans profil de droits.
+  ///
+  /// Sans effet sur le libellé s'il existe déjà (comparaison insensible à la
+  /// casse : « serveur » et « Serveur » sont le même poste). [permissions] —
+  /// clés `EmployeePermission.key` ; `null` laisse le profil INCHANGÉ, une
+  /// liste vide efface les droits du poste.
+  static Future<void> saveJobTitle(String shopId, String name,
+      {List<String>? permissions, int? overtimeRate}) async {
+    _assertNotFrozen();
+    final clean = name.trim();
+    if (clean.isEmpty) return;
+    final list = LocalStorageService.getJobTitles(shopId);
+    final isNew =
+        !list.any((t) => t.toLowerCase() == clean.toLowerCase());
+    if (isNew) {
+      list.add(clean);
+      await _putJobTitles(shopId, list);
+    }
+    if (permissions != null) {
+      final perms = LocalStorageService.getJobTitlePerms(shopId)
+        ..[clean] = permissions.join(',');
+      await _putJobPerms(shopId, perms);
+    }
+    if (overtimeRate != null) {
+      final rates = LocalStorageService.getJobTitleRates(shopId)
+        ..[clean] = overtimeRate;
+      await _putJobRates(shopId, rates);
+    }
+    _bgWrite({'table': _jobTitlesTable, 'op': 'upsert',
+      'data': {
+        'shop_id': shopId,
+        'name': clean,
+        // Colonne ajoutée par hotfix_161 : omise tant qu'aucun profil n'est
+        // défini, pour qu'un poste simple continue de se synchroniser même
+        // si le SQL n'a pas encore été appliqué.
+        if (permissions != null) 'permissions': permissions.join(','),
+        // Idem pour le taux horaire des heures supplémentaires (hotfix_165).
+        if (overtimeRate != null) 'overtime_rate': overtimeRate,
+      },
+      'onConflict': 'shop_id,name'});
+    if (isNew) {
+      await ActivityLogService.log(
+        action: 'job_title_created', targetType: 'job_title',
+        targetId: clean, targetLabel: clean, shopId: shopId,
+      );
+    }
+  }
+
+  /// Retire un poste de la liste proposée.
+  ///
+  /// Ne débaptise personne : la fonction d'un employé vit sur son compte
+  /// (`shop_memberships.job_title`). C'est l'écran appelant qui refuse la
+  /// suppression tant que quelqu'un porte le poste — le faire ici obligerait
+  /// cette couche à connaître les comptes.
+  static Future<void> deleteJobTitle(String shopId, String name) async {
+    _assertNotFrozen();
+    final list = LocalStorageService.getJobTitles(shopId)
+      ..removeWhere((t) => t.toLowerCase() == name.toLowerCase());
+    await _putJobTitles(shopId, list);
+    final perms = LocalStorageService.getJobTitlePerms(shopId)
+      ..removeWhere((k, _) => k.toLowerCase() == name.toLowerCase());
+    await _putJobPerms(shopId, perms);
+    final rates = LocalStorageService.getJobTitleRates(shopId)
+      ..removeWhere((k, _) => k.toLowerCase() == name.toLowerCase());
+    await _putJobRates(shopId, rates);
+    // Suppression filtrée sur (shop_id, name) : sans le shop_id, l'ordre
+    // effacerait le poste dans TOUTES les boutiques de l'utilisateur.
+    _bgWrite({'table': _jobTitlesTable, 'op': 'delete',
+      'match': {'shop_id': shopId, 'name': name},
+      'data': {'shop_id': shopId, 'name': name}});
+    await ActivityLogService.log(
+      action: 'job_title_deleted', targetType: 'job_title',
+      targetId: name, targetLabel: name, shopId: shopId,
+    );
+  }
+
+  /// Renomme un poste, EN CONSERVANT son profil de droits. La propagation
+  /// vers les comptes qui le portent est du ressort de l'appelant (il a le
+  /// notifier employés sous la main) — ici on ne touche qu'à la liste.
+  static Future<void> renameJobTitle(
+      String shopId, String old, String neo) async {
+    final clean = neo.trim();
+    if (clean.isEmpty || old == clean) return;
+    final carried = LocalStorageService.getJobTitlePerms(shopId)[old];
+    final carriedRate = LocalStorageService.getJobTitleRates(shopId)[old];
+    await saveJobTitle(shopId, clean,
+        permissions: carried == null
+            ? null
+            : carried.split(',').where((k) => k.isNotEmpty).toList(),
+        overtimeRate: carriedRate);
+    await deleteJobTitle(shopId, old);
+    await ActivityLogService.log(
+      action: 'job_title_updated', targetType: 'job_title',
+      targetId: clean, targetLabel: clean, shopId: shopId,
+      details: {'old_name': old},
+    );
+  }
+
+  /// Amorce la liste des postes d'une boutique qui n'en a encore aucun.
+  ///
+  /// Trois sources fusionnées, dans cet ordre : le socle métier livré avec
+  /// l'app, les ajouts manuels rangés sur CET appareil avant hotfix_160, et
+  /// les libellés déjà portés par des comptes. Sans cet amorçage, une liste
+  /// vide s'afficherait vide — et un poste du socle ne serait pas supprimable,
+  /// puisqu'il ne serait écrit nulle part.
+  ///
+  /// N'a lieu QU'UNE FOIS par appareil et par boutique (drapeau
+  /// `job_titles_seeded_<shopId>`). Sans ce drapeau, l'amorçage ne pourrait se
+  /// déclencher que sur une liste vide — et les postes ajoutés à la main avant
+  /// hotfix_160, qui occupent déjà cette clé, l'empêcheraient à jamais.
+  ///
+  /// Limite assumée : un appareil qui découvre la boutique APRÈS que le socle
+  /// y a été élagué réintroduira les postes supprimés. Le drapeau est local,
+  /// et une liste de métiers ne mérite pas la table de tombstones qu'il
+  /// faudrait pour faire mieux.
+  static Future<void> ensureJobTitlesSeeded(
+      String shopId, List<String> seed) async {
+    try {
+      final flag = 'job_titles_seeded_$shopId';
+      if (HiveBoxes.settingsBox.get(flag) == true) return;
+      final out = <String>[];
+      for (final raw in [
+        ...LocalStorageService.getJobTitles(shopId), // ajouts déjà présents
+        ...seed,
+      ]) {
+        final t = raw.trim();
+        if (t.isEmpty) continue;
+        if (out.any((e) => e.toLowerCase() == t.toLowerCase())) continue;
+        out.add(t);
+      }
+      await HiveBoxes.settingsBox.put(flag, true);
+      if (out.isEmpty) return;
+      await _putJobTitles(shopId, out);
+      for (final t in out) {
+        _bgWrite({'table': _jobTitlesTable, 'op': 'upsert',
+          'data': {'shop_id': shopId, 'name': t},
+          'onConflict': 'shop_id,name'});
+      }
+      debugPrint('[DB] postes amorcés (${out.length}) pour $shopId');
+    } catch (e) {
+      debugPrint('[DB] ensureJobTitlesSeeded: $e');
+    }
+  }
+
+  // ══ RÉGLAGES DU PERSONNEL (hotfix_165) ═══════════════════════════════
+  //
+  // L'heure de fermeture de l'établissement — la référence qui décide si un
+  // départ est anticipé ou s'il vaut des heures supplémentaires.
+  //
+  // SYNCHRONISÉE, et non rangée dans les préférences de l'appareil : la leçon
+  // du fond de caisse (hotfix_147). La tablette de la salle réglée sur 22 h et
+  // le téléphone du gérant sur 23 h jugeraient différemment le même pointage,
+  // et l'employé se verrait reprocher un départ anticipé selon l'écran ouvert.
+
+  static String _staffClosingKey(String shopId) =>
+      'staff_closing_time_$shopId';
+
+  /// Règle l'heure de fermeture de la boutique. `null` ou vide la retire —
+  /// plus rien n'est alors jugé, ce qui est le comportement d'avant la règle.
+  static Future<void> setShopClosingTime(String shopId, String? hhmm) async {
+    _assertNotFrozen();
+    final clean = (hhmm ?? '').trim();
+    await HiveBoxes.settingsBox.put(_staffClosingKey(shopId), clean);
+    _bgWrite({'table': 'staff_settings', 'op': 'upsert',
+      'data': {
+        'shop_id': shopId,
+        'closing_time': clean.isEmpty ? null : clean,
+      },
+      'onConflict': 'shop_id'});
+    _notify('staff_settings', shopId);
+  }
+
+  static Future<void> syncStaffSettings(String shopId) async {
+    try {
+      final rows = await _db
+          .from('staff_settings')
+          .select('closing_time')
+          .eq('shop_id', shopId)
+          .limit(1) as List;
+      // Boutique sans ligne : aucun horaire réglé. On écrit tout de même la
+      // valeur vide, sinon un horaire supprimé sur un autre appareil
+      // resterait éternellement en place sur celui-ci.
+      final t = rows.isEmpty
+          ? ''
+          : (rows.first['closing_time']?.toString() ?? '');
+      await HiveBoxes.settingsBox.put(_staffClosingKey(shopId), t);
+      _notify('staff_settings', shopId);
+    } catch (e) {
+      debugPrint('[DB] syncStaffSettings: $e');
+    }
+  }
+
   static Future<void> syncMetadata(String shopId) async {
     try {
       final cats   = await _db.from('categories').select('name').eq('shop_id', shopId);
@@ -5337,6 +5655,42 @@ end \$\$;""",
       await HiveBoxes.settingsBox.put('categories_$shopId', cl);
       await HiveBoxes.settingsBox.put('brands_$shopId', bl);
       await HiveBoxes.settingsBox.put('units_$shopId', ul);
+      // POSTES — table ajoutée par hotfix_160. Sa lecture est isolée : tant
+      // que le SQL n'est pas appliqué, elle échoue (42P01) et ne doit pas
+      // emporter avec elle les catégories, marques et unités déjà écrites.
+      try {
+        // `permissions` (hotfix_161) demandée à part : si la colonne manque
+        // encore, la requête entière échouerait et la boutique n'aurait plus
+        // aucun poste. On retombe alors sur les seuls libellés.
+        List rows;
+        try {
+          rows = await _db.from(_jobTitlesTable)
+              .select('name,permissions,overtime_rate')
+              .eq('shop_id', shopId) as List;
+        } catch (_) {
+          try {
+            rows = await _db.from(_jobTitlesTable)
+                .select('name,permissions').eq('shop_id', shopId) as List;
+          } catch (_) {
+            rows = await _db.from(_jobTitlesTable)
+                .select('name').eq('shop_id', shopId) as List;
+          }
+        }
+        await _putJobTitles(
+            shopId, rows.map((r) => r['name'] as String).toList());
+        final perms = <String, String>{};
+        final rates = <String, int>{};
+        for (final r in rows) {
+          final p = (r as Map)['permissions']?.toString() ?? '';
+          if (p.isNotEmpty) perms[r['name'] as String] = p;
+          final rate = (r['overtime_rate'] as num?)?.toInt() ?? 0;
+          if (rate > 0) rates[r['name'] as String] = rate;
+        }
+        await _putJobPerms(shopId, perms);
+        await _putJobRates(shopId, rates);
+      } catch (e) {
+        debugPrint('[DB] syncMetadata postes: $e');
+      }
     } catch (e) { debugPrint('[DB] syncMetadata: $e'); }
   }
 
@@ -5413,6 +5767,7 @@ end \$\$;""",
       _executeOp({'table': 'categories',     'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
       _executeOp({'table': 'brands',         'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
       _executeOp({'table': 'units',          'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
+      _executeOp({'table': 'job_titles',     'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
       _executeOp({'table': 'suppliers',      'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
       _executeOp({'table': 'incidents',      'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
       _executeOp({'table': 'stock_movements','op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
@@ -5642,6 +5997,15 @@ end \$\$;""",
       'categories_$shopId',
       'brands_$shopId',
       'units_$shopId',
+      // Les postes de l'établissement sont de la configuration, au même titre
+      // que les unités : une remise à zéro qui garde le catalogue n'a aucune
+      // raison de faire oublier qu'on emploie un chawarmier.
+      'job_titles_$shopId',
+      'job_title_perms_$shopId',
+      // Le taux des heures supplémentaires et l'heure de fermeture sont de la
+      // même nature : des règles de l'établissement, pas des données d'activité.
+      'job_title_rates_$shopId',
+      'staff_closing_time_$shopId',
     };
     final settingsKeys = HiveBoxes.settingsBox.keys
         .where((k) {

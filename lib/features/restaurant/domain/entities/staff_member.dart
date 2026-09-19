@@ -31,6 +31,36 @@ class StaffMember {
   final String? pinHash;
   final String? pinSalt;
 
+  /// Cette personne a-t-elle un COMPTE dans l'application ?
+  ///
+  /// Un restaurant emploie deux populations que rien ne distinguait jusqu'ici :
+  ///   * celles qui utilisent l'app — serveurs qui prennent les commandes,
+  ///     caissiers, gérants. Leur fiche est rattachée à un compte, dont elle
+  ///     recopie le nom et la fonction ;
+  ///   * celles qui ne s'y connecteront JAMAIS — veilleur de nuit, homme de
+  ///     ménage, plongeur. Elles n'ont pas de compte, mais elles ont un
+  ///     salaire, des heures et des avances à tenir.
+  ///
+  /// La seconde population était impossible à inscrire : la fiche exigeait de
+  /// choisir la personne parmi les comptes de la boutique. D'où ce drapeau —
+  /// il décide aussi si le nom et la fonction se saisissent ici (sans compte)
+  /// ou s'ils sont hérités (avec compte), pour que les deux ne divergent
+  /// jamais.
+  ///
+  /// `true` pour toute fiche antérieure : elles ont toutes été créées depuis
+  /// un compte (cf. migration de schéma v2).
+  final bool hasAppAccess;
+
+  /// Heure de fin de service PROPRE à cet employé, `HH:mm` (hotfix_165).
+  ///
+  /// `null` — le cas de loin le plus fréquent — signifie « suit l'heure de
+  /// fermeture de l'établissement ». La surcharge existe pour les horaires
+  /// décalés qu'un restaurant a toujours : le boulanger qui part à 11 h, le
+  /// veilleur qui prend à la fermeture. Sans elle, ces gens-là accumuleraient
+  /// chaque jour des heures supplémentaires imaginaires, ou devraient
+  /// justifier un départ anticipé quotidien.
+  final String? closingTime;
+
   final DateTime createdAt;
 
   const StaffMember({
@@ -46,6 +76,8 @@ class StaffMember {
     this.station,
     this.pinHash,
     this.pinSalt,
+    this.hasAppAccess = true,
+    this.closingTime,
   });
 
   /// L'employé peut-il badger ? Sans PIN configuré, il faut passer par une
@@ -97,10 +129,15 @@ class StaffMember {
     String? station,
     String? pinHash,
     String? pinSalt,
+    bool? hasAppAccess,
+    String? closingTime,
 
     /// Retire le code de pointage : `copyWith(pinHash: null)` serait un no-op
     /// silencieux et l'employé continuerait de pouvoir badger.
     bool clearPin = false,
+
+    /// Remet l'employé à l'horaire de la boutique — même raison que ci-dessus.
+    bool clearClosingTime = false,
   }) =>
       StaffMember(
         id: id,
@@ -115,13 +152,35 @@ class StaffMember {
         station: station ?? this.station,
         pinHash: clearPin ? null : (pinHash ?? this.pinHash),
         pinSalt: clearPin ? null : (pinSalt ?? this.pinSalt),
+        hasAppAccess: hasAppAccess ?? this.hasAppAccess,
+        closingTime:
+            clearClosingTime ? null : (closingTime ?? this.closingTime),
       );
 
-  static const int currentSchemaVersion = 1;
+  static const int currentSchemaVersion = 3;
   static const SchemaMigrator _migrator = SchemaMigrator(
     currentVersion: currentSchemaVersion,
-    steps: {},
+    steps: {
+      // v1 → v2 — arrivée du personnel SANS compte. Toute fiche écrite avant
+      // vient forcément d'un compte : c'était la seule façon d'en créer une.
+      // Pure et idempotente, elle ne fait que poser un drapeau à vrai.
+      //
+      // La clé est la version de DÉPART (cf. `SchemaMigrator.steps`). Elle
+      // valait 2 : la step ne s'exécutait donc jamais — sans conséquence tant
+      // que la version cible était 2, le `fromMap` retombant de toute façon
+      // sur `true`. Elle en aurait eu une dès le passage à v3 : la step se
+      // serait déclenchée sur des fiches v2 et aurait remis `has_app_access` à
+      // vrai sur tout le personnel SANS compte, effaçant précisément ce que la
+      // v2 était venue introduire.
+      1: _markLegacyAsAccountHolder,
+      // v2 → v3 — heure de fermeture propre à un employé. Purement additif :
+      // absente, elle vaut null et l'employé suit l'horaire de la boutique.
+    },
   );
+
+  static Map<String, dynamic> _markLegacyAsAccountHolder(
+          Map<String, dynamic> m) =>
+      {...m, 'has_app_access': true};
 
   Map<String, dynamic> toMap() => {
         'schema_version': currentSchemaVersion,
@@ -136,6 +195,8 @@ class StaffMember {
         'station': station,
         'pin_hash': pinHash,
         'pin_salt': pinSalt,
+        'has_app_access': hasAppAccess,
+        'closing_time': closingTime,
         'created_at': createdAt.toUtc().toIso8601String(),
       };
 
@@ -154,6 +215,8 @@ class StaffMember {
       station: _nullIfEmpty(m['station']),
       pinHash: _nullIfEmpty(m['pin_hash']),
       pinSalt: _nullIfEmpty(m['pin_salt']),
+      hasAppAccess: m['has_app_access'] as bool? ?? true,
+      closingTime: _nullIfEmpty(m['closing_time']),
       createdAt: m['created_at'] == null
           ? DateTime.now()
           : (DateTime.tryParse(m['created_at'].toString())?.toLocal() ??

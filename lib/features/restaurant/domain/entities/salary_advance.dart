@@ -34,7 +34,22 @@ class SalaryAdvance {
   /// manquant de 20 000 F.
   final bool isCash;
 
+  /// AVANCE ou QUINZAINE ? (hotfix_165)
+  ///
+  /// Les deux sortent de la même caisse et se retiennent sur la même paie,
+  /// mais ne s'obtiennent pas de la même façon : la quinzaine est un DROIT —
+  /// la moitié du salaire vers le milieu du mois, sans avoir à se justifier ;
+  /// l'avance est une FAVEUR, demandée à tout moment et motivée.
+  ///
+  /// Les distinguer sert à deux choses : ne pas exiger de motif là où il n'en
+  /// faut pas, et pouvoir dire à l'employé qui redemande une quinzaine qu'il
+  /// l'a déjà touchée ce mois-ci.
+  final String kind;
+
   final DateTime createdAt;
+
+  static const String kindAdvance = 'advance';
+  static const String kindFortnight = 'fortnight';
 
   const SalaryAdvance({
     required this.id,
@@ -48,7 +63,18 @@ class SalaryAdvance {
     this.deductedFromMonth,
     this.isDeducted = false,
     this.isCash = true,
+    this.kind = kindAdvance,
   });
+
+  bool get isFortnight => kind == kindFortnight;
+
+  /// PLAFOND DE LA QUINZAINE : la moitié du salaire de base.
+  ///
+  /// Au-delà, ce n'est plus une quinzaine mais une avance — qui, elle, se
+  /// motive. Sans ce plafond, « toucher sa quinzaine » viderait le salaire du
+  /// mois en une fois et l'employé se retrouverait à zéro le 30.
+  static int fortnightCap(int baseSalary) =>
+      baseSalary <= 0 ? 0 : baseSalary ~/ 2;
 
   /// Clé de mois `YYYY-MM` — le format de `payroll.month`, et donc la seule
   /// façon de rapprocher une avance d'une fiche de paie.
@@ -67,6 +93,7 @@ class SalaryAdvance {
     String? deductedFromMonth,
     bool? isDeducted,
     bool? isCash,
+    String? kind,
   }) =>
       SalaryAdvance(
         id: id,
@@ -80,9 +107,12 @@ class SalaryAdvance {
         deductedFromMonth: deductedFromMonth ?? this.deductedFromMonth,
         isDeducted: isDeducted ?? this.isDeducted,
         isCash: isCash ?? this.isCash,
+        kind: kind ?? this.kind,
       );
 
-  static const int currentSchemaVersion = 1;
+  // v2 — la quinzaine (hotfix_165). Purement additif : une ligne écrite avant
+  // la règle est forcément une avance, ce que donne déjà la valeur par défaut.
+  static const int currentSchemaVersion = 2;
   static const SchemaMigrator _migrator = SchemaMigrator(
     currentVersion: currentSchemaVersion,
     steps: {},
@@ -100,6 +130,7 @@ class SalaryAdvance {
         'deducted_from_month': deductedFromMonth,
         'is_deducted': isDeducted,
         'is_cash': isCash,
+        'kind': kind,
         'created_at': createdAt.toUtc().toIso8601String(),
       };
 
@@ -121,6 +152,11 @@ class SalaryAdvance {
           _nullIfEmpty(m['deducted_from_month']) ?? monthKey(date),
       isDeducted: m['is_deducted'] as bool? ?? false,
       isCash: m['is_cash'] as bool? ?? true,
+      // Hors CHECK, l'upsert serait rejeté par Postgres et l'op droppée après
+      // dix essais : une valeur inconnue retombe sur l'avance.
+      kind: (m['kind']?.toString() == kindFortnight)
+          ? kindFortnight
+          : kindAdvance,
       createdAt: m['created_at'] == null
           ? DateTime.now()
           : (DateTime.tryParse(m['created_at'].toString())?.toLocal() ??

@@ -148,6 +148,59 @@ class LocalStorageService {
   }
 
   // ══════════════════════════════════════════════════════════════════
+  // POSTES — par boutique (hotfix_160)
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // Les fonctions proposées à la création d'un compte : Serveur, Cuisinier,
+  // Livreur… Même stockage que les marques et les unités — une simple liste
+  // de libellés par boutique, tenue à jour depuis Supabase par
+  // `AppDatabase.syncMetadata`.
+  //
+  // La clé `job_titles_<shopId>` était déjà utilisée AVANT hotfix_160 pour
+  // ranger les seuls ajouts manuels de l'appareil. Ils ne sont pas perdus :
+  // `AppDatabase.ensureJobTitlesSeeded` les reprend dans la liste partagée
+  // au premier amorçage.
+
+  static List<String> getJobTitles(String shopId) {
+    final raw = HiveBoxes.settingsBox.get('job_titles_$shopId');
+    if (raw == null) return [];
+    return List<String>.from(raw as List);
+  }
+
+  /// Profil de droits par poste : nom du poste → clés de permissions séparées
+  /// par des virgules (hotfix_161). Un poste absent de cette table ne décide
+  /// d'aucun accès — le choisir ne coche ni ne décoche rien.
+  static Map<String, String> getJobTitlePerms(String shopId) {
+    final raw = HiveBoxes.settingsBox.get('job_title_perms_$shopId');
+    if (raw is! Map) return {};
+    return raw.map((k, v) => MapEntry(k.toString(), v?.toString() ?? ''));
+  }
+
+  /// Taux horaire des heures supplémentaires par poste (hotfix_165), en FCFA.
+  ///
+  /// Un poste absent vaut 0 : ses heures supplémentaires sont comptées en
+  /// minutes mais jamais valorisées. C'est volontaire — mieux vaut un montant
+  /// nul et visible qu'un taux inventé par l'application.
+  static Map<String, int> getJobTitleRates(String shopId) {
+    final raw = HiveBoxes.settingsBox.get('job_title_rates_$shopId');
+    if (raw is! Map) return {};
+    final out = <String, int>{};
+    raw.forEach((k, v) {
+      final n = v is num ? v.toInt() : int.tryParse(v?.toString() ?? '');
+      if (n != null) out[k.toString()] = n;
+    });
+    return out;
+  }
+
+  /// Heure de fermeture de l'établissement, `HH:mm` — `null` si aucune n'est
+  /// réglée, auquel cas aucun départ n'est jugé.
+  static String? getShopClosingTime(String shopId) {
+    final raw = HiveBoxes.settingsBox.get('staff_closing_time_$shopId');
+    final s = raw?.toString().trim() ?? '';
+    return s.isEmpty ? null : s;
+  }
+
+  // ══════════════════════════════════════════════════════════════════
   // PRODUITS — stockage persistent par shopId
   // ══════════════════════════════════════════════════════════════════
 
