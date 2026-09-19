@@ -1902,6 +1902,72 @@ class AppDatabase {
   /// Nombre total d'opérations en attente de sync (toutes tables).
   static int get pendingOpsCount => HiveBoxes.offlineQueueBox.length;
 
+  /// LES OPÉRATIONS EN FILE, une par une, pour l'écran de synchronisation.
+  ///
+  /// [pendingOpsCount] et [syncQueueStats] ne rendent que des nombres, et
+  /// `getSyncErrors` ne rend que ce qui a été JOURNALISÉ — une op qui échoue
+  /// sans journal n'apparaissait donc nulle part. On pouvait tout vider, jamais
+  /// regarder.
+  ///
+  /// La clé Hive est rendue avec chaque op : c'est elle qui permet d'en
+  /// abandonner une seule (cf. [discardOp]).
+  ///
+  /// Triées par nombre de tentatives DÉCROISSANT : celles qui bloquent depuis
+  /// le plus longtemps sont celles qu'on cherche.
+  static List<({dynamic key, String table, String op, int retries,
+      String? lastError, String? lastRetry})> get pendingOps {
+    final out = <({dynamic key, String table, String op, int retries,
+        String? lastError, String? lastRetry})>[];
+    try {
+      final box = HiveBoxes.offlineQueueBox;
+      for (final key in box.keys) {
+        final raw = box.get(key);
+        if (raw == null) continue;
+        try {
+          final m = Map<String, dynamic>.from(raw);
+          out.add((
+            key: key,
+            table: m['table']?.toString() ?? '?',
+            op: m['op']?.toString() ?? '?',
+            retries: (m['_retries'] as int?) ?? 0,
+            lastError: m['_last_error']?.toString(),
+            lastRetry: m['_last_retry']?.toString(),
+          ));
+        } catch (_) {/* ligne corrompue : ignorée */}
+      }
+    } catch (e) {
+      debugPrint('[DB] pendingOps err: $e');
+    }
+    out.sort((a, b) => b.retries.compareTo(a.retries));
+    return out;
+  }
+
+  /// Abandonne UNE opération, par sa clé.
+  ///
+  /// C'est une perte d'écriture DÉFINITIVE, et c'est tout l'intérêt : sans
+  /// elle, la seule issue devant une op définitivement invalide était « Vider
+  /// la queue », qui les perd toutes. Protéger une table de l'abandon
+  /// automatique sans offrir l'abandon choisi revenait à concentrer la perte au
+  /// lieu de l'étaler — et à la rendre volontaire.
+  ///
+  /// Journalisé avant suppression : une fois l'op partie, plus rien ne dit ce
+  /// qui a été abandonné ni par qui.
+  static Future<void> discardOp(dynamic key) async {
+    try {
+      final box = HiveBoxes.offlineQueueBox;
+      final raw = box.get(key);
+      if (raw == null) return;
+      try {
+        _logSyncError(Map<String, dynamic>.from(raw),
+            'Abandonnée manuellement depuis l\'écran de synchronisation');
+      } catch (_) {/* le journal ne doit pas empêcher l'abandon */}
+      await box.delete(key);
+      debugPrint('[DB] 🗑️ Op abandonnée manuellement: $key');
+    } catch (e) {
+      debugPrint('[DB] discardOp err: $e');
+    }
+  }
+
   /// Nombre de ventes / commandes en échec de sync depuis ≥ 10 tentatives.
   /// Utilisé par la bannière offline pour alerter l'utilisateur qu'il y a
   /// des transactions financières qui n'ont pas atteint Supabase.

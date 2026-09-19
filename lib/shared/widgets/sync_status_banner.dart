@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/database/app_database.dart';
+import '../../core/database/sync_op_nature.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/theme/app_theme.dart';
@@ -93,7 +94,11 @@ class SyncStatusBanner extends ConsumerWidget {
   String _label(SyncStatus s) {
     final parts = <String>[];
     if (s.stuckCount > 0) {
-      parts.add('${s.stuckCount} vente(s)/dépense(s) bloquée(s)');
+      // « opération(s) » et non « vente(s)/dépense(s) » : la phrase tenait
+      // tant que trois tables étaient surveillées. Elle devient fausse dès
+      // qu'on en protège davantage — un pointage n'est ni une vente ni une
+      // dépense. Le détail par nature est dans la feuille, au tap.
+      parts.add('${s.stuckCount} opération(s) bloquée(s)');
     }
     if (s.errorsCount > 0) {
       parts.add('${s.errorsCount} erreur(s) de sync');
@@ -128,6 +133,10 @@ class _SyncErrorsSheetState extends ConsumerState<_SyncErrorsSheet> {
     final errors = AppDatabase.getSyncErrors();
     final stuck  = AppDatabase.stuckCriticalOpsCount;
     final pend   = AppDatabase.pendingOpsCount;
+    // LES OPS ELLES-MÊMES, et pas seulement les erreurs journalisées : une op
+    // qui échoue sans journal n'apparaissait nulle part, et on ne pouvait que
+    // tout vider sans jamais rien regarder.
+    final ops    = AppDatabase.pendingOps;
 
     return SafeArea(
       child: ConstrainedBox(
@@ -155,8 +164,20 @@ class _SyncErrorsSheetState extends ConsumerState<_SyncErrorsSheet> {
                 '${errors.length} erreur(s)',
                 style: AppTextStyles.bodySmSecondary.copyWith(
                     color: AppColors.textSecondary)),
+            // DÉTAIL PAR NATURE — « 3 Dépenses et achats · 2 Personnel »
+            // plutôt que trois noms de tables. Une table inconnue retombe sur
+            // « Autres », jamais sur son nom technique.
+            if (ops.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                  syncCountsByNature(ops.map((o) => o.table))
+                      .map((e) => '${e.count} ${e.nature.label}')
+                      .join(' · '),
+                  style: AppTextStyles.caption.copyWith(
+                      color: Theme.of(context).semantic.warning)),
+            ],
             const SizedBox(height: 12),
-            if (errors.isEmpty && stuck == 0)
+            if (ops.isEmpty && errors.isEmpty && stuck == 0)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 24),
                 child: Center(child: Text(
@@ -165,6 +186,17 @@ class _SyncErrorsSheetState extends ConsumerState<_SyncErrorsSheet> {
                       color: AppColors.textSecondary),
                   textAlign: TextAlign.center)),
               )
+            else if (ops.isNotEmpty)
+              // Les OPS priment sur les erreurs journalisées : elles portent
+              // leur propre dernière erreur, et elles seules peuvent être
+              // abandonnées une par une.
+              Flexible(child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: ops.length,
+                separatorBuilder: (_, __) => Divider(
+                    height: 1, color: Theme.of(context).semantic.borderSubtle),
+                itemBuilder: (_, i) => _opTile(ops[i]),
+              ))
             else
               Flexible(child: ListView.separated(
                 shrinkWrap: true,
@@ -231,6 +263,79 @@ class _SyncErrorsSheetState extends ConsumerState<_SyncErrorsSheet> {
         ),
       ),
     );
+  }
+
+  /// Une opération en file : sa nature, son état, et le moyen de l'abandonner.
+  Widget _opTile(
+      ({dynamic key, String table, String op, int retries, String? lastError,
+        String? lastRetry}) o) {
+    final sem = Theme.of(context).semantic;
+    final nature = syncNatureOf(o.table);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+            Text('${nature.label} · ${o.op}',
+                style: AppTextStyles.bodySmBold.copyWith(
+                    color: Theme.of(context).colorScheme.onSurface)),
+            const SizedBox(height: 2),
+            Text(
+                o.retries == 0
+                    ? 'En attente d\'envoi'
+                    : '${o.retries} tentative(s)',
+                style: AppTextStyles.caption.copyWith(
+                    color: o.retries >= 10 ? sem.warning : null)),
+            if ((o.lastError ?? '').isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(o.lastError!,
+                  maxLines: 2, overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.micro.copyWith(
+                      color: AppColors.textHint)),
+            ],
+          ]),
+        ),
+        // ABANDON D'UNE SEULE op. Sans lui, la seule issue devant une écriture
+        // définitivement invalide était « Vider la queue », qui les perd
+        // toutes — la perte devenait concentrée et volontaire au lieu d'être
+        // étalée et silencieuse.
+        IconButton(
+          tooltip: 'Abandonner cette opération',
+          icon: Icon(Icons.delete_outline_rounded, size: 18, color: sem.danger),
+          onPressed: _busy ? null : () => _confirmDiscardOne(o.key, nature),
+        ),
+      ]),
+    );
+  }
+
+  /// Confirmation NOMMANT ce qui sera perdu. Une écriture abandonnée ne
+  /// revient jamais : le dire en toutes lettres est le minimum.
+  Future<void> _confirmDiscardOne(dynamic key, SyncOpNature nature) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Abandonner cette opération ?'),
+        content: Text(
+            'Cette écriture « ${nature.label} » ne sera jamais envoyée au '
+            'serveur. Elle restera visible sur cet appareil et sur aucun '
+            'autre. C\'est définitif.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Annuler')),
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: Text('Abandonner',
+                  style: TextStyle(color: Theme.of(ctx).semantic.danger))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _busy = true);
+    await AppDatabase.discardOp(key);
+    if (mounted) setState(() => _busy = false);
   }
 
   Future<void> _retryAll() async {
