@@ -552,6 +552,31 @@ comptée, ce qui est correct puisque cette période ne l'a pas payée.
 
 ---
 
+### Une dépense du restaurant pouvait être abandonnée sans un mot
+
+*Corrigé le 19/09/2026 — « fix(sync): les tables qui portent de l'argent ne
+perdent plus une écriture en silence », après « feat(sync): la file de
+synchronisation devient visible, et s'abandonne op par op ».*
+
+Ce n'est pas un calcul faux, c'est de la perte de données : les sections 1 à 10
+définissent des calculs et supposent que leurs entrées existent. La file
+abandonnait une écriture de `daily_expenses` dès la première erreur permanente,
+et toute table non protégée après dix tentatives. La dépense restait sur
+l'appareil qui l'avait saisie, le bilan de tous les autres était faux, et rien
+ne l'annonçait.
+
+**Correction** : une liste unique de vingt-huit tables, trois prédicats qui en
+dérivent, et un test qui refuse qu'ils divergent. Les deux écarts que les trois
+listes manuelles avaient laissés s'installer sont refermés au passage :
+`partner_ledger_entries` survivait à l'erreur permanente mais était supprimée
+après dix tentatives ; `restaurant_tables` survivait aux deux sans jamais
+alerter.
+
+L'écran de synchronisation est venu **avant** : protéger sans permettre
+d'abandonner au cas par cas aurait concentré la perte au lieu de l'étaler.
+
+---
+
 ## 10. Ce que le tableau de bord doit expliquer
 
 Un commerçant doit pouvoir répondre seul à « pourquoi mon bénéfice a baissé ».
@@ -575,32 +600,84 @@ absentes reste un bilan faux.
 
 ### Les tables qui ne doivent jamais être abandonnées
 
-La file de synchronisation hors-ligne abandonne une opération après dix
-tentatives, ou immédiatement sur une erreur permanente — **sauf** pour les
-tables inscrites dans `neverDropTables` et `criticalTables`
-(`app_database.dart`). Une opération abandonnée reste dans Hive sur l'appareil
-qui l'a saisie et n'existe nulle part ailleurs.
+La file de synchronisation hors-ligne abandonne une opération dans deux cas :
+après dix tentatives, ou immédiatement sur une erreur permanente. Une opération
+abandonnée reste dans Hive sur l'appareil qui l'a saisie et n'existe nulle part
+ailleurs.
 
-**Règle** : *toute table qui porte de l'argent, ou qui sert à en calculer,
-figure dans les deux listes.* Elle n'a pas à être « importante » pour
-l'utilisateur — il suffit qu'un chiffre du bilan ou de la caisse en dépende.
+**Règle** : *toute table qui porte de l'argent, ou qui sert à en calculer, est
+protégée.* Elle n'a pas à être « importante » pour l'utilisateur — il suffit
+qu'un chiffre du bilan ou de la caisse en dépende.
 
-Pour le restaurant, cela désigne :
+#### Il y a TROIS protections, pas deux
 
-`daily_expenses` · `losses` · `payments` · `payroll` · `salary_advances` ·
-`time_records` · `cash_closures` · `ingredients` · `recipe_ingredients` ·
-`fixed_charges` · `bottle_deposits` · `stock_items` · `staff_penalties` ·
-`staff_absences` · `staff_contests` · `staff_ratings`
+La première rédaction de cette section n'en annonçait que deux. C'était faux, et
+la troisième est celle qui décide si les deux autres servent à quelque chose :
 
-**État au 19/09/2026 : AUCUNE n'y figure.** Les deux listes protègent
-`orders`, `sales`, `expenses`, `partner_ledger_entries` et
-`restaurant_tables` — dont une seule concerne le restaurant, et elle n'est pas
-financière : c'est le plan de salle.
+| Protection | Ce qu'elle empêche | Sans elle |
+|---|---|---|
+| **survit à l'erreur permanente** | l'abandon immédiat sur colonne absente, contrainte violée, droit refusé | l'écriture est jetée au premier essai |
+| **survit au plafond** | l'abandon après dix tentatives | l'écriture est jetée le jour où le réseau est mauvais |
+| **alerte** | le silence | l'écriture est gardée et **personne ne l'apprend** |
 
-⚠ **Piège de nommage** : `expenses` est protégée, mais c'est la table de
+Une opération protégée par les deux premières sans la troisième est **une
+opération perdue avec un délai** : elle reste en file indéfiniment, invisible,
+jusqu'à la prochaine purge ou au prochain appareil. C'est précisément ce qui
+arrivait à `restaurant_tables`.
+
+Les trois protections dérivent désormais d'**une seule liste**,
+`kProtectedSyncTables` (`lib/core/database/sync_protected_tables.dart`), et un
+test vérifie pour toute table que les trois répondent la même chose. Trois
+listes tenues à la main à trois endroits avaient divergé sans que rien ne le
+signale.
+
+#### La liste exacte
+
+`orders` · `sales` · `payments` · `cash_closures` · `bottle_deposits` ·
+`expenses` · `daily_expenses` · `fixed_charges` · `receptions` · `payroll` ·
+`salary_advances` · `time_records` · `staff_penalties` · `staff_absences` ·
+`staff_contests` · `staff_ratings` · `employees` · `job_titles` ·
+`staff_settings` · `ingredients` · `recipe_ingredients` · `losses` ·
+`incidents` · `stock_movements` · `stock_items` · `restaurant_activities` ·
+`restaurant_tables` · `partner_ledger_entries`
+
+**La liste de seize de la première rédaction était fausse dans les deux sens.**
+Elle omettait `employees`, `job_titles`, `staff_settings`,
+`restaurant_activities`, `incidents`, `receptions` et `stock_movements` — sept
+tables qui passent bien par la file. Et elle présentait les cinq déjà protégées
+comme absentes, alors qu'elles y étaient. Le décompte réel au moment de l'écrire
+était : cinq protégées, vingt-trois à ajouter.
+
+`job_titles` et `staff_settings` ont été vérifiées une par une plutôt que
+supposées : les deux passent par `_bgWrite`, donc par la file.
+
+⚠ **`stock_movements` et `receptions` sont PARTAGÉES avec l'e-commerce.** Les
+protéger change le comportement des quatre boutiques en production : leur file
+peut désormais grossir au lieu de se vider en perdant des mouvements. C'est le
+compromis retenu — hotfix_176 a montré qu'un mouvement de stock abandonné en
+silence est un scénario réel, pas théorique — et il n'est tenable que parce que
+l'écran de synchronisation permet d'abandonner une opération isolée.
+
+⚠ **Piège de nommage** : `expenses` était protégée, mais c'est la table de
 l'e-commerce. Les dépenses du restaurant vivent dans `daily_expenses`, avec sa
-propre boîte Hive, et ne sont PAS protégées. Deux noms proches, deux sorts
-opposés.
+propre boîte Hive, et n'étaient PAS protégées. Deux noms proches, deux sorts
+opposés. Les deux le sont désormais.
+
+⚠ **`sales` est protégée et n'est jamais mise en file par une vente.** Le seul
+chemin qui l'enfile est la remise à zéro d'une boutique (`op: delete`) ;
+`SaleRepositoryImpl.createSale` et `refundSale` l'enfileraient, mais
+`saleRepositoryProvider` n'est lu nulle part — ce code est inatteignable. Une
+vente est écrite dans `orders`. La table reste protégée : le jour où ce chemin
+revit, l'oubli coûterait des ventes.
+
+#### Ce que la protection coûte
+
+Une opération définitivement invalide reste en file et se rejoue à chaque
+vidage. Sans moyen d'en abandonner une seule, la protection **concentrerait** la
+perte au lieu de l'étaler : la seule issue serait « Vider la queue », qui les
+perd toutes d'un coup. L'écran de synchronisation — la liste des opérations en
+file, leur nature, leur dernière erreur, et l'abandon op par op — a donc été
+livré **avant** cette liste, et non après.
 
 ### Ce qu'affiche un bilan incomplet
 

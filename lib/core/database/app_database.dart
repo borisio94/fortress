@@ -10,6 +10,7 @@ import '../services/notification_service.dart';
 import '../storage/hive_boxes.dart';
 import '../storage/local_storage_service.dart';
 import '../storage/schema_migrator.dart';
+import 'sync_protected_tables.dart';
 import '../../features/auth/domain/entities/user.dart';
 import '../../features/shop_selector/domain/entities/shop_summary.dart';
 import '../../features/inventaire/domain/entities/product.dart';
@@ -1477,15 +1478,11 @@ class AppDatabase {
         // cash perdu. On les garde indéfiniment dans la queue et on alerte
         // l'utilisateur (badge + son) pour qu'il sache qu'une action manuelle
         // est requise (resync ou contact support).
-        // `restaurant_tables` en fait partie depuis hotfix_180 : le plan de
-        // salle est le point d'ancrage de toutes les commandes en salle, et une
-        // création abandonnée après dix essais disparaîtrait de l'app sans un
-        // mot — la table n'existerait que sur l'appareil qui l'a saisie, puis
-        // plus nulle part après le premier resync.
-        const criticalTables = {
-          'orders', 'sales', 'expenses', 'restaurant_tables',
-        };
-        final isCritical = criticalTables.contains(table);
+        //
+        // La liste vivait ici, en dur, et deux autres copies vivaient plus bas.
+        // Elles avaient divergé. Elle est désormais dans
+        // `sync_protected_tables.dart`, unique et testée.
+        final isCritical = survivesRetryCap(table);
 
         // Pour les tables non-critiques : abandon après 10 essais (sinon
         // on garde une queue qui grossit à l'infini sur des erreurs réelles).
@@ -1765,14 +1762,7 @@ class AppDatabase {
         // file (réessai + bannière "Synchro incomplète" visible) et on
         // journalise. Le garde-fou anti-purge protège la ligne locale tant
         // que l'op est en file → le solde ne peut plus revenir en arrière.
-        const neverDropTables = {
-          'partner_ledger_entries', 'orders', 'sales', 'expenses',
-          // Cf. `criticalTables` plus haut : deux listes distinctes, l'une pour
-          // les erreurs permanentes, l'autre pour le plafond de tentatives.
-          // Protéger le plan de salle demande les deux.
-          'restaurant_tables',
-        };
-        if (neverDropTables.contains(failedTable)) {
+        if (survivesPermanentError(failedTable)) {
           debugPrint('[DB] Erreur permanente sur table critique '
               '"$failedTable" → GARDÉE en file (pas d\'abandon silencieux)');
           _logSyncError(op, err);
@@ -1968,18 +1958,21 @@ class AppDatabase {
     }
   }
 
-  /// Nombre de ventes / commandes en échec de sync depuis ≥ 10 tentatives.
-  /// Utilisé par la bannière offline pour alerter l'utilisateur qu'il y a
-  /// des transactions financières qui n'ont pas atteint Supabase.
+  /// Nombre d'écritures protégées bloquées depuis ≥ 10 tentatives.
+  ///
+  /// C'est ce compteur qui allume la bannière « Synchro incomplète ». Il était
+  /// la TROISIÈME liste, la plus courte des trois : `restaurant_tables` était
+  /// protégée des deux abandons mais ne comptait pas ici, donc survivait sans
+  /// que personne ne l'apprenne. Une op gardée dont on ne dit rien est une op
+  /// perdue avec un délai.
   static int get stuckCriticalOpsCount {
-    const criticalTables = {'orders', 'sales', 'expenses'};
     var n = 0;
     for (final raw in HiveBoxes.offlineQueueBox.values) {
       try {
         final m = Map<String, dynamic>.from(raw);
         final table = m['table'] as String? ?? '';
         final retries = (m['_retries'] as int?) ?? 0;
-        if (criticalTables.contains(table) && retries >= 10) n++;
+        if (countsAsStuck(table) && retries >= 10) n++;
       } catch (_) {}
     }
     return n;
