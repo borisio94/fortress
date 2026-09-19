@@ -87,6 +87,12 @@ class RestaurantFinanceReport {
   /// Charges fixes imputables à la période (FCFA).
   final int charges;
 
+  /// Achats de matières qu'AUCUN PLAT VENDU n'a absorbés (FCFA).
+  ///
+  /// Un ingrédient dont aucun plat vendu ne se sert : bocal acheté pour un plat
+  /// retiré de la carte, ou rattachement simplement oublié.
+  final int unallocatedPurchases;
+
   /// Chiffre d'affaires des plats dont le COÛT EST CONNU.
   ///
   /// `null` quand l'appelant ne le renseigne pas : le taux retombe alors sur le
@@ -161,6 +167,7 @@ class RestaurantFinanceReport {
     this.operatingCost = 0,
     this.payrollEstimated = false,
     this.coveredRevenue,
+    this.unallocatedPurchases = 0,
     this.purchasedMaterialLosses = 0,
     this.lossLines = const [],
   });
@@ -327,6 +334,30 @@ class RestaurantFinanceReport {
   /// jours, ça peut n'être qu'un stock constitué d'avance.
   double get foodCostGap =>
       usesRealFoodCost ? netRealFoodCost - materialCost : 0;
+
+  /// Part de [foodCostGap] qui s'explique par des achats NON RATTACHÉS.
+  ///
+  /// En mode RÉPARTITION, le coût théorique est dérivé des achats eux-mêmes —
+  /// l'identité du module le dit : « vendu + perdu + non réparti + retiré =
+  /// acheté ». L'écart ne peut donc rien révéler sur le gaspillage : celui-ci
+  /// est déjà sorti en pertes, et ce qui reste est du NON-RATTACHEMENT.
+  ///
+  /// L'écran annonçait pourtant « stock constitué, gaspillage ou fiche recette
+  /// à revoir » — trois causes, dont deux fausses. Le gérant partait chercher
+  /// un voleur là où il suffisait de rattacher un ingrédient.
+  ///
+  /// PLAFONNÉ à l'écart lui-même : des pertes peuvent rendre celui-ci plus
+  /// petit que le non-rattaché, et annoncer une cause plus grosse que l'effet
+  /// serait incompréhensible.
+  double get gapFromUnallocated {
+    final gap = foodCostGap;
+    if (gap <= 0 || unallocatedPurchases <= 0) return 0;
+    final u = unallocatedPurchases.toDouble();
+    return u < gap ? u : gap;
+  }
+
+  /// Ce qui reste de l'écart une fois le non-rattaché mis de côté.
+  double get gapBeyondUnallocated => foodCostGap - gapFromUnallocated;
 
   /// Bénéfice par bucket, déduit des trois autres séries — elles restent donc
   /// forcément cohérentes entre elles à l'écran.
@@ -782,6 +813,7 @@ class RestaurantReportingService {
       payroll: payroll.round(),
       payrollEstimated: payrollEstimated,
       coveredRevenue: coveredRevenue,
+      unallocatedPurchases: allocation.unallocated,
       revenueSeries: revenueSeries,
       expenseSeries: expenseSeries,
       lossSeries: lossSeries,

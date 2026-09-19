@@ -1109,20 +1109,41 @@ class _FoodCostCard extends StatelessWidget {
                 ),
             ],
           ),
-          if (report.usesRealFoodCost && report.foodCostGap.abs() > 0) ...[
+          // ÉCART ACHATS / CONSOMMATION, DÉCOMPOSÉ.
+          //
+          // En répartition, le coût théorique est dérivé des achats eux-mêmes :
+          // l'écart ne peut pas mesurer le gaspillage, qui est déjà sorti en
+          // pertes. Ce qui reste est du NON-RATTACHEMENT — des achats qu'aucun
+          // plat vendu ne consomme. Annoncer « gaspillage ou fiche à revoir »
+          // envoyait le gérant chercher un coupable là où il suffisait de
+          // cocher un ingrédient.
+          if (report.usesRealFoodCost && report.gapFromUnallocated > 0) ...[
             const SizedBox(height: 6),
             Text(
-                report.foodCostGap > 0
+                '${CurrencyFormatter.format(report.gapFromUnallocated)} '
+                'd\'achats ne sont rattachés à aucun plat vendu : un '
+                'ingrédient dont aucune recette ne se sert, ou un plat retiré '
+                'de la carte.',
+                style: AppTextStyles.caption.copyWith(color: sem.warning)),
+          ],
+          // Ce qui RESTE une fois le non-rattaché nommé. Là, et seulement là,
+          // les trois causes historiques gardent leur sens.
+          if (report.usesRealFoodCost &&
+              report.gapBeyondUnallocated.abs() > 0) ...[
+            const SizedBox(height: 6),
+            Text(
+                report.gapBeyondUnallocated > 0
                     ? 'Vous avez acheté '
-                        '${CurrencyFormatter.format(report.foodCostGap)} '
+                        '${CurrencyFormatter.format(report.gapBeyondUnallocated)} '
                         'de plus que ce que vos ventes ont consommé — stock '
                         'constitué, gaspillage ou fiche recette à revoir.'
                     : 'Vous avez consommé '
-                        '${CurrencyFormatter.format(-report.foodCostGap)} '
+                        '${CurrencyFormatter.format(-report.gapBeyondUnallocated)} '
                         'de plus que vos achats de la période — vous puisez '
                         'dans le stock existant.',
                 style: AppTextStyles.caption.copyWith(
-                    color: report.foodCostGap > 0 ? sem.warning : null)),
+                    color:
+                        report.gapBeyondUnallocated > 0 ? sem.warning : null)),
           ],
           if (!report.usesRealFoodCost) ...[
             const SizedBox(height: 6),

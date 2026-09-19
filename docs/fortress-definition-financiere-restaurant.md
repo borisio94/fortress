@@ -165,10 +165,6 @@ du comptage réel.
 
 À traiter, dans cet ordre de gravité.
 
-**La comparaison théorique / réel ne mesure pas le gaspillage** en mode
-répartition : le théorique est calculé depuis les achats eux-mêmes. L'écart
-mesure ce qui n'a pas été rattaché ou réparti.
-
 **Les fournitures — emballages, gaz — sont comptées deux fois** sur un écart
 d'inventaire : leur achat est déjà en charge d'exploitation.
 
@@ -450,6 +446,44 @@ soirée.
 **Pas de double comptage** : `settleOvertime` marque `overtimeSettled` à
 l'instant de la décision, ce qui exclut ces heures d'`overtimeToSettle`, donc de
 toute fiche.
+
+---
+
+### L'écart théorique / réel s'annonçait comme un gaspillage
+
+*Corrigé le 19/09/2026 — lot 8.*
+*Commit : « fix(restaurant): l'écart d'achats dit ce qu'il mesure au lieu
+d'accuser un gaspillage ».*
+
+En mode répartition, le coût théorique est dérivé des achats eux-mêmes.
+L'identité de la section 3 le dit : `vendu + perdu + non réparti + retiré =
+acheté`. En la développant, l'écart vaut **non réparti + perdu** — et le perdu
+est déjà sorti en pertes. **Il ne peut donc rien révéler sur le gaspillage.**
+
+L'écran annonçait pourtant « stock constitué, gaspillage ou fiche recette à
+revoir ». Sur 200 000 F d'achats dont 50 000 F sur un ingrédient qu'aucun plat
+vendu ne contient, il affichait un écart de 50 000 F attribué à ces trois
+causes, **dont deux fausses**. Le gérant partait chercher un voleur ou un
+cuisinier négligent là où il suffisait de rattacher un ingrédient.
+
+**Périmètre** : la part FICHE TECHNIQUE échappe à ce raisonnement — son
+théorique vient des quantités pesées, indépendamment des achats, et l'écart y
+mesure bien un gaspillage. Mais la répartition est le mode par défaut.
+
+**Décision prise** : *nommer ce que l'écart mesure, plutôt que de le restreindre
+à la part fiche.* Restreindre aurait supprimé l'indicateur pour la majorité des
+boutiques sans rien mettre à la place, alors que le nommer transforme un chiffre
+trompeur en chiffre actionnable — « rattachez cet ingrédient » est une action,
+« cherchez un gaspillage » n'en est pas une quand il n'y en a pas.
+
+**Correction** : `unallocatedPurchases` remonte `AllocationResult.unallocated`
+jusqu'au bilan, et l'écart se décompose en `gapFromUnallocated` — plafonné à
+l'écart lui-même, car des pertes peuvent le rendre plus petit que le
+non-rattaché — et `gapBeyondUnallocated`. Le tableau de bord affiche deux
+messages distincts : le non-rattaché nommé pour ce qu'il est, puis le reliquat,
+qui seul conserve les trois causes historiques.
+
+**Le chiffre ne change pas** : seule son interprétation est corrigée.
 
 ---
 
