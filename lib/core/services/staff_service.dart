@@ -1071,6 +1071,45 @@ class StaffService {
           month: month)
       .fold(0, (s, p) => s + p.laborCost);
 
+  /// Heures supplémentaires PAYÉES DE LA MAIN À LA MAIN sur un mois.
+  ///
+  /// Ces heures-là n'entrent JAMAIS dans une fiche de paie, et c'est voulu :
+  /// [settleOvertime] les marque soldées à l'instant où le gérant décide de les
+  /// payer, ce qui les exclut d'[overtimeToSettle]. Les porter aussi sur la
+  /// fiche les paierait deux fois.
+  ///
+  /// Mais le bilan sommait les fiches. Cet argent, bien sorti du tiroir le soir
+  /// même, n'apparaissait donc nulle part en charge : masse salariale
+  /// sous-évaluée, bénéfice surévalué d'autant. La clôture de caisse, elle, le
+  /// savait déjà — [cashOut] le déduit pour ne pas crier au manquant.
+  ///
+  /// C'est exactement la maladie des avances, refermée par `Payslip.laborCost`,
+  /// et la même décision s'applique : la paie du bilan est le COÛT DU TRAVAIL,
+  /// pas l'argent versé le jour de la paie.
+  ///
+  /// Le mois est celui de la SORTIE, comme partout ailleurs pour les heures
+  /// supplémentaires : un service commencé le 31 à 21 h et fini le 1er à 2 h
+  /// appartient au mois où il s'est terminé — c'est la nuit qui a été payée,
+  /// pas la soirée.
+  ///
+  /// Fonction pure — la liste est fournie par l'appelant — pour être
+  /// vérifiable sans Hive.
+  static int overtimePaidInCashFor(List<TimeRecord> records, String month) {
+    var total = 0;
+    for (final r in records) {
+      if (!r.hasOvertime || !r.overtimeSettled) continue;
+      if (r.overtimeSettlement != OvertimeSettlement.paidNow) continue;
+      final at = r.clockOut ?? r.createdAt;
+      if (SalaryAdvance.monthKey(at) != month) continue;
+      total += r.overtimeAmount;
+    }
+    return total;
+  }
+
+  /// Idem, lu depuis Hive.
+  static int overtimePaidInCash(String shopId, String month) =>
+      overtimePaidInCashFor(timeRecords(shopId), month);
+
   /// Masse salariale ESTIMÉE d'un mois, d'après les CONTRATS.
   ///
   /// Sans fiche de paie, la masse salariale du mois valait zéro : un restaurant
@@ -1132,10 +1171,14 @@ class StaffService {
   /// bénéfice calculé sur des fiches arrêtées.
   static ({int amount, bool estimated}) payrollOrEstimate(
       String shopId, String month) {
+    // Payées de la main à la main, donc hors de toute fiche : elles s'ajoutent
+    // aux deux branches, car l'argent est sorti quelle que soit l'avancée de
+    // la paie.
+    final cash = overtimePaidInCash(shopId, month);
     final real = payrollTotal(shopId, month);
-    if (real > 0) return (amount: real, estimated: false);
+    if (real > 0) return (amount: real + cash, estimated: false);
     return (
-      amount: payrollEstimateFor(forShop(shopId), month),
+      amount: payrollEstimateFor(forShop(shopId), month) + cash,
       estimated: true
     );
   }

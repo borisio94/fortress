@@ -150,10 +150,11 @@ Les sept canaux de sortie d'espèces sont branchés : dépenses et achats
 marché, consigne rendue, avances sur salaire, quinzaines, salaires versés,
 heures supplémentaires payées le jour même, primes de concours.
 
-⚠ Constaté le 18/09/2026 : `StaffService.cashOut` n'en connaît que DEUX dans
-`HEAD` — avances en espèces et salaires payés en espèces. Les autres
-dépendent du chantier « Notation de l'équipe », non commité. Cette section
-décrit donc un état que le dépôt n'a pas encore.
+État au 19/09/2026, après le commit du chantier « Notation de l'équipe » :
+`StaffService.cashOut` en couvre QUATRE — avances en espèces, salaires payés
+en espèces, heures supplémentaires réglées de la main à la main, primes de
+concours. Les trois autres — dépenses, achats marché, consigne rendue — ne
+passent pas par ce service mais par `DailyExpenseService`.
 
 Contrôle aveugle : le montant système n'est jamais affiché avant la saisie
 du comptage réel.
@@ -163,13 +164,6 @@ du comptage réel.
 ## 8. Écarts connus, non corrigés
 
 À traiter, dans cet ordre de gravité.
-
-**Les heures supplémentaires payées en espèces le soir même n'entrent pas au
-bilan.** ⚠ Non traitable en l'état : `OvertimeSettlement` vit dans
-`shift_evaluation.dart`, un fichier NON SUIVI par git appartenant au chantier
-« Notation de l'équipe ». Dans `HEAD`, `staff_service.dart` ne contient aucune
-occurrence de `overtime` — la notion entière est absente du dépôt. À reprendre
-quand ce chantier sera commité.
 
 **La comparaison théorique / réel ne mesure pas le gaspillage** en mode
 répartition : le théorique est calculé depuis les achats eux-mêmes. L'écart
@@ -421,6 +415,41 @@ surévalué du coût manquant. On ne peut pas inventer un coût qu'aucune donné
 porte. Seul le renseignement des fiches recettes ou du prix d'achat des plats
 concernés le comblera — et la mention de couverture est précisément là pour y
 inviter.
+
+---
+
+### Une heure supplémentaire payée le soir ne pesait pas sur le bénéfice
+
+*Corrigé le 19/09/2026 — lot 7. Il referme la moitié restée ouverte au lot 5.*
+*Commit : « fix(restaurant): une heure supplémentaire payée le soir compte dans
+la masse salariale ».*
+
+Le gérant tranche en fin de service : payées de suite, ou reportées sur la paie
+du mois. « Payées de suite » sort l'argent du tiroir immédiatement et marque le
+pointage soldé — ces heures n'entrent donc **jamais** dans une fiche de paie, et
+c'est voulu : les y porter aussi les paierait deux fois.
+
+Mais le bilan sommait les fiches. Cet argent, bien sorti, n'apparaissait nulle
+part en charge. La clôture de caisse, elle, le savait déjà : `cashOut` le déduit
+pour ne pas crier au manquant. **Seul le bilan l'ignorait** — exactement la
+maladie des avances.
+
+**Aucune décision nouvelle n'a été nécessaire** : la règle avait été tranchée au
+lot 5. La paie du bilan est le coût du travail, pas l'argent versé le jour de la
+paie.
+
+**Correction** : `overtimePaidInCashFor` somme les heures réglées `paidNow` du
+mois, et `payrollOrEstimate` les ajoute aux DEUX branches — fiches ou estimation
+contractuelle — puisque l'argent est sorti quelle que soit l'avancée de la paie.
+
+**Mois d'imputation** : celui de la SORTIE, comme partout ailleurs pour les
+heures supplémentaires. Un service commencé le 31 à 21 h et fini le 1er à 2 h
+appartient au mois où il s'est terminé — c'est la nuit qui a été payée, pas la
+soirée.
+
+**Pas de double comptage** : `settleOvertime` marque `overtimeSettled` à
+l'instant de la décision, ce qui exclut ces heures d'`overtimeToSettle`, donc de
+toute fiche.
 
 ---
 
