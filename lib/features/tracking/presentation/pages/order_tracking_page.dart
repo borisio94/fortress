@@ -55,8 +55,12 @@ class _OrderTrackingPageState extends State<OrderTrackingPage> {
     setState(() => _validating = true);
     try {
       final db = Supabase.instance.client;
+      // Le paramètre est le JETON de suivi (hotfix_173) : valider est une
+      // écriture qui engage le stock, elle exige la possession du lien. Un
+      // ancien lien porteur de l'identifiant reste lisible mais se verra
+      // refuser la validation — c'est le comportement voulu.
       final result = await db.rpc('validate_order_by_client',
-          params: {'p_order_id': widget.orderId});
+          params: {'p_tracking_token': widget.orderId});
       if (!mounted) return;
       final isOk = result == 'validated' || result == 'already_validated';
       if (isOk) {

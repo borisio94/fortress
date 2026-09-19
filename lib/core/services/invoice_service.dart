@@ -28,9 +28,29 @@ class InvoiceService {
   /// fallback. Cette méthode ne lève jamais — toute erreur est
   /// journalisée et le PDF est retourné vide (Uint8List(0)) en cas
   /// d'échec total de la composition.
+  /// Rouleau thermique 80 mm, hauteur libre — le format d'impression par
+  /// DÉFAUT. Un rouleau ne se coupe pas à une page : la hauteur est infinie et
+  /// le ticket s'allonge avec le nombre d'articles.
+  ///
+  /// Marge de 6 mm : les têtes thermiques n'impriment pas jusqu'au bord, et
+  /// une marge trop mince fait rogner les montants alignés à droite.
+  static const PdfPageFormat roll80 = PdfPageFormat(
+    80 * PdfPageFormat.mm,
+    double.infinity,
+    marginAll: 6 * PdfPageFormat.mm,
+  );
+
+  /// En dessous de cette largeur, la mise en page bascule sur le ticket.
+  /// 80 mm valent ~227 pt : le seuil laisse passer un 58 mm sans ambiguïté et
+  /// exclut l'A4 (595 pt).
+  static const double _ticketMaxWidth = 300;
+
+  /// [format] : `roll80` par défaut. Passer `PdfPageFormat.a4` pour la
+  /// facture pleine page (mise en page distincte, conservée intacte).
   static Future<Uint8List> generatePdf({
     required Sale sale,
     required ShopSummary shop,
+    PdfPageFormat format = roll80,
   }) async {
     // 1. Charger les bytes du logo (cache → fetch). Si null, on
     //    génère sans logo (fallback gracieux).
@@ -61,13 +81,238 @@ class InvoiceService {
         shopId: shop.id, logoBytes: logoBytes);
     try {
       final doc = pw.Document();
-      doc.addPage(_buildPage(sale: sale, shop: shop, theme: theme));
+      doc.addPage(format.width < _ticketMaxWidth
+          ? _buildTicketPage(
+              sale: sale, shop: shop, theme: theme, format: format)
+          : _buildPage(sale: sale, shop: shop, theme: theme));
       return doc.save();
     } catch (e, st) {
       debugPrint('[InvoiceService] genération PDF échouée : $e\n$st');
       return Uint8List(0);
     }
   }
+
+  // ══ TICKET 80 mm ════════════════════════════════════════════════
+  //
+  // Mise en page ENTIÈREMENT distincte de l'A4, et non un A4 rétréci. Sur
+  // 198 pt utiles, le tableau à quatre colonnes de la facture pleine page est
+  // impossible : ses seules colonnes fixes (qté 40 + prix 80 + total 80) les
+  // consomment déjà toutes, ne laissant rien à la désignation.
+  //
+  // Le ticket adopte donc la convention des caisses : une ligne par article
+  // pour son nom, une seconde pour « qté × prix » à gauche et le total à
+  // droite. Tout est aligné sur la pleine largeur, rien n'est mis côte à côte.
+  //
+  // Ce qui disparaît par rapport à l'A4, volontairement : le bloc de garantie
+  // (un an sur un plat n'a pas de sens, et il coûterait 3 cm de papier à
+  // chaque service) et la numérotation des pages (un rouleau n'en a qu'une).
+
+  static pw.Page _buildTicketPage({
+    required Sale          sale,
+    required ShopSummary   shop,
+    required InvoiceTheme  theme,
+    required PdfPageFormat format,
+  }) {
+    final infos = [
+      if ((sale.clientPhone ?? '').trim().isNotEmpty) sale.clientPhone!.trim(),
+      if ((sale.deliveryAddress ?? '').trim().isNotEmpty)
+        sale.deliveryAddress!.trim(),
+    ].join(' · ');
+    final client = (sale.clientName ?? '').trim();
+    final contact = [
+      if ((shop.phone ?? '').isNotEmpty) 'Tél : ${shop.phone}',
+      if ((shop.email ?? '').isNotEmpty) shop.email,
+    ].where((s) => s != null && s.toString().trim().isNotEmpty).join('\n');
+
+    return pw.Page(
+      pageFormat: format,
+      build: (_) => pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          // ── En-tête centré ───────────────────────────────────────
+          if (theme.logoBytes != null) ...[
+            pw.Center(
+              child: pw.Container(
+                constraints: const pw.BoxConstraints(
+                    maxWidth: 90, maxHeight: 50),
+                child: pw.Image(pw.MemoryImage(theme.logoBytes!),
+                    fit: pw.BoxFit.contain),
+              ),
+            ),
+            pw.SizedBox(height: 6),
+          ],
+          pw.Center(
+            child: pw.Text(shop.name,
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(
+                    fontSize: 13,
+                    fontWeight: pw.FontWeight.bold,
+                    color: theme.primary)),
+          ),
+          if (contact.isNotEmpty) ...[
+            pw.SizedBox(height: 2),
+            pw.Center(
+              child: pw.Text(contact,
+                  textAlign: pw.TextAlign.center,
+                  style: const pw.TextStyle(
+                      fontSize: 7.5, color: InvoiceTheme.textSecondary)),
+            ),
+          ],
+          pw.SizedBox(height: 6),
+          pw.Container(height: 1, color: theme.primary),
+          pw.SizedBox(height: 5),
+          pw.Center(
+            child: pw.Text(_invoiceMeta(sale),
+                style: const pw.TextStyle(
+                    fontSize: 8, color: InvoiceTheme.textPrimary)),
+          ),
+          if (client.isNotEmpty || infos.isNotEmpty) ...[
+            pw.SizedBox(height: 4),
+            pw.Center(
+              child: pw.Text(
+                  [if (client.isNotEmpty) client, if (infos.isNotEmpty) infos]
+                      .join('\n'),
+                  textAlign: pw.TextAlign.center,
+                  style: const pw.TextStyle(
+                      fontSize: 8, color: InvoiceTheme.textSecondary)),
+            ),
+          ],
+          pw.SizedBox(height: 6),
+          _ticketDivider(),
+
+          // ── Articles ─────────────────────────────────────────────
+          for (final item in sale.items) _ticketItem(item, shop),
+
+          _ticketDivider(),
+          pw.SizedBox(height: 3),
+
+          // ── Totaux ───────────────────────────────────────────────
+          _ticketLine('Sous-total', _money(sale.subtotal, shop), size: 8),
+          if (sale.discountAmount > 0)
+            _ticketLine('Remise', '− ${_money(sale.discountAmount, shop)}',
+                size: 8, color: theme.secondary),
+          if (sale.taxRate > 0)
+            _ticketLine('TVA (${sale.taxRate.toStringAsFixed(1)} %)',
+                _money(sale.taxAmount, shop), size: 8),
+          if (sale.deliveryFeeToFix)
+            _ticketLine('Livraison', 'À confirmer', size: 8)
+          else if ((sale.deliveryPrice ?? 0) > 0)
+            _ticketLine('Livraison', _money(sale.deliveryPrice!, shop),
+                size: 8),
+          ...sale.fees
+              .where((f) => ((f['amount'] as num?)?.toDouble() ?? 0) > 0)
+              .map((f) {
+            final lbl = (f['label'] as String?)?.trim();
+            return _ticketLine(
+                (lbl == null || lbl.isEmpty) ? 'Frais' : lbl,
+                _money((f['amount'] as num?)?.toDouble() ?? 0, shop),
+                size: 8);
+          }),
+          pw.SizedBox(height: 3),
+          pw.Container(height: 1, color: theme.primary),
+          pw.SizedBox(height: 3),
+          _ticketLine('TOTAL', _money(sale.total, shop),
+              size: 12, color: theme.primary, bold: true),
+          if (sale.amountPaid > 0)
+            _ticketLine('Payé', _money(sale.amountPaid, shop), size: 8),
+          if (sale.amountDue > 0)
+            _ticketLine('Reste dû', _money(sale.amountDue, shop),
+                size: 9, color: theme.secondary, bold: true),
+
+          if ((sale.notes ?? '').trim().isNotEmpty) ...[
+            pw.SizedBox(height: 6),
+            _ticketDivider(),
+            pw.Text(sale.notes!.trim(),
+                style: const pw.TextStyle(
+                    fontSize: 8, color: InvoiceTheme.textPrimary)),
+          ],
+
+          // ── Pied ─────────────────────────────────────────────────
+          pw.SizedBox(height: 8),
+          pw.Center(
+            child: pw.Text('Merci pour votre confiance',
+                style: pw.TextStyle(
+                    fontSize: 8.5,
+                    fontWeight: pw.FontWeight.bold,
+                    color: theme.primary)),
+          ),
+          pw.SizedBox(height: 2),
+          pw.Center(
+            child: pw.Text('Édité depuis Fortress POS',
+                style: const pw.TextStyle(
+                    fontSize: 7, color: InvoiceTheme.footerBrand)),
+          ),
+          // Marge basse : la lame de coupe tombe quelques millimètres sous la
+          // dernière ligne imprimée, sans quoi elle tranche le texte.
+          pw.SizedBox(height: 14),
+        ],
+      ),
+    );
+  }
+
+  /// Un article : nom sur sa ligne, « qté × prix unitaire » et total sur la
+  /// suivante. La quantité reste visible même à 1 — le client vérifie ce
+  /// qu'on lui a compté, pas seulement ce qu'il doit.
+  static pw.Widget _ticketItem(SaleItem item, ShopSummary shop) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 3),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          pw.Text(_itemLabel(item),
+              style: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                  color: InvoiceTheme.textPrimary)),
+          pw.SizedBox(height: 1),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text(
+                  '${item.quantity} × ${_money(item.effectivePrice, shop)}',
+                  style: const pw.TextStyle(
+                      fontSize: 8, color: InvoiceTheme.textSecondary)),
+              pw.Text(_money(item.subtotal, shop),
+                  style: pw.TextStyle(
+                      fontSize: 9,
+                      fontWeight: pw.FontWeight.bold,
+                      color: InvoiceTheme.textPrimary)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget _ticketLine(
+    String label,
+    String value, {
+    required double size,
+    PdfColor? color,
+    bool bold = false,
+  }) {
+    final style = pw.TextStyle(
+      fontSize: size,
+      color: color ?? InvoiceTheme.textSecondary,
+      fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+    );
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 1),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Expanded(child: pw.Text(label, style: style)),
+          pw.Text(value, style: style),
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget _ticketDivider() => pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 3),
+        child:
+            pw.Container(height: 0.5, color: InvoiceTheme.divider),
+      );
 
   // ── Page A4 unique avec MultiPage pour gérer les longues listes ──
 
@@ -76,9 +321,13 @@ class InvoiceService {
     required ShopSummary  shop,
     required InvoiceTheme theme,
   }) {
+    // `pageTheme` SEUL : le paquet `pdf` interdit de le combiner à
+    // `pageFormat` / `margin` et le vérifie par une assertion. Les deux
+    // étaient passés ici, ce qui faisait échouer la composition — et
+    // `generatePdf` avalant l'exception, la facture A4 sortait VIDE. Invisible
+    // en release, où les assertions sont retirées ; systématique en debug et
+    // en test. Le format et les marges vivent donc uniquement dans le thème.
     return pw.MultiPage(
-      pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.fromLTRB(28, 28, 28, 28),
       // Fond page constant via PageTheme — ne dépend pas du logo.
       pageTheme: pw.PageTheme(
         pageFormat: PdfPageFormat.a4,
@@ -104,6 +353,8 @@ class InvoiceService {
           pw.SizedBox(height: 14),
           _notesBlock(sale.notes!.trim(), theme),
         ],
+        pw.SizedBox(height: 14),
+        _warrantyBlock(theme),
       ],
     );
   }
@@ -350,6 +601,25 @@ class InvoiceService {
                 _totalLine('TVA (${sale.taxRate.toStringAsFixed(1)} %)',
                     _money(sale.taxAmount, shop),
                     size: 10, color: InvoiceTheme.textSecondary),
+              // Frais de livraison par quartier (PR-2/3). Le TOTAL TTC inclut
+              // déjà ce montant ; ligne dédiée pour le détail client.
+              if (sale.deliveryFeeToFix)
+                _totalLine('Livraison', 'À confirmer',
+                    size: 10, color: InvoiceTheme.textSecondary)
+              else if ((sale.deliveryPrice ?? 0) > 0)
+                _totalLine('Livraison', _money(sale.deliveryPrice!, shop),
+                    size: 10, color: InvoiceTheme.textSecondary),
+              // Autres dépenses supplémentaires (emballage…) — chacune
+              // s'ajoute au total facturé au client.
+              ...sale.fees
+                  .where((f) => ((f['amount'] as num?)?.toDouble() ?? 0) > 0)
+                  .map((f) {
+                    final lbl = (f['label'] as String?)?.trim();
+                    return _totalLine(
+                        (lbl == null || lbl.isEmpty) ? 'Frais' : lbl,
+                        _money((f['amount'] as num?)?.toDouble() ?? 0, shop),
+                        size: 10, color: InvoiceTheme.textSecondary);
+                  }),
               pw.SizedBox(height: 4),
               pw.Container(height: 1, color: InvoiceTheme.divider),
               pw.SizedBox(height: 4),
@@ -423,6 +693,38 @@ class InvoiceService {
           pw.Text(notes,
               style: const pw.TextStyle(
                   fontSize: 10, color: InvoiceTheme.textPrimary)),
+        ],
+      ),
+    );
+  }
+
+  // ── Garantie ──────────────────────────────────────────────────
+  // Mention de garantie 1 an apposée sur chaque facture (preuve d'achat).
+
+  static pw.Widget _warrantyBlock(InvoiceTheme theme) {
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.all(8),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: theme.primary, width: 0.6),
+        borderRadius: pw.BorderRadius.circular(4),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text('GARANTIE 1 AN',
+              style: pw.TextStyle(
+                  fontSize: 8,
+                  letterSpacing: 1.0,
+                  color: theme.primary,
+                  fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 3),
+          pw.Text(
+              'Vos articles sont garantis 1 an à compter de la date d\'achat '
+              '(défauts de fabrication). Conservez cette facture comme preuve '
+              'd\'achat pour bénéficier de la garantie.',
+              style: const pw.TextStyle(
+                  fontSize: 9, color: InvoiceTheme.textSecondary)),
         ],
       ),
     );

@@ -48,7 +48,7 @@ class AidePage extends StatelessWidget {
             'Retrouvez ici les réponses aux questions les plus courantes. '
             'Si vous ne trouvez pas votre réponse, contactez-nous.',
             style: AppTextStyles.bodySm
-                .copyWith(color: const Color(0xFF6B7280)),
+                .copyWith(color: AppColors.textSecondary),
           ),
           const SizedBox(height: 16),
           ..._faq.map((e) => _FaqTile(question: e.$1, answer: e.$2)),
@@ -129,14 +129,14 @@ class _FaqTile extends StatelessWidget {
           expandedAlignment: Alignment.topLeft,
           expandedCrossAxisAlignment: CrossAxisAlignment.start,
           iconColor: AppColors.primary,
-          collapsedIconColor: const Color(0xFF9CA3AF),
+          collapsedIconColor: AppColors.textHint,
           title: Text(question,
               style: AppTextStyles.body
                   .copyWith(fontWeight: FontWeight.w700)),
           children: [
             Text(answer,
                 style: AppTextStyles.bodySm.copyWith(
-                    color: const Color(0xFF4B5563), height: 1.5)),
+                    color: AppColors.textSecondary, height: 1.5)),
           ],
         ),
       ),
@@ -210,7 +210,7 @@ class _TutorialsSectionState extends State<_TutorialsSection> {
         Text(
           'Apprenez chaque fonction pas à pas, directement dans l\'application.',
           style: AppTextStyles.bodySm
-              .copyWith(color: const Color(0xFF6B7280)),
+              .copyWith(color: AppColors.textSecondary),
         ),
         const SizedBox(height: 16),
         // Sections groupées par catégorie.
@@ -275,7 +275,7 @@ class _TutorialCard extends StatelessWidget {
                   style: AppTextStyles.caption.copyWith(
                       color: seen
                           ? AppColors.secondary
-                          : const Color(0xFF9CA3AF))),
+                          : AppColors.textHint)),
             ],
           ),
         ),
@@ -327,7 +327,7 @@ class _SupportCard extends StatelessWidget {
           Text(
             'Notre équipe vous répond directement.',
             style: AppTextStyles.bodySm
-                .copyWith(color: const Color(0xFF4B5563)),
+                .copyWith(color: AppColors.textSecondary),
           ),
           const SizedBox(height: 14),
           Row(children: [

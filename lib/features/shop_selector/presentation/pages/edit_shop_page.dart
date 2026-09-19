@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../bloc/shop_selector_bloc.dart';
 import '../../../../core/services/activity_log_service.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/country_phone_data.dart';
@@ -130,9 +131,10 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
     return null;
   }
 
+  // `_sector` ne figure plus dans la détection de changement : il est figé
+  // à la création et ne peut donc jamais différer de `_origSector`.
   bool get _hasChanges =>
       _nameCtrl.text.trim()  != _origName.trim()   ||
-      _sector                != _origSector        ||
       _phoneCtrl.text.trim() != _origPhone.trim()  ||
       _waCtrl.text.trim()    != _origWa.trim()     ||
       _emailCtrl.text.trim() != _origEmail.trim()  ||
@@ -140,7 +142,6 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
 
   bool get _hasShopFieldChanges =>
       _nameCtrl.text.trim()  != _origName.trim()   ||
-      _sector                != _origSector        ||
       _phoneCtrl.text.trim() != _origPhone.trim()  ||
       _waCtrl.text.trim()    != _origWa.trim()     ||
       _emailCtrl.text.trim() != _origEmail.trim();
@@ -161,7 +162,10 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
     return UpdateShopParams(
       shopId:   widget.shopId,
       name:     name  != _origName.trim()   ? name  : null,
-      sector:   _sector != _origSector      ? _sector : null,
+      // `sector` JAMAIS envoyé : figé à la création. Le retirer ici et pas
+      // seulement de l'UI est ce qui rend le verrou réel — sinon un état
+      // résiduel ou un futur widget rebrancherait la modification sans que
+      // personne ne s'en aperçoive.
       // Pays/monnaie non modifiables ici (cohérent avec CreateShopPage)
       phone:    phone != _origPhone.trim()  ? phone : null,
       whatsappPhone: wa != _origWa.trim()   ? wa : null,
@@ -297,9 +301,9 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
                     child: Container(
                       width: isDesktop ? 480 : double.infinity,
                       decoration: isDesktop ? BoxDecoration(
-                          color: Colors.white,
+                          color: AppColors.surface,
                           borderRadius: BorderRadius.circular(20)) : null,
-                      color: isDesktop ? null : Colors.white,
+                      color: isDesktop ? null : AppColors.surface,
                       padding: EdgeInsets.symmetric(
                           horizontal: isDesktop ? 36 : 20,
                           vertical: isDesktop ? 36 : 24),
@@ -317,11 +321,11 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
                               child: Container(
                                 padding: const EdgeInsets.all(7),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFF3F4F6),
+                                  color: AppColors.inputFill,
                                   borderRadius: BorderRadius.circular(8),
                                 ),
-                                child: const Icon(Icons.close,
-                                    size: 16, color: Color(0xFF6B7280)),
+                                child: Icon(Icons.close,
+                                    size: 16, color: AppColors.textSecondary),
                               ),
                             ),
                           ]),
@@ -343,12 +347,12 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
                           Center(child: Text('Modifier la boutique',
                               style: AppTextStyles.title.copyWith(
                                   fontWeight: FontWeight.w800,
-                                  color: const Color(0xFF0F172A)))),
+                                  color: AppColors.onSurface))),
                           const SizedBox(height: 4),
                           Center(child: Text(
                               'Mettez à jour les informations de votre boutique',
                               style: AppTextStyles.bodySm.copyWith(
-                                  color: const Color(0xFF6B7280)))),
+                                  color: AppColors.textSecondary))),
                           const SizedBox(height: 28),
 
                           // ── Nom boutique ─────────────────────────
@@ -363,12 +367,18 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
                           if (_nameError != null) _ErrText(_nameError!),
                           const SizedBox(height: 14),
 
-                          // ── Secteur ──────────────────────────────
-                          AppFieldLabel('Secteur d\'activité', required: true),
-                          const SizedBox(height: 8),
-                          _SectorPicker(
-                            value: _sector,
-                            onChanged: (v) => setState(() => _sector = v),
+                          // ── Type d'établissement (LECTURE SEULE) ─
+                          // Figé à la création : il détermine toute
+                          // l'ergonomie (caisse e-commerce ou service en
+                          // salle). Le basculer sur une boutique en
+                          // exploitation laisserait des données orphelines
+                          // — commandes rattachées à des tables sur une
+                          // boutique devenue e-commerce, plan de salle
+                          // inaccessible. Cf. kCreationSectors.
+                          _ReadOnlyInfo(
+                            icon: Icons.storefront_outlined,
+                            label: 'Type d\'établissement',
+                            value: establishmentLabel(_sector),
                           ),
                           const SizedBox(height: 14),
 
@@ -396,14 +406,14 @@ class _EditShopPageState extends ConsumerState<EditShopPage> {
                               onPhoneChanged: (_, __) => setState(() {}),
                             ),
                           ),
-                          const Padding(
-                            padding: EdgeInsets.only(top: 4, left: 2),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4, left: 2),
                             child: Text(
                               'Numéro qui reçoit les conversations du '
                               'catalogue et des commandes. Laisser vide '
                               'pour utiliser le téléphone de la boutique.',
                               style: TextStyle(
-                                  fontSize: 11, color: Color(0xFF9CA3AF)),
+                                  fontSize: 11, color: AppColors.textHint),
                             ),
                           ),
                           const SizedBox(height: 14),
@@ -500,6 +510,48 @@ class _CountryInfo extends StatelessWidget {
   );
 }
 
+/// Champ non modifiable, avec cadenas — même présentation que
+/// [_CountryInfo] pour que « figé » se lise de la même façon partout.
+class _ReadOnlyInfo extends StatelessWidget {
+  final IconData icon;
+  final String label, value;
+  const _ReadOnlyInfo({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+    decoration: BoxDecoration(
+      color: AppColors.primarySurface,
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+    ),
+    child: Row(children: [
+      Icon(icon, size: 14, color: AppColors.primary),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label,
+                style: AppTextStyles.micro.copyWith(
+                    color: AppColors.primary.withValues(alpha: 0.7))),
+            Text(value,
+                style: AppTextStyles.bodySm.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+      Icon(Icons.lock_outline_rounded,
+          size: 12, color: AppColors.primary.withValues(alpha: 0.4)),
+    ]),
+  );
+}
+
 class _ErrText extends StatelessWidget {
   final String message;
   const _ErrText(this.message);
@@ -514,57 +566,6 @@ class _ErrText extends StatelessWidget {
     ),
   );
 }
-
-class _SectorPicker extends StatelessWidget {
-  final String value;
-  final ValueChanged<String> onChanged;
-  const _SectorPicker({required this.value, required this.onChanged});
-
-  static const _sectors = [
-    ('retail',      'Commerce',      Icons.storefront_rounded,           Color(0xFF6C3FC7)),
-    ('restaurant',  'Restaurant',    Icons.restaurant_rounded,           Color(0xFFEF4444)),
-    ('supermarche', 'Supermarché',   Icons.local_grocery_store_rounded,  Color(0xFF10B981)),
-    ('pharmacie',   'Pharmacie',     Icons.local_pharmacy_rounded,       Color(0xFF3B82F6)),
-    ('ecommerce',   'E-commerce',    Icons.shopping_bag_rounded,         Color(0xFFF59E0B)),
-    ('autre',       'Autre',         Icons.store_rounded,                Color(0xFF8B5CF6)),
-  ];
-
-  @override
-  Widget build(BuildContext context) => Wrap(
-    spacing: 8,
-    runSpacing: 8,
-    children: _sectors.map((s) {
-      final (key, label, icon, color) = s;
-      final selected = value == key;
-      return GestureDetector(
-        onTap: () => onChanged(key),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: selected
-                ? color.withValues(alpha:0.10) : const Color(0xFFF9FAFB),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: selected ? color : const Color(0xFFE5E7EB),
-              width: selected ? 1.5 : 1,
-            ),
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 15,
-                color: selected ? color : const Color(0xFF9CA3AF)),
-            const SizedBox(width: 6),
-            Text(label, style: AppTextStyles.bodySm.copyWith(
-                fontWeight:
-                selected ? FontWeight.w600 : FontWeight.normal,
-                color: selected ? color : const Color(0xFF6B7280))),
-          ]),
-        ),
-      );
-    }).toList(),
-  );
-}
-
 // ─── Sélecteur de magasin parent ─────────────────────────────────────────────
 class _WarehousePicker extends StatelessWidget {
   final List<StockLocation> warehouses;
@@ -582,20 +583,20 @@ class _WarehousePicker extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: const Color(0xFFF9FAFB),
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          border: Border.all(color: AppColors.divider),
         ),
         child: Row(children: [
-          const Icon(Icons.info_outline_rounded,
-              size: 14, color: Color(0xFF9CA3AF)),
+          Icon(Icons.info_outline_rounded,
+              size: 14, color: AppColors.textHint),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
                 'Aucun magasin créé. Va dans Paramètres → Emplacements de stock '
                 'pour créer un magasin central qui approvisionnera cette boutique.',
                 style: AppTextStyles.caption.copyWith(
-                    color: const Color(0xFF6B7280))),
+                    color: AppColors.textSecondary)),
           ),
         ]),
       );
@@ -610,7 +611,7 @@ class _WarehousePicker extends StatelessWidget {
         child: Text('— Aucun (boutique indépendante) —',
             overflow: TextOverflow.ellipsis,
             style: AppTextStyles.body.copyWith(
-                color: const Color(0xFF6B7280))),
+                color: AppColors.textSecondary)),
       ),
       ...warehouses.map((w) => DropdownMenuItem<String?>(
             value: w.id,
@@ -623,7 +624,7 @@ class _WarehousePicker extends StatelessWidget {
                 Text(w.name,
                     overflow: TextOverflow.ellipsis,
                     style: AppTextStyles.body.copyWith(
-                        color: const Color(0xFF0F172A))),
+                        color: AppColors.onSurface)),
               ],
             ),
           )),
@@ -635,20 +636,20 @@ class _WarehousePicker extends StatelessWidget {
       onChanged: onChanged,
       isDense: true,
       isExpanded: true, // indispensable avec des items à largeur variable
-      icon: const Icon(Icons.arrow_drop_down_rounded,
-          color: Color(0xFF9CA3AF)),
+      icon: Icon(Icons.arrow_drop_down_rounded,
+          color: AppColors.textHint),
       decoration: InputDecoration(
         filled: true,
-        fillColor: const Color(0xFFF9FAFB),
+        fillColor: AppColors.inputFill,
         isDense: true,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+            borderSide: BorderSide(color: AppColors.divider)),
         enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+            borderSide: BorderSide(color: AppColors.divider)),
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide(color: AppColors.primary, width: 1.5)),

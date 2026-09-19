@@ -517,15 +517,12 @@ Color _hashColor(String s) {
 
 // ─── Promo helpers ──────────────────────────────────────────────────────────
 
-bool _isPromoActive(ProductVariant v) {
-  if (!v.promoEnabled || v.promoPrice == null) return false;
-  final now = DateTime.now();
-  final s = v.promoStart;
-  final e = v.promoEnd;
-  if (s != null && now.isBefore(s)) return false;
-  if (e != null && now.isAfter(e))  return false;
-  return v.promoPrice! < v.priceSellPos;
-}
+/// Délègue à `ProductVariant.isPromoActive`. La règle vivait ici, en privé ;
+/// le panier ne la connaissait donc pas et facturait le plein tarif sur un
+/// article affiché en promotion. Elle est désormais portée par l'entité —
+/// cette fonction reste pour les `where(_isPromoActive)` et `every(...)` des
+/// appelants, qui attendent une fonction et non un getter.
+bool _isPromoActive(ProductVariant v) => v.isPromoActive;
 
 /// Label remise : `−X %` si toutes variantes en promo (X = pct max),
 /// `productPromoBadge` i18n si promo partielle, `null` sinon.

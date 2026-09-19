@@ -104,7 +104,7 @@ class _OnboardingSlidesPageState extends ConsumerState<OnboardingSlidesPage> {
                   const Spacer(),
                   TextButton(
                     onPressed: _finish,
-                    child: const Text('Passer',
+                    child: Text('Passer',
                         style: TextStyle(color: AppColors.textSecondary)),
                   ),
                 ],

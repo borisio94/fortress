@@ -83,7 +83,7 @@ class AppConfirmDialog extends StatelessWidget {
                     onPressed: () => Navigator.of(context).pop(false),
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size(0, 44),
-                      foregroundColor: const Color(0xFF6B7280),
+                      foregroundColor: AppColors.textSecondary,
                     ),
                     child: Text(cancelLabel),
                   ),

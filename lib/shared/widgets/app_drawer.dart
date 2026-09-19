@@ -398,7 +398,7 @@ class _DrawerHeader extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: AppTextStyles.microSecondary.copyWith(
                             fontWeight: FontWeight.w500,
-                            color: const Color(0xFF6B7280))),
+                            color: AppColors.textSecondary)),
                   ],
                 ),
               ),
@@ -490,7 +490,7 @@ class _Chip extends StatelessWidget {
           const SizedBox(width: 4),
           Text(label,
               style: AppTextStyles.microBold.copyWith(
-                  color: const Color(0xFF374151))),
+                  color: AppColors.onSurface)),
         ]),
       );
 }
@@ -603,7 +603,7 @@ class _NavTile extends StatelessWidget {
                   height: 40,
                   child: Center(
                     child: Icon(nav.icon, size: 22,
-                        color: active ? color : const Color(0xFF6B7280)),
+                        color: active ? color : AppColors.textSecondary),
                   ),
                 );
               }
@@ -614,14 +614,14 @@ class _NavTile extends StatelessWidget {
                   mainAxisSize: MainAxisSize.max,
                   children: [
                     Icon(nav.icon, size: 20,
-                        color: active ? color : const Color(0xFF6B7280)),
+                        color: active ? color : AppColors.textSecondary),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(label,
                           overflow: TextOverflow.ellipsis, maxLines: 1,
                           style: AppTextStyles.body.copyWith(
                               fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                              color: active ? color : const Color(0xFF374151))),
+                              color: active ? color : AppColors.onSurface)),
                     ),
                     if (badge > 0) ...[
                       const SizedBox(width: 6),
@@ -785,7 +785,7 @@ class _LogoutTile extends ConsumerWidget {
       title: l.navLogoutConfirmTitle,
       body: Text(l.navLogoutConfirmBody,
           style: AppTextStyles.bodySecondary.copyWith(
-              color: const Color(0xFF6B7280))),
+              color: AppColors.textSecondary)),
       cancelLabel: l.cancel,
       confirmLabel: l.navLogoutConfirmBtn,
       confirmColor: AppColors.error,
@@ -884,7 +884,7 @@ class _SyncBeforeLogoutSheetState
             l.logoutSyncDescription(widget.pending),
             textAlign: TextAlign.center,
             style: AppTextStyles.bodySecondary.copyWith(
-                color: const Color(0xFF6B7280)),
+                color: AppColors.textSecondary),
           ),
           const SizedBox(height: 24),
 

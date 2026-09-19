@@ -139,7 +139,7 @@ class _RecordAcompteDialogState extends State<RecordAcompteDialog> {
               suffixText: sym,
               isDense: true,
               filled: true,
-              fillColor: const Color(0xFFF9FAFB),
+              fillColor: AppColors.inputFill,
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide:

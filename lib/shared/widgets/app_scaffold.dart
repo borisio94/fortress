@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -26,6 +28,10 @@ class AppScaffold extends ConsumerStatefulWidget {
   final Widget? floatingActionButton;
   final Widget? bottomNavigationBar;
   final bool isRootPage;
+  /// Interception du bouton retour de l'AppBar. `null` (défaut) = retour
+  /// immédiat, comportement inchangé pour toutes les pages existantes.
+  /// Renvoyer `false` annule la sortie.
+  final Future<bool> Function()? onBeforeBack;
 
   const AppScaffold({
     super.key,
@@ -36,6 +42,7 @@ class AppScaffold extends ConsumerStatefulWidget {
     this.floatingActionButton,
     this.bottomNavigationBar,
     this.isRootPage = true,
+    this.onBeforeBack,
   });
 
   @override
@@ -98,6 +105,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
     final inAdaptive =
         context.findAncestorWidgetOfExactType<AdaptiveScaffold>() != null;
     if (inAdaptive) {
+      // (le décor restaurant est déjà géré par AdaptiveScaffold plus haut)
       if (widget.floatingActionButton == null
           && widget.bottomNavigationBar == null) {
         return widget.body;
@@ -119,9 +127,24 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
     return _buildMobile(context);
   }
 
+  /// Couleur de fond du Scaffold.
+  ///
+  /// TRANSPARENTE quand un [RestoBackdrop] est monté au-dessus (sous-pages
+  /// restaurant hors shell : addition, prise de commande). Un fond opaque y
+  /// masquerait entièrement le décor, et la page jurerait avec le reste du
+  /// mode restaurant.
+  ///
+  /// Détection par ancêtre, comme `inAdaptive` juste au-dessus : le décor ne
+  /// change pas pendant la vie de la page, aucune dépendance de rebuild n'est
+  /// nécessaire.
+  Color _scaffoldBg(BuildContext context) =>
+      context.findAncestorWidgetOfExactType<RestoBackdrop>() != null
+          ? Colors.transparent
+          : Theme.of(context).scaffoldBackgroundColor;
+
   Widget _buildDesktop(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: _scaffoldBg(context),
       body: Row(children: [
         ClipRect(
           child: AnimatedContainer(
@@ -138,13 +161,12 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
         Container(width: 1, color: Theme.of(context).semantic.borderSubtle),
         Expanded(
           child: Scaffold(
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+            backgroundColor: _scaffoldBg(context),
             appBar: _buildAppBar(context, isDesktop: true) as PreferredSizeWidget,
             body: OfflineBlockGuard(
               child: Column(
                 children: [
                   const PinLockBanner(),
-                  const OfflineBanner(),
                   const SyncStatusBanner(),
                   const SubscriptionBanner(),
                   Expanded(child: widget.body),
@@ -160,14 +182,13 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
 
   Widget _buildMobile(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: _scaffoldBg(context),
       drawer: widget.isRootPage ? AppDrawer(shopId: widget.shopId) : null,
       appBar: _buildAppBar(context, isDesktop: false) as PreferredSizeWidget,
       body: OfflineBlockGuard(
         child: Column(
           children: [
             const PinLockBanner(),
-            const OfflineBanner(),
             const SyncStatusBanner(),
             const SubscriptionBanner(),
             Expanded(child: widget.body),
@@ -192,6 +213,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
       ),
       centerTitle: isDesktop ? false : true,
       actions: [
+        const OfflineChip(),
         ...?widget.actions,
         // Badge panier
         _CartBadgeBtn(shopId: widget.shopId),
@@ -211,7 +233,17 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
       return IconButton(
         icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
         color: Theme.of(context).colorScheme.onSurface,
-        onPressed: () {
+        onPressed: () async {
+          // `PopScope` n'intercepte PAS un `context.pop()` programmatique :
+          // sans ce point d'accroche, la flèche de l'AppBar contournerait
+          // tout garde-fou de saisie non enregistrée.
+          final guard = widget.onBeforeBack;
+          if (guard != null && !await guard()) {
+            return;
+          }
+          if (!context.mounted) {
+            return;
+          }
           if (context.canPop()) context.pop();
           else context.go('/shop/${widget.shopId}/dashboard');
         },
@@ -288,26 +320,26 @@ class _NotifBtn extends StatelessWidget {
     final l = context.l10n;
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => Padding(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(width: 36, height: 4,
-              decoration: BoxDecoration(color: const Color(0xFFE5E7EB),
+              decoration: BoxDecoration(color: AppColors.divider,
                   borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 16),
           Text(l.notificationsTitle,
               style: AppTextStyles.subtitleBold),
           const SizedBox(height: 32),
-          const Icon(Icons.notifications_off_outlined,
-              size: 40, color: Color(0xFFD1D5DB)),
+          Icon(Icons.notifications_off_outlined,
+              size: 40, color: AppColors.textHint),
           const SizedBox(height: 12),
           Text('Aucune notification',
               style: AppTextStyles.bodySecondary.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: const Color(0xFF6B7280))),
+                  color: AppColors.textSecondary)),
           const SizedBox(height: 4),
           Text(
             'Les alertes liées à vos ventes et à votre stock\n'

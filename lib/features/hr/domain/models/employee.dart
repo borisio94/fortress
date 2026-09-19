@@ -15,6 +15,15 @@ class Employee {
   final String                  fullName;
   final String                  email;
   final MemberRole            role;
+
+  /// MÉTIER de la personne (Serveur, Cuisinier, Livreur…) — distinct de
+  /// [role], qui est un niveau de DROITS (admin/user). Alimente la fiche
+  /// Personnel, qui n'a plus à le redemander.
+  ///
+  /// Vide tant que la colonne `shop_memberships.job_title` n'est pas
+  /// renseignée — ou pas encore créée (hotfix_159). L'absence est traitée
+  /// comme « aucune fonction », jamais comme une erreur.
+  final String                  jobTitle;
   final EmployeeStatus          status;
   final Set<EmployeePermission> permissions;
   /// Permissions explicitement RETIRÉES (format `deny:perm` en JSONB).
@@ -33,6 +42,7 @@ class Employee {
     required this.fullName,
     required this.email,
     required this.role,
+    this.jobTitle = '',
     required this.status,
     required this.permissions,
     this.denies = const {},
@@ -50,6 +60,7 @@ class Employee {
   Employee copyWith({
     String?                  fullName,
     MemberRole?            role,
+    String?                  jobTitle,
     EmployeeStatus?          status,
     Set<EmployeePermission>? permissions,
   }) => Employee(
@@ -58,6 +69,7 @@ class Employee {
     fullName:    fullName    ?? this.fullName,
     email:       email,
     role:        role        ?? this.role,
+    jobTitle:    jobTitle    ?? this.jobTitle,
     status:      status      ?? this.status,
     permissions: permissions ?? this.permissions,
     createdAt:   createdAt,
@@ -84,6 +96,7 @@ class Employee {
       fullName:    (m['full_name']  ?? '').toString(),
       email:       (m['email']      ?? '').toString(),
       role:        MemberRoleX.fromString(m['role'] as String?),
+      jobTitle:    (m['job_title'] ?? '').toString(),
       status:      EmployeeStatusX.fromString(m['status'] as String?),
       permissions: perms,
       denies:      parsed.denies,
@@ -102,6 +115,7 @@ class Employee {
     'full_name':   fullName,
     'email':       email,
     'role':        role.key,
+    'job_title':   jobTitle,
     'status':      status.key,
     'permissions': MemberPermissions(grants: permissions, denies: denies)
                        .toList(),
@@ -125,6 +139,7 @@ class Employee {
       fullName:    (m['full_name'] ?? '').toString(),
       email:       (m['email']     ?? '').toString(),
       role:        MemberRoleX.fromString(m['role'] as String?),
+      jobTitle:    (m['job_title'] ?? '').toString(),
       status:      EmployeeStatusX.fromString(m['status'] as String?),
       permissions: perms,
       denies:      parsed.denies,

@@ -102,6 +102,24 @@ class ActivityActions {
     'order_status_changed':       ActivityCategory.sale,
     'acompte_recorded':           ActivityCategory.sale,
     'order_cancelled_by_client_from_alert': ActivityCategory.alert,
+    // Tournées « à choisir sur place ». Ces deux actions étaient ÉMISES depuis
+    // longtemps sans figurer ici : elles retombaient donc en catégorie
+    // « other », invisibles dans tous les filtres sauf « Tous ».
+    'approval_closed':            ActivityCategory.sale,
+    'approval_cancelled':         ActivityCategory.alert,
+    // Gestes de service sous PIN gérant (restaurant — Lot A). Catégorie
+    // « alerte » : ce sont les deux façons de faire sortir de l'argent sans
+    // qu'un plat sorte, ils doivent ressortir dans le filtre des actions
+    // sensibles.
+    'round_cancelled':            ActivityCategory.alert,
+    // Contrôles de caisse (restaurant — Lot C). Le X et le Z sont des faits
+    // de caisse, pas des incidents : c'est l'ÉCART qu'on lit, dans le détail.
+    'cash_closure_x':             ActivityCategory.sale,
+    'cash_closure_z':             ActivityCategory.sale,
+    'bill_discounted':            ActivityCategory.alert,
+    // Vente encaissée défaite (retour en « programmée ») : restitue stock,
+    // paiement et écritures partenaire. La porte la plus large des trois.
+    'paid_sale_reopened':         ActivityCategory.alert,
 
     // ── Clients ──────────────────────────────────────────────────────
     'client_created':             ActivityCategory.shop,

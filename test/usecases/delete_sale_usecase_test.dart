@@ -145,13 +145,14 @@ void main() {
       );
     });
 
-    test('autorise les 4 statuts éligibles : scheduled, processing, refused, '
-        'cancelled', () {
+    test('autorise 3 statuts éligibles : scheduled, refused, cancelled '
+        '(processing EXCLU — stock réservé, annuler d\'abord)', () {
       expect(DeleteSaleUseCase.allowedStatuses,
           {SaleStatus.scheduled,
-           SaleStatus.processing,
            SaleStatus.refused,
            SaleStatus.cancelled});
+      expect(DeleteSaleUseCase.allowedStatuses,
+          isNot(contains(SaleStatus.processing)));
     });
   });
 

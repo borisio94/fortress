@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/router/route_names.dart';
+import '../../../../core/services/partner_ledger_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
@@ -31,14 +33,33 @@ class _StockLocationsPageState extends ConsumerState<StockLocationsPage> {
   List<StockLocation> _locations = [];
   bool _loading = true;
 
+  late void Function(String, String) _listener;
+
   @override
   void initState() {
     super.initState();
+    // Rafraîchit la page quand le stock OU le solde partenaire change
+    // (versement, charge, transfert…) → la pastille solde reste à jour.
+    _listener = (table, sid) {
+      if (!mounted) return;
+      if (table == 'partner_ledger_entries' ||
+          table == 'stock_locations' ||
+          table == 'stock_levels') {
+        setState(() {});
+      }
+    };
+    AppDatabase.addListener(_listener);
     _load();
     // Sync silencieuse depuis Supabase en arrière-plan
     AppDatabase.syncStockLocations().then((_) {
       if (mounted) _load();
     });
+  }
+
+  @override
+  void dispose() {
+    AppDatabase.removeListener(_listener);
+    super.dispose();
   }
 
   void _load() {
@@ -54,7 +75,15 @@ class _StockLocationsPageState extends ConsumerState<StockLocationsPage> {
   }
 
   void _openContents(StockLocation loc) {
-    context.push('/shop/${widget.shopId}/parametres/locations/${loc.id}');
+    // Les dépôts partenaires ouvrent le hub partenaire unifié (onglet Stock) :
+    // stock + solde + mouvements au même endroit. Boutiques/magasins gardent
+    // la page de contenu d'emplacement classique.
+    if (loc.type == StockLocationType.partner) {
+      context.push(
+          '/shop/${widget.shopId}/parametres/partner/${loc.id}?tab=stock');
+    } else {
+      context.push('/shop/${widget.shopId}/parametres/locations/${loc.id}');
+    }
   }
 
   Future<void> _openForm({
@@ -192,6 +221,28 @@ class _StockLocationsPageState extends ConsumerState<StockLocationsPage> {
                   ),
                   const SizedBox(height: 16),
                   _Section(
+                    title: 'Dépôts partenaires',
+                    icon: Icons.local_shipping_rounded,
+                    color: AppColors.warning,
+                    subtitle: 'Sociétés de livraison ou partenaires qui '
+                        'stockent quelques pièces pour accélérer les livraisons',
+                    locations: partners,
+                    // Solde du compte partenaire affiché sur chaque carte ;
+                    // le clic ouvre le hub pour effectuer des opérations.
+                    balanceOf: (l) => PartnerLedgerService.balanceForPartner(
+                        widget.shopId, l.id),
+                    onOpen: _openContents,
+                    onEdit: AppDatabase.isSubscriptionFrozen
+                        ? null : (l) => _openForm(existing: l),
+                    onDelete: AppDatabase.isSubscriptionFrozen
+                        ? null : _confirmDelete,
+                    onCreate: () => _openForm(
+                        defaultType: StockLocationType.partner,
+                        lockType: true),
+                    createLabel: 'Nouveau dépôt partenaire',
+                  ),
+                  const SizedBox(height: 16),
+                  _Section(
                     title: 'Magasins',
                     icon: Icons.warehouse_rounded,
                     color: AppColors.info,
@@ -206,24 +257,6 @@ class _StockLocationsPageState extends ConsumerState<StockLocationsPage> {
                     onCreate: () => _openForm(
                         defaultType: StockLocationType.warehouse),
                     createLabel: 'Nouveau magasin',
-                  ),
-                  const SizedBox(height: 16),
-                  _Section(
-                    title: 'Dépôts partenaires',
-                    icon: Icons.local_shipping_rounded,
-                    color: AppColors.warning,
-                    subtitle: 'Sociétés de livraison ou partenaires qui '
-                        'stockent quelques pièces pour accélérer les livraisons',
-                    locations: partners,
-                    onOpen: _openContents,
-                    onEdit: AppDatabase.isSubscriptionFrozen
-                        ? null : (l) => _openForm(existing: l),
-                    onDelete: AppDatabase.isSubscriptionFrozen
-                        ? null : _confirmDelete,
-                    onCreate: () => _openForm(
-                        defaultType: StockLocationType.partner,
-                        lockType: true),
-                    createLabel: 'Nouveau dépôt partenaire',
                   ),
                   const SizedBox(height: 32),
                 ],
@@ -252,7 +285,7 @@ class _Hint extends StatelessWidget {
         child: Text(
           'Les emplacements te permettent de savoir où est physiquement ton '
           'stock : boutique, magasin central, ou dépôt partenaire. '
-          'Le transfert entre emplacements arrivera dans une prochaine étape.',
+          'Tu peux transférer du stock entre emplacements depuis l\'inventaire.',
           style: AppTextStyles.caption.copyWith(
               color: AppColors.primary.withValues(alpha:0.9)),
         ),
@@ -276,6 +309,10 @@ class _Section extends StatelessWidget {
   final void Function(StockLocation)? onDelete;
   final VoidCallback? onCreate;
   final String? createLabel;
+  /// Solde du compte à afficher sur la carte (partenaires uniquement) —
+  /// null = pas de solde affiché. Convention PartnerLedger : >0 le partenaire
+  /// vous doit, <0 vous lui devez, =0 à jour.
+  final double? Function(StockLocation)? balanceOf;
 
   const _Section({
     required this.title,
@@ -288,6 +325,7 @@ class _Section extends StatelessWidget {
     this.onDelete,
     this.onCreate,
     this.createLabel,
+    this.balanceOf,
   });
 
   @override
@@ -344,12 +382,13 @@ class _Section extends StatelessWidget {
                       ? 'Aucun $title pour le moment.'
                       : 'Aucun $title.',
                   style: AppTextStyles.bodySm.copyWith(
-                      color: const Color(0xFF9CA3AF))),
+                      color: AppColors.textHint)),
             )
           else
             ...locations.map((l) => _LocationTile(
                   location: l,
                   color: color,
+                  balance: balanceOf?.call(l),
                   onTap: onOpen != null ? () => onOpen!(l) : null,
                   onEdit: onEdit != null ? () => onEdit!(l) : null,
                   onDelete: onDelete != null ? () => onDelete!(l) : null,
@@ -393,6 +432,8 @@ class _Section extends StatelessWidget {
 class _LocationTile extends StatelessWidget {
   final StockLocation location;
   final Color color;
+  /// Solde du compte partenaire (null si non applicable).
+  final double? balance;
   /// Clic simple sur la tuile → ouverture du contenu.
   final VoidCallback? onTap;
   /// Édition via menu (three dots).
@@ -403,10 +444,25 @@ class _LocationTile extends StatelessWidget {
   const _LocationTile({
     required this.location,
     required this.color,
+    this.balance,
     this.onTap,
     this.onEdit,
     this.onDelete,
   });
+
+  /// Libellé court du solde, façon page Partenaires.
+  String _balanceLabel(double b) {
+    if (b > 0) return 'Vous doit ${CurrencyFormatter.format(b.abs())}';
+    if (b < 0) return 'À régler ${CurrencyFormatter.format(b.abs())}';
+    return 'Compte à jour';
+  }
+
+  Color _balanceColor(BuildContext context, double b) {
+    final sem = Theme.of(context).semantic;
+    if (b > 0) return sem.success;
+    if (b < 0) return sem.danger;
+    return AppColors.textHint;
+  }
 
   int _itemsCount() {
     // Seul le stock disponible compte pour la carte. En Phase 1, available
@@ -448,7 +504,7 @@ class _LocationTile extends StatelessWidget {
     final tile = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(children: [
@@ -469,7 +525,7 @@ class _LocationTile extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 5, vertical: 1),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFEE2E2),
+                      color: AppColors.error.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text('Inactif',
@@ -484,7 +540,22 @@ class _LocationTile extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: AppTextStyles.caption.copyWith(
-                        color: const Color(0xFF9CA3AF))),
+                        color: AppColors.textHint)),
+              ],
+              if (balance != null) ...[
+                const SizedBox(height: 3),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.account_balance_wallet_outlined,
+                      size: 11, color: _balanceColor(context, balance!)),
+                  const SizedBox(width: 3),
+                  Flexible(
+                    child: Text(_balanceLabel(balance!),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.captionBold.copyWith(
+                            color: _balanceColor(context, balance!))),
+                  ),
+                ]),
               ],
             ],
           ),
@@ -497,14 +568,14 @@ class _LocationTile extends StatelessWidget {
                 style: AppTextStyles.label.copyWith(color: color)),
             Text('unités',
                 style: AppTextStyles.micro.copyWith(
-                    color: const Color(0xFF9CA3AF))),
+                    color: AppColors.textHint)),
           ],
         ),
         if (onEdit != null || onDelete != null) ...[
           const SizedBox(width: 6),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert_rounded,
-                size: 16, color: Color(0xFF9CA3AF)),
+            icon: Icon(Icons.more_vert_rounded,
+                size: 16, color: AppColors.textHint),
             padding: EdgeInsets.zero,
             onSelected: (v) {
               if (v == 'edit') onEdit?.call();

@@ -35,6 +35,21 @@
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Fortress POS — caisse multi-boutique pour commerçants.">
 
+  <!-- ── Open Graph / aperçu réseaux sociaux (Facebook, WhatsApp, Twitter) ──
+       STATIQUE : carte Fortress générique (le crawler Facebook n'exécute pas
+       le JavaScript → impossible d'injecter des OG par boutique côté client ;
+       l'OG par boutique vit dans la Cloud Function functions/index.html, à
+       activer le jour où Blaze est dispo). Orienté client final, pas B2B. -->
+  <meta property="og:type" content="website"/>
+  <meta property="og:site_name" content="Fortress"/>
+  <meta property="og:title" content="Commandez en ligne — Catalogue"/>
+  <meta property="og:description" content="Parcourez le catalogue et commandez en quelques clics · Livraison à domicile · Paiement à la réception"/>
+  <meta property="og:image" content="https://fortress-pos.web.app/icons/Icon-512.png"/>
+  <meta name="twitter:card" content="summary_large_image"/>
+  <meta name="twitter:title" content="Commandez en ligne — Catalogue"/>
+  <meta name="twitter:description" content="Livraison à domicile · Paiement à la réception"/>
+  <meta name="twitter:image" content="https://fortress-pos.web.app/icons/Icon-512.png"/>
+
   <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
@@ -84,17 +99,40 @@
     #fortress-splash.hidden { opacity: 0; pointer-events: none; }
   </style>
 </head>
-<body>
+<body style="background:#534AB7">
   <!--
-    Purge du service worker hérité. L'ancienne stratégie PWA offline-first
-    de Flutter web enregistrait un SW qui servait obstinément une version
-    obsolète de l'app et ne se mettait jamais à jour (bug bloquant en prod).
-    On build désormais en --pwa-strategy=none (aucun SW enregistré), mais les
-    clients déjà « empoisonnés » gardent l'ancien SW actif tant qu'on ne le
-    désinstalle pas explicitement. Ce script le supprime + vide ses caches,
-    puis recharge UNE fois (garde sessionStorage anti-boucle) pour récupérer
-    les assets frais. Une fois le SW parti, getRegistrations() est vide →
-    no-op aux chargements suivants.
+    Splash de marque placé EN PREMIER dans le body → peint dès que le
+    navigateur parse le body, AVANT tout script → réduit au maximum l'écran
+    noir de démarrage (surtout dans les navigateurs in-app lents type
+    WhatsApp/Instagram). Se masque sur `flutter-first-frame`.
+  -->
+  <div id="fortress-splash" role="status" aria-label="Chargement de Fortress POS">
+    <img src="icons/Icon-192.png" alt="">
+    <div class="spinner"></div>
+    <div class="label">Fortress POS</div>
+  </div>
+  <script>
+    // Flutter dispatche cet évènement quand le 1er frame est rendu.
+    // Fallback timeout 8s au cas où l'évènement ne firerait pas (erreur boot).
+    (function () {
+      var hideSplash = function () {
+        var s = document.getElementById('fortress-splash');
+        if (!s) return;
+        s.classList.add('hidden');
+        setTimeout(function () { if (s.parentNode) s.parentNode.removeChild(s); }, 320);
+      };
+      window.addEventListener('flutter-first-frame', hideSplash);
+      setTimeout(hideSplash, 8000);
+    })();
+  </script>
+
+  <!--
+    Purge du service worker hérité (async → ne bloque pas le rendu du splash).
+    L'ancienne stratégie PWA offline-first enregistrait un SW qui servait une
+    version obsolète et ne se mettait jamais à jour. On build désormais en
+    --pwa-strategy=none ; ce script désinstalle un éventuel SW hérité + vide
+    ses caches, puis recharge UNE fois (garde sessionStorage anti-boucle).
+    getRegistrations() vide → no-op aux chargements suivants.
   -->
   <script>
     (function () {
@@ -121,37 +159,19 @@
       });
     })();
   </script>
-  <div id="fortress-splash" role="status" aria-label="Chargement de Fortress POS">
-    <img src="icons/Icon-192.png" alt="">
-    <div class="spinner"></div>
-    <div class="label">Fortress POS</div>
-  </div>
-  <script>
-    // Flutter dispatche cet évènement quand le 1er frame est rendu.
-    // Fallback timeout 8s au cas où l'évènement ne firerait pas (erreur boot).
-    (function () {
-      var hideSplash = function () {
-        var s = document.getElementById('fortress-splash');
-        if (!s) return;
-        s.classList.add('hidden');
-        setTimeout(function () { if (s.parentNode) s.parentNode.removeChild(s); }, 320);
-      };
-      window.addEventListener('flutter-first-frame', hideSplash);
-      setTimeout(hideSplash, 8000);
-    })();
-  </script>
+
   <!--
-    Cache buster — query string `v` change à chaque build (timestamp en
-    centièmes de seconde). Force le navigateur à re-fetcher
-    flutter_bootstrap.js (qui charge ensuite main.dart.js avec son propre
-    hash interne Flutter). Sans ce buster, un cache HTTP `immutable`
-    obsolète bloquait l'invalidation après chaque deploy.
+    Chargement de Flutter via createElement (PAS document.write, qui peut
+    retarder le 1er rendu du splash). Cache-buster `v` = timestamp par build →
+    force le re-fetch de flutter_bootstrap.js après chaque deploy.
   -->
   <script>
-    document.write(
-      '<script src="flutter_bootstrap.js?v=' +
-      Date.now() + '" async><\/script>'
-    );
+    (function () {
+      var s = document.createElement('script');
+      s.src = 'flutter_bootstrap.js?v=' + Date.now();
+      s.async = true;
+      document.body.appendChild(s);
+    })();
   </script>
 </body>
 </html>

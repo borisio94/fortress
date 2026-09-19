@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/services/storage_service.dart';
 import '../../core/theme/app_theme.dart';
 
 /// Image produit unifiée — `BoxFit.cover` + ratio fixe (1:1 par défaut),
@@ -77,11 +78,15 @@ class ProductImageCard extends StatelessWidget {
       // déformant les photos non carrées AVANT le BoxFit.cover. En ne
       // passant que la largeur, la hauteur est calculée proportionnellement
       // → ratio préservé, recadrage propre par cover.
-      // < 400 : pixelisation visible sur les cards de catalogue rétina.
-      // > 1600 : la source PNG produit fait 1600 px max (cf.
-      //   image_validation.dart maxOutputSize), inutile d'allouer
-      //   un buffer plus grand que la source réelle.
-      final cachePx = (logical * dpr).clamp(400.0, 1600.0).toInt();
+      // Borné [160, 1600]. Plancher BAS (160) volontaire : les TRÈS petites
+      // vignettes (liste produits ~48-64 px, swatches) doivent recevoir une
+      // image proche de leur taille. Un plancher haut (ex. 400) sur-provisionne
+      // la source → downscale à fort ratio → flou sur web/CanvasKit (pas de
+      // mipmaps). La résolution rétina des GRANDES cards reste couverte par
+      // `logical × dpr` (qui dépasse 400 dès qu'une card est grande × DPR>1).
+      // > 1600 : la source produit fait ~1600 px max (image_validation), inutile
+      //   d'allouer un buffer plus grand.
+      final cachePx = (logical * dpr).clamp(160.0, 1600.0).toInt();
       return _content(theme, cachePx);
     });
 
@@ -134,6 +139,34 @@ class ProductImageCard extends StatelessWidget {
   // peut renvoyer une frame vide silencieusement. Sur mobile/desktop, on
   // le garde — économie mémoire ×4 typique (source 1600 px → cible 400 px).
   Widget _network(ThemeData theme, String url, int cachePx) {
+    // On charge une image REDIMENSIONNÉE CÔTÉ SERVEUR (transform Supabase) à
+    // une largeur PROCHE de l'affichage réel [cachePx], au lieu de l'image
+    // brute ~1600 px réduite en une passe (flou web/CanvasKit à fort ratio).
+    // « Bucketée » par pas de 160 px (plancher 160) pour limiter la
+    // fragmentation cache/CDN tout en collant à la taille des petites vignettes.
+    final renderW = ((cachePx / 160).ceil() * 160).clamp(160, 1600);
+    final tUrl    = StorageService.thumbUrl(url, width: renderW);
+    return CachedNetworkImage(
+      imageUrl:       tUrl,
+      cacheKey:       tUrl,
+      memCacheWidth:  kIsWeb ? null : cachePx,
+      fit:            BoxFit.cover,
+      width:          double.infinity,
+      height:         double.infinity,
+      filterQuality:  FilterQuality.high,
+      fadeInDuration: const Duration(milliseconds: 200),
+      placeholder:    (_, __) => _skeleton(theme),
+      // Repli sur l'image brute si le transform échoue (endpoint indispo). Si
+      // l'URL n'est pas du stockage Supabase, `thumbUrl` la renvoie telle
+      // quelle (tUrl == url) → repli direct sur le placeholder.
+      errorWidget:    tUrl == url
+          ? (_, __, ___) => _placeholder(theme)
+          : (_, __, ___) => _networkRaw(theme, url, cachePx),
+    );
+  }
+
+  /// Repli : image brute (sans transform serveur), même cache disque.
+  Widget _networkRaw(ThemeData theme, String url, int cachePx) {
     return CachedNetworkImage(
       imageUrl:       url,
       cacheKey:       url,
@@ -142,7 +175,6 @@ class ProductImageCard extends StatelessWidget {
       width:          double.infinity,
       height:         double.infinity,
       filterQuality:  FilterQuality.high,
-      fadeInDuration: const Duration(milliseconds: 200),
       placeholder:    (_, __) => _skeleton(theme),
       errorWidget:    (_, __, ___) => _placeholder(theme),
     );

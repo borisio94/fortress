@@ -34,7 +34,7 @@ class DeliveryModeSelector extends StatelessWidget {
             Text('Mode de livraison',
                 style: AppTextStyles.label.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: const Color(0xFF0F172A))),
+                    color: AppColors.onSurface)),
             const SizedBox(height: 12),
             _ModeTile(
               icon: Icons.store_rounded,
@@ -123,18 +123,18 @@ class _ModeTile extends StatelessWidget {
             children: [
               Text(label,
                   style: AppTextStyles.bodyBold.copyWith(
-                      color: selected ? color : const Color(0xFF0F172A))),
+                      color: selected ? color : AppColors.onSurface)),
               const SizedBox(height: 2),
               Text(subtitle,
                   style: AppTextStyles.captionHint
-                      .copyWith(color: const Color(0xFF9CA3AF))),
+                      .copyWith(color: AppColors.textHint)),
             ],
           ),
         ),
         Icon(
             selected ? Icons.radio_button_checked : Icons.radio_button_off_rounded,
             size: 16,
-            color: selected ? color : const Color(0xFFBBBBBB)),
+            color: selected ? color : AppColors.textHint),
       ]),
     ),
   );
@@ -178,10 +178,10 @@ class _PersonNameFieldState extends State<_PersonNameField> {
       decoration: InputDecoration(
         hintText: 'Nom du livreur (optionnel)',
         hintStyle: AppTextStyles.bodySm
-            .copyWith(color: const Color(0xFFBBBBBB)),
-        prefixIcon: const Icon(Icons.person_outline, size: 15,
-            color: Color(0xFFAAAAAA)),
-        filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
+            .copyWith(color: AppColors.textHint),
+        prefixIcon: Icon(Icons.person_outline, size: 15,
+            color: AppColors.textHint),
+        filled: true, fillColor: AppColors.inputFill, isDense: true,
         contentPadding: const EdgeInsets.symmetric(
             horizontal: 12, vertical: 10),
         border: OutlineInputBorder(
@@ -272,7 +272,7 @@ class _PartnerSectionState extends State<_PartnerSection> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppTextStyles.body
-                            .copyWith(color: const Color(0xFF0F172A))),
+                            .copyWith(color: AppColors.onSurface)),
                   ),
                 ]),
               )).toList(),
@@ -286,7 +286,7 @@ class _PartnerSectionState extends State<_PartnerSection> {
               isDense: true,
               isExpanded: true,
               decoration: InputDecoration(
-                filled: true, fillColor: const Color(0xFFF9FAFB),
+                filled: true, fillColor: AppColors.inputFill,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 10),

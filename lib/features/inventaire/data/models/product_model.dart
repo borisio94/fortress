@@ -81,6 +81,11 @@ class ProductModel {
   final int      stockMinAlert;
   final bool     isActive;
   final bool     isVisibleWeb;
+  /// Suivi de stock (hotfix_138). Défaut true = comportement historique.
+  final bool     trackStock;
+  /// Secteur restaurant — `restaurant_activities.id` (hotfix_141). null hors
+  /// restauration.
+  final String?  activityId;
   final String?  imageUrl;
   final int      rating;
   final List<ProductVariantModel> variants;
@@ -103,6 +108,8 @@ class ProductModel {
     this.stockMinAlert = 5,
     this.isActive      = true,
     this.isVisibleWeb  = false,
+    this.trackStock    = true,
+    this.activityId,
     this.imageUrl,
     this.rating        = 0,
     this.variants      = const [],
@@ -126,6 +133,8 @@ class ProductModel {
     stockMinAlert: (m['stock_min_alert'] as num?)?.toInt() ?? 5,
     isActive:      m['is_active']      as bool? ?? true,
     isVisibleWeb:  m['is_visible_web']  as bool? ?? false,
+    trackStock:    m['track_stock']     as bool? ?? true,
+    activityId:    m['activity_id']    as String?,
     imageUrl:      m['image_url']      as String?,
     rating:        (m['rating']        as num?)?.toInt() ?? 0,
     variants:      (m['variants'] as List? ?? [])
@@ -151,6 +160,8 @@ class ProductModel {
     'stock_min_alert':stockMinAlert,
     'is_active':      isActive,
     'is_visible_web': isVisibleWeb,
+    'track_stock':    trackStock,
+    'activity_id':    activityId,
     'image_url':      imageUrl,
     'rating':         rating,
     'variants':       variants.map((v) => v.toMap()).toList(),
@@ -174,6 +185,8 @@ class ProductModel {
     stockMinAlert: p.stockMinAlert,
     isActive:      p.isActive,
     isVisibleWeb:  p.isVisibleWeb,
+    trackStock:    p.trackStock,
+    activityId:    p.activityId,
     imageUrl:      p.imageUrl,
     rating:        p.rating,
     variants:      p.variants.map(ProductVariantModel.fromEntity).toList(),
@@ -197,6 +210,8 @@ class ProductModel {
     stockMinAlert: stockMinAlert,
     isActive:      isActive,
     isVisibleWeb:  isVisibleWeb,
+    trackStock:    trackStock,
+    activityId:    activityId,
     imageUrl:      imageUrl,
     rating:        rating,
     variants:      variants.map((v) => v.toEntity()).toList(),

@@ -25,7 +25,7 @@ class ShopComparisonPage extends StatelessWidget {
             child: Container(height: 1, color: Theme.of(context).semantic.borderSubtle)),
       ),
       body: Center(child: Text(l.hubCompare,
-          style: const TextStyle(color: Color(0xFF6B7280)))),
+          style: TextStyle(color: AppColors.textSecondary))),
     );
   }
 }

@@ -11,11 +11,15 @@ import '../../../../core/services/storage_service.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/utils/image_validation.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/theme/app_text_styles.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_section_card.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/app_switch.dart';
+import '../../../../shared/widgets/barcode_scanner_page.dart';
+import '../../../../shared/widgets/upload_status_dot.dart';
 import '../../../../shared/widgets/form_sheet.dart';
+import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../core/widgets/danger_confirm_dialog.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/i18n/app_localizations.dart';
@@ -74,6 +78,10 @@ class _Variant {
   /// stock initial ; les variantes existantes utilisent les indicateurs +
   /// le dialogue "Corriger" à la place.
   bool    isNew      = true;
+  /// Contrôle d'unicité du SKU, évalué pendant la frappe (anti-rebond).
+  _SkuStatus skuStatus = _SkuStatus.empty;
+  /// Nom du produit qui occupe déjà ce SKU, pour pouvoir le nommer.
+  String?    skuConflictName;
 
   void dispose() {
     name.dispose(); sku.dispose(); barcode.dispose();
@@ -85,10 +93,21 @@ class _Variant {
   }
 }
 
+/// État du contrôle d'unicité du SKU pendant la saisie.
+enum _SkuStatus { empty, checking, available, taken }
+
 class _Expense {
   final TextEditingController description = TextEditingController();
   final TextEditingController amount      = TextEditingController(text: '0');
   void dispose() { description.dispose(); amount.dispose(); }
+}
+
+/// Erreur de validation rattachée à l'étape qui la porte (0-indexée), pour
+/// pouvoir y ramener l'utilisateur au lieu d'échouer depuis une autre étape.
+class _StepError {
+  final int    step;
+  final String message;
+  const _StepError(this.step, this.message);
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -105,10 +124,18 @@ class ProductFormExtra {
   final Product product;
   final String? focusVariantId;
   final bool addNewVariant;
+
+  /// Le produit vient de l'AJOUT RAPIDE et n'est pas encore enregistré : on
+  /// poursuit une saisie, on ne modifie pas une fiche existante. Sert
+  /// uniquement au titre de l'écran — sans lui, un produit neuf s'ouvrirait
+  /// sous « Modifier le produit », ce qui ferait croire qu'il existe déjà.
+  final bool isQuickAddContinuation;
+
   const ProductFormExtra({
     required this.product,
     this.focusVariantId,
     this.addNewVariant = false,
+    this.isQuickAddContinuation = false,
   });
 }
 
@@ -123,6 +150,10 @@ class _ProductFormPageState extends State<ProductFormPage> {
   final _pageCtrl = PageController();
   int  _step      = 0;
   static const _totalSteps = 3;
+
+  /// Saisie poursuivie depuis l'ajout rapide (cf. [ProductFormExtra]) :
+  /// change le titre, rien d'autre.
+  bool _isQuickAddContinuation = false;
 
   final _keys = List.generate(3, (_) => GlobalKey<FormState>());
 
@@ -141,6 +172,11 @@ class _ProductFormPageState extends State<ProductFormPage> {
     if (e is ProductFormExtra) return e.product;
     return null;
   }
+
+  /// `true` en création (aucun produit transmis). Sert à n'exiger marque et
+  /// catégorie qu'à ce moment-là : un produit déjà au catalogue peut ne pas
+  /// en avoir, et on ne veut pas rendre sa modification impossible.
+  bool get _isCreating => _editingProduct == null;
 
   /// Fournisseur choisi via le picker — permet d'afficher les infos
   /// (téléphone, email, adresse) en dessous. `null` si saisie manuelle.
@@ -167,6 +203,9 @@ class _ProductFormPageState extends State<ProductFormPage> {
   // Visibilité web activée par défaut à la CRÉATION (en édition, écrasée par
   // la valeur du produit dans _fillFromProduct, gardé après `if (p == null)`).
   bool  _isVisibleWeb = true;
+  // Suivi de stock activé par défaut (hotfix_138) : le comportement
+  // historique reste la norme, on ne le désactive que volontairement.
+  bool  _trackStock   = true;
   int   _rating       = 0;
 
   // ── Calculs ───────────────────────────────────────────────────────
@@ -182,6 +221,14 @@ class _ProductFormPageState extends State<ProductFormPage> {
   @override
   void initState() {
     super.initState();
+    // LU TOUT DE SUITE, et non dans le post-frame ci-dessous : le titre est
+    // peint dès la première frame. Laissé à `_prefillIfEdit`, il se serait
+    // affiché « Modifier le produit » avant de changer — ou de ne jamais
+    // changer, faute de reconstruction déclenchée.
+    final raw = widget.extra;
+    if (raw is ProductFormExtra) {
+      _isQuickAddContinuation = raw.isQuickAddContinuation;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadCategories();
       _prefillIfEdit();
@@ -199,6 +246,9 @@ class _ProductFormPageState extends State<ProductFormPage> {
       final base = _Variant()..isMain = true..isExpanded = true;
       setState(() => _variants.add(base));
     }
+    // En création, `_prefillIfEdit` ne pose pas d'empreinte : on la capture
+    // ici, formulaire vide, pour que la moindre saisie soit détectée.
+    _initialSignature ??= _formSignature();
   }
 
   /// Charge les fournisseurs actifs de la boutique depuis Hive.
@@ -232,12 +282,15 @@ class _ProductFormPageState extends State<ProductFormPage> {
       p = raw.product;
       focusVariantId = raw.focusVariantId;
       addNewVariant = raw.addNewVariant;
+      // `_isQuickAddContinuation` est déjà posé dans initState (voir là-bas).
     }
     if (p == null) return;
     _nameCtrl.text    = p.name;
     _brandCtrl.text   = p.brand ?? '';
     if (p.brand != null && p.brand!.isNotEmpty) _brand = p.brand!;
     _descCtrl.text    = p.description ?? '';
+    _notesCtrl.text   = p.internalNotes ?? '';
+    if (p.unit != null && p.unit!.isNotEmpty) _unit = p.unit!;
     _taxRateCtrl.text = p.taxRate.toString();
     // Fournisseur global — lire depuis la première variante
     final firstVariant = p.variants.isNotEmpty ? p.variants.first : null;
@@ -247,6 +300,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
     _selectedSupplier = _matchSupplierByName(_supplierCtrl.text);
     _isActive         = p.isActive;
     _isVisibleWeb     = p.isVisibleWeb;
+    _trackStock       = p.trackStock;
     _rating           = p.rating;
 
     final cat = p.categoryId ?? 'Autre';
@@ -282,6 +336,10 @@ class _ProductFormPageState extends State<ProductFormPage> {
         if (v.promoPrice != null) nv.promoPrice.text = v.promoPrice!.toStringAsFixed(0);
         nv.promoStart            = v.promoStart;
         nv.promoEnd              = v.promoEnd;
+        if (v.weightG  != null) nv.weight.text = v.weightG!.toStringAsFixed(0);
+        if (v.lengthCm != null) nv.length.text = v.lengthCm!.toStringAsFixed(0);
+        if (v.widthCm  != null) nv.width.text  = v.widthCm!.toStringAsFixed(0);
+        if (v.heightCm != null) nv.height.text = v.heightCm!.toStringAsFixed(0);
         _variants.add(nv);
       }
       // Si focus actif, ouvrir directement l'étape 2 (Variantes).
@@ -299,7 +357,22 @@ class _ProductFormPageState extends State<ProductFormPage> {
         for (final existing in _variants) {
           existing.isExpanded = false;
         }
-        _variants.add(_Variant()..isExpanded = true..isNew = true);
+        // Point de départ repris du produit parent : une nouvelle déclinaison
+        // se vend presque toujours au même prix et vient du même fournisseur.
+        // Restent VIDES le nom (c'est ce qui la distingue : « Taille L »,
+        // « Rouge »…), le SKU (il doit être unique) et le stock (chaque
+        // variante a le sien).
+        //
+        // On est ici forcément dans la branche `p.variants.isNotEmpty` :
+        // la première variante existe toujours et sert de gabarit.
+        final ref = p.variants.first;
+        final nv  = _Variant()..isExpanded = true..isNew = true;
+        nv.purchasePrice.text = ref.priceBuy     > 0 ? ref.priceBuy.toString()     : '';
+        nv.salePricePos.text  = ref.priceSellPos > 0 ? ref.priceSellPos.toString() : '';
+        nv.salePriceWeb.text  = ref.priceSellWeb > 0 ? ref.priceSellWeb.toString() : '';
+        nv.supplier.text      = ref.supplier    ?? '';
+        nv.supplierRef.text   = ref.supplierRef ?? '';
+        _variants.add(nv);
         _step = 1;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && _pageCtrl.hasClients) {
@@ -334,10 +407,13 @@ class _ProductFormPageState extends State<ProductFormPage> {
       _expenses.add(ex);
     }
     setState(() => _category = cat);
+    _initialSignature = _formSignature();
   }
 
   @override
   void dispose() {
+    _skuDebounce?.cancel();
+    _nameDebounce?.cancel();
     for (final c in [_nameCtrl, _brandCtrl, _descCtrl, _notesCtrl,
       _taxRateCtrl, _pageCtrl]) c.dispose();
     for (final v in _variants) v.dispose();
@@ -368,12 +444,392 @@ class _ProductFormPageState extends State<ProductFormPage> {
 
   bool _isSaving = false;
 
+  /// Anti-rebond du contrôle de SKU. Un seul suffit : on ne saisit que dans
+  /// un champ à la fois.
+  Timer? _skuDebounce;
+
+  /// Produits déjà au catalogue dont le nom ressemble à celui qu'on saisit.
+  /// Évite de recréer une fiche qui existe — un doublon se paie ensuite en
+  /// stock éclaté sur deux références.
+  List<Product> _similarProducts = [];
+  Timer? _nameDebounce;
+
+  /// Frappe dans le champ Nom : rafraîchit la complétude, puis cherche les
+  /// homonymes après une pause. Sans l'anti-rebond, on parcourrait tout le
+  /// catalogue à chaque caractère.
+  void _onNameChanged(String value) {
+    setState(() {});
+    _nameDebounce?.cancel();
+    final q = value.trim();
+    if (q.length < 3) {
+      if (_similarProducts.isNotEmpty) {
+        setState(() => _similarProducts = []);
+      }
+      return;
+    }
+    _nameDebounce = Timer(const Duration(milliseconds: 500), () async {
+      final found =
+          await AppDatabase.searchProductsByName(widget.shopId, q);
+      if (!mounted) return;
+      setState(() => _similarProducts = found
+          .where((p) => p.id != _editingProduct?.id)
+          .take(3)
+          .toList());
+    });
+  }
+
+  /// Empreinte du formulaire juste après le pré-remplissage. Sert à savoir
+  /// s'il y a vraiment quelque chose à perdre : sans elle, on ouvrirait le
+  /// dialogue de sortie même quand l'utilisateur n'a rien touché.
+  String? _initialSignature;
+
+  /// Id du brouillon déjà écrit, pour que deux sorties successives mettent à
+  /// jour la MÊME fiche au lieu d'en empiler une par sortie.
+  String? _draftId;
+
   void _submit() {
     if (_isSaving) return;
+    // Contrôle de TOUTES les étapes, pas seulement celle affichée. La barre
+    // d'étapes permet d'atterrir directement sur l'étape 3 : sans ça, on
+    // enregistre un produit dont le SKU ou le prix d'achat est vide, et rien
+    // ne le signale avant l'écriture — ou jamais.
+    final err = _validateAllSteps();
+    if (err != null) {
+      if (_step != err.step) _goTo(err.step);
+      AppSnack.error(context, err.message);
+      return;
+    }
     if (_keys[_step].currentState?.validate() == false) {
       _showValidationError(); return;
     }
     _saveProduct();
+  }
+
+  /// Renvoie la première erreur trouvée avec son étape, `null` si tout est bon.
+  ///
+  /// Reproduit exactement les règles des validateurs de champ déjà en place —
+  /// on ne durcit rien, on les rend seulement atteignables depuis n'importe
+  /// quelle étape. Seules marque et catégorie sont nouvelles, et uniquement
+  /// à la création (cf. [_isCreating]).
+  _StepError? _validateAllSteps() {
+    // ── Étape 1 ────────────────────────────────────────────────────────
+    if (_nameCtrl.text.trim().isEmpty) {
+      return const _StepError(0, 'Le nom du produit est requis');
+    }
+    if (_isCreating) {
+      if (_category.trim().isEmpty) {
+        return const _StepError(0, 'La catégorie est requise');
+      }
+      if (_brand.trim().isEmpty) {
+        return const _StepError(0, 'La marque est requise');
+      }
+    }
+
+    // ── Étape 2 ────────────────────────────────────────────────────────
+    final seenSku = <String>{};
+    for (final v in _variants) {
+      if (v.name.text.trim().isEmpty) {
+        return const _StepError(1, 'Chaque variante doit porter un nom');
+      }
+      final label = '« ${v.name.text.trim()} »';
+      if (v.sku.text.trim().isEmpty) {
+        return _StepError(1, 'Le SKU est requis pour $label');
+      }
+      if (!seenSku.add(v.sku.text.trim().toLowerCase())) {
+        return _StepError(1,
+            'Le SKU « ${v.sku.text.trim()} » est utilisé par deux variantes');
+      }
+      if (v.skuStatus == _SkuStatus.taken) {
+        return _StepError(1, v.skuConflictName == null
+            ? 'Le SKU de $label est déjà utilisé par un autre produit'
+            : 'Le SKU de $label est déjà pris par « ${v.skuConflictName} »');
+      }
+      if (v.purchasePrice.text.trim().isEmpty) {
+        return _StepError(1, 'Le prix d\'achat est requis pour $label');
+      }
+      // Les champs de stock n'existent pas en mode « sur commande », et le
+      // stock d'une variante déjà enregistrée passe par « Corriger ».
+      if (_trackStock) {
+        if (v.stockAlert.text.trim().isEmpty) {
+          return _StepError(1, 'L\'alerte de stock est requise pour $label');
+        }
+        if (v.isNew && v.stock.text.trim().isEmpty) {
+          return _StepError(1, 'Le stock initial est requis pour $label');
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Texte du bandeau d'avertissement affiché en MODIFICATION quand marque
+  /// ou catégorie manque — non bloquant (cf. [_validateAllSteps]).
+  String _missingTaxonomyWarning() {
+    final missing = <String>[
+      if (_category.trim().isEmpty) 'de catégorie',
+      if (_brand.trim().isEmpty)    'de marque',
+    ];
+    final list = missing.join(' ni ');
+    return 'Ce produit n\'a pas $list. Vous pouvez l\'enregistrer ainsi, '
+        'mais il sera absent des filtres du catalogue en ligne et plus '
+        'difficile à retrouver en caisse.';
+  }
+
+  /// Suppression d'une variante — jamais immédiate.
+  ///
+  /// Avant, la croix retirait la variante sur-le-champ, y compris une variante
+  /// DÉJÀ ENREGISTRÉE avec du stock : la ligne disparaissait, et
+  /// l'enregistrement la retirait définitivement du produit (niveaux de stock
+  /// orphelins, lignes de commande pointant dans le vide).
+  Future<void> _confirmRemoveVariant(_Variant v) async {
+    final named = v.name.text.trim();
+    final title = named.isEmpty ? 'cette variante' : '« $named »';
+    final saved = !v.isNew;
+    final stock = int.tryParse(v.stock.text.trim()) ?? 0;
+
+    final String body;
+    if (saved && stock > 0) {
+      body = 'Cette variante est enregistrée et il lui reste $stock '
+          'unité${stock > 1 ? 's' : ''} en stock. La supprimer retire ce stock '
+          'du produit. Irréversible une fois le produit enregistré.';
+    } else if (saved) {
+      body = 'Cette variante est déjà enregistrée. Irréversible une fois le '
+          'produit enregistré.';
+    } else {
+      body = 'Cette variante n\'a pas encore été enregistrée.';
+    }
+
+    final ok = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.delete_outline_rounded,
+      title: 'Supprimer $title ?',
+      body: Text(body, style: TextStyle(fontSize: 12, height: 1.45,
+          color: AppColors.textSecondary)),
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Supprimer',
+      onConfirm: () {},
+    );
+    if (ok != true || !mounted) return;
+    // Retrait PAR RÉFÉRENCE, pas par index : entre l'ouverture de la feuille
+    // et la confirmation, la liste a pu bouger.
+    setState(() { if (_variants.remove(v)) v.dispose(); });
+  }
+
+  /// Concatène tout ce qui est saisissable. Volontairement grossier : on ne
+  /// cherche pas à dire QUOI a changé, seulement SI quelque chose a changé.
+  String _formSignature() => [
+    _nameCtrl.text, _brandCtrl.text, _descCtrl.text, _notesCtrl.text,
+    _supplierCtrl.text, _supplierRefCtrl.text, _taxRateCtrl.text,
+    _category, _brand, _unit,
+    '$_isActive|$_isVisibleWeb|$_trackStock|$_rating',
+    for (final v in _variants)
+      '${v.name.text}|${v.sku.text}|${v.barcode.text}|'
+      '${v.purchasePrice.text}|${v.salePricePos.text}|${v.salePriceWeb.text}|'
+      '${v.stock.text}|${v.stockAlert.text}|${v.promoEnabled}|'
+      '${v.promoPrice.text}|${v.imageBytes?.length ?? 0}|'
+      '${v.secondaryImageBytes.length}',
+    for (final e in _expenses) '${e.description.text}|${e.amount.text}',
+  ].join('¦');
+
+  bool _hasUnsavedChanges() =>
+      _initialSignature != null && _formSignature() != _initialSignature;
+
+  /// Complétude de la fiche, de 0 à 1. Pondère ce qui compte réellement
+  /// pour vendre : sans prix ni stock un produit n'est pas exploitable,
+  /// alors qu'une catégorie manquante ne gêne que les filtres.
+  double get _profileCompletion {
+    final v = _variants.isEmpty ? null : _variants.first;
+    var score = 0.0;
+    if (_nameCtrl.text.trim().isNotEmpty)               score += 0.20;
+    if (_category.trim().isNotEmpty)                    score += 0.10;
+    if ((double.tryParse(v?.purchasePrice.text ?? '') ?? 0) > 0) score += 0.20;
+    if ((double.tryParse(v?.salePricePos.text ?? '')  ?? 0) > 0) score += 0.20;
+    // Un article sur commande n'a pas de stock à renseigner : on ne lui
+    // reproche pas une case qu'on lui retire.
+    if (!_trackStock || (int.tryParse(v?.stock.text ?? '') ?? 0) > 0) {
+      score += 0.15;
+    }
+    if (_variants.any((x) => x.imageBytes != null || x.imageUrl != null)) {
+      score += 0.15;
+    }
+    return score.clamp(0.0, 1.0);
+  }
+
+  /// Retourne `true` si la page peut se fermer.
+  ///
+  /// « Garder le brouillon » n'est proposé QU'EN CRÉATION : appliqué à un
+  /// produit déjà publié, l'enregistrement en brouillon le dépublierait
+  /// (`isActive: false` + statut brouillon) — un effet de bord inacceptable
+  /// sur une fiche en ligne.
+  Future<bool> _confirmExit() async {
+    if (!_hasUnsavedChanges()) return true;
+    final canDraft = _isCreating;
+    final choice = await showFormSheet<String>(
+      context: context,
+      builder: (dc) => SafeArea(
+        top: false,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const FormSheetHeader(
+              title: 'Quitter sans enregistrer ?',
+              icon: Icons.help_outline_rounded),
+          Divider(height: 1, color: Theme.of(dc).semantic.borderSubtle),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+            child: Text(
+              canDraft
+                  ? 'Votre saisie n\'est pas enregistrée. Vous pouvez la '
+                    'garder en brouillon et la reprendre plus tard : le '
+                    'produit ne sera ni vendable ni visible en ligne.'
+                  : 'Vos modifications ne sont pas enregistrées et seront '
+                    'perdues.',
+              style: TextStyle(fontSize: 12, height: 1.45,
+                  color: AppColors.textSecondary)),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: Column(children: [
+              SizedBox(width: double.infinity, height: 46,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(dc).pop('stay'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white, elevation: 0,
+                    minimumSize: const Size(0, 46),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10))),
+                  child: const Text('Continuer à modifier'))),
+              if (canDraft) ...[
+                const SizedBox(height: 8),
+                SizedBox(width: double.infinity, height: 46,
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.of(dc).pop('draft'),
+                    icon: const Icon(Icons.bookmark_outline_rounded, size: 18),
+                    label: const Text('Garder le brouillon'),
+                    style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 46)))),
+              ],
+              const SizedBox(height: 8),
+              SizedBox(width: double.infinity, height: 46,
+                child: TextButton(
+                  onPressed: () => Navigator.of(dc).pop('leave'),
+                  style: TextButton.styleFrom(
+                      foregroundColor: AppColors.error,
+                      minimumSize: const Size(0, 46)),
+                  child: const Text('Quitter sans enregistrer'))),
+            ]),
+          ),
+        ]),
+      ),
+    );
+    if (choice == 'draft') return _saveDraft();
+    return choice == 'leave';
+  }
+
+  /// Écrit la saisie en cours comme brouillon. Chemin de sauvegarde normal
+  /// (`AppDatabase.saveProduct`), jamais `_doSaveProduct` — qui reste
+  /// réservé à l'enregistrement réel et n'est pas touché.
+  ///
+  /// `skipValidation` : un brouillon est par nature incomplet, son SKU peut
+  /// être vide ou déjà pris. Le refuser reviendrait à perdre la saisie,
+  /// c'est-à-dire exactement ce qu'on cherche à éviter. Les contrôles
+  /// d'unicité s'appliqueront à l'enregistrement définitif.
+  ///
+  /// Limite assumée : les images choisies mais pas encore envoyées ne sont
+  /// PAS mises en file pour un brouillon — la file est plafonnée à 50
+  /// entrées et sert les produits réels. Les images déjà en ligne restent.
+  Future<bool> _saveDraft() async {
+    try {
+      final now = DateTime.now();
+      final id  = _draftId ?? 'prod_${now.microsecondsSinceEpoch}';
+      final name = _nameCtrl.text.trim().isEmpty
+          ? 'Brouillon du ${now.day}/${now.month}'
+          : _nameCtrl.text.trim();
+
+      final variants = <ProductVariant>[];
+      for (int i = 0; i < _variants.length; i++) {
+        final v = _variants[i];
+        final qty = int.tryParse(v.stock.text.trim()) ?? 0;
+        variants.add(ProductVariant(
+          id:   v.id ?? 'var_${now.microsecondsSinceEpoch}_$i',
+          name: v.name.text.trim().isEmpty ? 'Base' : v.name.text.trim(),
+          sku:  v.sku.text.trim().isEmpty ? null : v.sku.text.trim(),
+          barcode: v.barcode.text.trim().isEmpty
+              ? null : v.barcode.text.trim(),
+          priceBuy:       double.tryParse(v.purchasePrice.text.trim()) ?? 0,
+          priceSellPos:   double.tryParse(v.salePricePos.text.trim())  ?? 0,
+          priceSellWeb:   double.tryParse(v.salePriceWeb.text.trim())  ?? 0,
+          stockAvailable: qty,
+          stockPhysical:  qty,
+          stockMinAlert:  int.tryParse(v.stockAlert.text.trim()) ?? 1,
+          imageUrl:       v.imageUrl,
+          isMain:         i == 0,
+          weightG:        double.tryParse(v.weight.text.trim()),
+          lengthCm:       double.tryParse(v.length.text.trim()),
+          widthCm:        double.tryParse(v.width.text.trim()),
+          heightCm:       double.tryParse(v.height.text.trim()),
+        ));
+      }
+
+      final draft = Product(
+        id:          id,
+        storeId:     widget.shopId,
+        name:        name,
+        categoryId:  _category.isEmpty ? null : _category,
+        brand:       _brand.isEmpty ? null : _brand,
+        description: _descCtrl.text.trim().isEmpty
+            ? null : _descCtrl.text.trim(),
+        status:      ProductStatus.draft,
+        // Un brouillon n'est ni vendable ni publiable : ces deux drapeaux
+        // sont ce que la caisse et les RPC publiques regardent réellement.
+        isActive:     false,
+        isVisibleWeb: false,
+        trackStock:   _trackStock,
+        unit:         _unit.trim().isEmpty ? null : _unit.trim(),
+        internalNotes: _notesCtrl.text.trim().isEmpty
+            ? null : _notesCtrl.text.trim(),
+        variants:     variants,
+        createdAt:    now,
+        draftExpiresAt: now.add(const Duration(days: 7)),
+      );
+
+      await AppDatabase.saveProduct(draft,
+          skipValidation: true, skipStockLog: true);
+      _draftId = id;
+      if (mounted) AppSnack.info(context, 'Brouillon conservé 7 jours');
+      return true;
+    } catch (e) {
+      if (mounted) AppSnack.error(context, 'Brouillon non enregistré : $e');
+      return false;
+    }
+  }
+
+  /// Contrôle d'unicité du SKU pendant la frappe, avec anti-rebond de 800 ms :
+  /// sans lui, on parcourait le catalogue à chaque caractère. Le conflit ne se
+  /// révélait auparavant qu'à l'enregistrement, après deux minutes de saisie.
+  void _onSkuChanged(String value, _Variant v) {
+    _skuDebounce?.cancel();
+    final sku = value.trim();
+    if (sku.isEmpty) {
+      setState(() {
+        v.skuStatus       = _SkuStatus.empty;
+        v.skuConflictName = null;
+      });
+      return;
+    }
+    setState(() => v.skuStatus = _SkuStatus.checking);
+    _skuDebounce = Timer(const Duration(milliseconds: 800),
+        () => _checkSkuAvailability(sku, v));
+  }
+
+  Future<void> _checkSkuAvailability(String sku, _Variant v) async {
+    final existing = await AppDatabase.findProductBySku(widget.shopId, sku);
+    if (!mounted) return;
+    // Retrouver ce SKU sur le produit qu'on est justement en train de
+    // modifier n'est pas un conflit.
+    final taken = existing != null && existing.id != _editingProduct?.id;
+    setState(() {
+      v.skuStatus       = taken ? _SkuStatus.taken : _SkuStatus.available;
+      v.skuConflictName = taken ? existing.name : null;
+    });
   }
 
   Future<void> _saveProduct() async {
@@ -468,6 +924,10 @@ class _ProductFormPageState extends State<ProductFormPage> {
         promoPrice:           double.tryParse(v.promoPrice.text),
         promoStart:           v.promoStart,
         promoEnd:             v.promoEnd,
+        weightG:              double.tryParse(v.weight.text.trim()),
+        lengthCm:             double.tryParse(v.length.text.trim()),
+        widthCm:              double.tryParse(v.width.text.trim()),
+        heightCm:             double.tryParse(v.height.text.trim()),
       ));
 
       if (!isEditing && formStock > 0) {
@@ -502,8 +962,13 @@ class _ProductFormPageState extends State<ProductFormPage> {
       stockMinAlert: baseVariant?.stockMinAlert ?? 1,
       isActive:      _isActive,
       isVisibleWeb:  _isVisibleWeb,
+      trackStock:    _trackStock,
       imageUrl:      mainVariant?.imageUrl,
       rating:        _rating,
+      // Saisis depuis toujours, enregistrés depuis hotfix_169 seulement.
+      unit:          _unit.trim().isEmpty ? null : _unit.trim(),
+      internalNotes: _notesCtrl.text.trim().isEmpty
+          ? null : _notesCtrl.text.trim(),
       variants:      variants,
       expenses:      expensesList,
       createdAt:     _editingProduct?.createdAt ?? DateTime.now(),
@@ -635,7 +1100,47 @@ class _ProductFormPageState extends State<ProductFormPage> {
     unawaited(PendingImageUploadService.flush());
   }
 
+  /// Lit un code-barres à la caméra et l'inscrit dans la variante.
+  ///
+  /// Recopier treize chiffres depuis une étiquette est long et se trompe :
+  /// c'est précisément ce que la caméra fait sans erreur.
+  Future<void> _scanBarcode(_Variant v) async {
+    final code = await BarcodeScannerPage.open(context);
+    if (code == null || !mounted) return;
+    setState(() => v.barcode.text = code);
+  }
+
+  /// Demande la source de l'image. Sur le web de bureau, « Prendre une
+  /// photo » retombe d'elle-même sur le sélecteur de fichiers : c'est le
+  /// comportement natif d'image_picker, on ne le contrarie pas.
+  Future<ImageSource?> _askImageSource() => showFormSheet<ImageSource>(
+    context: context,
+    builder: (dc) => SafeArea(
+      top: false,
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const FormSheetHeader(
+            title: 'Ajouter une image', icon: Icons.add_a_photo_outlined),
+        Divider(height: 1, color: Theme.of(dc).semantic.borderSubtle),
+        ListTile(
+          leading: Icon(Icons.photo_camera_outlined,
+              size: 20, color: AppColors.primary),
+          title: const Text('Prendre une photo'),
+          onTap: () => Navigator.of(dc).pop(ImageSource.camera),
+        ),
+        ListTile(
+          leading: Icon(Icons.photo_library_outlined,
+              size: 20, color: AppColors.primary),
+          title: const Text('Choisir dans la galerie'),
+          onTap: () => Navigator.of(dc).pop(ImageSource.gallery),
+        ),
+        const SizedBox(height: 8),
+      ]),
+    ),
+  );
+
   Future<void> _pickImage({int variantIdx = 0}) async {
+    final source = await _askImageSource();
+    if (source == null || !mounted) return;
     // Pas de maxWidth / imageQuality sur ImagePicker : sur web ils
     // peuvent forcer une recompression JPEG silencieuse et tuer la
     // transparence. On lit les bytes bruts puis `validateAndReadImage`
@@ -644,7 +1149,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
     // `_variants[].imageBytes` sont donc DÉJÀ du PNG prêt à uploader —
     // l'upload doit passer `mimeType: 'image/png'`, sinon Supabase
     // enregistre du PNG sous extension .jpg.
-    final xFile = await ImagePicker().pickImage(source: ImageSource.gallery);
+    final xFile = await ImagePicker().pickImage(source: source);
     if (xFile == null || !mounted) return;
     final result = await validateAndReadImage(xFile, context);
     if (!mounted || !result.isValid) return;
@@ -653,7 +1158,9 @@ class _ProductFormPageState extends State<ProductFormPage> {
   }
 
   Future<void> _pickSecondaryImage({int variantIdx = 0}) async {
-    final xFile = await ImagePicker().pickImage(source: ImageSource.gallery);
+    final source = await _askImageSource();
+    if (source == null || !mounted) return;
+    final xFile = await ImagePicker().pickImage(source: source);
     if (xFile == null || !mounted) return;
     final result = await validateAndReadImage(xFile, context);
     if (!mounted || !result.isValid) return;
@@ -705,7 +1212,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
                       hintStyle: const TextStyle(
                           color: Color(0xFFBBBBBB), fontSize: 12),
                       filled: true,
-                      fillColor: const Color(0xFFF9FAFB),
+                      fillColor: AppColors.inputFill,
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 11),
@@ -786,13 +1293,33 @@ class _ProductFormPageState extends State<ProductFormPage> {
   Widget build(BuildContext context) {
     final l      = context.l10n;
     final titles = _stepTitles(l);
-    return AppScaffold(
+    return PopScope(
+      // Retour système / geste / bouton Android. La flèche de l'AppBar, elle,
+      // passe par `onBeforeBack` : un `context.pop()` programmatique n'est
+      // pas interceptable ici.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final canLeave = await _confirmExit();
+        // `context.mounted` et non `mounted` : l'analyseur ne reconnaît pas
+        // le drapeau du State comme protégeant CE context après un `await`.
+        if (canLeave && context.mounted) context.pop();
+      },
+      child: AppScaffold(
       shopId: widget.shopId,
-      title: widget.extra != null ? 'Modifier le produit' : l.inventaireAdd,
+      // Trois états distincts : poursuivre une saisie rapide n'est ni créer
+      // de zéro, ni modifier une fiche existante.
+      title: _isQuickAddContinuation
+          ? 'Compléter le produit'
+          : widget.extra != null
+              ? 'Modifier le produit'
+              : 'Nouveau produit',
       isRootPage: false,
+      onBeforeBack: _confirmExit,
       body: Column(children: [
         _StepBar(current: _step, total: _totalSteps,
             titles: titles, icons: _stepIcons, onTap: _goTo),
+        _ProfileProgressBar(value: _profileCompletion),
         Expanded(child: PageView(
           controller: _pageCtrl,
           physics: const NeverScrollableScrollPhysics(),
@@ -803,7 +1330,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
             onPrev: _prev, onNext: _next, onSubmit: _submit,
             isSaving: _isSaving),
       ]),
-    );
+    ));
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -814,10 +1341,26 @@ class _ProductFormPageState extends State<ProductFormPage> {
     children: [
       AppSectionCard(title: l.prodGeneralInfo, icon: Icons.info_outline_rounded, children: [
         _LF(l.inventaireName, req: true,
-            child: _TF(_nameCtrl, 'Ex: Coca-Cola 33cl', Icons.label_outline,
-                validator: (v) => (v ?? '').trim().isEmpty ? 'Requis' : null)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _TF(_nameCtrl, 'Ex: Coca-Cola 33cl', Icons.label_outline,
+                    autofocus: true,
+                    onChanged: _onNameChanged,
+                    validator: (v) =>
+                        (v ?? '').trim().isEmpty ? 'Requis' : null),
+                if (_similarProducts.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  _SimilarProductsHint(
+                    products: _similarProducts,
+                    onOpen: (p) => context.push(
+                        '/shop/${widget.shopId}/inventaire/product', extra: p),
+                  ),
+                ],
+              ],
+            )),
         _gap(),
-        _LF(l.prodBrand, req: true,
+        _LF(l.prodBrand, req: _isCreating,
             child: AppSelectWidget(
               label: '', required: false, items: _brands,
               value: _brand.isEmpty ? null : _brand,
@@ -849,7 +1392,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
               },
             )),
         _gap(),
-        _LF(l.prodCategory, req: true,
+        _LF(l.prodCategory, req: _isCreating,
             child: AppSelectWidget(
               label: '', required: false, items: _categories,
               value: _category.isEmpty ? null : _category,
@@ -881,7 +1424,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
               },
             )),
         _gap(),
-        _LF(l.prodUnitType, req: true,
+        _LF(l.prodUnitType,
             child: AppSelectWidget(
               label: '', required: false, items: _units,
               value: _unit.isEmpty ? null : _unit,
@@ -913,6 +1456,15 @@ class _ProductFormPageState extends State<ProductFormPage> {
               },
             )),
         _gap(),
+        // Avertissement non bloquant en MODIFICATION : un produit ancien peut
+        // ne pas avoir de marque/catégorie. On le signale sans empêcher
+        // l'enregistrement. Un message fugace serait écrasé par celui de
+        // succès — d'où un bandeau permanent.
+        if (!_isCreating &&
+            (_category.trim().isEmpty || _brand.trim().isEmpty)) ...[
+          _WarnBanner(_missingTaxonomyWarning()),
+          _gap(),
+        ],
         _LF(l.prodDescription,
             child: _TF(_descCtrl, 'Description visible par les clients…',
                 Icons.notes_rounded, maxLines: 3)),
@@ -922,39 +1474,46 @@ class _ProductFormPageState extends State<ProductFormPage> {
                 Icons.sticky_note_2_outlined, maxLines: 2)),
       ]),
       _gap(h: 14),
-      // Fournisseur (global au produit)
-      AppSectionCard(title: 'Fournisseur', icon: Icons.local_shipping_rounded, children: [
-        _LF('Nom du fournisseur',
-            child: _SupplierPickField(
-              controller: _supplierCtrl,
-              suppliers: _suppliers,
-              selected: _selectedSupplier,
-              onPicked: (s) => setState(() {
-                _selectedSupplier = s;
-                _supplierCtrl.text = s.name;
-              }),
-              onCleared: () => setState(() {
-                _selectedSupplier = null;
-                _supplierCtrl.clear();
-              }),
-              onManualChange: (text) {
-                // Si l'utilisateur retape, on tente de re-matcher ; sinon on
-                // considère que c'est une saisie libre (fournisseur hors liste).
-                final match = _matchSupplierByName(text);
-                if (match?.id != _selectedSupplier?.id) {
-                  setState(() => _selectedSupplier = match);
-                }
-              },
-            )),
-        if (_selectedSupplier != null) ...[
-          _gap(h: 8),
-          _SupplierInfoCard(supplier: _selectedSupplier!),
+      // Fournisseur (facultatif) — replié par défaut, dépliable au besoin.
+      // Auto-déplié en édition si un fournisseur/référence est déjà renseigné.
+      _ExpandSection(
+        icon: Icons.local_shipping_rounded,
+        label: 'Fournisseur (facultatif)',
+        forceOpen: _selectedSupplier != null
+            || _supplierRefCtrl.text.trim().isNotEmpty,
+        children: [
+          _LF('Nom du fournisseur',
+              child: _SupplierPickField(
+                controller: _supplierCtrl,
+                suppliers: _suppliers,
+                selected: _selectedSupplier,
+                onPicked: (s) => setState(() {
+                  _selectedSupplier = s;
+                  _supplierCtrl.text = s.name;
+                }),
+                onCleared: () => setState(() {
+                  _selectedSupplier = null;
+                  _supplierCtrl.clear();
+                }),
+                onManualChange: (text) {
+                  // Si l'utilisateur retape, on tente de re-matcher ; sinon on
+                  // considère que c'est une saisie libre (fournisseur hors liste).
+                  final match = _matchSupplierByName(text);
+                  if (match?.id != _selectedSupplier?.id) {
+                    setState(() => _selectedSupplier = match);
+                  }
+                },
+              )),
+          if (_selectedSupplier != null) ...[
+            _gap(h: 8),
+            _SupplierInfoCard(supplier: _selectedSupplier!),
+          ],
+          _gap(),
+          _LF('Référence fournisseur',
+              child: _TF(_supplierRefCtrl, 'Ex: REF-001',
+                  Icons.tag_rounded)),
         ],
-        _gap(),
-        _LF('Référence fournisseur',
-            child: _TF(_supplierRefCtrl, 'Ex: REF-001',
-                Icons.tag_rounded)),
-      ]),
+      ),
     ],
   );
 
@@ -975,10 +1534,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
             isBase: i == 0, isMain: v.isMain, isExpanded: v.isExpanded,
             expensePerUnit: _expensePerUnit,
             onToggleExpand: () => setState(() => v.isExpanded = !v.isExpanded),
-            onRemove: i == 0 ? null : () => setState(() {
-              _variants[i].dispose();
-              _variants.removeAt(i);
-            }),
+            onRemove: i == 0 ? null : () => _confirmRemoveVariant(v),
             onChanged:             () => setState(() {}),
             onPickImage:           () => _pickImage(variantIdx: i),
             onPickSecondaryImage:  () => _pickSecondaryImage(variantIdx: i),
@@ -1010,6 +1566,8 @@ class _ProductFormPageState extends State<ProductFormPage> {
               }
               return null;
             },
+            onSkuChanged: (val) => _onSkuChanged(val, v),
+            onScanBarcode: () => _scanBarcode(v),
           );
         }),
         _gap(h: 4),
@@ -1033,7 +1591,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: Theme.of(context).semantic.borderSubtle),
-              color: const Color(0xFFF9FAFB),
+              color: AppColors.surface,
             ),
             child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
               Icon(Icons.add_rounded, size: 16, color: AppColors.primary),
@@ -1121,6 +1679,8 @@ class _ProductFormPageState extends State<ProductFormPage> {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(9),
                       child: _buildVariantImage(
+                        context: context,
+                        displaySize: 80,
                         bytes: v.imageBytes,
                         url:   v.imageUrl,
                         placeholder: _ImgPlaceholderSmall(),
@@ -1147,7 +1707,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
                           child: Text(
                             i == 0 ? l.prodBaseVariant : '${l.prodVariants} $i',
                             textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 9,
+                            style: AppTextStyles.micro.copyWith(
                                 color: Colors.white, fontWeight: FontWeight.w600),
                           ),
                         )),
@@ -1167,6 +1727,13 @@ class _ProductFormPageState extends State<ProductFormPage> {
         _ToggleRow(l.prodIsVisibleWeb, l.webShopVisibleHint,
             _isVisibleWeb, AppColors.primary,
                 (v) => setState(() => _isVisibleWeb = v)),
+        Divider(height: 18, color: Theme.of(context).semantic.borderSubtle),
+        // Suivi de stock (hotfix_138). Décoché = plat cuisiné, service ou
+        // prestation : les ventes ne décrémentent rien et les annulations
+        // ne recréditent rien.
+        _ToggleRow(l.prodTrackStock, l.trackStockHint,
+            _trackStock, AppColors.secondary,
+                (v) => setState(() => _trackStock = v)),
         Divider(height: 18, color: Theme.of(context).semantic.borderSubtle),
         _LF(l.prodRating,
             child: _Stars(_rating, (v) => setState(() => _rating = v))),
@@ -1198,6 +1765,10 @@ class _VariantFullCard extends StatelessWidget {
   final String? shopId;
   final bool showWebPrice;
   final String? Function(String?)? skuValidator;
+  /// Remonte chaque frappe du SKU au formulaire, qui pilote l'anti-rebond.
+  final void Function(String)? onSkuChanged;
+  /// Ouvre le scanner de code-barres pour cette variante.
+  final VoidCallback? onScanBarcode;
 
   const _VariantFullCard({
     super.key,
@@ -1221,6 +1792,8 @@ class _VariantFullCard extends StatelessWidget {
     this.shopId,
     this.showWebPrice = false,
     this.skuValidator,
+    this.onSkuChanged,
+    this.onScanBarcode,
   });
 
   @override
@@ -1237,7 +1810,7 @@ class _VariantFullCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: isMain ? AppColors.primarySurface : const Color(0xFFF9FAFB),
+        color: isMain ? AppColors.primarySurface : AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
             color: isMain
@@ -1278,6 +1851,8 @@ class _VariantFullCard extends StatelessWidget {
                   child: SizedBox(
                     width: 32, height: 32,
                     child: _buildVariantImage(
+                      context: context,
+                      displaySize: 32,
                       bytes: variant.imageBytes,
                       url:   variant.imageUrl,
                       placeholder: const SizedBox(width: 32, height: 32),
@@ -1289,8 +1864,8 @@ class _VariantFullCard extends StatelessWidget {
               if (!isExpanded) ...[
                 Expanded(child: Text(
                   variant.name.text.isEmpty ? '—' : variant.name.text,
-                  style: const TextStyle(fontSize: 12,
-                      color: Color(0xFF374151), fontWeight: FontWeight.w500),
+                  style: TextStyle(fontSize: 12,
+                      color: AppColors.onSurface, fontWeight: FontWeight.w500),
                   overflow: TextOverflow.ellipsis,
                 )),
                 if (sell > 0)
@@ -1307,7 +1882,7 @@ class _VariantFullCard extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFAF5FF),
+                      color: AppColors.primarySurface,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: AppColors.primary.withValues(alpha:0.3)),
                     ),
@@ -1327,7 +1902,7 @@ class _VariantFullCard extends StatelessWidget {
                 const SizedBox(width: 4),
                 IconButton(
                     onPressed: onRemove,
-                    icon: const Icon(Icons.close_rounded, size: 16,
+                    icon: Icon(Icons.close_rounded, size: 16,
                         color: AppColors.textHint),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 24, minHeight: 24)),
@@ -1352,7 +1927,7 @@ class _VariantFullCard extends StatelessWidget {
               // image+nom+SKU, sur toute la largeur du panneau variante).
               Text(
                 l.imageUploadHint,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
                   color: AppColors.textHint,
                   fontStyle: FontStyle.italic,
@@ -1371,6 +1946,8 @@ class _VariantFullCard extends StatelessWidget {
                         width: 64, height: 64,
                         child: hasImg
                             ? _buildVariantImage(
+                                context: context,
+                                displaySize: 64,
                                 bytes: variant.imageBytes,
                                 url:   variant.imageUrl,
                                 placeholder: _ImgPlaceholderSmall(),
@@ -1383,12 +1960,12 @@ class _VariantFullCard extends StatelessWidget {
                                 child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      const Icon(Icons.add_photo_alternate_outlined,
-                                          size: 20, color: Color(0xFFD1D5DB)),
+                                      Icon(Icons.add_photo_alternate_outlined,
+                                          size: 20, color: AppColors.textHint),
                                       const SizedBox(height: 2),
                                       Text(l.prodChooseFile,
                                           textAlign: TextAlign.center,
-                                          style: const TextStyle(fontSize: 8,
+                                          style: AppTextStyles.micro.copyWith(
                                               color: AppColors.textHint)),
                                     ])),
                       ),
@@ -1402,6 +1979,9 @@ class _VariantFullCard extends StatelessWidget {
                             child: const Icon(Icons.edit_rounded,
                                 size: 10, color: Colors.white),
                           )),
+                    // En HAUT à droite : la pastille crayon occupe déjà le bas.
+                    Positioned(top: 0, right: 0,
+                        child: UploadStatusDot(productId: productId)),
                   ]),
                 ),
                 const SizedBox(width: 12),
@@ -1414,11 +1994,29 @@ class _VariantFullCard extends StatelessWidget {
                           validator: (v) =>
                           (v ?? '').trim().isEmpty ? 'Requis' : null)),
                   _LF(l.prodSku, req: true,
-                      child: _TF(variant.sku,
-                          isBase ? 'PROD-001' : 'PROD-001-R',
-                          Icons.tag_rounded,
-                          validator: skuValidator ?? (v) =>
-                          (v ?? '').trim().isEmpty ? 'Requis' : null)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _TF(variant.sku,
+                              isBase ? 'PROD-001' : 'PROD-001-R',
+                              Icons.tag_rounded,
+                              onChanged: onSkuChanged,
+                              suffix: _SkuStatusDot(status: variant.skuStatus),
+                              validator: skuValidator ?? (v) =>
+                              (v ?? '').trim().isEmpty ? 'Requis' : null),
+                          if (variant.skuStatus == _SkuStatus.taken)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                variant.skuConflictName == null
+                                    ? 'Ce SKU est déjà utilisé'
+                                    : 'Ce SKU est utilisé par '
+                                      '« ${variant.skuConflictName} »',
+                                style: const TextStyle(fontSize: 11,
+                                    color: AppColors.error, height: 1.3)),
+                            ),
+                        ],
+                      )),
                 ])),
               ]),
               _gap(h: 10),
@@ -1462,7 +2060,17 @@ class _VariantFullCard extends StatelessWidget {
               // Barcode
               _LF(l.prodBarcode,
                   child: _TF(variant.barcode, '6009123…',
-                      Icons.qr_code_scanner_rounded)),
+                      Icons.qr_code_scanner_rounded,
+                      suffix: onScanBarcode == null ? null : IconButton(
+                        onPressed: onScanBarcode,
+                        icon: const Icon(Icons.qr_code_scanner_outlined,
+                            size: 20),
+                        color: AppColors.primary,
+                        tooltip: 'Scanner avec la caméra',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                            minWidth: 34, minHeight: 34),
+                      ))),
               _gap(h: 10),
 
               // Prix achat (obligatoire) + prix de vente (optionnel à la création)
@@ -1687,8 +2295,9 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
                 margin: const EdgeInsets.only(right: 6),
                 decoration: BoxDecoration(color: AppColors.primary.withValues(alpha:0.1),
                     borderRadius: BorderRadius.circular(8)),
-                child: Text('${_arrivals.length}', style: TextStyle(fontSize: 9,
-                    fontWeight: FontWeight.w700, color: AppColors.primary)),
+                child: Text('${_arrivals.length}', style: AppTextStyles.micro
+                    .copyWith(fontWeight: FontWeight.w700,
+                        color: AppColors.primary)),
               ),
             // Correction 1 : bouton centré
             GestureDetector(
@@ -1718,7 +2327,7 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
           margin: const EdgeInsets.only(bottom: 4),
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: a.isAvailable ? const Color(0xFFF0FDF4) : const Color(0xFFFEF2F2),
+            color: a.isAvailable ? AppColors.secondary.withValues(alpha: 0.12) : AppColors.error.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(6),
             border: Border.all(color: a.isAvailable
                 ? const Color(0xFFA7F3D0) : const Color(0xFFFCA5A5))),
@@ -1731,10 +2340,10 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
               Text('+${a.quantity} · ${a.cause.label}',
                   style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
               Text('${a.statusLabel} · ${_fmtDate(a.createdAt)}',
-                  style: const TextStyle(fontSize: 9, color: AppColors.textHint)),
+                  style: AppTextStyles.micro),
               if (a.note != null && a.note!.isNotEmpty)
-                Text(a.note!, style: const TextStyle(fontSize: 9,
-                    color: AppColors.textSecondary, fontStyle: FontStyle.italic),
+                Text(a.note!, style: AppTextStyles.microSecondary
+                    .copyWith(fontStyle: FontStyle.italic),
                     maxLines: 1, overflow: TextOverflow.ellipsis),
             ])),
             // Correction 2 : boutons modifier/supprimer
@@ -1753,8 +2362,8 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
           ]),
         ))),
       if (_expanded && _arrivals.isEmpty)
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
           child: Text('Aucune arrivée enregistrée',
               style: TextStyle(fontSize: 11, color: AppColors.textHint)),
         ),
@@ -1860,12 +2469,12 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
                   Text(isEdit ? 'Modifier l\'arrivée' : 'Enregistrer une arrivée',
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                   Text(widget.variantName.isEmpty ? 'Variante' : widget.variantName,
-                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                      style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
                 ])),
               ]),
               const SizedBox(height: 20),
               // Quantité
-              const Align(alignment: Alignment.centerLeft,
+              Align(alignment: Alignment.centerLeft,
                   child: Text('Quantité reçue', style: TextStyle(fontSize: 12,
                       fontWeight: FontWeight.w600, color: AppColors.textSecondary))),
               const SizedBox(height: 8),
@@ -1893,7 +2502,7 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
               ]),
               const SizedBox(height: 16),
               // Statut
-              const Align(alignment: Alignment.centerLeft,
+              Align(alignment: Alignment.centerLeft,
                   child: Text('Statut', style: TextStyle(fontSize: 12,
                       fontWeight: FontWeight.w600, color: AppColors.textSecondary))),
               const SizedBox(height: 8),
@@ -1909,14 +2518,14 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
               ]),
               const SizedBox(height: 16),
               // Cause
-              const Align(alignment: Alignment.centerLeft,
+              Align(alignment: Alignment.centerLeft,
                   child: Text('Cause', style: TextStyle(fontSize: 12,
                       fontWeight: FontWeight.w600, color: AppColors.textSecondary))),
               const SizedBox(height: 8),
               DropdownButtonFormField<ArrivalCause>(
                 value: cause,
                 decoration: InputDecoration(isDense: true, filled: true,
-                  fillColor: const Color(0xFFF9FAFB),
+                  fillColor: AppColors.inputFill,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(color: Theme.of(ctx).semantic.borderSubtle)),
@@ -1932,7 +2541,7 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
               TextField(controller: noteCtrl, style: const TextStyle(fontSize: 13),
                 decoration: InputDecoration(
                   hintText: 'Note (optionnel)', isDense: true,
-                  filled: true, fillColor: const Color(0xFFF9FAFB),
+                  filled: true, fillColor: AppColors.inputFill,
                   hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
@@ -2146,7 +2755,7 @@ class _StockIndicatorsState extends State<_StockIndicators> {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F7FC),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
@@ -2236,7 +2845,7 @@ class _StockIndicatorsState extends State<_StockIndicators> {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F7FC),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
@@ -2350,8 +2959,7 @@ class _LocationChip extends StatelessWidget {
                         color: selected ? _color : Theme.of(context).colorScheme.onSurface)),
               ),
               Text('${data.available} dispo',
-                  style: const TextStyle(fontSize: 9,
-                      color: AppColors.textHint,
+                  style: AppTextStyles.micro.copyWith(
                       fontWeight: FontWeight.w500)),
             ],
           ),
@@ -2382,8 +2990,7 @@ class _StockCell extends StatelessWidget {
       const SizedBox(height: 3),
       Text('$value', style: TextStyle(fontSize: 14,
           fontWeight: FontWeight.w800, color: color)),
-      Text(label, style: const TextStyle(fontSize: 9,
-          color: AppColors.textHint)),
+      Text(label, style: AppTextStyles.micro),
     ]),
   );
 }
@@ -2402,7 +3009,7 @@ class _StatusChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: active ? color.withValues(alpha:0.1) : const Color(0xFFF9FAFB),
+          color: active ? color.withValues(alpha:0.1) : AppColors.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: active ? color : Theme.of(context).semantic.borderSubtle,
               width: active ? 1.5 : 1)),
@@ -2443,7 +3050,7 @@ class _ExpandSectionState extends State<_ExpandSection> {
     final open = _open || widget.forceOpen;
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Theme.of(context).semantic.borderSubtle),
       ),
@@ -2456,8 +3063,8 @@ class _ExpandSectionState extends State<_ExpandSection> {
               Icon(widget.icon, size: 14, color: AppColors.primary),
               const SizedBox(width: 8),
               Expanded(child: Text(widget.label,
-                  style: const TextStyle(fontSize: 12,
-                      fontWeight: FontWeight.w600, color: Color(0xFF374151)))),
+                  style: TextStyle(fontSize: 12,
+                      fontWeight: FontWeight.w600, color: AppColors.onSurface))),
               if (widget.trailing != null) widget.trailing!,
               Icon(open
                   ? Icons.keyboard_arrow_up_rounded
@@ -2498,7 +3105,7 @@ class _SecondaryImagesRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const brokenIcon = Icon(Icons.broken_image, color: Color(0xFFD1D5DB));
+    final brokenIcon = Icon(Icons.broken_image, color: AppColors.textHint);
     return SizedBox(
       height: 52,
       child: ListView(
@@ -2539,7 +3146,7 @@ class _SecondaryImagesRow extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(context.l10n.prodChooseFile,
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 7, color: AppColors.primary)),
+                    style: AppTextStyles.micro.copyWith(color: AppColors.primary)),
               ]),
             ),
           ),
@@ -2597,7 +3204,7 @@ class _ExpRow extends StatelessWidget {
             onChanged: (_) => onChanged(),
             validator: (v) => (v ?? '').trim().isEmpty ? 'Requis' : null)),
         IconButton(onPressed: onRemove,
-            icon: const Icon(Icons.close_rounded, size: 16,
+            icon: Icon(Icons.close_rounded, size: 16,
                 color: AppColors.textHint),
             padding: const EdgeInsets.only(left: 4),
             constraints: const BoxConstraints(minWidth: 28, minHeight: 28)),
@@ -2625,7 +3232,7 @@ class _StepBar extends StatelessWidget {
       final done   = i < current;
       final active = i == current;
       final col    = active ? AppColors.primary
-          : done ? AppColors.secondary : const Color(0xFFD1D5DB);
+          : done ? AppColors.secondary : AppColors.textHint;
       return Expanded(child: GestureDetector(
         onTap: () => onTap(i),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -2652,7 +3259,7 @@ class _StepBar extends StatelessWidget {
           const SizedBox(height: 3),
           Text(titles[i], maxLines: 1, overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 9,
+              style: AppTextStyles.micro.copyWith(
                   fontWeight: active ? FontWeight.w700 : FontWeight.w400,
                   color: active ? AppColors.primary
                       : done ? AppColors.secondary : AppColors.textHint)),
@@ -2687,7 +3294,7 @@ class _BottomNav extends StatelessWidget {
             icon: const Icon(Icons.arrow_back_ios_rounded, size: 13),
             label: Text(l.prodPrev),
             style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF374151),
+              foregroundColor: AppColors.onSurface,
               side: BorderSide(color: Theme.of(context).semantic.borderSubtle),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               minimumSize: Size.zero,
@@ -2731,25 +3338,43 @@ class _BottomNav extends StatelessWidget {
 ///  - `url` http(s) (image distante uploadée vers Supabase)
 ///  - `url` chemin local (sur mobile uniquement, web tombe sur placeholder)
 Widget _buildVariantImage({
+  required BuildContext context,
   required Uint8List? bytes,
   required String?    url,
   required Widget     placeholder,
+  double              displaySize = 80,
   BoxFit              fit = BoxFit.cover,
 }) {
-  // FilterQuality.high : meilleur rendu lors du downscale (par défaut
-  // FilterQuality.low donne un aspect pixelisé sur les vignettes).
+  // Anti-grain : on charge l'image à une taille proche de la vignette au lieu
+  // de l'image brute ~2048 px. Décoder/afficher à fort ratio en une passe
+  // produit de l'aliasing sur web même en FilterQuality.high. Réseau →
+  // vignette redimensionnée côté serveur (StorageService.thumbUrl) ;
+  // mémoire/fichier → `cacheWidth`.
+  // Largeur cible DPR-AWARE : taille logique de la vignette × densité écran,
+  // bornée [120, 600]. Sur un écran rétina (DPR 2-3) une vignette 80 px a
+  // besoin de 160-240 px réels — une valeur fixe basse pixeliserait.
   const fq = FilterQuality.high;
+  final dpr = MediaQuery.of(context).devicePixelRatio;
+  final int thumbPx = (displaySize * dpr).clamp(120.0, 600.0).round();
   if (bytes != null) {
     return Image.memory(bytes, fit: fit, filterQuality: fq,
+        // cacheWidth omis sur web (décodage canvas peu fiable avec) ; l'aperçu
+        // mémoire est de toute façon transitoire (avant upload → bascule URL).
+        cacheWidth: kIsWeb ? null : thumbPx,
         errorBuilder: (_, __, ___) => placeholder);
   }
   if (url != null && url.isNotEmpty) {
     if (url.startsWith('http')) {
-      return Image.network(url, fit: fit, filterQuality: fq,
-          errorBuilder: (_, __, ___) => placeholder);
+      return Image.network(StorageService.thumbUrl(url, width: thumbPx),
+          fit: fit, filterQuality: fq,
+          // Repli sur l'image brute si la vignette transformée échoue.
+          errorBuilder: (_, __, ___) => Image.network(url,
+              fit: fit, filterQuality: fq,
+              errorBuilder: (_, __, ___) => placeholder));
     }
     if (!kIsWeb) {
       return Image.file(File(url), fit: fit, filterQuality: fq,
+          cacheWidth: thumbPx,
           errorBuilder: (_, __, ___) => placeholder);
     }
   }
@@ -2762,7 +3387,7 @@ class _ImgPlaceholderSmall extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     color: AppColors.inputFill,
-    child: const Icon(Icons.image_outlined, color: Color(0xFFD1D5DB)),
+    child: Icon(Icons.image_outlined, color: AppColors.textHint),
   );
 }
 
@@ -2773,14 +3398,20 @@ class _StepScroll extends StatelessWidget {
   final List<Widget> children;
   const _StepScroll({required this.formKey, required this.children});
   @override
-  Widget build(BuildContext context) => Form(
-    key: formKey,
-    autovalidateMode: AutovalidateMode.onUserInteraction,
-    child: ListView(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-      children: children,
-    ),
-  );
+  Widget build(BuildContext context) {
+    // AppScaffold utilise resizeToAvoidBottomInset:false → le clavier ne
+    // rétrécit PAS le body. On ajoute donc sa hauteur en marge basse pour que
+    // les derniers champs puissent défiler AU-DESSUS du clavier.
+    final keyboard = MediaQuery.of(context).viewInsets.bottom;
+    return Form(
+      key: formKey,
+      autovalidateMode: AutovalidateMode.onUserInteraction,
+      child: ListView(
+        padding: EdgeInsets.fromLTRB(16, 14, 16, 8 + keyboard),
+        children: children,
+      ),
+    );
+  }
 }
 
 Widget _gap({double h = 12}) => SizedBox(height: h);
@@ -2797,7 +3428,7 @@ class _LF extends StatelessWidget {
     children: [
       if (label.isNotEmpty) ...[
         RichText(text: TextSpan(
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500,
+          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500,
               color: AppColors.textSecondary),
           children: [
             TextSpan(text: label),
@@ -2840,7 +3471,7 @@ class _ToggleRow extends StatelessWidget {
     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label, style: TextStyle(fontSize: 13,
           fontWeight: FontWeight.w600, color: Theme.of(context).colorScheme.onSurface)),
-      Text(sub, style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
+      Text(sub, style: TextStyle(fontSize: 11, color: AppColors.textHint)),
     ])),
     AppSwitch(value: value, onChanged: onChange),
   ]);
@@ -2876,7 +3507,7 @@ class _DateBtn extends StatelessWidget {
     },
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-      decoration: BoxDecoration(color: const Color(0xFFF9FAFB),
+      decoration: BoxDecoration(color: AppColors.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: Theme.of(context).semantic.borderSubtle)),
       child: Row(children: [
@@ -2917,16 +3548,136 @@ class _InfoBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(10),
-    decoration: BoxDecoration(color: const Color(0xFFF0F9FF),
+    decoration: BoxDecoration(color: AppColors.info.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: const Color(0xFFBAE6FD))),
     child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Icon(Icons.info_outline, size: 14, color: AppColors.primary),
       const SizedBox(width: 8),
-      Expanded(child: Text(text, style: const TextStyle(fontSize: 11,
-          color: Color(0xFF374151), height: 1.4))),
+      Expanded(child: Text(text, style: TextStyle(fontSize: 11,
+          color: AppColors.onSurface, height: 1.4))),
     ]),
   );
+}
+
+/// Pendant de [_InfoBanner] en teinte d'alerte — même gabarit, mêmes tailles.
+/// Pour les manques non bloquants (marque/catégorie absentes en modification).
+class _WarnBanner extends StatelessWidget {
+  final String text;
+  const _WarnBanner(this.text);
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: AppColors.warning.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: AppColors.warning.withValues(alpha: 0.45)),
+    ),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Icon(Icons.warning_amber_rounded, size: 14,
+          color: AppColors.warning),
+      const SizedBox(width: 8),
+      Expanded(child: Text(text, style: TextStyle(fontSize: 11,
+          color: AppColors.onSurface, height: 1.4))),
+    ]),
+  );
+}
+
+/// Complétude de la fiche, sous la barre d'étapes. Dit à l'utilisateur ce
+/// qu'il lui reste à renseigner sans le bloquer.
+class _ProfileProgressBar extends StatelessWidget {
+  final double value;
+  const _ProfileProgressBar({required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = (value * 100).round();
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(bottom: BorderSide(
+            color: Theme.of(context).semantic.borderSubtle)),
+      ),
+      child: Row(children: [
+        Text('Profil produit', style: AppTextStyles.caption),
+        const SizedBox(width: 10),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: value,
+              minHeight: 4,
+              backgroundColor: AppColors.inputFill,
+              valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Text('$pct %', style: AppTextStyles.caption.copyWith(
+            color: AppColors.primary, fontWeight: FontWeight.w600)),
+      ]),
+    );
+  }
+}
+
+/// Signale les produits déjà au catalogue au nom voisin de celui qu'on est
+/// en train de saisir. Simple avertissement : rien n'est bloqué, deux
+/// produits peuvent légitimement porter des noms proches.
+class _SimilarProductsHint extends StatelessWidget {
+  final List<Product> products;
+  final void Function(Product) onOpen;
+  const _SimilarProductsHint({required this.products, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(8),
+    decoration: BoxDecoration(
+      color: AppColors.warning.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: AppColors.warning.withValues(alpha: 0.30)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Déjà au catalogue :',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                color: AppColors.warning)),
+        const SizedBox(height: 2),
+        ...products.map((p) => GestureDetector(
+          onTap: () => onOpen(p),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text('→ ${p.name}',
+                style: TextStyle(fontSize: 12, color: AppColors.primary,
+                    decoration: TextDecoration.underline)),
+          ),
+        )),
+      ],
+    ),
+  );
+}
+
+/// État du contrôle de SKU, rendu dans le champ lui-même.
+class _SkuStatusDot extends StatelessWidget {
+  final _SkuStatus status;
+  const _SkuStatusDot({required this.status});
+
+  @override
+  Widget build(BuildContext context) => switch (status) {
+    _SkuStatus.empty     => const SizedBox.shrink(),
+    _SkuStatus.checking  => const Padding(
+        padding: EdgeInsets.only(right: 10),
+        child: SizedBox(width: 12, height: 12,
+            child: CircularProgressIndicator(strokeWidth: 1.6))),
+    _SkuStatus.available => const Padding(
+        padding: EdgeInsets.only(right: 8),
+        child: Icon(Icons.check_circle_rounded,
+            size: 18, color: AppColors.secondary)),
+    _SkuStatus.taken     => const Padding(
+        padding: EdgeInsets.only(right: 8),
+        child: Icon(Icons.error_rounded, size: 18, color: AppColors.error)),
+  };
 }
 
 class _BenefitBanner extends StatelessWidget {
@@ -2942,7 +3693,7 @@ class _BenefitBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: pos ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2),
+        color: pos ? AppColors.secondary.withValues(alpha: 0.12) : AppColors.error.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
             color: pos ? const Color(0xFF6EE7B7) : const Color(0xFFFCA5A5)),
@@ -2952,10 +3703,10 @@ class _BenefitBanner extends StatelessWidget {
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(l.prodEffectiveCost,
-                    style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+                    style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
                 Text(CurrencyFormatter.format(effectiveCost),
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-                        color: Color(0xFF374151))),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
+                        color: AppColors.onSurface)),
               ])),
           Container(width: 1, height: 32,
               color: pos ? const Color(0xFF6EE7B7) : const Color(0xFFFCA5A5)),
@@ -2963,7 +3714,7 @@ class _BenefitBanner extends StatelessWidget {
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(l.prodBenefit,
-                    style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+                    style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
                 Text(CurrencyFormatter.format(benefit),
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
                         color: benefitColor)),
@@ -2974,7 +3725,7 @@ class _BenefitBanner extends StatelessWidget {
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(l.prodMarginPOS,
-                    style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+                    style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
                 Text('${margin.toStringAsFixed(1)}%',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
                         color: benefitColor)),
@@ -2984,7 +3735,7 @@ class _BenefitBanner extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
               '${l.prodExpensePerUnit}: +${CurrencyFormatter.format(expensePerUnit.ceilToDouble())}/u inclus dans le prix de revient',
-              style: const TextStyle(fontSize: 10, color: AppColors.textSecondary)),
+              style: TextStyle(fontSize: 10, color: AppColors.textSecondary)),
         ],
       ]),
     );
@@ -3012,7 +3763,7 @@ class _CalcBanner extends StatelessWidget {
             children: [
               Text(label, style: TextStyle(fontSize: 10, color: c,
                   fontWeight: FontWeight.w600)),
-              Text(sub, style: const TextStyle(fontSize: 10,
+              Text(sub, style: TextStyle(fontSize: 10,
                   color: AppColors.textSecondary)),
             ])),
         Text(value, style: TextStyle(fontSize: 12,
@@ -3022,7 +3773,7 @@ class _CalcBanner extends StatelessWidget {
   }
 }
 
-class _TF extends StatelessWidget {
+class _TF extends StatefulWidget {
   final TextEditingController ctrl;
   final String hint;
   final IconData icon;
@@ -3030,31 +3781,98 @@ class _TF extends StatelessWidget {
   final TextInputType? keyboardType;
   final String? Function(String?)? validator;
   final ValueChanged<String>? onChanged;
+  final bool autofocus;
+  /// Élément affiché à droite dans le champ (état du SKU, par exemple).
+  final Widget? suffix;
   const _TF(this.ctrl, this.hint, this.icon, {this.maxLines = 1,
-    this.keyboardType, this.validator, this.onChanged});
+    this.keyboardType, this.validator, this.onChanged, this.autofocus = false,
+    this.suffix});
+
   @override
-  Widget build(BuildContext context) => TextFormField(
-    controller: ctrl, maxLines: maxLines,
-    keyboardType: keyboardType, onChanged: onChanged, validator: validator,
-    style: const TextStyle(fontSize: 13, color: Color(0xFF1A1D2E)),
-    inputFormatters: keyboardType == TextInputType.number
-        ? [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))] : null,
-    decoration: InputDecoration(
-      hintText: hint,
-      hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 12),
-      prefixIcon: Icon(icon, size: 15, color: const Color(0xFFAAAAAA)),
-      filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
-      errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: AppColors.error)),
-    ),
-  );
+  State<_TF> createState() => _TFState();
+}
+
+class _TFState extends State<_TF> {
+  late final FocusNode _node;
+
+  @override
+  void initState() {
+    super.initState();
+    _node = FocusNode();
+    _node.addListener(_ensureVisibleOnFocus);
+  }
+
+  // Auto-scroll : dès qu'un champ prend le focus (tap OU navigation clavier),
+  // on le fait défiler dans la zone visible — jamais caché hors écran ni
+  // derrière le clavier mobile. alignment 0.15 = champ placé vers le haut du
+  // viewport restant (au-dessus du clavier).
+  void _ensureVisibleOnFocus() {
+    if (!_node.hasFocus || !mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || Scrollable.maybeOf(context) == null) return;
+      final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+      if (keyboardOpen) {
+        // Clavier ouvert (mobile) : place le champ vers le haut du viewport,
+        // garanti au-dessus du clavier.
+        Scrollable.ensureVisible(context,
+            alignment: 0.15,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic);
+      } else {
+        // Desktop / sans clavier : défilement MINIMAL, uniquement si le champ
+        // déborde de la zone visible — évite tout saut intempestif.
+        context.findRenderObject()?.showOnScreen(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _node.removeListener(_ensureVisibleOnFocus);
+    _node.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Pas de navigation auto vers le champ suivant : Entrée (desktop) ne
+    // déplace PLUS le focus ; sur mobile la touche vaut « OK » (ferme le
+    // clavier). Seul le 1er champ (Nom) reçoit un autofocus à l'ouverture.
+    // Multi-lignes → saut de ligne. (L'auto-scroll de confort au focus reste.)
+    final action = widget.maxLines > 1
+        ? TextInputAction.newline : TextInputAction.done;
+    return TextFormField(
+      controller: widget.ctrl, maxLines: widget.maxLines,
+      focusNode: _node,
+      autofocus: widget.autofocus,
+      textInputAction: action,
+      keyboardType: widget.keyboardType, onChanged: widget.onChanged,
+      validator: widget.validator,
+      style: const TextStyle(fontSize: 13, color: Color(0xFF1A1D2E)),
+      inputFormatters: widget.keyboardType == TextInputType.number
+          ? [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))] : null,
+      decoration: InputDecoration(
+        hintText: widget.hint,
+        hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 12),
+        prefixIcon: Icon(widget.icon, size: 15, color: const Color(0xFFAAAAAA)),
+        suffixIcon: widget.suffix,
+        suffixIconConstraints:
+            const BoxConstraints(minWidth: 34, minHeight: 34),
+        filled: true, fillColor: AppColors.inputFill, isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
+        errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: AppColors.error)),
+      ),
+    );
+  }
 }
 
 // ─── Sélecteur de fournisseur ──────────────────────────────────────────────
@@ -3112,7 +3930,7 @@ class _SupplierPickField extends StatelessWidget {
           children: [
             if (hasSelection)
               IconButton(
-                icon: const Icon(Icons.close_rounded,
+                icon: Icon(Icons.close_rounded,
                     size: 16, color: AppColors.textHint),
                 tooltip: 'Effacer le fournisseur',
                 onPressed: onCleared,
@@ -3125,7 +3943,7 @@ class _SupplierPickField extends StatelessWidget {
             ),
           ],
         ),
-        filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
+        filled: true, fillColor: AppColors.inputFill, isDense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide(color: Theme.of(context).semantic.borderSubtle)),
@@ -3193,9 +4011,9 @@ class _SupplierPickerSheetState extends State<_SupplierPickerSheet> {
                 decoration: InputDecoration(
                   hintText: 'Rechercher par nom, téléphone, email…',
                   hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
-                  prefixIcon: const Icon(Icons.search_rounded,
+                  prefixIcon: Icon(Icons.search_rounded,
                       size: 18, color: AppColors.textHint),
-                  filled: true, fillColor: const Color(0xFFF9FAFB),
+                  filled: true, fillColor: AppColors.inputFill,
                   isDense: true,
                   contentPadding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 11),
@@ -3207,8 +4025,8 @@ class _SupplierPickerSheetState extends State<_SupplierPickerSheet> {
               const SizedBox(height: 12),
               Flexible(
                 child: items.isEmpty
-                    ? const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 28),
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 28),
                         child: Center(
                           child: Text('Aucun fournisseur trouvé',
                               style: TextStyle(
@@ -3256,7 +4074,7 @@ class _SupplierPickerSheetState extends State<_SupplierPickerSheet> {
                                                 .where((e) =>
                                                     e != null && e.isNotEmpty)
                                                 .join(' · '),
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                                 fontSize: 11,
                                                 color: AppColors.textHint)),
                                     ],
@@ -3331,7 +4149,7 @@ class _SupplierInfoCard extends StatelessWidget {
                 )),
           ] else ...[
             const SizedBox(height: 4),
-            const Text(
+            Text(
                 'Aucun contact renseigné pour ce fournisseur.',
                 style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
           ],
@@ -3355,7 +4173,7 @@ class _SupplierInfoRow extends StatelessWidget {
       SizedBox(
         width: 72,
         child: Text(label,
-            style: const TextStyle(fontSize: 11, color: AppColors.textHint)),
+            style: TextStyle(fontSize: 11, color: AppColors.textHint)),
       ),
       Expanded(
         child: Text(value,

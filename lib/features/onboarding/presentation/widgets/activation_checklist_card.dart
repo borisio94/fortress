@@ -1,81 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
-import '../../data/onboarding_prefs.dart';
 
-/// Checklist d'activation 4 étapes (point 6 de l'onboarding spec).
+/// Checklist d'activation (premiers pas) affichée en haut du dashboard tant
+/// que toutes les étapes ne sont pas complétées. Disparaît automatiquement
+/// quand tout est coché.
 ///
-/// Affichée en haut du dashboard tant que toutes les étapes ne sont
-/// pas cochées. Disparaît complètement (et automatiquement) quand
-/// l'utilisateur a complété les 4.
+/// Étapes (toutes AUTO, recalculées à chaque build depuis Hive)
+/// ────────────────────────────────────────────────────────────
+///   1. Ajouter un produit  — auto si `getProductsForShop().isNotEmpty`
+///   2. Première vente       — auto si ≥ 1 commande status='completed'
 ///
-/// Étapes
-/// ──────
-///   1. Ajouter un produit         — auto si `getProductsForShop().isNotEmpty`
-///   2. Inviter un vendeur         — manuel (toggle utilisateur)
-///   3. Première vente             — auto si ≥ 1 commande status='completed'
-///   4. Activer catalogue web      — manuel (toggle utilisateur)
-///
-/// La persistance utilise SharedPreferences via [OnboardingPrefs]
-/// (préfixe `onboarding_checklist_<uid>_<step>`). Les étapes auto sont
-/// recalculées à chaque build (rapide via Hive), les manuelles sont
-/// lues depuis SharedPreferences au mount.
-class ActivationChecklistCard extends StatefulWidget {
+/// (Les anciennes étapes manuelles « Invitez un vendeur » et « Activez votre
+///  catalogue web » ont été retirées à la demande — plus de flags manuels.)
+class ActivationChecklistCard extends StatelessWidget {
   final String shopId;
   const ActivationChecklistCard({super.key, required this.shopId});
 
-  @override
-  State<ActivationChecklistCard> createState() =>
-      _ActivationChecklistCardState();
-}
-
-class _ActivationChecklistCardState
-    extends State<ActivationChecklistCard> {
-  static const _kInvite = 'invite_member';
-  static const _kWeb    = 'web_catalogue';
-
-  bool? _inviteDone;
-  bool? _webDone;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadManualFlags();
-  }
-
-  Future<void> _loadManualFlags() async {
-    final uid = Supabase.instance.client.auth.currentUser?.id ?? '';
-    final inv = await OnboardingPrefs.isChecklistStepDone(uid, _kInvite);
-    final web = await OnboardingPrefs.isChecklistStepDone(uid, _kWeb);
-    if (!mounted) return;
-    setState(() {
-      _inviteDone = inv;
-      _webDone    = web;
-    });
-  }
-
-  Future<void> _toggleManual(String key, bool current) async {
-    final uid = Supabase.instance.client.auth.currentUser?.id ?? '';
-    if (!current) {
-      // Cochage manuel : on persiste. Pas de "uncheck" possible —
-      // cohérent avec une checklist de premiers pas, pas un to-do.
-      await OnboardingPrefs.markChecklistStepDone(uid, key);
-    }
-    if (!mounted) return;
-    setState(() {
-      if (key == _kInvite) _inviteDone = true;
-      if (key == _kWeb)    _webDone    = true;
-    });
-  }
-
   bool get _addProductDone {
     try {
-      return AppDatabase.getProductsForShop(widget.shopId).isNotEmpty;
+      return AppDatabase.getProductsForShop(shopId).isNotEmpty;
     } catch (_) {
       return false;
     }
@@ -83,12 +31,11 @@ class _ActivationChecklistCardState
 
   bool get _firstSaleDone {
     try {
-      // Lecture directe Hive — pas besoin de getOrders complet, on
-      // s'arrête à la 1ʳᵉ commande completed trouvée.
+      // Lecture directe Hive — on s'arrête à la 1ʳᵉ commande completed.
       for (final raw in HiveBoxes.ordersBox.values) {
         final m = Map<String, dynamic>.from(raw);
-        if (m['shop_id'] != widget.shopId) continue;
-        if (m['deleted_at'] != null)       continue;
+        if (m['shop_id'] != shopId) continue;
+        if (m['deleted_at'] != null) continue;
         if ((m['status'] as String?) == 'completed') return true;
       }
       return false;
@@ -99,45 +46,17 @@ class _ActivationChecklistCardState
 
   @override
   Widget build(BuildContext context) {
-    // Tant que les flags manuels sont en cours de lecture, on ne rend
-    // rien — évite un flash "tout coché par défaut" avant l'init.
-    if (_inviteDone == null || _webDone == null) {
-      return const SizedBox.shrink();
-    }
-
     final steps = <_StepSpec>[
       _StepSpec(
         title: 'Ajoutez votre premier produit',
-        icon:  Icons.inventory_2_outlined,
         done:  _addProductDone,
         onTap: () => context.push(
-            '/shop/${widget.shopId}/inventaire/quick-add'),
-      ),
-      _StepSpec(
-        title: 'Invitez un vendeur',
-        icon:  Icons.group_add_outlined,
-        done:  _inviteDone!,
-        onTap: () async {
-          await _toggleManual(_kInvite, _inviteDone!);
-          if (!context.mounted) return;
-          context.push('/shop/${widget.shopId}/employees');
-        },
+            '/shop/$shopId/inventaire/quick-add'),
       ),
       _StepSpec(
         title: 'Encaissez votre première vente',
-        icon:  Icons.point_of_sale_outlined,
         done:  _firstSaleDone,
-        onTap: () => context.push('/shop/${widget.shopId}/caisse'),
-      ),
-      _StepSpec(
-        title: 'Activez votre catalogue web',
-        icon:  Icons.public_outlined,
-        done:  _webDone!,
-        onTap: () async {
-          await _toggleManual(_kWeb, _webDone!);
-          if (!context.mounted) return;
-          context.push('/shop/${widget.shopId}/parametres/shop');
-        },
+        onTap: () => context.push('/shop/$shopId/caisse'),
       ),
     ];
 
@@ -212,12 +131,10 @@ class _ActivationChecklistCardState
 
 class _StepSpec {
   final String       title;
-  final IconData     icon;
   final bool         done;
   final VoidCallback onTap;
   const _StepSpec({
     required this.title,
-    required this.icon,
     required this.done,
     required this.onTap,
   });
@@ -261,7 +178,7 @@ class _StepRow extends StatelessWidget {
               ),
             ),
             if (!spec.done)
-              const Icon(Icons.arrow_forward_ios_rounded,
+              Icon(Icons.arrow_forward_ios_rounded,
                   color: AppColors.textHint, size: 14),
           ],
         ),

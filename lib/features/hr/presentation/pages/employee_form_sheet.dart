@@ -11,9 +11,17 @@ import '../../../../shared/widgets/auth_fields.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../data/providers/employees_provider.dart';
 import '../../../../core/permisions/subscription_provider.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../domain/models/employee.dart';
 import '../../domain/models/employee_permission.dart';
 import '../../domain/models/member_role.dart';
+import '../../../../shared/widgets/app_select_menu.dart';
+import '../../../restaurant/domain/entities/staff_member.dart';
+import '../../domain/models/job_titles.dart';
+import '../../../../core/database/app_database.dart';
+import '../../../../core/storage/local_storage_service.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
+import '../../../../shared/widgets/app_primary_button.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // EmployeeFormSheet — création + édition.
@@ -58,6 +66,11 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
   /// directe avec mot de passe défini par l'admin.
   bool                 _inviteMode  = true;
 
+  /// MÉTIER de la personne (Serveur, Cuisinier, Livreur…), distinct du rôle
+  /// admin/user. Restauration seulement : c'est la fiche Personnel qui en a
+  /// besoin, et l'e-commerce n'a pas de notion de poste.
+  late String _jobTitle = widget.existing?.jobTitle ?? '';
+
   bool get _isEdit => widget.existing != null;
 
   /// Permissions données par défaut au rôle courant (sans grants/denies).
@@ -82,8 +95,25 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
         ...e.permissions, // grants
       }.difference(e.denies);
     } else {
-      // Nouvel employé : preset caissier (cohérent avec rôle user par défaut).
-      _selected = {...EmployeePermissionPresets.cashier};
+      // Nouvel employé : préréglage de départ le plus RESTREINT du secteur.
+      // En restauration c'est « Serveur » — le poste le plus courant, et celui
+      // dont les droits sont les plus étroits. Partir du plus large obligerait
+      // à penser à retirer, et on ne pense pas à retirer.
+      _selected = isRestaurantShop(widget.shopId)
+          ? {...EmployeePermissionPresets.waiter}
+          : {...EmployeePermissionPresets.cashier};
+    }
+    // Amorçage de la liste des postes — restauration seulement, c'est le seul
+    // secteur où le champ Fonction existe. Différé après le premier rendu :
+    // la feuille s'ouvre immédiatement, la liste se complète juste après.
+    if (isRestaurantShop(widget.shopId)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await AppDatabase.ensureJobTitlesSeeded(widget.shopId, [
+          ...StaffMember.suggestedRoles,
+          ..._carriedTitles.values,
+        ]);
+        if (mounted) setState(() {});
+      });
     }
   }
 
@@ -94,6 +124,299 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
     _passwordCtrl.dispose();
     _passwordCConfirmCtrl.dispose();
     super.dispose();
+  }
+
+  /// Postes PROPOSÉS : ceux que l'établissement a déclarés, plus ceux
+  /// réellement portés par des comptes. Voir [JobTitles.merge] pour le
+  /// pourquoi de la seconde source.
+  List<String> get _jobTitles => JobTitles.merge(
+        LocalStorageService.getJobTitles(widget.shopId),
+        _carriedTitles.values,
+      );
+
+  /// Fonction de chaque personne de la boutique, par nom. Sert à refuser la
+  /// suppression d'un poste encore occupé, et à propager un renommage.
+  Map<String, String> get _carriedTitles {
+    final out = <String, String>{};
+    for (final e in (ref.read(employeesProvider(widget.shopId)).valueOrNull
+        ?? const <Employee>[])) {
+      final t = e.jobTitle.trim();
+      if (t.isNotEmpty) out[e.fullName] = t;
+    }
+    return out;
+  }
+
+  /// Les postes de l'établissement, dans l'ordre de la liste, avec le profil
+  /// de droits de chacun (`null` = le poste ne nomme qu'une fonction).
+  List<_Poste> get _postes {
+    final perms = LocalStorageService.getJobTitlePerms(widget.shopId);
+    return [
+      for (final name in _jobTitles)
+        _Poste(name, JobTitles.decodePerms(JobTitles.permsFor(perms, name))),
+    ];
+  }
+
+  /// Les postes sortent du volet rétractable en restauration : c'est là que
+  /// se joue le choix courant, et il n'a pas à être déplié pour être vu.
+  bool get _presetsAlwaysVisible => isRestaurantShop(widget.shopId);
+
+  Widget _buildPresetSelector() => _PresetSelector(
+        selected: _selected,
+        onApply:  _applyPreset,
+        shopId:   widget.shopId,
+        // Restauration : les POSTES de l'établissement siègent ici, à côté
+        // des profils livrés avec l'app. Un poste porte un nom de métier ET
+        // des droits — le choisir renseigne la fonction et coche les
+        // autorisations.
+        postes:   isRestaurantShop(widget.shopId) ? _postes : const [],
+        jobTitle: _jobTitle,
+        onApplyPoste:  _applyPoste,
+        onCreatePoste: _createPosteFromCurrent,
+        onEditPoste:   _posteMenu,
+      );
+
+  /// Choisir un poste = poser la fonction, et appliquer ses droits s'il en a.
+  void _applyPoste(_Poste p) {
+    setState(() => _jobTitle = p.name);
+    if (p.perms != null) _applyPreset(p.perms!);
+  }
+
+  /// Crée un poste À PARTIR DES DROITS ACTUELLEMENT COCHÉS.
+  ///
+  /// C'est le geste qui manquait : on règle les autorisations d'un chawarmier
+  /// une fois, on les enregistre sous ce nom, et le poste devient à la fois un
+  /// préréglage de droits et une fonction proposée à la prochaine embauche.
+  Future<void> _createPosteFromCurrent() async {
+    final name = await _askPosteName('Nouveau poste',
+        'Chawarmier, glacier, gérant adjoint… *', '');
+    if (name == null || name.isEmpty) return;
+    try {
+      await AppDatabase.saveJobTitle(widget.shopId, name,
+          permissions: _selected.map((p) => p.key).toList());
+      if (mounted) setState(() => _jobTitle = name);
+    } catch (e) {
+      if (mounted) {
+        _snack(e.toString().replaceAll('Exception: ', ''), success: false);
+      }
+    }
+  }
+
+  /// Menu d'un poste : enregistrer les droits affichés, renommer, supprimer.
+  Future<void> _posteMenu(_Poste p) async {
+    final action = await showFormSheet<String>(
+      context: context,
+      builder: (dc) => SafeArea(
+        top: false,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          FormSheetHeader(title: p.name, icon: Icons.work_outline_rounded),
+          Divider(height: 1, color: Theme.of(dc).semantic.borderSubtle),
+          ListTile(
+            leading: const Icon(Icons.shield_outlined, size: 20),
+            title: const Text('Enregistrer les droits affichés'),
+            subtitle: Text(
+                '${_selected.length} autorisation(s) deviendront celles de '
+                'ce poste',
+                style: AppTextStyles.caption),
+            onTap: () => Navigator.of(dc).pop('perms'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.edit_outlined, size: 20),
+            title: const Text('Renommer'),
+            onTap: () => Navigator.of(dc).pop('rename'),
+          ),
+          ListTile(
+            leading: Icon(Icons.delete_outline_rounded,
+                size: 20, color: Theme.of(dc).semantic.danger),
+            title: const Text('Supprimer'),
+            onTap: () => Navigator.of(dc).pop('delete'),
+          ),
+          const SizedBox(height: 8),
+        ]),
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case 'perms':
+        await AppDatabase.saveJobTitle(widget.shopId, p.name,
+            permissions: _selected.map((x) => x.key).toList());
+        if (mounted) setState(() => _jobTitle = p.name);
+      case 'rename':
+        final neo = await _askPosteName('Renommer le poste', p.name, p.name);
+        if (neo != null && neo.isNotEmpty) await _renameJobTitle(p.name, neo);
+      case 'delete':
+        await _deleteJobTitle(p.name);
+    }
+  }
+
+  /// Saisie d'un nom de poste — création comme renommage.
+  Future<String?> _askPosteName(
+      String title, String hint, String initial) async {
+    final ctrl = TextEditingController(text: initial);
+    final value = await showAdaptiveFormSheet<String>(
+      context: context,
+      builder: (sheetCtx) => AdaptiveFormFrame(
+        title: title,
+        subtitle: 'Il sera proposé comme fonction à l\'embauche',
+        icon: Icons.work_outline_rounded,
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(
+                    labelText: 'Poste', hintText: hint),
+                onSubmitted: (v) => Navigator.of(sheetCtx).pop(v.trim()),
+              ),
+              const SizedBox(height: 18),
+              AppPrimaryButton(
+                label: 'Valider',
+                icon: Icons.check_rounded,
+                fullWidth: true,
+                onTap: () => Navigator.of(sheetCtx).pop(ctrl.text.trim()),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    ctrl.dispose();
+    return value?.trim();
+  }
+
+  /// Ajoute un poste à la liste de l'établissement.
+  ///
+  /// Écrit dans la table `job_titles` (hotfix_160) : la liste appartient à la
+  /// boutique, pas à l'appareil. Un poste créé sur le téléphone du gérant est
+  /// proposé sur la tablette de la caisse sans que personne ne le porte
+  /// encore.
+  Future<String?> _addJobTitle(BuildContext ctx) async {
+    final ctrl = TextEditingController();
+    final value = await showAdaptiveFormSheet<String>(
+      context: ctx,
+      builder: (sheetCtx) => AdaptiveFormFrame(
+        title: 'Nouvelle fonction',
+        subtitle: 'Elle rejoindra la liste proposée',
+        icon: Icons.work_outline_rounded,
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                    labelText: 'Fonction',
+                    hintText: 'Pâtissier, veilleur, gérant adjoint… *'),
+                onSubmitted: (v) => Navigator.of(sheetCtx).pop(v.trim()),
+              ),
+              const SizedBox(height: 18),
+              AppPrimaryButton(
+                label: 'Ajouter',
+                icon: Icons.check_rounded,
+                fullWidth: true,
+                onTap: () => Navigator.of(sheetCtx).pop(ctrl.text.trim()),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    ctrl.dispose();
+    final v = value?.trim() ?? '';
+    if (v.isEmpty) return null;
+    // Un poste déjà présent est simplement re-sélectionné : re-saisir
+    // « Serveur » ne doit pas en créer un second, ni échouer.
+    final existing = _jobTitles.where((t) => JobTitles.same(t, v)).toList();
+    if (existing.isNotEmpty) {
+      if (mounted) setState(() {});
+      return existing.first;
+    }
+    try {
+      await AppDatabase.saveJobTitle(widget.shopId, v);
+    } catch (e) {
+      debugPrint('[RH] ajout poste err: $e');
+    }
+    if (mounted) setState(() {});
+    return v;
+  }
+
+  /// Supprime un poste de la liste de l'établissement.
+  ///
+  /// REFUSÉ tant que quelqu'un le porte : la fonction d'une personne vit sur
+  /// son compte, la retirer de la liste ne la débaptiserait pas — sa fiche
+  /// afficherait une fonction qui n'existe plus nulle part, et la première
+  /// modification de son compte l'effacerait sans que personne ne l'ait
+  /// décidé.
+  Future<void> _deleteJobTitle(String label) async {
+    final holders = JobTitles.holders(label, _carriedTitles);
+    if (holders.isNotEmpty) {
+      if (mounted) _snack(JobTitles.inUseMessage(holders, label),
+          success: false);
+      return;
+    }
+    try {
+      await AppDatabase.deleteJobTitle(widget.shopId, label);
+      if (mounted) {
+        setState(() {
+          if (JobTitles.same(_jobTitle, label)) _jobTitle = '';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        _snack(e.toString().replaceAll('Exception: ', ''), success: false);
+      }
+    }
+  }
+
+  /// Renomme un poste, et le répercute sur les comptes qui le portent.
+  ///
+  /// La propagation n'est pas un extra : sans elle, l'ancien libellé
+  /// resurgirait dans la liste par la seconde source ([JobTitles.merge]) et
+  /// le renommage n'aurait rien renommé.
+  Future<void> _renameJobTitle(String oldName, String newName) async {
+    final neo = newName.trim();
+    if (neo.isEmpty || JobTitles.same(oldName, neo)) return;
+    try {
+      await AppDatabase.renameJobTitle(widget.shopId, oldName, neo);
+      final notifier = ref.read(employeesProvider(widget.shopId).notifier);
+      for (final e in (ref.read(employeesProvider(widget.shopId)).valueOrNull
+          ?? const <Employee>[])) {
+        if (JobTitles.same(e.jobTitle, oldName)) {
+          await notifier.setJobTitle(e.userId, neo);
+        }
+      }
+      if (mounted) {
+        setState(() {
+          if (JobTitles.same(_jobTitle, oldName)) _jobTitle = neo;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        _snack(e.toString().replaceAll('Exception: ', ''), success: false);
+      }
+    }
+  }
+
+
+  Future<void> _applyJobTitleByEmail(EmployeesNotifier notifier) async {
+    if (_jobTitle.trim().isEmpty) return;
+    final email = _emailCtrl.text.trim().toLowerCase();
+    final list = ref.read(employeesProvider(widget.shopId)).valueOrNull
+        ?? const <Employee>[];
+    for (final e in list) {
+      if (e.email.toLowerCase() == email) {
+        await notifier.setJobTitle(e.userId, _jobTitle);
+        return;
+      }
+    }
   }
 
   Future<void> _submit() async {
@@ -193,6 +516,12 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
             widget.existing!.userId, grants, denies: denies);
         await notifier.updateProfile(widget.existing!.userId,
             fullName: _nameCtrl.text.trim(), role: effectiveRole);
+        // Fonction métier : écrite à part, sur la table. La RPC de profil
+        // garde sa signature — la changer imposerait un DROP FUNCTION, donc
+        // une fenêtre où la gestion des comptes serait cassée pour tous.
+        if (_jobTitle != (widget.existing!.jobTitle)) {
+          await notifier.setJobTitle(widget.existing!.userId, _jobTitle);
+        }
         if (_status != widget.existing!.status) {
           await notifier.setStatus(widget.existing!.userId, _status);
         }
@@ -220,6 +549,9 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
           denies:      denies,
           status:      _status,
         );
+        // La RPC ne rend pas l'id du compte créé : on le retrouve dans la
+        // liste rafraîchie, par son email — seul identifiant unique connu ici.
+        await _applyJobTitleByEmail(notifier);
       }
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
@@ -395,6 +727,29 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
               const SizedBox(height: 12),
             ],
 
+            // ── FONCTION MÉTIER (restauration) ───────────────────────
+            // Serveur, Cuisinier, Livreur… — distinct du rôle admin/user, qui
+            // est un niveau de DROITS. Saisie ICI et une seule fois : la fiche
+            // Personnel en hérite au lieu de la redemander.
+            if (isRestaurantShop(widget.shopId)) ...[
+              const _FieldLabel(text: 'Fonction'),
+              const SizedBox(height: 6),
+              AppSelectWidget(
+                label: '',
+                items: _jobTitles,
+                value: _jobTitle.isEmpty ? null : _jobTitle,
+                icon: Icons.work_outline_rounded,
+                addLabel: 'Ajouter une fonction',
+                onAdd: _addJobTitle,
+                // Chaque poste se supprime et se renomme depuis la liste :
+                // aucun établissement n'a exactement les postes d'un autre.
+                onDelete: _deleteJobTitle,
+                onRename: _renameJobTitle,
+                onChanged: (v) => setState(() => _jobTitle = v),
+              ),
+              const SizedBox(height: 12),
+            ],
+
             // ── Email (création seulement, lecture seule en édition) ────
             EmailField(
               controller: _emailCtrl,
@@ -444,6 +799,25 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
             ),
             const SizedBox(height: 14),
 
+            // ── Postes / préréglages — TOUJOURS VISIBLES ────────────
+            //
+            // Ils étaient rangés dans le volet rétractable des
+            // autorisations, replié par défaut : le geste le plus courant
+            // (choisir le poste de la personne) était donc caché derrière un
+            // dépliage, sous des dizaines de cases à cocher qui, elles, ne
+            // servent qu'aux cas particuliers.
+            //
+            // Restauration seulement : l'e-commerce garde sa présentation.
+            if (_presetsAlwaysVisible) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _FieldLabel(text: l.hrPresetTitle),
+              ),
+              const SizedBox(height: 6),
+              _buildPresetSelector(),
+              const SizedBox(height: 14),
+            ],
+
             // ── Autorisations (menu rétractable pour alléger l'UI) ──
             Container(
               decoration: BoxDecoration(
@@ -464,17 +838,17 @@ class _EmployeeFormSheetState extends ConsumerState<EmployeeFormSheet> {
                     style: AppTextStyles.caption,
                   ),
                   children: [
-                    // Préréglages
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: _FieldLabel(text: l.hrPresetTitle),
-                    ),
-                    const SizedBox(height: 6),
-                    _PresetSelector(
-                      selected: _selected,
-                      onApply: _applyPreset,
-                    ),
-                    const SizedBox(height: 14),
+                    // Préréglages — ici seulement quand ils ne sont pas déjà
+                    // affichés en permanence au-dessus.
+                    if (!_presetsAlwaysVisible) ...[
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: _FieldLabel(text: l.hrPresetTitle),
+                      ),
+                      const SizedBox(height: 6),
+                      _buildPresetSelector(),
+                      const SizedBox(height: 14),
+                    ],
                     // Permissions par groupe
                     for (final g in EmployeePermissionGroup.values) ...[
                       _PermissionGroup(
@@ -810,7 +1184,26 @@ class _StatusSelector extends StatelessWidget {
 class _PresetSelector extends StatelessWidget {
   final Set<EmployeePermission>             selected;
   final ValueChanged<Set<EmployeePermission>> onApply;
-  const _PresetSelector({required this.selected, required this.onApply});
+  final String                              shopId;
+  /// Postes de l'établissement (restauration). Vide ailleurs.
+  final List<_Poste>                        postes;
+  /// Fonction actuellement retenue — c'est elle qui met un poste en évidence,
+  /// et non l'égalité des permissions : deux postes peuvent parfaitement
+  /// avoir les mêmes droits sans être le même métier.
+  final String                              jobTitle;
+  final ValueChanged<_Poste>                onApplyPoste;
+  final VoidCallback                        onCreatePoste;
+  final ValueChanged<_Poste>                onEditPoste;
+  const _PresetSelector({
+    required this.selected,
+    required this.onApply,
+    required this.shopId,
+    this.postes    = const [],
+    this.jobTitle  = '',
+    required this.onApplyPoste,
+    required this.onCreatePoste,
+    required this.onEditPoste,
+  });
 
   /// Compare deux sets de permissions (égalité stricte).
   static bool _eq(Set<EmployeePermission> a, Set<EmployeePermission> b) =>
@@ -819,35 +1212,141 @@ class _PresetSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
+    final isResto = isRestaurantShop(shopId);
     final items = <_PresetSpec>[
-      // Admin en premier — c'est le rôle "co-propriétaire" et la limite
-      // des 3 administrateurs s'applique. Les autres préréglages ne
-      // changent que les permissions (rôle reste 'user').
-      _PresetSpec(l.hrPresetAdmin,      Icons.admin_panel_settings_rounded,
-          EmployeePermissionPresets.admin),
-      _PresetSpec(l.hrPresetEmployee,   Icons.badge_outlined,
-          EmployeePermissionPresets.employee),
-      _PresetSpec(l.hrPresetCashier,    Icons.point_of_sale_rounded,
-          EmployeePermissionPresets.cashier),
-      _PresetSpec(l.hrPresetStock,      Icons.inventory_rounded,
-          EmployeePermissionPresets.stockManager),
+      // EN RESTAURATION, LES PROFILS GÉNÉRIQUES SONT RETIRÉS.
+      //
+      // « Admin » et « Employé » ne nomment pas un métier : dans une rangée où
+      // tout le reste s'appelle Serveur, Cuisinier ou Chawarmier, ils se
+      // lisaient comme deux postes de plus. Les droits d'un établissement se
+      // règlent poste par poste ; le niveau admin, lui, reste accessible sur
+      // la fiche d'un compte existant (champ Rôle, en modification).
+      //
+      // « Caissier » et « Stock » restent hors restauration : leur nom y
+      // désignerait un métier alors qu'ils ne sont qu'un profil de droits.
+      if (!isResto) ...[
+        _PresetSpec(l.hrPresetAdmin,      Icons.admin_panel_settings_rounded,
+            EmployeePermissionPresets.admin),
+        _PresetSpec(l.hrPresetEmployee,   Icons.badge_outlined,
+            EmployeePermissionPresets.employee),
+        _PresetSpec(l.hrPresetCashier,    Icons.point_of_sale_rounded,
+            EmployeePermissionPresets.cashier),
+        _PresetSpec(l.hrPresetStock,      Icons.inventory_rounded,
+            EmployeePermissionPresets.stockManager),
+      ],
       _PresetSpec(l.hrPresetAccountant, Icons.calculate_rounded,
           EmployeePermissionPresets.accountant),
-      _PresetSpec(l.hrPresetClear,      Icons.layers_clear_rounded,
-          const <EmployeePermission>{}),
+      // « Tout décocher » n'est pas un profil : c'est un geste. En laisser la
+      // pastille radio allumée laissait croire qu'un employé avait le
+      // « préréglage vide », alors qu'il n'a simplement aucun droit encore
+      // choisi. Hors restauration, l'ancienne présentation est conservée.
+      if (!isResto)
+        _PresetSpec(l.hrPresetClear,      Icons.layers_clear_rounded,
+            const <EmployeePermission>{}),
     ];
 
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final spec in items)
-          _PresetRadio(
-            spec:     spec,
-            selected: _eq(selected, spec.perms),
-            onTap:    () => onApply(spec.perms),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final spec in items)
+              _PresetRadio(
+                spec:     spec,
+                // Un profil livré n'est mis en évidence que si AUCUN poste
+                // n'est retenu : sinon « Chawarmier » et « Employé »
+                // paraîtraient cochés tous les deux.
+                selected: jobTitle.trim().isEmpty && _eq(selected, spec.perms),
+                onTap:    () => onApply(spec.perms),
+              ),
+            for (final p in postes)
+              _PresetRadio(
+                spec: _PresetSpec(
+                    p.name,
+                    p.perms == null
+                        ? Icons.work_outline_rounded
+                        : Icons.verified_user_outlined,
+                    p.perms ?? const <EmployeePermission>{}),
+                selected: JobTitles.same(jobTitle, p.name),
+                onTap:    () => onApplyPoste(p),
+                onMenu:   () => onEditPoste(p),
+              ),
+            // Créer un poste depuis les droits affichés.
+            _PresetAddChip(onTap: onCreatePoste),
+          ],
+        ),
+        if (isResto) ...[
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => onApply(const <EmployeePermission>{}),
+              icon: const Icon(Icons.layers_clear_rounded, size: 15),
+              label: Text(l.hrPresetClear, style: AppTextStyles.bodySm),
+              style: TextButton.styleFrom(
+                foregroundColor: cs.onSurface.withValues(alpha: 0.70),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
           ),
+        ],
+        if (postes.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Un poste porte un nom de métier et ses droits. Le choisir '
+            'renseigne la fonction ; ⋮ permet d\'y enregistrer les '
+            'autorisations affichées, de le renommer ou de le supprimer.',
+            style: AppTextStyles.caption.copyWith(
+                color: cs.onSurface.withValues(alpha: 0.60)),
+          ),
+        ],
       ],
+    );
+  }
+}
+
+/// Un poste de l'établissement : un nom de métier et, éventuellement, le
+/// profil de droits qui va avec.
+class _Poste {
+  final String name;
+  final Set<EmployeePermission>? perms;
+  const _Poste(this.name, this.perms);
+}
+
+/// Puce « + Poste » — enregistre les droits actuellement cochés sous un nom.
+class _PresetAddChip extends StatelessWidget {
+  final VoidCallback onTap;
+  const _PresetAddChip({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs    = theme.colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: cs.primary.withValues(alpha: 0.55),
+              width: 1,
+              style: BorderStyle.solid),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.add_rounded, size: 15, color: cs.primary),
+          const SizedBox(width: 6),
+          Text('Nouveau poste',
+              style: AppTextStyles.bodySm.copyWith(
+                  fontWeight: FontWeight.w700, color: cs.primary)),
+        ]),
+      ),
     );
   }
 }
@@ -863,10 +1362,15 @@ class _PresetRadio extends StatelessWidget {
   final _PresetSpec  spec;
   final bool         selected;
   final VoidCallback onTap;
+  /// Non null pour les postes de l'établissement : affiche le ⋮ qui ouvre
+  /// leur menu (droits / renommer / supprimer). Les profils livrés avec
+  /// l'app n'en ont pas — ils ne se modifient pas.
+  final VoidCallback? onMenu;
   const _PresetRadio({
     required this.spec,
     required this.selected,
     required this.onTap,
+    this.onMenu,
   });
 
   @override
@@ -924,6 +1428,21 @@ class _PresetRadio extends StatelessWidget {
                   color: selected
                       ? cs.primary
                       : cs.onSurface.withValues(alpha:0.85))),
+          if (onMenu != null) ...[
+            const SizedBox(width: 2),
+            // Zone de frappe à part : toucher le ⋮ ouvre le menu du poste,
+            // toucher la puce le sélectionne. Sans ce GestureDetector imbriqué,
+            // le tap remonterait au parent et sélectionnerait au lieu d'ouvrir.
+            GestureDetector(
+              onTap: onMenu,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                child: Icon(Icons.more_vert_rounded, size: 15,
+                    color: cs.onSurface.withValues(alpha: 0.55)),
+              ),
+            ),
+          ],
         ]),
       ),
     );

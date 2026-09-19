@@ -432,7 +432,7 @@ class _Header extends StatelessWidget {
         Expanded(
           child: Text(titles[step],
               style: AppTextStyles.subtitleBold
-                  .copyWith(color: const Color(0xFF0F172A))),
+                  .copyWith(color: AppColors.onSurface)),
         ),
         Row(
           mainAxisSize: MainAxisSize.min,
@@ -486,7 +486,7 @@ class _ProductStep extends StatelessWidget {
             const Spacer(),
             Text('${selected.length}/${products.length}',
                 style: AppTextStyles.captionHint
-                    .copyWith(color: const Color(0xFF9CA3AF))),
+                    .copyWith(color: AppColors.textHint)),
           ]),
         ),
       ),
@@ -509,7 +509,7 @@ class _ProductStep extends StatelessWidget {
                     size: 20,
                     color: sel
                         ? AppColors.primary
-                        : const Color(0xFFD1D5DB)),
+                        : AppColors.textHint),
                 const SizedBox(width: 10),
                 Expanded(child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -522,12 +522,12 @@ class _ProductStep extends StatelessWidget {
                             ? CurrencyFormatter.format(p.priceSellPos)
                             : 'Prix non défini',
                         style: AppTextStyles.captionHint
-                            .copyWith(color: const Color(0xFF9CA3AF))),
+                            .copyWith(color: AppColors.textHint)),
                   ],
                 )),
                 Text('Stock: ${p.totalStock}',
                     style: AppTextStyles.micro
-                        .copyWith(color: const Color(0xFF9CA3AF))),
+                        .copyWith(color: AppColors.textHint)),
               ]),
             ),
           );
@@ -708,7 +708,7 @@ class _ClientRow extends StatelessWidget {
                 size: 20,
                 color: selected
                     ? AppColors.primary
-                    : const Color(0xFFD1D5DB)),
+                    : AppColors.textHint),
             const SizedBox(width: 10),
             Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -718,7 +718,7 @@ class _ClientRow extends StatelessWidget {
                     maxLines: 1, overflow: TextOverflow.ellipsis),
                 Text(client.phone ?? '',
                     style: AppTextStyles.captionHint
-                        .copyWith(color: const Color(0xFF9CA3AF))),
+                        .copyWith(color: AppColors.textHint)),
               ],
             )),
           ]),
@@ -771,7 +771,7 @@ class _SendStep extends StatelessWidget {
           decoration: InputDecoration(
             hintText: 'Message catalogue...',
             filled: true,
-            fillColor: const Color(0xFFF9FAFB),
+            fillColor: AppColors.inputFill,
             isDense: true,
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -880,7 +880,7 @@ class _RecipientRow extends StatelessWidget {
       decoration: BoxDecoration(
         color: sent
             ? AppColors.secondary.withValues(alpha: 0.08)
-            : const Color(0xFFF9FAFB),
+            : AppColors.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: sent
@@ -903,7 +903,7 @@ class _RecipientRow extends StatelessWidget {
                 maxLines: 1, overflow: TextOverflow.ellipsis),
             Text(recipient.phoneE164,
                 style: AppTextStyles.micro
-                    .copyWith(color: const Color(0xFF9CA3AF))),
+                    .copyWith(color: AppColors.textHint)),
           ],
         )),
         // Bouton "Envoyer" via Link target=blank — sur web, contourne le
@@ -976,7 +976,7 @@ class _FooterBtn extends StatelessWidget {
           style: ElevatedButton.styleFrom(
             backgroundColor: color ?? AppColors.primary,
             foregroundColor: Colors.white,
-            disabledBackgroundColor: const Color(0xFFE5E7EB),
+            disabledBackgroundColor: AppColors.divider,
             elevation: 0,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10)),

@@ -42,6 +42,17 @@ class LocalStorageService {
   static Future<void> clearCurrentUser() =>
       HiveBoxes.settingsBox.delete('current_user_id');
 
+  /// Propriétaire des données locales actuellement en cache (anti-fuite
+  /// inter-comptes sur appareil partagé). Posé au login, EFFACÉ au logout
+  /// (volontairement absent de `_deviceSettingKeys`). Au login suivant, si ce
+  /// marqueur diffère du nouvel utilisateur, c'est qu'un logout n'a pas eu
+  /// lieu/fini → on purge avant de charger (cf. AuthSupabaseDataSource.login).
+  static String? getLocalDataOwnerId() =>
+      HiveBoxes.settingsBox.get('local_data_owner_id') as String?;
+
+  static Future<void> setLocalDataOwnerId(String id) =>
+      HiveBoxes.settingsBox.put('local_data_owner_id', id);
+
   /// Dernier email utilisé au login (pré-remplissage de l'écran de connexion).
   /// NON effacé au logout pour éviter de retaper à chaque reconnexion.
   static Future<void> saveLastLoginEmail(String email) =>
@@ -134,6 +145,59 @@ class LocalStorageService {
     final raw = HiveBoxes.settingsBox.get('units_$shopId');
     if (raw == null) return [];
     return List<String>.from(raw as List);
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // POSTES — par boutique (hotfix_160)
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // Les fonctions proposées à la création d'un compte : Serveur, Cuisinier,
+  // Livreur… Même stockage que les marques et les unités — une simple liste
+  // de libellés par boutique, tenue à jour depuis Supabase par
+  // `AppDatabase.syncMetadata`.
+  //
+  // La clé `job_titles_<shopId>` était déjà utilisée AVANT hotfix_160 pour
+  // ranger les seuls ajouts manuels de l'appareil. Ils ne sont pas perdus :
+  // `AppDatabase.ensureJobTitlesSeeded` les reprend dans la liste partagée
+  // au premier amorçage.
+
+  static List<String> getJobTitles(String shopId) {
+    final raw = HiveBoxes.settingsBox.get('job_titles_$shopId');
+    if (raw == null) return [];
+    return List<String>.from(raw as List);
+  }
+
+  /// Profil de droits par poste : nom du poste → clés de permissions séparées
+  /// par des virgules (hotfix_161). Un poste absent de cette table ne décide
+  /// d'aucun accès — le choisir ne coche ni ne décoche rien.
+  static Map<String, String> getJobTitlePerms(String shopId) {
+    final raw = HiveBoxes.settingsBox.get('job_title_perms_$shopId');
+    if (raw is! Map) return {};
+    return raw.map((k, v) => MapEntry(k.toString(), v?.toString() ?? ''));
+  }
+
+  /// Taux horaire des heures supplémentaires par poste (hotfix_165), en FCFA.
+  ///
+  /// Un poste absent vaut 0 : ses heures supplémentaires sont comptées en
+  /// minutes mais jamais valorisées. C'est volontaire — mieux vaut un montant
+  /// nul et visible qu'un taux inventé par l'application.
+  static Map<String, int> getJobTitleRates(String shopId) {
+    final raw = HiveBoxes.settingsBox.get('job_title_rates_$shopId');
+    if (raw is! Map) return {};
+    final out = <String, int>{};
+    raw.forEach((k, v) {
+      final n = v is num ? v.toInt() : int.tryParse(v?.toString() ?? '');
+      if (n != null) out[k.toString()] = n;
+    });
+    return out;
+  }
+
+  /// Heure de fermeture de l'établissement, `HH:mm` — `null` si aucune n'est
+  /// réglée, auquel cas aucun départ n'est jugé.
+  static String? getShopClosingTime(String shopId) {
+    final raw = HiveBoxes.settingsBox.get('staff_closing_time_$shopId');
+    final s = raw?.toString().trim() ?? '';
+    return s.isEmpty ? null : s;
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -326,6 +390,8 @@ class LocalStorageService {
     'is_active': s.isActive, 'today_sales': s.todaySales,
     'owner_id': s.ownerId, 'phone': s.phone,
     'whatsapp_phone': s.whatsappPhone, 'email': s.email,
+    'facebook_pixel_id': s.facebookPixelId,
+    'partner_debt_alert_days': s.partnerDebtAlertDays,
     'created_at': s.createdAt?.toIso8601String(),
     'kind':           s.kind.key,
     'parent_shop_id': s.parentShopId,
@@ -354,6 +420,12 @@ class LocalStorageService {
     phone:        m['phone']?.toString(),
     whatsappPhone: m['whatsapp_phone']?.toString(),
     email:        m['email']?.toString(),
+    facebookPixelId: m['facebook_pixel_id']?.toString(),
+    // Champ ajouté après coup : toute map écrite par une version antérieure
+    // en est dépourvue. Le défaut suffit, aucune migration n'est requise —
+    // c'est précisément ce que la lecture défensive permet d'éviter.
+    partnerDebtAlertDays:
+        (m['partner_debt_alert_days'] as num?)?.toInt() ?? 30,
     createdAt:    m['created_at'] is String
         ? DateTime.tryParse(m['created_at'] as String)
         : (m['created_at'] is DateTime
@@ -409,10 +481,14 @@ class LocalStorageService {
     'stock_qty': p.stockQty, 'stock_min_alert': p.stockMinAlert,
     'status': p.status.key,
     'is_active': p.isActive, 'is_visible_web': p.isVisibleWeb,
+    'track_stock': p.trackStock,
+    'activity_id': p.activityId,
     'image_url': p.imageUrl, 'rating': p.rating,
     'variants': p.variants.map(_variantToMap).toList(),
     'expenses': p.expenses,
     'created_at': p.createdAt?.toIso8601String(),
+    'draft_expires_at': p.draftExpiresAt?.toIso8601String(),
+    'unit': p.unit, 'internal_notes': p.internalNotes,
     // Soft-delete (hotfix_085). archived_snapshot reste null pour les
     // produits vivants — il est rempli uniquement par la RPC delete_product
     // côté serveur et redescendu via realtime.
@@ -475,6 +551,12 @@ class LocalStorageService {
       status:       ProductStatusX.fromString(m['status'] as String?),
       isActive:     m['is_active'] as bool? ?? true,
       isVisibleWeb: m['is_visible_web'] as bool? ?? false,
+      // Défaut true : les produits antérieurs à hotfix_138 n'ont pas la clé
+      // et doivent conserver le suivi de stock historique.
+      trackStock:   m['track_stock'] as bool? ?? true,
+      // Secteur restaurant (hotfix_141) — absent des produits legacy et de
+      // tout l'e-commerce : null, aucun rattachement.
+      activityId:   m['activity_id'] as String?,
       imageUrl:     m['image_url'],
       rating:       m['rating'] as int? ?? 0,
       variants:     variants,
@@ -486,6 +568,16 @@ class LocalStorageService {
           : (m['created_at'] is DateTime
               ? m['created_at'] as DateTime
               : null),
+      // Absent de tous les produits antérieurs → null, donc non-brouillon.
+      // Lecture tolérante, comme les champs de suppression douce ci-dessous.
+      draftExpiresAt: m['draft_expires_at'] is String
+          ? DateTime.tryParse(m['draft_expires_at'] as String)
+          : (m['draft_expires_at'] is DateTime
+              ? m['draft_expires_at'] as DateTime
+              : null),
+      // Absents des produits antérieurs → null.
+      unit:          m['unit'] as String?,
+      internalNotes: m['internal_notes'] as String?,
       // Soft-delete (hotfix_085). Lecture tolérante : les produits legacy
       // n'ont pas ces colonnes → null par défaut.
       deletedAt: m['deleted_at'] is String
@@ -521,6 +613,12 @@ class LocalStorageService {
     'promo_price': v.promoPrice,
     'promo_start': v.promoStart?.toIso8601String(),
     'promo_end':   v.promoEnd?.toIso8601String(),
+    // Poids et dimensions : dans le JSON des variantes, sans colonne
+    // dédiée — il n'existe pas de table `product_variants`.
+    'weight_g':  v.weightG,
+    'length_cm': v.lengthCm,
+    'width_cm':  v.widthCm,
+    'height_cm': v.heightCm,
   };
 
   static ProductVariant _variantFromMap(Map<String, dynamic> m) {
@@ -551,6 +649,11 @@ class LocalStorageService {
           ? DateTime.tryParse(m['promo_start'] as String) : null,
       promoEnd:       m['promo_end'] != null
           ? DateTime.tryParse(m['promo_end'] as String) : null,
+      // Absentes des variantes antérieures → null, aucune migration.
+      weightG:  (m['weight_g']  as num?)?.toDouble(),
+      lengthCm: (m['length_cm'] as num?)?.toDouble(),
+      widthCm:  (m['width_cm']  as num?)?.toDouble(),
+      heightCm: (m['height_cm'] as num?)?.toDouble(),
     );
   }
 
@@ -591,12 +694,52 @@ class LocalStorageService {
   static ProductVariant variantFromMap(Map<String, dynamic> m) => _variantFromMap(m);
   static Product productFromMap(Map<String, dynamic> m) => _productFromMap(m);
   // ── Réinitialisation complète des données locales ────────────────────────
-  static Future<void> clearAllLocalData() async {
-    await HiveBoxes.shopsBox.clear();
-    await HiveBoxes.productsBox.clear();
-    await HiveBoxes.membershipsBox.clear();
-    await HiveBoxes.usersBox.clear();
-    await HiveBoxes.settingsBox.clear();
-    await HiveBoxes.cartBox.clear();
-  }
+  /// Purge TOUTES les box métier (commandes, clients, ventes, stock, finances,
+  /// tickets, notifs, panier…) en conservant les préférences device (thème,
+  /// locale, dernier email). Anciennement PARTIELLE (ne vidait que shops/
+  /// products/memberships/users/settings/cart) → elle laissait fuiter
+  /// commandes et clients lors d'une invalidation de session zombie ou d'une
+  /// suppression de compte. Déléguée désormais à la purge complète anti-fuite.
+  static Future<void> clearAllLocalData() =>
+      HiveBoxes.clearAllForLogout(_deviceSettingKeys,
+          preserveSettingsKeyPrefixes: _deviceSettingKeyPrefixes);
+
+  /// Clés de PRÉFÉRENCES liées à l'APPAREIL (pas au compte) — conservées au
+  /// logout. Tout le reste (caches compte/boutique `*_$userId`/`*_$shopId`,
+  /// `current_user_id`, tokens, ventes offline…) est purgé. Les chaînes sont
+  /// les clés posées par : TextScale (`text_scale`), DemoMode
+  /// (`demo_mode_enabled`), ThemeMode (`app_theme_mode`), ThemePalette
+  /// (`app_theme_palette*`), locale (`app_locale`), onboarding
+  /// (`onboarding_seen`), ce service (`last_login_email`, `whatsapp_provider`).
+  static const _deviceSettingKeys = <String>{
+    'last_login_email',
+    'text_scale',
+    'demo_mode_enabled',
+    'app_theme_mode',
+    'app_theme_palette',
+    'app_theme_palette_last_manual',
+    'app_locale',
+    'onboarding_seen',
+    'whatsapp_provider',
+    // Barre de navigation rétractée : préférence d'AFFICHAGE de l'appareil,
+    // au même titre que la taille du texte. La purger au logout rouvrirait la
+    // barre déployée à chaque reconnexion.
+    'nav_rail_collapsed',
+  };
+
+  /// Préfixes de clés settings conservés au purge (clés dynamiques par uid).
+  /// `onboarding_done_<uid>` : le tour de bienvenue est vu UNE FOIS par compte
+  /// sur l'appareil — il ne doit pas réapparaître à chaque reconnexion.
+  static const _deviceSettingKeyPrefixes = <String>{
+    'onboarding_done_',
+  };
+
+  /// Purge anti-fuite inter-comptes (appareil partagé) : efface TOUTES les
+  /// données locales liées au compte/boutique en conservant les préférences
+  /// device ci-dessus. À appeler au logout (remplace `clearCurrentUser`, qui
+  /// n'effaçait que `current_user_id` et laissait fuiter produits, prix
+  /// d'achat, clients, panier…).
+  static Future<void> purgeOnLogout() =>
+      HiveBoxes.clearAllForLogout(_deviceSettingKeys,
+          preserveSettingsKeyPrefixes: _deviceSettingKeyPrefixes);
 }

@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
+import '../observability/error_reporter.dart';
 import '../../shared/widgets/alerts/_alert_demo_page.dart';
 import '../../features/auth/presentation/bloc/auth_state.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
@@ -41,6 +43,17 @@ import '../../features/caisse/presentation/pages/caisse_page.dart';
 import '../../features/caisse/presentation/pages/orders_page.dart';
 import '../../features/caisse/presentation/pages/payment_page.dart';
 import '../../features/inventaire/presentation/pages/inventaire_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_tables_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_setup_page.dart';
+import '../../features/restaurant/presentation/pages/bill_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_dashboard_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_menu_page.dart';
+import '../../features/restaurant/presentation/pages/finances_hub_page.dart';
+import '../../features/restaurant/presentation/pages/inventory_reconcile_page.dart';
+import '../../features/restaurant/presentation/pages/cash_closure_page.dart';
+import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
+import '../../features/restaurant/presentation/pages/restaurant_staff_page.dart';
+import '../../features/restaurant/presentation/pages/timeclock_page.dart';
 import '../../features/inventaire/presentation/pages/product_form_page.dart';
 import '../../features/inventaire/presentation/pages/reception_page.dart';
 import '../../features/inventaire/presentation/pages/incidents_page.dart';
@@ -55,6 +68,7 @@ import '../../features/finances/presentation/pages/finances_page.dart';
 import '../../features/hub_central/presentation/pages/hub_dashboard_page.dart';
 import '../../features/hub_central/presentation/pages/shop_comparison_page.dart';
 import '../../features/parametres/presentation/pages/parametres_page.dart';
+import '../../features/parametres/presentation/pages/marketing_page.dart';
 import '../../features/parametres/presentation/pages/shop_settings_page.dart';
 import '../../features/parametres/presentation/pages/stock_locations_page.dart';
 import '../../features/parametres/presentation/pages/location_contents_page.dart';
@@ -76,10 +90,13 @@ import '../../features/parametres/presentation/pages/notifications_page.dart';
 import '../../features/parametres/presentation/pages/exports_page.dart';
 import '../../features/parametres/presentation/pages/payments_page.dart';
 import '../../features/parametres/presentation/pages/delivery_templates_page.dart';
+import '../../features/parametres/presentation/pages/livraison_page.dart';
 import '../../features/parametres/presentation/pages/partner_accounts_page.dart';
+import '../../features/parametres/presentation/pages/partner_hub_detail_page.dart';
 import '../../features/parametres/presentation/pages/pin_delete_page.dart';
 import '../../features/parametres/presentation/pages/sessions_page.dart';
 import '../permisions/admin_panel_page.dart';
+import '../config/restaurant_mode.dart';
 import '../permisions/subscription_provider.dart';
 import '../database/app_database.dart';
 import '../services/presence_service.dart';
@@ -206,6 +223,13 @@ class AuthRouterNotifier extends ChangeNotifier {
       // Démarre le heartbeat de présence (PresenceService).
       // Permet au workflow d'approbation owner de fonctionner.
       PresenceService.start();
+      // Phase 0 — enrichissement Sentry : associe la cible exacte (qui est
+      // connecté) à tout event remonté.
+      if (state is AuthAuthenticated) {
+        final u = state.user;
+        Sentry.configureScope((scope) =>
+            scope.setUser(SentryUser(id: u.id, email: u.email)));
+      }
     } else if (wasAuth && !_isAuthenticated) {
       _ref?.read(subscriptionProvider.notifier).reset();
       _ref?.read(shopRolesMapProvider.notifier).state = {};
@@ -218,6 +242,12 @@ class AuthRouterNotifier extends ChangeNotifier {
       } catch (_) {}
       AppDatabase.notifyAllChanged();
       PresenceService.stop();
+      // Phase 0 — Sentry : on oublie l'utilisateur ET la boutique au logout
+      // (les events suivants ne doivent pas être attribués au compte précédent).
+      Sentry.configureScope((scope) {
+        scope.setUser(null);
+        scope.removeTag('shop_id');
+      });
     }
     if (wasAuth != _isAuthenticated || justInitialized) notifyListeners();
   }
@@ -276,12 +306,67 @@ final authRouterNotifierProvider = Provider<AuthRouterNotifier>((ref) {
 // lors de la navigation entre routes shell et routes hors-shell
 final _shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
 
+/// Garde des routes du module restaurant.
+///
+/// Jusqu'ici ces écrans n'étaient protégés que par la VISIBILITÉ de leur entrée
+/// de menu (`ShellNavItem.visibleIf`). Masquer un item n'empêche pas d'atteindre
+/// l'URL : n'importe quel membre connecté pouvait ouvrir `/restaurant/personnel`
+/// et y lire les salaires et les avances de toute l'équipe.
+///
+/// Deux filtres :
+///   * SECTEUR — hors restauration ces écrans n'ont pas de sens ; on renvoie au
+///     tableau de bord plutôt que d'afficher une page vide (même parti pris que
+///     la redirection de l'ancienne page Finances, plus bas).
+///   * RÔLE — [adminOnly] pour tout ce qui expose de l'argent : salaires,
+///     marges, coûts matières, écarts d'inventaire.
+///
+/// Le service courant (plan de salle, cuisine, addition, clôture de caisse)
+/// reste ouvert à tout membre : ce sont les écrans de travail de l'équipe, et
+/// c'est le caissier lui-même qui compte son tiroir.
+String? _restaurantGuard(Ref ref, GoRouterState s, {bool adminOnly = false}) {
+  final id = s.pathParameters['shopId'] ?? '';
+  if (id.isEmpty) return null;
+  if (!isRestaurantShop(id)) return '/shop/$id/dashboard';
+  // AUCUNE REDIRECTION VERS LA CONFIGURATION.
+  //
+  // Une version précédente renvoyait tous les écrans du module vers
+  // `/restaurant/setup` tant que la mise en route n'était pas finie. C'était
+  // une contrainte : elle empêchait d'explorer l'application avant d'avoir
+  // saisi quoi que ce soit, et enfermait quiconque voulait simplement regarder.
+  //
+  // L'accompagnement subsiste, mais il PROPOSE au lieu d'imposer : la bannière
+  // du tableau de bord et la carte de progression de l'écran Menu mènent à la
+  // configuration tant qu'il reste quelque chose à faire. Tout le reste est
+  // accessible dès la première connexion. (Il n'y a PAS d'entrée « Configuration »
+  // au menu, contrairement à ce que disait cette note.)
+  //
+  // `/restaurant/setup` reste donc ouverte à tout membre, À DESSEIN : elle dit
+  // où en est l'établissement, ce qui est une information de service. Ce sont
+  // ses ÉTAPES qui portent les droits — `canAddProduct` pour composer la carte,
+  // `canManageExpenses` pour les achats. La garder ici en `adminOnly` aurait
+  // écarté l'employé à qui le gérant a justement délégué `inventoryWrite`.
+  if (!adminOnly) return null;
+  final perms = ref.read(permissionsProvider(id));
+  // On ne renvoie que si l'on SAIT que l'utilisateur est un membre non-admin.
+  // Au tout premier rendu après un deep-link, les rôles peuvent ne pas être
+  // encore hydratés (`isMember` faux) : rediriger un owner vers son tableau de
+  // bord parce que son rôle n'est pas encore chargé serait pire que le mal.
+  if (perms.isMember && !perms.isShopAdmin) return shopLandingRoute(id);
+  return null;
+}
+
 final appRouterProvider = Provider<GoRouter>((ref) {
   final notifier = ref.watch(authRouterNotifierProvider);
 
   return GoRouter(
     initialLocation: RouteNames.landing,
     refreshListenable: notifier, // ← le router se rafraîchit quand notifier change
+    // Phase 0 — SentryNavigatorObserver RÉACTIVÉ : pose le nom de la route
+    // courante (cible « écran ») sur chaque event + breadcrumbs de navigation.
+    // (Désactivé un temps pendant le debug du gel logout ; la cause réelle
+    // était le signOut bloquant — corrigée. La déconnexion redirige désormais
+    // en une seule navigation, l'observer ne s'emballe plus.)
+    observers: [SentryNavigatorObserver(setRouteNameAsTransaction: true)],
     redirect: (context, state) {
       // Helper : destination après login. Si l'utilisateur a EXACTEMENT
       // 1 boutique en cache (owner ou membre), on saute la page
@@ -299,13 +384,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         final shops = LocalStorageService.getShopsForUser(uid);
         if (shops.length == 1) {
           LocalStorageService.saveActiveShopId(uid, shops.first.id);
-          return '/shop/${shops.first.id}/dashboard';
+          // Restaurant → Menu ; sinon Tableau de bord (cf. shopLandingRoute).
+          return shopLandingRoute(shops.first.id);
         }
         return RouteNames.shopSelector;
       }
 
       final isLoggedIn           = notifier.isAuthenticated;
       final loc                  = state.matchedLocation;
+      // Phase 1 observabilité — cible « écran » des rapports de bugs.
+      ErrorReporter.lastRoute = loc;
       final isAuthRoute          = loc.startsWith('/auth');
       final isSubscriptionRoute  = loc.startsWith('/subscription');
       final isAcceptInviteRoute  = loc.startsWith('/accept-invite');
@@ -399,7 +487,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         if (loc.startsWith('${RouteNames.suspended}/')) {
           final parts = loc.split('/');
           final sid = parts.length >= 3 ? parts[2] : '';
-          return suspendedFor(sid) ? null : '/shop/$sid/dashboard';
+          return suspendedFor(sid) ? null : shopLandingRoute(sid);
         }
         if (loc.startsWith('/shop/')) {
           final parts = loc.split('/');
@@ -572,6 +660,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             }
             final loc = qp['loc']?.trim();
             final deliveryMode = qp['mode']?.trim() == 'delivery';
+            // Deep-link pub Facebook : `?product=<id>` ouvre le catalogue
+            // COMPLET et met en avant (ouvre la fiche) du produit ciblé. Le
+            // client peut ensuite fermer la fiche et continuer à parcourir.
+            final highlight = qp['product']?.trim();
             return CataloguePage(
               shopId: s.pathParameters['shopId']!,
               initialCategory: qp['cat'],
@@ -579,6 +671,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               stockOverride: stockOverride,
               locationId: (loc != null && loc.isNotEmpty) ? loc : null,
               deliveryMode: deliveryMode,
+              highlightProductId:
+                  (highlight != null && highlight.isNotEmpty) ? highlight : null,
             );
           }),
       // Suivi de commande publique — lien envoyé par WhatsApp dans la
@@ -719,9 +813,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           return ShopShell(key: ValueKey(shopId), child: child, shopId: shopId);
         },
         routes: [
+          // Tableau de bord : deux écrans distincts selon le secteur. Le
+          // restaurant a ses propres indicateurs (canaux de service, tables
+          // occupées, bons en cuisine) qui n'ont aucun sens en e-commerce,
+          // et réciproquement. Route unique pour que la redirection après
+          // login et le lien « Accueil » restent inchangés.
           GoRoute(path: '/shop/:shopId/dashboard',
-              pageBuilder: (c, s) => _shellPage(s,
-                  DashboardPage(shopId: s.pathParameters['shopId']!))),
+              pageBuilder: (c, s) {
+                final id = s.pathParameters['shopId']!;
+                return _shellPage(s, isRestaurantShop(id)
+                    ? RestaurantDashboardPage(shopId: id)
+                    : DashboardPage(shopId: id));
+              }),
           GoRoute(path: '/shop/:shopId/caisse',
               pageBuilder: (c, s) => _shellPage(s, CaissePage(
                 shopId: s.pathParameters['shopId']!,
@@ -733,9 +836,91 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/caisse/orders',
               pageBuilder: (c, s) => _shellPage(s,
                   OrdersPage(shopId: s.pathParameters['shopId']!))),
-          GoRoute(path: '/shop/:shopId/inventaire',
+          // Module restaurant — plan de salle. L'onglet de nav n'apparaît que
+          // pour les secteurs de restauration, mais la route reste atteignable
+          // par deeplink : la page se contente d'afficher un plan vide si la
+          // boutique n'est pas un établissement de restauration (aucune donnée
+          // sensible exposée).
+          // L'écran de SERVICE a été SUPPRIMÉ (2026-08-03). La prise de
+          // commande passe par le Menu (panier → « Type de commande » →
+          // cuisine), le cycle de vie des tables par le Plan de salle, et
+          // l'avancement du service par la page Commandes. Le garder aurait
+          // laissé un troisième chemin de prise de commande, divergeant en
+          // silence des deux autres.
+          // Mise en route — la seule route restaurant que la garde laisse
+          // toujours passer (elle s'exclut elle-même de la redirection).
+          GoRoute(path: '/shop/:shopId/restaurant/setup',
+              redirect: (c, st) => _restaurantGuard(ref, st),
               pageBuilder: (c, s) => _shellPage(s,
-                  InventairePage(shopId: s.pathParameters['shopId']!))),
+                  RestaurantSetupPage(shopId: s.pathParameters['shopId']!))),
+          GoRoute(path: '/shop/:shopId/restaurant/tables',
+              redirect: (c, st) => _restaurantGuard(ref, st),
+              pageBuilder: (c, s) => _shellPage(s,
+                  RestaurantTablesPage(shopId: s.pathParameters['shopId']!))),
+          // Route « Préparation » supprimée avec son entrée de menu
+          // (2026-08-05) : le cuisinier annonce à voix haute, l'opérateur
+          // fait avancer le bon depuis Commandes, qui porte déjà toute la
+          // chronologie du service.
+          // Route « À emporter » supprimée avec son entrée de menu : les
+          // commandes de comptoir se suivent depuis Commandes.
+          // Finances restaurant (PR-B) — hub Ingrédients / Activités / Stock.
+          GoRoute(path: '/shop/:shopId/restaurant/finances',
+              redirect: (c, st) => _restaurantGuard(ref, st, adminOnly: true),
+              pageBuilder: (c, s) => _shellPage(s,
+                  FinancesHubPage(shopId: s.pathParameters['shopId']!))),
+          // Réconciliation d'inventaire (Lot 2) — comptage de fin de service.
+          GoRoute(path: '/shop/:shopId/restaurant/inventory/reconcile',
+              redirect: (c, st) => _restaurantGuard(ref, st, adminOnly: true),
+              pageBuilder: (c, s) => _shellPage(s,
+                  InventoryReconcilePage(
+                      shopId: s.pathParameters['shopId']!))),
+          // Clôture de caisse aveugle X/Z (Lot C) — accessible à tout membre
+          // qui encaisse : c'est LE caissier qui compte. Seul l'historique des
+          // écarts est filtré, à l'intérieur de la page.
+          GoRoute(path: '/shop/:shopId/restaurant/caisse/cloture',
+              redirect: (c, st) => _restaurantGuard(ref, st),
+              pageBuilder: (c, s) => _shellPage(s,
+                  CashClosurePage(shopId: s.pathParameters['shopId']!))),
+          // Personnel du restaurant (Lot D) : équipe, heures, paie.
+          GoRoute(path: '/shop/:shopId/restaurant/personnel',
+              redirect: (c, st) => _restaurantGuard(ref, st, adminOnly: true),
+              pageBuilder: (c, s) => _shellPage(s,
+                  RestaurantStaffPage(shopId: s.pathParameters['shopId']!))),
+          // SUPPRIMES (2026-08-03) : la page « Modificateurs de menu » et la
+          // prise de commande par table. Les accompagnements n'existent plus
+          // — chaque combinaison est un plat entier de la carte — et toute
+          // commande passe par le Menu.
+          //
+          // `RestoBackdrop` : l'addition vit HORS du shell, elle ne reçoit
+          // donc pas le décor restaurant par héritage. On le remonte ici pour
+          // que le service garde le même fond d'un bout à l'autre.
+          GoRoute(path: '/shop/:shopId/restaurant/addition/:tableId',
+              redirect: (c, st) => _restaurantGuard(ref, st),
+              builder: (c, s) => RestoBackdrop(
+                    child: BillPage(
+                      shopId:  s.pathParameters['shopId']!,
+                      tableId: s.pathParameters['tableId']!,
+                    ),
+                  )),
+          // Badgeuse (Lot D) — HORS shell à dessein : posée en libre-service à
+          // l'entrée du personnel, elle ne doit donner accès à aucune autre
+          // page de l'application. Une seule sortie, par le bouton fermer.
+          GoRoute(path: '/shop/:shopId/restaurant/pointage',
+              redirect: (c, st) => _restaurantGuard(ref, st),
+              builder: (c, s) =>
+                  TimeclockPage(shopId: s.pathParameters['shopId']!)),
+          // Carte / inventaire : deux écrans selon le secteur. En
+          // restauration c'est « Menu » — grille de plats avec photo, note
+          // et ajout au panier à emporter. Route unique pour que les liens
+          // internes (« Voir la carte », tuiles du tableau de bord) marchent
+          // dans les deux cas.
+          GoRoute(path: '/shop/:shopId/inventaire',
+              pageBuilder: (c, s) {
+                final id = s.pathParameters['shopId']!;
+                return _shellPage(s, isRestaurantShop(id)
+                    ? RestaurantMenuPage(shopId: id)
+                    : InventairePage(shopId: id));
+              }),
           GoRoute(path: '/shop/:shopId/employees',
               pageBuilder: (c, s) => _shellPage(s, EmployeesPage(
                   shopId: s.pathParameters['shopId']!))),
@@ -778,6 +963,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/crm/notify',
               builder: (c, s) => SendNotificationPage(shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/finances',
+              // La page comptable (CA / dépenses / pertes / bilan) est
+              // e-commerce uniquement. En restaurant, la gestion financière
+              // gastronomique passe exclusivement par le hub Finances dédié :
+              // toute tentative d'atteindre cette page (deeplink, ancien lien)
+              // est redirigée pour ne jamais exposer l'ancienne logique.
+              redirect: (c, s) {
+                final id = s.pathParameters['shopId']!;
+                return isRestaurantShop(id)
+                    ? '/shop/$id/restaurant/finances'
+                    : null;
+              },
               pageBuilder: (c, s) {
                 final tab = s.uri.queryParameters['tab'];
                 // ValueKey dépendante du `tab` : state.pageKey est basée
@@ -803,6 +999,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/parametres',
               pageBuilder: (c, s) => _shellPage(s,
                   ParametresPage(shopId: s.pathParameters['shopId']!))),
+          // Page dédiée d'UNE section de Paramètres (sommaire désencombré) :
+          // /parametres/section/<boutique|compte|securite|preferences|
+          //  abonnement|integrations|administration|danger>
+          GoRoute(path: '/shop/:shopId/parametres/section/:key',
+              builder: (c, s) => ParametresSectionPage(
+                  shopId: s.pathParameters['shopId']!,
+                  sectionKey: s.pathParameters['key']!)),
           GoRoute(path: '/shop/:shopId/parametres/shop',
               builder: (c, s) {
                 final showOverview =
@@ -885,12 +1088,26 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/parametres/payments',
               builder: (c, s) => PaymentsPage(
                   shopId: s.pathParameters['shopId']!)),
+          GoRoute(path: '/shop/:shopId/parametres/marketing',
+              builder: (c, s) => MarketingPage(
+                  shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/delivery-templates',
               builder: (c, s) => DeliveryTemplatesPage(
+                  shopId: s.pathParameters['shopId']!)),
+          GoRoute(path: '/shop/:shopId/parametres/livraison',
+              builder: (c, s) => LivraisonPage(
                   shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/partner-accounts',
               builder: (c, s) => PartnerAccountsPage(
                   shopId: s.pathParameters['shopId']!)),
+          // Hub partenaire unifié (Solde + Stock déposé). `?tab=stock` ouvre
+          // directement l'onglet Stock (depuis la page Emplacements).
+          GoRoute(path: '/shop/:shopId/parametres/partner/:partnerId',
+              builder: (c, s) => PartnerHubDetailPage(
+                  shopId: s.pathParameters['shopId']!,
+                  partnerLocationId: s.pathParameters['partnerId']!,
+                  initialTab:
+                      s.uri.queryParameters['tab'] == 'stock' ? 1 : 0)),
           GoRoute(path: '/shop/:shopId/parametres/pin/delete',
               builder: (c, s) => PinDeletePage(
                   shopId: s.pathParameters['shopId']!)),

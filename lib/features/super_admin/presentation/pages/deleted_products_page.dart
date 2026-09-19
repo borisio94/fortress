@@ -656,7 +656,7 @@ class _PlaceholderImg extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         color: Theme.of(context).semantic.borderSubtle,
-        child: const Icon(Icons.image_outlined,
+        child: Icon(Icons.image_outlined,
             color: AppColors.textHint, size: 20),
       );
 }
@@ -724,7 +724,7 @@ class _SnapshotSheet extends StatelessWidget {
             margin: const EdgeInsets.only(top: 10, bottom: 6),
             width: 36, height: 4,
             decoration: BoxDecoration(
-                color: const Color(0xFFDDD9F0),
+                color: AppColors.primarySurface,
                 borderRadius: BorderRadius.circular(2)),
           ),
 
@@ -755,7 +755,7 @@ class _SnapshotSheet extends StatelessWidget {
               ),
               IconButton(
                 tooltip: 'Copier le JSON',
-                icon: const Icon(Icons.copy_rounded,
+                icon: Icon(Icons.copy_rounded,
                     color: AppColors.textSecondary),
                 onPressed: () async {
                   await Clipboard.setData(ClipboardData(text: pretty));
@@ -765,7 +765,7 @@ class _SnapshotSheet extends StatelessWidget {
               ),
               IconButton(
                 tooltip: 'Fermer',
-                icon: const Icon(Icons.close_rounded,
+                icon: Icon(Icons.close_rounded,
                     color: AppColors.textSecondary),
                 onPressed: () => Navigator.of(context).pop(),
               ),

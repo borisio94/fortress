@@ -36,7 +36,11 @@ class DeleteSaleUseCase {
   /// cf. hotfix_117 qui ajoute `cancelled`).
   static const allowedStatuses = <SaleStatus>{
     SaleStatus.scheduled,
-    SaleStatus.processing,
+    // `processing` (En cours) VOLONTAIREMENT EXCLU : son stock est déjà sorti
+    // des disponibles (réservé à l'envoi). Autoriser sa suppression directe =
+    // risque de perte sèche de stock. Il faut d'abord ANNULER la commande (ce
+    // qui restitue le stock), puis la commande annulée devient supprimable.
+    // Retirer ce statut MASQUE aussi le bouton Supprimer (il teste ce set).
     SaleStatus.refused,
     SaleStatus.cancelled,
   };
@@ -140,8 +144,9 @@ class SuppressionStatutInvalideException implements DeleteSaleException {
   @override String get code => 'suppression_statut_invalide';
   @override String get message =>
       'Suppression refusée : statut « ${status.label} » non éligible. '
-      'Seules les commandes programmées, en cours ou refusées peuvent être '
-      'supprimées.';
+      'Seules les commandes programmées, annulées ou refusées peuvent être '
+      'supprimées. Pour une commande en cours, annulez-la d\'abord '
+      '(le stock est alors restitué).';
   @override String toString() => 'SuppressionStatutInvalideException($status)';
 }
 

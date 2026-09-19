@@ -50,7 +50,10 @@ Future<ImageValidationResult> validateAndReadImage(
   int minWidth = 200,
   int minHeight = 200,
   int maxOutputSize = 2048,
-  bool requireSquare = true,
+  // Rectangles ACCEPTÉS (demande utilisateur). L'affichage produit utilise
+  // `BoxFit.cover` → une image non carrée est recadrée au centre (jamais
+  // déformée). Passer `true` uniquement si un contexte précis exige le 1:1.
+  bool requireSquare = false,
 }) async {
   final rawBytes = await xFile.readAsBytes();
   final decoded = img.decodeImage(rawBytes);

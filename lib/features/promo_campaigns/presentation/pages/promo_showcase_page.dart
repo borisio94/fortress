@@ -54,7 +54,7 @@ class _PromoShowcasePageState extends ConsumerState<PromoShowcasePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F3FA),
+      backgroundColor: AppColors.background,
       body: FutureBuilder<PromoCampaign?>(
         future: _futureCampaign,
         builder: (_, snap) {

@@ -154,7 +154,7 @@ class _OrderReturnCard extends StatelessWidget {
               maxLines: 1, overflow: TextOverflow.ellipsis),
           Text('${_fmtDate(order.createdAt)} · ${CurrencyFormatter.format(order.total)}',
               style: AppTextStyles.micro
-                  .copyWith(color: const Color(0xFFD1D5DB))),
+                  .copyWith(color: AppColors.textHint)),
         ])),
         GestureDetector(
           onTap: onReturn,
@@ -272,7 +272,7 @@ class _ReturnSheetState extends State<_ReturnSheet> {
                       labelStyle: AppTextStyles.micro,
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                      filled: true, fillColor: const Color(0xFFFFF7ED),
+                      filled: true, fillColor: AppColors.warning.withValues(alpha: 0.12),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
                           borderSide: const BorderSide(color: Color(0xFFFDE68A))),
                     ),
@@ -403,7 +403,7 @@ class _StatePill extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: active ? color.withValues(alpha:0.1) : const Color(0xFFF9FAFB),
+        color: active ? color.withValues(alpha:0.1) : AppColors.surface,
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
             color: active ? color : Theme.of(context).semantic.borderSubtle,

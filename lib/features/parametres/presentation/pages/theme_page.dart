@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/logo_theme_builder.dart';
@@ -39,11 +40,12 @@ class ThemePage extends ConsumerWidget {
             children: [
               _Header(palette: current, label: current.label(isFr)),
               const SizedBox(height: 18),
-              // Sélecteur clair / sombre / système masqué tant que le mode
-              // sombre n'est pas finalisé (le rendu est forcé clair dans
-              // app.dart). Réactiver en décommentant la ligne ci-dessous.
-              // _ModeSelector(primary: current.primary, isFr: isFr),
-              // const SizedBox(height: 18),
+              // Sélecteur clair / sombre / système. Le mode sombre est actif
+              // (app.dart résout le brightness et le passe à MaterialApp) et
+              // la migration des composants est en cours — l'utilisateur peut
+              // choisir librement son apparence.
+              _ModeSelector(primary: current.primary, isFr: isFr),
+              const SizedBox(height: 18),
               Row(children: [
                 Container(
                   width: 28, height: 28,
@@ -284,7 +286,7 @@ class _LogoGeneratedCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
@@ -410,7 +412,7 @@ class _PaletteCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white,
+      color: AppColors.surface,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         onTap: onTap,
@@ -419,12 +421,12 @@ class _PaletteCard extends StatelessWidget {
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOut,
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
               color: selected
                   ? palette.primary
-                  : const Color(0xFFE5E7EB),
+                  : AppColors.divider,
               width: selected ? 2 : 1,
             ),
             boxShadow: selected
@@ -469,7 +471,7 @@ class _PaletteCard extends StatelessWidget {
                         style: AppTextStyles.bodyBold.copyWith(
                           color: selected
                               ? palette.primary
-                              : const Color(0xFF0F172A),
+                              : AppColors.onSurface,
                         ),
                       ),
                     ),
@@ -626,9 +628,8 @@ class _PaletteMockup extends StatelessWidget {
 }
 
 // ─── Sélecteur de mode (Clair / Sombre / Système) ───────────────────────────
-// Conservé pour réactivation quand le mode sombre sera finalisé (cf.
-// theme_page build + app.dart). Masqué de l'UI pour l'instant.
-// ignore: unused_element
+// Branché dans `build` : pilote `themeModeProvider`, lui-même consommé par
+// app.dart (theme/darkTheme/themeMode de MaterialApp).
 class _ModeSelector extends ConsumerWidget {
   final Color primary;
   final bool isFr;
@@ -719,6 +720,11 @@ class _ModeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Tokens adaptatifs : la carte non sélectionnée prend la surface du thème
+    // (blanc en clair, slate en sombre) et une bordure/texte lisibles dans les
+    // deux modes — sinon elle reste blanche éclatante sur fond sombre.
+    final cs  = Theme.of(context).colorScheme;
+    final sem = Theme.of(context).semantic;
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(12),
@@ -732,10 +738,10 @@ class _ModeCard extends StatelessWidget {
           duration: const Duration(milliseconds: 160),
           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
           decoration: BoxDecoration(
-            color: selected ? primary.withValues(alpha:0.08) : Colors.white,
+            color: selected ? primary.withValues(alpha:0.08) : cs.surface,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: selected ? primary : const Color(0xFFE5E7EB),
+              color: selected ? primary : sem.borderSubtle,
               width: selected ? 1.5 : 1,
             ),
           ),
@@ -744,12 +750,16 @@ class _ModeCard extends StatelessWidget {
             children: [
               Icon(icon,
                   size: 22,
-                  color: selected ? primary : const Color(0xFF6B7280)),
+                  color: selected
+                      ? primary
+                      : cs.onSurface.withValues(alpha: 0.55)),
               const SizedBox(height: 6),
               Text(label,
                   style: AppTextStyles.bodySm.copyWith(
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                    color: selected ? primary : const Color(0xFF374151),
+                    color: selected
+                        ? primary
+                        : cs.onSurface.withValues(alpha: 0.75),
                   )),
             ],
           ),

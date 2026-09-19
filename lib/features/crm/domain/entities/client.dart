@@ -1,7 +1,12 @@
 import 'package:equatable/equatable.dart';
 
-/// Segment dérivé automatiquement du nombre d'achats complétés du client.
-/// Voir [Client.tag] : 0 → none, 1 → new_, 2-3 → regular, 4+ → vip.
+/// Seuil de dépense cumulée (toutes commandes confondues) à partir duquel
+/// un client est considéré VIP. En FCFA. Voir [Client.tag].
+const double kVipThresholdSpent = 50000;
+
+/// Segment dérivé automatiquement du client.
+/// Voir [Client.tag] : VIP dès [kVipThresholdSpent] cumulés, sinon par
+/// nombre d'achats (1 → Nouveau, 2+ → Régulier).
 enum ClientTag { vip, regular, new_, none }
 
 extension ClientTagX on ClientTag {
@@ -66,14 +71,15 @@ class Client extends Equatable {
     this.isArchived  = false,
   });
 
-  /// Segment calculé à la volée depuis [totalOrders] — plus de champ manuel.
+  /// Segment calculé à la volée — plus de champ manuel.
   /// Règle métier :
-  ///   0 achat   → none (pas de badge)
-  ///   1 achat   → new_ (Nouveau)
-  ///   2-3 achats → regular (Régulier)
-  ///   4+ achats → vip (VIP)
+  ///   cumul dépensé ≥ [kVipThresholdSpent] → vip (VIP), peu importe le
+  ///                                           nombre de commandes
+  ///   2+ achats  → regular (Régulier)
+  ///   1 achat    → new_ (Nouveau)
+  ///   0 achat    → none (pas de badge)
   ClientTag get tag {
-    if (totalOrders >= 4) return ClientTag.vip;
+    if (totalSpent >= kVipThresholdSpent) return ClientTag.vip;
     if (totalOrders >= 2) return ClientTag.regular;
     if (totalOrders >= 1) return ClientTag.new_;
     return ClientTag.none;

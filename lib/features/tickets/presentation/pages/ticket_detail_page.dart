@@ -21,10 +21,16 @@ import '../../domain/entities/shop_ticket.dart';
 class TicketDetailPage extends ConsumerStatefulWidget {
   final String shopId;
   final String ticketId;
+  /// Ouvert depuis le panneau super-admin (vision transversale). Dans ce mode :
+  ///   * scaffold autonome (pas de chrome boutique `AppScaffold`) ;
+  ///   * intervention pleine (réponse + résolution) sans être membre ;
+  ///   * pas d'escalade (le SA est déjà au sommet).
+  final bool superAdmin;
   const TicketDetailPage({
     super.key,
     required this.shopId,
     required this.ticketId,
+    this.superAdmin = false,
   });
   @override
   ConsumerState<TicketDetailPage> createState() => _TicketDetailPageState();
@@ -223,12 +229,17 @@ class _TicketDetailPageState extends ConsumerState<TicketDetailPage> {
     final myUid  = LocalStorageService.getCurrentUser()?.id;
     final t      = _ticket;
 
-    final isPrivileged = perms.isShopAdmin || perms.isOwner;
-    final isAuthor     = t != null && t.openedBy == myUid;
-    final canResolve   = (isPrivileged || isAuthor) && t?.status == TicketStatus.open;
+    final isSA          = widget.superAdmin;
+    final isPrivileged  = perms.isShopAdmin || perms.isOwner;
+    final isAuthor      = t != null && t.openedBy == myUid;
+    // Le super-admin intervient pleinement (résout n'importe quel ticket).
+    final canResolve    = (isPrivileged || isAuthor || isSA)
+                          && t?.status == TicketStatus.open;
     // Escalade : admin → owner réservé admin/owner ; owner → super_admin
-    // réservé owner. Pas d'escalade si super_admin déjà ou ticket résolu.
-    final canEscalate = t != null
+    // réservé owner. Jamais pour le SA (déjà au sommet), ni si super_admin
+    // déjà atteint ou ticket résolu.
+    final canEscalate = !isSA
+        && t != null
         && t.status == TicketStatus.open
         && t.currentLevel != TicketLevel.superAdmin
         && (
@@ -236,55 +247,72 @@ class _TicketDetailPageState extends ConsumerState<TicketDetailPage> {
           || (t.currentLevel == TicketLevel.owner && perms.isOwner)
         );
 
+    final actions = <Widget>[
+      if (canEscalate)
+        IconButton(
+          icon: const Icon(Icons.upgrade_rounded, size: 20),
+          tooltip: 'Escalader',
+          onPressed: _escalate,
+        ),
+      if (canResolve)
+        IconButton(
+          icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
+          tooltip: 'Marquer résolu',
+          onPressed: _resolve,
+        ),
+    ];
+
+    final body = _loading
+        ? const Center(child: CircularProgressIndicator())
+        : t == null
+            ? const Center(child: Text('Ticket introuvable.'))
+            : Column(children: [
+                _TicketHeader(ticket: t),
+                Expanded(child: _MessageList(
+                    ticket:    t,
+                    messages:  _messages,
+                    myUid:     myUid,
+                    scroll:    _scroll)),
+                if (t.status == TicketStatus.open)
+                  _MessageComposer(
+                      controller: _msgCtrl,
+                      sending:    _posting,
+                      onSend:     _sendMessage)
+                else
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    color: Theme.of(context).semantic.trackMuted,
+                    child: Text(
+                        'Ce ticket est ${t.status.labelFr.toLowerCase()} — '
+                        'lecture seule.',
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.caption.copyWith(
+                            color: Theme.of(context).colorScheme
+                                .onSurface.withValues(alpha:0.6))),
+                  ),
+              ]);
+
+    // Mode super-admin : scaffold autonome (ouvert via Navigator hors du
+    // shell boutique → pas de chrome `AppScaffold` lié à la boutique courante).
+    if (isSA) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(t?.subject ?? 'Ticket',
+              style: AppTextStyles.label.copyWith(fontWeight: FontWeight.w800)),
+          actions: actions,
+        ),
+        body: body,
+      );
+    }
+
     return AppScaffold(
       shopId:     widget.shopId,
       title:      t?.subject ?? 'Ticket',
       isRootPage: false,
-      actions: [
-        if (canEscalate)
-          IconButton(
-            icon: const Icon(Icons.upgrade_rounded, size: 20),
-            tooltip: 'Escalader',
-            onPressed: _escalate,
-          ),
-        if (canResolve)
-          IconButton(
-            icon: const Icon(Icons.check_circle_outline_rounded, size: 20),
-            tooltip: 'Marquer résolu',
-            onPressed: _resolve,
-          ),
-      ],
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : t == null
-              ? const Center(child: Text('Ticket introuvable.'))
-              : Column(children: [
-                  _TicketHeader(ticket: t),
-                  Expanded(child: _MessageList(
-                      ticket:    t,
-                      messages:  _messages,
-                      myUid:     myUid,
-                      scroll:    _scroll)),
-                  if (t.status == TicketStatus.open)
-                    _MessageComposer(
-                        controller: _msgCtrl,
-                        sending:    _posting,
-                        onSend:     _sendMessage)
-                  else
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                      color: Theme.of(context).semantic.trackMuted,
-                      child: Text(
-                          'Ce ticket est ${t.status.labelFr.toLowerCase()} — '
-                          'lecture seule.',
-                          textAlign: TextAlign.center,
-                          style: AppTextStyles.caption.copyWith(
-                              color: Theme.of(context).colorScheme
-                                  .onSurface.withValues(alpha:0.6))),
-                    ),
-                ]),
+      actions:    actions,
+      body:       body,
     );
   }
 }

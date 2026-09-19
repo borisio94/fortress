@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/config/restaurant_mode.dart';
 import '../../core/i18n/app_localizations.dart';
 
 /// Mappe une route GoRouter (`/shop/<id>/...`) vers le **titre exact** à
@@ -50,7 +51,9 @@ String? titleForLocation({
     case '/':                              return l.navDashboard;
     case '/dashboard':                     return l.navDashboard;
     case '/caisse':                        return l.navCaisse;
-    case '/inventaire':                    return l.navInventaire;
+    // « Carte » en restauration — cohérent avec le libellé de navigation.
+    case '/inventaire':
+      return isCurrentShopRestaurant() ? 'Menu' : l.navInventaire;
     case '/crm':                           return l.navClients;
     case '/finances':                      return l.navFinances;
     case '/historique':                    return l.navHistorique;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/database/app_database.dart';
+import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -14,26 +15,38 @@ import '../../../../shared/widgets/app_snack.dart';
 import '../widgets/transfer_form_sheet.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 
-/// Page qui liste tous les produits/variantes présents à un emplacement.
+/// Résout le nom d'un emplacement depuis Hive (pour le titre du wrapper).
+String stockLocationNameOf(String id) {
+  try {
+    final raw = HiveBoxes.stockLocationsBox.get(id);
+    if (raw == null) return 'Emplacement';
+    return StockLocation.fromMap(Map<String, dynamic>.from(raw)).name;
+  } catch (_) { return 'Emplacement'; }
+}
+
+/// Vue (SANS chrome de navigation) listant les produits/variantes présents à
+/// un emplacement. Embarquée comme onglet « Stock déposé » du hub partenaire
+/// ([PartnerHubDetailPage]) ou enveloppée par [LocationContentsPage] pour un
+/// accès plein écran depuis la page Emplacements.
 ///
 /// Comportement :
 /// - Si la location est type `shop` → on lit directement les variantes des
 ///   produits de la boutique (source de vérité Phase 1).
 /// - Si la location est type `warehouse` ou `partner` → on lit les StockLevel
 ///   de cette location et on joint avec les Product/Variant correspondants.
-class LocationContentsPage extends ConsumerStatefulWidget {
-  final String shopId;       // shop courante (pour l'AppScaffold)
+class LocationContentsView extends ConsumerStatefulWidget {
+  final String shopId;       // shop courante (pour le transfert)
   final String locationId;   // location à afficher
-  const LocationContentsPage({
+  const LocationContentsView({
     super.key, required this.shopId, required this.locationId,
   });
 
   @override
-  ConsumerState<LocationContentsPage> createState() =>
-      _LocationContentsPageState();
+  ConsumerState<LocationContentsView> createState() =>
+      _LocationContentsViewState();
 }
 
-class _LocationContentsPageState extends ConsumerState<LocationContentsPage> {
+class _LocationContentsViewState extends ConsumerState<LocationContentsView> {
   StockLocation? _location;
   List<_LocationItem> _items = [];
   String _query = '';
@@ -157,17 +170,7 @@ class _LocationContentsPageState extends ConsumerState<LocationContentsPage> {
   @override
   Widget build(BuildContext context) {
     final list = _filtered;
-    return AppScaffold(
-      shopId: widget.shopId,
-      title: _location?.name ?? 'Emplacement',
-      isRootPage: false,
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.refresh_rounded, size: 20),
-          tooltip: 'Rafraîchir',
-          onPressed: _load,
-        ),
-      ],
+    return Scaffold(
       floatingActionButton: _location != null && _totalUnits > 0
           ? FloatingActionButton.extended(
               onPressed: _openTransfer,
@@ -197,9 +200,9 @@ class _LocationContentsPageState extends ConsumerState<LocationContentsPage> {
                         hintText: 'Rechercher un produit, SKU…',
                         hintStyle: AppTextStyles.bodySm.copyWith(
                             color: const Color(0xFFBBBBBB)),
-                        prefixIcon: const Icon(Icons.search_rounded, size: 18,
-                            color: Color(0xFF9CA3AF)),
-                        filled: true, fillColor: const Color(0xFFF9FAFB),
+                        prefixIcon: Icon(Icons.search_rounded, size: 18,
+                            color: AppColors.textHint),
+                        filled: true, fillColor: AppColors.inputFill,
                         isDense: true,
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 11),
@@ -234,6 +237,26 @@ class _LocationContentsPageState extends ConsumerState<LocationContentsPage> {
                 ]),
     );
   }
+}
+
+/// Page plein écran autonome (route `/parametres/locations/:locationId`) —
+/// enveloppe [LocationContentsView] dans le chrome de navigation boutique.
+/// Utilisée pour les emplacements boutique/magasin depuis la page
+/// Emplacements ; les dépôts partenaires passent désormais par le hub
+/// partenaire ([PartnerHubDetailPage], onglet Stock).
+class LocationContentsPage extends StatelessWidget {
+  final String shopId;
+  final String locationId;
+  const LocationContentsPage({
+    super.key, required this.shopId, required this.locationId,
+  });
+  @override
+  Widget build(BuildContext context) => AppScaffold(
+        shopId: shopId,
+        title: stockLocationNameOf(locationId),
+        isRootPage: false,
+        body: LocationContentsView(shopId: shopId, locationId: locationId),
+      );
 }
 
 class _VariantRef {
@@ -315,7 +338,7 @@ class _Header extends StatelessWidget {
               style: AppTextStyles.title.copyWith(color: _color)),
           Text('$items référence${items > 1 ? 's' : ''}',
               style: AppTextStyles.micro.copyWith(
-                  color: const Color(0xFF9CA3AF))),
+                  color: AppColors.textHint)),
         ],
       ),
     ]),
@@ -358,7 +381,7 @@ class _ItemTile extends StatelessWidget {
               ].join(' · '),
                   maxLines: 1, overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.caption.copyWith(
-                      color: const Color(0xFF9CA3AF))),
+                      color: AppColors.textHint)),
             ],
           ),
         ),
@@ -375,7 +398,7 @@ class _ItemTile extends StatelessWidget {
                             : const Color(0xFF10B981))),
             Text('dispo',
                 style: AppTextStyles.micro.copyWith(
-                    color: const Color(0xFF9CA3AF))),
+                    color: AppColors.textHint)),
           ],
         ),
         if (item.blocked > 0) ...[
@@ -385,7 +408,7 @@ class _ItemTile extends StatelessWidget {
                 style: AppTextStyles.bodySmBold.copyWith(
                     color: const Color(0xFFEF4444))),
             Text('bloq', style: AppTextStyles.micro.copyWith(
-                color: const Color(0xFF9CA3AF))),
+                color: AppColors.textHint)),
           ]),
         ],
       ]),

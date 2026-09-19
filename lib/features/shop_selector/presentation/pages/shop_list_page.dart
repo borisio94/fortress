@@ -12,6 +12,7 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/storage/hive_boxes.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/widgets/fortress_logo.dart';
@@ -137,7 +138,7 @@ class _ShopListPageState extends ConsumerState<ShopListPage> {
                         .setShop(state.shops.first);
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (!context.mounted) return;
-                      context.go('/shop/${state.shops.first.id}/dashboard');
+                      context.go(shopLandingRoute(state.shops.first.id));
                     });
                   }
                 }
@@ -287,7 +288,7 @@ class _ShopListPageState extends ConsumerState<ShopListPage> {
                                     AppDatabase.syncMetadata(shop.id)
                                         .catchError((e) => debugPrint(
                                             '[ShopList] syncMetadata bg: $e'));
-                                    context.go('/shop/${shop.id}/dashboard');
+                                    context.go(shopLandingRoute(shop.id));
                                     return;
                                   }
 
@@ -302,7 +303,7 @@ class _ShopListPageState extends ConsumerState<ShopListPage> {
                                   }
                                   if (!mounted) return;
                                   setState(() => _loadingShopId = null);
-                                  context.go('/shop/${shop.id}/dashboard');
+                                  context.go(shopLandingRoute(shop.id));
                                 },
                               ),
                               childCount: state.shops.length,
@@ -374,7 +375,7 @@ class _ShopCardState extends State<_ShopCard> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: _hovered ? color.withValues(alpha:0.4) : AppColors.divider,
@@ -414,7 +415,7 @@ class _ShopCardState extends State<_ShopCard> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFECFDF5),
+                                color: AppColors.secondary.withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Row(
@@ -541,7 +542,7 @@ class _EmptyOrLoadingStateState extends State<_EmptyOrLoadingState> {
   Widget build(BuildContext context) {
     if (!_showEmpty) {
       // Pendant 3s : spinner discret
-      return const Center(
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -883,7 +884,7 @@ class _UserTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isBlocked
@@ -898,7 +899,7 @@ class _UserTile extends StatelessWidget {
           decoration: BoxDecoration(
             color: isBlocked
                 ? const Color(0xFFFEE2E2)
-                : const Color(0xFFEEEDFE),
+                : AppColors.inputFill,
             shape: BoxShape.circle,
           ),
           child: Center(child: Text(initials,
@@ -922,7 +923,7 @@ class _UserTile extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                   decoration: BoxDecoration(
-                      color: const Color(0xFFEEEDFE),
+                      color: AppColors.inputFill,
                       borderRadius: BorderRadius.circular(4)),
                   child: Text('SA',
                       style: AppTextStyles.microBold
@@ -941,8 +942,8 @@ class _UserTile extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
                 color: isActive
-                    ? const Color(0xFFEEEDFE)
-                    : const Color(0xFFF3F4F6),
+                    ? AppColors.inputFill
+                    : AppColors.inputFill,
                 borderRadius: BorderRadius.circular(5),
               ),
               child: Text(planLabel,
@@ -952,7 +953,7 @@ class _UserTile extends StatelessWidget {
                           : AppColors.textHint)),
             )
           else
-            const Text('Sans plan', style: AppTextStyles.micro),
+            Text('Sans plan', style: AppTextStyles.micro),
           if (isBlocked)
             Text('Bloqué',
                 style: AppTextStyles.microBold

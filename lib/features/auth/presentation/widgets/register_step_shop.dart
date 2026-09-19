@@ -32,10 +32,10 @@ class _StepShop extends StatelessWidget {
           if (state._shopNameError != null)
             _ErrText(state._shopNameError!),
           const SizedBox(height: 14),
-          // Secteur d'activité — masqué en mode e-commerce unique (réversible :
-          // kEcommerceOnlyMode). Code conservé pour réactivation future.
-          if (!kEcommerceOnlyMode) ...[
-            const AppFieldLabel('Type d\'activité', required: true),
+          // Type d'établissement — choix DÉFINITIF, non modifiable après
+          // création (cf. kCreationSectors dans restaurant_mode.dart).
+          ...[
+            const AppFieldLabel('Type d\'établissement', required: true),
             DropdownButtonFormField<String>(
               initialValue: state._sector,
               items: _kSectors
@@ -54,28 +54,19 @@ class _StepShop extends StatelessWidget {
                     size: 18, color: AppColors.textSecondary),
                 isDense: true,
                 filled: true,
-                fillColor: const Color(0xFFF9FAFB),
+                fillColor: AppColors.inputFill,
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide:
-                        const BorderSide(color: Color(0xFFE5E7EB))),
+                        BorderSide(color: AppColors.divider)),
                 enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide:
-                        const BorderSide(color: Color(0xFFE5E7EB))),
+                        BorderSide(color: AppColors.divider)),
               ),
             ),
             const SizedBox(height: 14),
           ],
-          // Adresse / Ville (désormais obligatoire)
-          const AppFieldLabel('Adresse / Ville', required: true),
-          AppField(
-            controller:  state._shopAddressCtrl,
-            hint:        'Ex : Bonanjo, Douala',
-            prefixIcon:  Icons.location_on_outlined,
-          ),
-          if (state._shopAddressError != null)
-            _ErrText(state._shopAddressError!),
         ],
       ),
     );

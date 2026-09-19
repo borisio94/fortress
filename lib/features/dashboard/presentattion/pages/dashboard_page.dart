@@ -31,6 +31,10 @@ import '../../../onboarding/presentation/widgets/j1_resume_banner.dart';
 import '../../../onboarding/presentation/widgets/trial_end_banner.dart';
 import '../../../onboarding/presentation/widgets/trial_status_banner.dart';
 import '../../../../shared/widgets/broadcast_banner.dart';
+import 'package:intl/intl.dart';
+import '../../../../shared/providers/current_shop_provider.dart';
+import '../../../../shared/widgets/offline_banner_widget.dart' show isOfflineProvider;
+import '../../../../core/permisions/app_permissions.dart';
 
 
 // ─── Page principale ──────────────────────────────────────────────────────────
@@ -78,6 +82,10 @@ class _DashBodyState extends ConsumerState<_DashBody> {
         if (!mounted) return;
         final uid =
             Supabase.instance.client.auth.currentUser?.id ?? '';
+        // Le tour décrit l'Inventaire et la gestion produits (écrans réservés
+        // aux admins/owners). Un employé ne les voit pas → pas de tour pour
+        // lui (sinon il pointe vers une nav inexistante pour son rôle).
+        if (!ref.read(permissionsProvider(widget.shopId)).isShopAdmin) return;
         OnboardingTourService.showIfFirstLogin(context, uid, widget.shopId);
       });
     });
@@ -162,42 +170,67 @@ class _DashBodyState extends ConsumerState<_DashBody> {
   Widget _buildContent(BuildContext context) {
     final l = context.l10n;
     final data = ref.watch(dashDataProvider(widget.shopId));
+    final perms = ref.watch(permissionsProvider(widget.shopId));
+    final fr    = Localizations.localeOf(context).languageCode == 'fr';
 
-    // KPIs prioritaires — strictement les 4 demandés par la spec dashboard
-    // (CA Total, Transactions, Clients, Bénéfice net) — affichés en grille
-    // 2×2 sur mobile / 4 colonnes sur desktop via _PriorityKpiGrid.
+    // Tendance du CA vs la période précédente de même durée (« hier » quand la
+    // période est « Aujourd'hui »). Le calcul de la période précédente ne
+    // filtre pas « mes ventes » : pour un vendeur, la comparaison serait
+    // fausse → tendance masquée. Admin / propriétaire : même périmètre des
+    // deux côtés.
+    final sameScope = perms.isAdmin || perms.isOwner;
+    final prevSales = sameScope
+        ? ref.watch(financesPreviousSnapshotProvider(widget.shopId)).totalSales
+        : 0.0;
+    final caTrend = prevSales > 0
+        ? (data.totalSales - prevSales) / prevSales * 100
+        : null;
+    final lowStockCount = data.lowStock.length;
+
+    // KPIs prioritaires : CA · Ventes · Stock en alerte · Clients servis —
+    // grille 2×2 sur mobile / 4 colonnes sur desktop via _PriorityKpiGrid.
+    // Le bénéfice net reste dans le résumé financier plus bas.
     final shopId = widget.shopId;
     final priorityKpis = <shared_kpi.KpiData>[
       shared_kpi.KpiData(
-        label: l.dashTotalSales,
+        label: fr ? 'CA' : 'Revenue',
         value: _fmtNum(data.totalSales), unit: CurrencyFormatter.currentSymbol,
         icon: Icons.trending_up,
         color: AppColors.secondary,
+        delta: caTrend == null ? ''
+            : '${caTrend >= 0 ? '+' : ''}${caTrend.toStringAsFixed(0)}%',
+        positive: (caTrend ?? 0) >= 0,
+        subtext: caTrend == null ? ''
+            : (_period == 'today'
+                ? (fr ? 'vs hier' : 'vs yesterday')
+                : (fr ? 'vs période préc.' : 'vs prev. period')),
         onTap: () => context.push('/shop/$shopId/finances'),
       ),
       shared_kpi.KpiData(
-        label: l.dashTransactions,
+        label: fr ? 'Ventes' : 'Sales',
         value: data.orderCount.toString(),
         icon: Icons.receipt_long_rounded,
         color: AppColors.info,
         onTap: () => context.push('/shop/$shopId/caisse'),
       ),
       shared_kpi.KpiData(
-        label: l.dashCustomers,
+        label: fr ? 'Stock en alerte' : 'Low stock',
+        value: lowStockCount.toString(),
+        icon: Icons.inventory_2_rounded,
+        color: lowStockCount > 0 ? AppColors.warning : AppColors.secondary,
+        // Stock réservé aux admins (même règle que le menu) : pas de lien
+        // vers un écran que le compte ne peut pas ouvrir.
+        onTap: (perms.isShopAdmin && perms.canViewProducts)
+            ? () => context.push('/shop/$shopId/inventaire')
+            : null,
+      ),
+      shared_kpi.KpiData(
+        // Clients distincts servis sur la période (pas le total CRM).
+        label: fr ? 'Clients servis' : 'Clients served',
         value: data.clientCount.toString(),
         icon: Icons.people_rounded,
         color: AppColors.warning,
         onTap: () => context.push('/shop/$shopId/crm'),
-      ),
-      shared_kpi.KpiData(
-        label: l.dashNetProfit,
-        value: _fmtNum(data.netProfit), unit: CurrencyFormatter.currentSymbol,
-        icon: Icons.account_balance_wallet_rounded,
-        color: data.netProfit >= 0
-            ? AppColors.primary
-            : AppColors.error,
-        positive: data.netProfit >= 0,
-        onTap: () => context.push('/shop/$shopId/finances'),
       ),
     ];
 
@@ -257,11 +290,64 @@ class _DashBodyState extends ConsumerState<_DashBody> {
           errorIndicator: true,
           onTap: () => context.push('/shop/$shopId/finances'),
         ),
+      // Créances clients — solde dû sur les ventes à crédit complétées de la
+      // période. Tap → liste des commandes (pour encaisser le reste).
+      if (data.totalClientDebts > 0)
+        shared_kpi.KpiData(
+          label: 'Créances clients',
+          value: _fmtNum(data.totalClientDebts),
+          unit: CurrencyFormatter.currentSymbol,
+          icon: Icons.account_balance_wallet_rounded,
+          color: AppColors.warning,
+          errorIndicator: true,
+          onTap: () => context.push('/shop/$shopId/caisse/orders'),
+        ),
     ];
 
+    final curShop  = ref.watch(currentShopProvider);
+    final shopName = ((curShop != null && curShop.id == shopId)
+        ? curShop : LocalStorageService.getShop(shopId))?.name ?? '';
+    // Même source que la puce hors-ligne de la barre du haut.
+    final isOnline = !ref.watch(isOfflineProvider)
+        .maybeWhen(data: (v) => v, orElse: () => false);
+
     return ListView(
+      // Défilable même quand le contenu tient à l'écran : sans ça, le geste
+      // « tirer pour actualiser » du cadre ne se déclenche pas.
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
+        // ── 1. Identité boutique ──────────────────────────────────────────
+        _ShopIdentityCard(name: shopName, isOnline: isOnline),
+        const SizedBox(height: 12),
+
+        // ── 2. Salutation + date + période (sélecteur existant déplacé) ───
+        _WelcomeBar(
+          periodLabel: _periodLabel(l),
+          onPeriodTap: () => _showPeriodPicker(context),
+        ),
+        const SizedBox(height: 12),
+
+        // ── 3. Nouvelle commande en 1 tap ─────────────────────────────────
+        if (perms.canAccessCaisse) ...[
+          _NewOrderButton(onTap: () => context.go('/shop/$shopId/caisse')),
+          const SizedBox(height: 14),
+        ],
+
+        // ── 4. KPI Cards prioritaires (2×2 mobile / 4 cols desktop) ───────
+        _PriorityKpiGrid(kpis: priorityKpis),
+        const SizedBox(height: 14),
+
+        // ── 5. Accès rapides (grille 2×2) ─────────────────────────────────
+        _QuickAccessGrid(shopId: widget.shopId, perms: perms),
+        const SizedBox(height: 14),
+
+        // ── 6. Ventes récentes (5 dernières, toutes dates) ────────────────
+        _RecentTxCard(transactions: data.recentTx, shopId: widget.shopId),
+        const SizedBox(height: 14),
+
+        // ── Blocs existants, inchangés, SOUS les nouveaux modules ─────────
+
         // ── Onboarding bannières (PR-1 / PR-2 / PR-3) ────────────────────
         // Toutes les widgets sont self-gated (SizedBox.shrink() s'ils ne
         // doivent pas s'afficher) → safe à inclure inconditionnellement.
@@ -285,18 +371,6 @@ class _DashBodyState extends ConsumerState<_DashBody> {
         // périmètre à l'intérieur de la boutique courante.
         ViewFilterChipBar(shopId: widget.shopId, useTabs: true),
         const SizedBox(height: 12),
-
-        // ── Header : titre + accès rapide + filtre période ────────────────
-        _DashboardHeader(
-          shopId: widget.shopId,
-          periodLabel: _periodLabel(l),
-          onPeriodTap: () => _showPeriodPicker(context),
-        ),
-        const SizedBox(height: 14),
-
-        // ── KPI Cards prioritaires (2×2 mobile / 4 cols desktop) ──────────
-        _PriorityKpiGrid(kpis: priorityKpis),
-        const SizedBox(height: 14),
 
         // ── Section Alertes (visible seulement si non-vide) ───────────────
         if (alertKpis.isNotEmpty) ...[
@@ -336,15 +410,10 @@ class _DashBodyState extends ConsumerState<_DashBody> {
           const SizedBox(height: 14),
         ],
 
-        // ── Transactions + Alertes ────────────────────────────────────────
-        _TwoColWrap(
-          minSecondWidth: 220,
-          first: _RecentTxCard(
-              transactions: data.recentTx, shopId: widget.shopId),
-          second: _InventoryAlertsCard(
-              alerts: data.lowStock, shopId: widget.shopId),
-          firstFlex: 3, secondFlex: 2,
-        ),
+        // ── Alertes stock (bloc existant, inchangé) ───────────────────────
+        // Les ventes récentes, qui partageaient cette rangée, sont remontées
+        // en module 6.
+        _InventoryAlertsCard(alerts: data.lowStock, shopId: widget.shopId),
         const SizedBox(height: 20),
       ],
     );
@@ -444,197 +513,298 @@ class _AlertsSection extends StatelessWidget {
   }
 }
 
-// ─── Header dashboard : titre + quick buttons + filtre ──────────────────────
+// ─── Accès rapides (grille 2×2) ──────────────────────────────────────────────
 
-class _DashboardHeader extends StatelessWidget {
+/// Accès rapides : 4 modules fréquents en 1 tap. Une carte n'apparaît que si
+/// le compte a le droit correspondant (mêmes règles que le menu).
+/// Sous-titres lus sur les données locales existantes (produits non
+/// supprimés, clients non archivés) — aucune requête nouvelle.
+class _QuickAccessGrid extends StatelessWidget {
   final String shopId;
-  final String periodLabel;
-  final VoidCallback onPeriodTap;
-
-  const _DashboardHeader({
-    required this.shopId,
-    required this.periodLabel,
-    required this.onPeriodTap,
-  });
+  final AppPermissions perms;
+  const _QuickAccessGrid({required this.shopId, required this.perms});
 
   @override
   Widget build(BuildContext context) {
-    final l       = context.l10n;
-    final theme   = Theme.of(context);
-    final isMobile = MediaQuery.of(context).size.width < 600;
-    // Prénom = premier mot du `name` du user courant. Avant cette fix le
-    // dashboard affichait "James" en dur (placeholder oublié), ce qui
-    // saluait *tous* les utilisateurs sous le même prénom. Si le profil
-    // n'a pas de nom (sync pas encore terminée, fallback Supabase vide),
-    // on tombe sur un message générique sans virgule.
-    final fullName = LocalStorageService.getCurrentUser()?.name.trim() ?? '';
-    final firstName = fullName.isEmpty
-        ? ''
-        : fullName.split(RegExp(r'\s+')).first;
-    final greeting = firstName.isEmpty
-        ? '${l.dashWelcome}.'
-        : '${l.dashWelcome}, $firstName.';
+    final fr = Localizations.localeOf(context).languageCode == 'fr';
+    final nProducts = LocalStorageService.getProductsForShop(shopId).length;
+    final nClients  = AppDatabase.getClientsForShop(shopId).length;
+    String plural(int n, String one) => '$n $one${n > 1 ? 's' : ''}';
+    final cards = <_QuickCard>[
+      if (perms.canAccessCaisse)
+        _QuickCard(icon: Icons.shopping_cart_outlined,
+            label: fr ? 'Caisse' : 'Checkout',
+            sublabel: fr ? 'Vente rapide' : 'Quick sale',
+            color: AppColors.primary,
+            onTap: () => context.go('/shop/$shopId/caisse')),
+      if (perms.isShopAdmin && perms.canViewProducts)
+        _QuickCard(icon: Icons.inventory_2_outlined,
+            label: 'Stock',
+            sublabel: plural(nProducts, fr ? 'produit' : 'product'),
+            color: AppColors.secondary,
+            onTap: () => context.go('/shop/$shopId/inventaire')),
+      if (perms.canViewFinances)
+        _QuickCard(icon: Icons.bar_chart_rounded,
+            label: 'Finances',
+            sublabel: fr ? 'Bilan du jour' : 'Daily summary',
+            color: AppColors.warning,
+            onTap: () => context.go('/shop/$shopId/finances')),
+      if (perms.canViewClients)
+        _QuickCard(icon: Icons.people_outline_rounded,
+            label: 'Clients',
+            sublabel: plural(nClients, 'client'),
+            color: AppColors.info,
+            onTap: () => context.go('/shop/$shopId/crm')),
+    ];
+    if (cards.isEmpty) return const SizedBox.shrink();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(fr ? 'ACCÈS RAPIDES' : 'QUICK ACCESS',
+          style: AppTextStyles.captionBold.copyWith(
+              color: AppColors.textSecondary, letterSpacing: 0.8)),
+      const SizedBox(height: 8),
+      LayoutBuilder(builder: (_, c) {
+        // 2 colonnes sur mobile, 4 sur desktop (même seuil que les KPI).
+        final cols = c.maxWidth >= 600 ? 4 : 2;
+        return GridView.count(
+          crossAxisCount: cols,
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: cols == 4 ? 2.2 : 1.8,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          children: cards,
+        );
+      }),
+    ]);
+  }
+}
 
-    // Sur mobile : greeting 12px w500 + sous-titre "Aujourd'hui" 10px,
-    // subtitle muted (spec round 9). Sur desktop : 17px w800 + sous-titre
-    // long inchangé pour préserver la densité informationnelle.
-    final greetSize    = isMobile ? 12.0 : 17.0;
-    final greetWeight  = isMobile ? FontWeight.w500 : FontWeight.w800;
-    final subSize      = isMobile ? 10.0 : 11.0;
-    final subText      = isMobile ? l.periodToday : l.dashSubtitle;
+class _QuickCard extends StatelessWidget {
+  final IconData icon;
+  final String label, sublabel;
+  final Color color;
+  final VoidCallback onTap;
+  const _QuickCard({required this.icon, required this.label,
+      required this.sublabel, required this.color, required this.onTap});
 
-    return Container(
-      padding: EdgeInsets.fromLTRB(16, isMobile ? 10 : 14, 16, isMobile ? 10 : 14),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: theme.semantic.borderSubtle),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha:0.03),
-            blurRadius: 6, offset: const Offset(0, 2))],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-
-          // ── Ligne 1 : Titre + filtre période ───────────────────────
-          Row(children: [
-            Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(greeting,
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: AppTextStyles.body.copyWith(fontSize: greetSize,
-                        fontWeight: greetWeight)),
-                const SizedBox(height: 2),
-                Text(subText,
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: AppTextStyles.caption.copyWith(fontSize: subSize)),
-              ],
-            )),
-            const SizedBox(width: 10),
-            // Pill période
-            GestureDetector(
-              onTap: onPeriodTap,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.primarySurface,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppColors.primary.withValues(alpha:0.3)),
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.calendar_today_rounded, size: 12,
-                      color: AppColors.primary),
-                  const SizedBox(width: 5),
-                  Text(periodLabel,
-                      style: AppTextStyles.captionBold.copyWith(
-                          color: AppColors.primary)),
-                  const SizedBox(width: 3),
-                  Icon(Icons.keyboard_arrow_down_rounded, size: 14,
-                      color: AppColors.primary),
-                ]),
-              ),
-            ),
-          ]),
-
-          SizedBox(height: isMobile ? 10 : 14),
-          Divider(height: 1, color: theme.semantic.borderSubtle),
-          SizedBox(height: isMobile ? 8 : 12),
-
-          // ── Ligne 2 : Accès rapide ────────────────────────────────
-          // Wrap content-sized (mobile + desktop) — chaque bouton à la
-          // largeur de son contenu, padding horizontal 10 (cf. _HeaderQuickBtn).
-          // Wrap retourne automatiquement à la ligne quand l'écran est étroit.
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _HeaderQuickBtn(
-                icon: Icons.point_of_sale_rounded,
-                label: l.dashNewSale,
-                color: AppColors.primary,
-                onTap: () => context.go('/shop/$shopId/caisse'),
-              ),
-              _HeaderQuickBtn(
-                icon: Icons.add_box_outlined,
-                label: l.dashAddProduct,
-                color: AppColors.secondary,
-                onTap: () => context.push('/shop/$shopId/inventaire/product'),
-              ),
-              _HeaderQuickBtn(
-                icon: Icons.person_add_rounded,
-                label: l.dashAddClient,
-                color: AppColors.info,
-                onTap: () => context.go('/shop/$shopId/crm'),
-              ),
-              _HeaderQuickBtn(
-                icon: Icons.bar_chart_rounded,
-                label: l.dashViewReports,
-                color: AppColors.warning,
-                onTap: () => context.go('/shop/$shopId/finances'),
-              ),
-            ],
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surface,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: theme.semantic.borderSubtle),
           ),
-        ],
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              width: 32, height: 32,
+              decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8)),
+              child: Icon(icon, color: color, size: 16),
+            ),
+            const Spacer(),
+            Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.bodySmBold
+                    .copyWith(color: theme.colorScheme.onSurface)),
+            Text(sublabel, maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.micro
+                    .copyWith(color: AppColors.textSecondary)),
+          ]),
+        ),
       ),
     );
   }
 }
 
-class _HeaderQuickBtn extends StatefulWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onTap;
-  const _HeaderQuickBtn({required this.icon, required this.label,
-    required this.color, required this.onTap});
-  @override
-  State<_HeaderQuickBtn> createState() => _HeaderQuickBtnState();
-}
+/// En-tête boutique : initiales + nom + état de connexion. La cloche et la
+/// puce hors-ligne détaillée restent dans la barre du haut du shell — ce
+/// point n'en est qu'un rappel discret, sans second indicateur cliquable.
+class _ShopIdentityCard extends StatelessWidget {
+  final String name;
+  final bool   isOnline;
+  const _ShopIdentityCard({required this.name, required this.isOnline});
 
-class _HeaderQuickBtnState extends State<_HeaderQuickBtn> {
-  bool _hover = false;
+  /// « Boutique Kamer » → « BK » ; « Shop » → « SH ».
+  String get _initials {
+    final parts = name.trim().split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    final w = parts.first;
+    return w.substring(0, w.length >= 2 ? 2 : 1).toUpperCase();
+  }
 
   @override
   Widget build(BuildContext context) {
-    // Padding différencié spec : 16h/8v desktop, 10h/8v mobile.
-    // Boutons content-sized partout (Wrap parent, mainAxisSize.min interne)
-    // — pas de SizedBox(width: infinity) ni d'Expanded, donc zéro stretch.
-    final isMobile = MediaQuery.of(context).size.width < 600;
-    final hPad = isMobile ? 10.0 : 16.0;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit:  (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
+    final theme = Theme.of(context);
+    final cs    = theme.colorScheme;
+    final fr    = Localizations.localeOf(context).languageCode == 'fr';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.semantic.borderSubtle),
+      ),
+      child: Row(children: [
+        Container(
+          width: 38, height: 38,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+              color: cs.primary, borderRadius: BorderRadius.circular(10)),
+          child: Text(_initials,
+              style: AppTextStyles.bodyBold.copyWith(color: cs.onPrimary)),
+        ),
+        const SizedBox(width: 10),
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.label.copyWith(color: cs.onSurface)),
+            const SizedBox(height: 2),
+            Row(children: [
+              Container(width: 6, height: 6,
+                  decoration: BoxDecoration(shape: BoxShape.circle,
+                      color: isOnline ? AppColors.secondary : AppColors.error)),
+              const SizedBox(width: 4),
+              Text(isOnline ? (fr ? 'En ligne' : 'Online')
+                            : (fr ? 'Hors ligne' : 'Offline'),
+                  style: AppTextStyles.caption
+                      .copyWith(color: AppColors.textSecondary)),
+            ]),
+          ],
+        )),
+      ]),
+    );
+  }
+}
+
+/// Salutation selon l'heure + prénom + date du jour, sur une ligne, avec le
+/// sélecteur de période existant (déplacé de l'ancien en-tête, inchangé).
+class _WelcomeBar extends StatelessWidget {
+  final String periodLabel;
+  final VoidCallback onPeriodTap;
+  const _WelcomeBar({required this.periodLabel, required this.onPeriodTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final fr  = Localizations.localeOf(context).languageCode == 'fr';
+    final now = DateTime.now();
+    final h   = now.hour;
+    final hello = (h >= 5 && h < 12) ? (fr ? 'Bonjour' : 'Good morning')
+        : (h >= 12 && h < 18) ? (fr ? 'Bon après-midi' : 'Good afternoon')
+        : (fr ? 'Bonsoir' : 'Good evening');
+    // Prénom = premier mot du nom du compte (même règle que l'ancien en-tête :
+    // sans nom de profil, salutation seule, sans virgule).
+    final full  = LocalStorageService.getCurrentUser()?.name.trim() ?? '';
+    final first = full.isEmpty ? '' : full.split(RegExp(r'\s+')).first;
+    final raw   = DateFormat('EEEE d MMM y', fr ? 'fr_FR' : 'en_US').format(now);
+    final date  = raw.isEmpty ? raw : raw[0].toUpperCase() + raw.substring(1);
+    return Row(children: [
+      Expanded(child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(first.isEmpty ? hello : '$hello, $first',
+              maxLines: 1, overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.label
+                  .copyWith(color: Theme.of(context).colorScheme.onSurface)),
+          const SizedBox(height: 2),
+          Row(children: [
+            Icon(Icons.calendar_today_rounded, size: 12,
+                color: AppColors.textSecondary),
+            const SizedBox(width: 4),
+            Flexible(child: Text(date, maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.caption
+                    .copyWith(color: AppColors.textSecondary))),
+          ]),
+        ],
+      )),
+      const SizedBox(width: 10),
+      // Pill période
+      GestureDetector(
+        onTap: onPeriodTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
           decoration: BoxDecoration(
-            color: _hover
-                ? widget.color.withValues(alpha:0.14)
-                : widget.color.withValues(alpha:0.07),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: _hover
-                  ? widget.color.withValues(alpha:0.4)
-                  : widget.color.withValues(alpha:0.15),
-              width: 1,
-            ),
+            color: AppColors.primarySurface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.primary.withValues(alpha:0.3)),
           ),
-          // mainAxisSize.min : le Row prend la largeur de son contenu
-          // (icône + gap + label), pas plus. Combiné au Wrap parent qui
-          // n'impose aucune contrainte de largeur, chaque bouton fait
-          // exactement la taille de son contenu.
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(widget.icon, size: 15, color: widget.color),
-            const SizedBox(width: 6),
-            Text(widget.label.replaceAll('\n', ' '),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+            Icon(Icons.calendar_today_rounded, size: 12,
+                color: AppColors.primary),
+            const SizedBox(width: 5),
+            Text(periodLabel,
                 style: AppTextStyles.captionBold.copyWith(
-                    color: widget.color)),
+                    color: AppColors.primary)),
+            const SizedBox(width: 3),
+            Icon(Icons.keyboard_arrow_down_rounded, size: 14,
+                color: AppColors.primary),
+          ]),
+        ),
+      ),
+    ]);
+  }
+}
+
+/// « Nouvelle commande » en 1 tap, intégré au défilement : pas de bouton
+/// flottant par-dessus le contenu (celui du shell est masqué sur l'accueil).
+/// Toute la rangée est cliquable.
+class _NewOrderButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _NewOrderButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs    = theme.colorScheme;
+    final fr    = Localizations.localeOf(context).languageCode == 'fr';
+    return Material(
+      color: cs.surface,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: theme.semantic.borderSubtle),
+          ),
+          child: Row(children: [
+            Container(
+              width: 52, height: 52,
+              decoration: BoxDecoration(
+                  color: cs.primary, borderRadius: BorderRadius.circular(14)),
+              child: Icon(Icons.add_rounded, color: cs.onPrimary, size: 24),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(fr ? 'Nouvelle commande' : 'New order',
+                    style: AppTextStyles.bodyBold
+                        .copyWith(color: cs.onSurface)),
+                Text(fr ? '1 tap · accès direct caisse'
+                        : '1 tap · straight to checkout',
+                    style: AppTextStyles.caption
+                        .copyWith(color: AppColors.textSecondary)),
+              ],
+            )),
+            Icon(Icons.chevron_right_rounded, color: AppColors.textSecondary),
           ]),
         ),
       ),
@@ -846,8 +1016,21 @@ class _FinancialSummaryCard extends StatelessWidget {
         _row(l.financesCA, '+${_fmt(data.totalSales)} ${CurrencyFormatter.currentSymbol}',
             AppColors.textPrimary),
         const SizedBox(height: 4),
+        // Coût incomplet → on le DIT. Sans ce signal, « Coût des produits : 0 »
+        // se lit comme « je n'ai rien dépensé », alors qu'il signifie « je ne
+        // sais pas ce que j'ai dépensé » — et le bénéfice juste en dessous est
+        // surestimé d'autant.
         _row(l.dashProductCost, '−${_fmt(productCost)} ${CurrencyFormatter.currentSymbol}',
-            AppColors.textSecondary),
+            AppColors.textSecondary,
+            trailing: data.costlessLines > 0
+                ? Tooltip(
+                    message: l.dashCostUnknown(data.costlessLines),
+                    triggerMode: TooltipTriggerMode.tap,
+                    showDuration: const Duration(seconds: 6),
+                    child: const Icon(Icons.warning_amber_rounded,
+                        size: 14, color: AppColors.warning),
+                  )
+                : null),
         const SizedBox(height: 8),
         Divider(height: 1, color: AppColors.divider),
         const SizedBox(height: 8),
@@ -859,7 +1042,8 @@ class _FinancialSummaryCard extends StatelessWidget {
     );
   }
 
-  Widget _row(String label, String value, Color valueColor, {bool bold = false}) =>
+  Widget _row(String label, String value, Color valueColor,
+          {bool bold = false, Widget? trailing}) =>
       Row(children: [
     Expanded(child: Text(label,
         maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -867,6 +1051,7 @@ class _FinancialSummaryCard extends StatelessWidget {
             fontSize: bold ? 12 : 10,
             fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
             color: bold ? AppColors.textPrimary : AppColors.textSecondary))),
+    if (trailing != null) ...[trailing, const SizedBox(width: 6)],
     Text(value,
         maxLines: 1, overflow: TextOverflow.ellipsis,
         style: AppTextStyles.body.copyWith(fontSize: bold ? 13 : 10,
@@ -1303,9 +1488,19 @@ class _RecentTxCard extends StatelessWidget {
     return '${d.day.toString().padLeft(2,'0')}/${d.month.toString().padLeft(2,'0')}';
   }
 
+  /// Libellé lisible du moyen de paiement (valeurs réelles de PaymentMethod).
+  String _paymentLabel(String m, bool fr) => switch (m) {
+    'cash'        => 'Cash',
+    'mobileMoney' => 'Mobile Money',
+    'card'        => fr ? 'Carte' : 'Card',
+    'credit'      => fr ? 'Crédit' : 'Credit',
+    _             => m,
+  };
+
   @override
   Widget build(BuildContext context) {
-    final l = context.l10n;
+    final l  = context.l10n;
+    final fr = Localizations.localeOf(context).languageCode == 'fr';
     return _DashCard(child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1318,78 +1513,99 @@ class _RecentTxCard extends StatelessWidget {
             label: l.dashNoSalesYet,
           )
         else
-          ...transactions.map((t) {
-            final s = _statusOf(l, t.status);
-            final isLoss = t.status == 'refunded' ||
-                t.status == 'cancelled' ||
-                t.status == 'refused';
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 7),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                // ── Avatar initiales client ─────────────────────────
-                Container(
-                  width: 36, height: 36,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha:0.12),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(_initials(t.clientName),
-                      style: AppTextStyles.bodySmBold.copyWith(
-                          color: AppColors.primary)),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Nom client + badge statut
-                      Row(children: [
-                        Expanded(child: Text(
-                            t.clientName ?? l.dashUnknownClient,
-                            maxLines: 1, overflow: TextOverflow.ellipsis,
-                            style: AppTextStyles.bodySmBold)),
-                        const SizedBox(width: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: s.color.withValues(alpha:0.12),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(s.label,
-                              style: AppTextStyles.microBold.copyWith(
-                                  color: s.color)),
-                        ),
-                      ]),
-                      // Produit principal + qty · temps écoulé
-                      const SizedBox(height: 1),
-                      Text(
-                        t.mainProduct != null
-                            ? (t.itemCount > 1
-                                ? '${t.mainProduct} ×${t.mainQty} '
-                                    '+${t.itemCount - 1} · ${_timeAgo(t.createdAt)}'
-                                : '${t.mainProduct} ×${t.mainQty} '
-                                    '· ${_timeAgo(t.createdAt)}')
-                            : _timeAgo(t.createdAt),
-                        maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.micro,
-                      ),
-                    ],
-                  ),
-                ),
-                // Montant à droite
-                Text('${t.amount.toStringAsFixed(0)} ${CurrencyFormatter.currentSymbol}',
-                    style: AppTextStyles.bodySmBold.copyWith(
-                        color: isLoss
-                            ? AppColors.error
-                            : AppColors.primary)),
-              ]),
-            );
-          }),
+          for (var i = 0; i < transactions.length; i++) ...[
+            if (i > 0)
+              Divider(height: 1,
+                  color: Theme.of(context).semantic.borderSubtle),
+            _row(l, transactions[i], fr),
+          ],
       ],
     ));
+  }
+
+  /// Une vente : avatar initiales · client + statut · articles et paiement ·
+  /// montant et heure. Hauteur minimale 56 px (zone confortable au doigt).
+  Widget _row(AppLocalizations l, RecentTx t, bool fr) {
+    final s = _statusOf(l, t.status);
+    final isLoss = t.status == 'refunded' ||
+        t.status == 'cancelled' ||
+        t.status == 'refused';
+    final isDone = t.status == 'completed';
+    // Encaissée → vert avec « + » ; annulée / remboursée → rouge ;
+    // en attente → violet.
+    final amountColor = isLoss
+        ? AppColors.error
+        : (isDone ? AppColors.secondary : AppColors.primary);
+    final n = t.itemCount;
+    final items = fr
+        ? '$n article${n > 1 ? 's' : ''}'
+        : '$n item${n > 1 ? 's' : ''}';
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 56),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(children: [
+          // ── Avatar initiales client ─────────────────────────
+          Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha:0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            alignment: Alignment.center,
+            child: Text(_initials(t.clientName),
+                style: AppTextStyles.bodySmBold.copyWith(
+                    color: AppColors.primary)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Nom client + badge statut
+                Row(children: [
+                  Flexible(child: Text(
+                      t.clientName ?? l.dashUnknownClient,
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodySmBold)),
+                  const SizedBox(width: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: s.color.withValues(alpha:0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(s.label,
+                        style: AppTextStyles.microBold.copyWith(
+                            color: s.color)),
+                  ),
+                ]),
+                const SizedBox(height: 2),
+                // Articles · moyen de paiement
+                Text('$items · ${_paymentLabel(t.paymentMethod, fr)}',
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.micro),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Montant + heure
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('${isDone ? '+' : ''}${CurrencyFormatter.format(t.amount)}',
+                  style: AppTextStyles.bodySmBold.copyWith(
+                      color: amountColor)),
+              const SizedBox(height: 2),
+              Text(_timeAgo(t.createdAt), style: AppTextStyles.micro),
+            ],
+          ),
+        ]),
+      ),
+    );
   }
 }
 
@@ -1725,7 +1941,7 @@ class _NewProductsEmpty extends StatelessWidget {
         alignment: Alignment.center,
         child: Column(
           children: [
-            const Icon(Icons.inventory_2_outlined,
+            Icon(Icons.inventory_2_outlined,
                 size: 28, color: AppColors.textHint),
             const SizedBox(height: 6),
             Text(message,
@@ -1772,7 +1988,7 @@ class _NewProductRow extends ConsumerWidget {
                 : null,
           ),
           child: (img == null || img.isEmpty)
-              ? const Icon(Icons.inventory_2_rounded,
+              ? Icon(Icons.inventory_2_rounded,
                   size: 16, color: AppColors.textHint)
               : null,
         ),
@@ -1797,7 +2013,7 @@ class _NewProductRow extends ConsumerWidget {
                           color: AppColors.primary.withValues(alpha:0.8))),
                   const SizedBox(width: 6),
                   Container(width: 2, height: 2,
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                           color: AppColors.textHint,
                           shape: BoxShape.circle)),
                   const SizedBox(width: 6),

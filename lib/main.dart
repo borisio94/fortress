@@ -9,6 +9,7 @@ import 'core/storage/secure_storage.dart';
 import 'core/services/supabase_service.dart';
 import 'core/database/app_database.dart';
 import 'core/database/supabase_migrations.dart';
+import 'core/observability/error_reporter.dart';
 import 'core/services/delivery_reminder_service.dart';
 import 'core/services/new_web_order_service.dart';
 import 'core/services/scheduled_order_alert_service.dart';
@@ -38,6 +39,23 @@ void main() async {
 
   // 1. Binding minimal — requis avant tout `runApp`.
   SentryWidgetsFlutterBinding.ensureInitialized();
+
+  // 1ter. Phase 1 observabilité — handlers d'erreurs globaux RÉACTIVÉS.
+  // (Ils avaient été coupés le temps de debugger le gel logout ; la vraie
+  // cause était le signOut bloquant sur le verrou multi-onglet GoTrue,
+  // désormais corrigée — cf. AuthBloc._onLogout émission-immédiate.)
+  // On CHAÎNE les handlers existants pour ne pas perdre la capture Sentry
+  // (Phase 0) : prev?.call(...) AVANT/APRÈS notre report dédupliqué.
+  final prevFlutterOnError = FlutterError.onError;
+  FlutterError.onError = (details) {
+    prevFlutterOnError?.call(details);
+    ErrorReporter.fromFlutterError(details);
+  };
+  final prevPlatformOnError = WidgetsBinding.instance.platformDispatcher.onError;
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    ErrorReporter.fromZoneError(error, stack);
+    return prevPlatformOnError?.call(error, stack) ?? true;
+  };
 
   // 1bis. Web : passe en path routing (sans #). Élimine le fragment qui
   //       posait problème quand un lien court (Edge `r` → 302) était
@@ -162,9 +180,40 @@ Future<void> _initBackgroundServices() async {
     // crash handler). Capturé en background, l'app est déjà visible.
     SentryFlutter.init((options) {
       options.dsn = 'https://5e24ab164b4eecefc3756bd5aa3b902c@o4511301758222336.ingest.de.sentry.io/4511301770477648';
-      options.tracesSampleRate = 1.0;
+      // Phase 0 — échantillonnage des traces de perf abaissé : 1.0 = 100 %
+      // (cher + bruyant). 0.15 suffit largement pour le suivi de bugs.
+      options.tracesSampleRate = 0.15;
       // ignore: experimental_member_use
       options.profilesSampleRate = 1.0;
+      // Phase 0 — RGPD/souveraineté : on retire les données sensibles (prix
+      // d'achat, coûts) AVANT envoi à Sentry, en scrubant les clés sensibles
+      // dans `extra` et dans le `data` des breadcrumbs.
+      options.beforeSend = (event, hint) {
+        bool sensitive(String k) {
+          final lk = k.toLowerCase();
+          return lk.contains('price_buy')
+              || lk.contains('pricebuy')
+              || lk.contains('purchase')
+              || lk.contains('prix_achat')
+              || lk.contains('buy_price')
+              || lk.contains('cost');
+        }
+        Map<String, dynamic>? scrub(Map<String, dynamic>? m) {
+          if (m == null) return null;
+          return {
+            for (final e in m.entries)
+              e.key: sensitive(e.key) ? '[redacted]' : e.value,
+          };
+        }
+        try {
+          // ignore: deprecated_member_use
+          event.extra = scrub(event.extra);
+          for (final b in (event.breadcrumbs ?? const <Breadcrumb>[])) {
+            b.data = scrub(b.data);
+          }
+        } catch (_) {}
+        return event;
+      };
     }).catchError((Object e) {
       debugPrint('Sentry init error: $e');
     }),

@@ -249,7 +249,7 @@ class _AcceptInvitePageState extends ConsumerState<AcceptInvitePage> {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.05),
@@ -267,14 +267,14 @@ class _AcceptInvitePageState extends ConsumerState<AcceptInvitePage> {
         Text('Rejoindre ${_info?['shop_name'] ?? 'la boutique'}',
             textAlign: TextAlign.center,
             style: AppTextStyles.subtitleBold
-                .copyWith(color: const Color(0xFF0F172A))),
+                .copyWith(color: AppColors.onSurface)),
         const SizedBox(height: 6),
         Text(
           _registerMode
               ? 'Créez votre mot de passe pour rejoindre l\'équipe.'
               : 'Connectez-vous pour rejoindre l\'équipe.',
           textAlign: TextAlign.center,
-          style: AppTextStyles.body.copyWith(color: const Color(0xFF6B7280)),
+          style: AppTextStyles.body.copyWith(color: AppColors.textSecondary),
         ),
         const SizedBox(height: 18),
 
@@ -385,7 +385,7 @@ class _StatusCard extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(24),
     decoration: BoxDecoration(
-      color: Colors.white,
+      color: AppColors.surface,
       borderRadius: BorderRadius.circular(16),
       boxShadow: [
         BoxShadow(color: Colors.black.withValues(alpha: 0.05),
@@ -400,10 +400,10 @@ class _StatusCard extends StatelessWidget {
       const SizedBox(height: 16),
       Text(title, textAlign: TextAlign.center,
           style: AppTextStyles.subtitleBold
-              .copyWith(color: const Color(0xFF0F172A))),
+              .copyWith(color: AppColors.onSurface)),
       const SizedBox(height: 8),
       Text(body, textAlign: TextAlign.center,
-          style: AppTextStyles.body.copyWith(color: const Color(0xFF6B7280))),
+          style: AppTextStyles.body.copyWith(color: AppColors.textSecondary)),
       if (primaryLabel != null) ...[
         const SizedBox(height: 22),
         SizedBox(width: double.infinity, height: 46,

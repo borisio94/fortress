@@ -125,12 +125,12 @@ class _PlatformIncidentsPageState extends State<PlatformIncidentsPage> {
           spacing: 8,
           children: [
             ChoiceChip(
-              label: const Text('Tous', style: AppTextStyles.caption),
+              label: Text('Tous', style: AppTextStyles.caption),
               selected: !_criticalOnly,
               onSelected: (_) => setState(() => _criticalOnly = false),
             ),
             ChoiceChip(
-              label: const Text('Critiques', style: AppTextStyles.caption),
+              label: Text('Critiques', style: AppTextStyles.caption),
               selected: _criticalOnly,
               selectedColor: AppColors.error.withValues(alpha: 0.15),
               onSelected: (_) => setState(() => _criticalOnly = true),
@@ -165,7 +165,7 @@ class _PlatformIncidentsPageState extends State<PlatformIncidentsPage> {
           Icon(Icons.check_circle_outline_rounded,
               size: 40, color: Theme.of(context).semantic.borderSubtle),
           const SizedBox(height: 12),
-          const Text('Aucun incident', style: AppTextStyles.bodySecondary),
+          Text('Aucun incident', style: AppTextStyles.bodySecondary),
         ],
       ),
     );

@@ -203,6 +203,8 @@ class _RevenusTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = context.l10n;
     return ListView(
+      // Défilable même contenu court : geste « tirer pour actualiser ».
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
         _RevenueSubKpis(data: data),
@@ -235,6 +237,22 @@ class _RevenueSubKpis extends StatelessWidget {
     final l = context.l10n;
     return KpiGrid(
       kpis: [
+        // Chiffre d'affaires total — l'info principale de la page, qui
+        // n'était pas affichée (seuls Transactions + Panier moyen l'étaient).
+        KpiData(
+          label: 'Chiffre d\'affaires',
+          value: _fmt(data.totalSales),
+          unit:  CurrencyFormatter.currentSymbol,
+          icon:  Icons.payments_rounded,
+          color: AppColors.secondary,
+        ),
+        KpiData(
+          label: 'Bénéfice net',
+          value: _fmt(data.netProfit),
+          unit:  CurrencyFormatter.currentSymbol,
+          icon:  Icons.savings_rounded,
+          color: AppColors.primary,
+        ),
         KpiData(
           label: l.financesTransactions,
           value: data.orderCount.toString(),
@@ -273,6 +291,8 @@ class _PertesTab extends ConsumerWidget {
         data.repairCost > 0;
 
     return ListView(
+      // Défilable même contenu court : geste « tirer pour actualiser ».
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
         KpiGrid(kpis: [
@@ -321,6 +341,8 @@ class _BilanTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
+      // Défilable même contenu court : geste « tirer pour actualiser ».
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       children: [
         _FinancialRecap(data: data),
@@ -508,7 +530,7 @@ class _SalesBarChart extends StatelessWidget {
               ? Center(child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.show_chart_rounded,
+                    Icon(Icons.show_chart_rounded,
                         size: 32, color: AppColors.textHint),
                     const SizedBox(height: 6),
                     Text(l.dashNoSalesYet,

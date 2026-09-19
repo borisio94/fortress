@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:http/http.dart' as http;
+import '../../core/config/supabase_config.dart';
 import '../../core/i18n/app_localizations.dart';
 import '../../core/database/app_database.dart';
 import '../../core/permisions/subscription_provider.dart';
@@ -25,12 +27,25 @@ import 'package:go_router/go_router.dart';
 // éviter les faux positifs ; les opérations qui ont vraiment besoin de
 // joindre Supabase utilisent `AppDatabase.isOnline()` séparément.
 
-bool _hasNetworkInterface(List<ConnectivityResult> results) => results.any(
-      (r) =>
-          r == ConnectivityResult.wifi ||
-          r == ConnectivityResult.mobile ||
-          r == ConnectivityResult.ethernet,
-    );
+/// Sonde de JOIGNABILITÉ RÉELLE du backend — bien plus fiable que le type
+/// d'interface de connectivity_plus, AMBIGU sur web (renvoie souvent `other`
+/// même hors ligne → l'app croyait rester en ligne alors que le wifi était
+/// coupé). On tente un petit GET sur le health-check Supabase (CORS autorisé,
+/// ~100 octets) : toute réponse HTTP = serveur joignable ; erreur réseau /
+/// timeout / DNS = hors ligne. Même principe que navigator.onLine (utilisé par
+/// WhatsApp Web) mais cross-plateforme (web + mobile) et calé sur le VRAI
+/// backend de l'app.
+Future<bool> _isReachable() async {
+  try {
+    final uri = Uri.parse('${SupabaseConfig.url}/auth/v1/health');
+    final res = await http
+        .get(uri, headers: {'apikey': SupabaseConfig.anonKey})
+        .timeout(const Duration(seconds: 5));
+    return res.statusCode > 0; // toute réponse = serveur joignable = en ligne
+  } catch (_) {
+    return false; // erreur réseau / timeout / DNS → hors ligne
+  }
+}
 
 /// Flag levé par [SessionRefresher] quand 3 tentatives consécutives de
 /// refresh token ont échoué. Inverse uniquement par un refresh réussi
@@ -44,13 +59,30 @@ final tokenRefreshFailedProvider = StateProvider<bool>((_) => false);
 /// Initialisé immédiatement par une vérification synchrone, puis mis à jour
 /// à chaque changement d'interface.
 final isOfflineProvider = StreamProvider<bool>((ref) async* {
-  // 1. Vérification synchrone immédiate au démarrage
-  final initial = await Connectivity().checkConnectivity();
-  yield !_hasNetworkInterface(initial);
+  // Sonde initiale, puis re-sonde à CHAQUE changement d'interface (réaction
+  // rapide) ET toutes les 12 s (filet de sécurité : l'évènement
+  // connectivity_plus ne fire pas toujours de façon fiable sur web, d'où le
+  // bug « wifi coupé mais pas de puce hors-ligne »).
+  var offline = !(await _isReachable());
+  yield offline;
 
-  // 2. Écoute des changements d'interface
-  await for (final results in Connectivity().onConnectivityChanged) {
-    yield !_hasNetworkInterface(results);
+  final trigger = StreamController<void>();
+  final subConn =
+      Connectivity().onConnectivityChanged.listen((_) => trigger.add(null));
+  final subTick = Stream<void>.periodic(const Duration(seconds: 12))
+      .listen((_) => trigger.add(null));
+  ref.onDispose(() {
+    subConn.cancel();
+    subTick.cancel();
+    trigger.close();
+  });
+
+  await for (final _ in trigger.stream) {
+    final now = !(await _isReachable());
+    if (now != offline) {
+      offline = now;
+      yield now;
+    }
   }
 });
 
@@ -94,6 +126,64 @@ class OfflineBanner extends ConsumerWidget {
     );
 
     return _OfflineTap(pendingOps: pendingOps);
+  }
+}
+
+// ── Puce compacte (barre du haut) ──────────────────────────────────────────
+/// Petit indicatif hors-ligne destiné à la barre supérieure — remplace le
+/// bandeau pleine largeur. Invisible en ligne ; visible dès que l'interface
+/// réseau tombe (ou après 3 échecs de refresh token). Cliquable → même
+/// feuille de détails que le bandeau.
+class OfflineChip extends ConsumerWidget {
+  const OfflineChip({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isOffline = ref.watch(isOfflineProvider).maybeWhen(
+        data: (v) => v, orElse: () => false);
+    final tokenFailed = ref.watch(tokenRefreshFailedProvider);
+    if (!isOffline && !tokenFailed) return const SizedBox.shrink();
+
+    final pendingOps = ref.watch(pendingOpsProvider).maybeWhen(
+        data: (n) => n, orElse: () => 0);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Center(
+        widthFactor: 1,
+        child: GestureDetector(
+          onTap: () => showModalBottomSheet(
+            context: context,
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+            builder: (_) => _OfflineSheet(pendingOps: pendingOps),
+          ),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEE2E2), // rouge pâle
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                  color: const Color(0xFFDC2626).withValues(alpha:0.35)),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.wifi_off_rounded,
+                  size: 13, color: Color(0xFFDC2626)),
+              const SizedBox(width: 4),
+              Text(
+                pendingOps > 0
+                    ? '${context.l10n.offlineShort} · $pendingOps'
+                    : context.l10n.offlineShort,
+                style: AppTextStyles.caption.copyWith(
+                    color: const Color(0xFFDC2626),
+                    fontWeight: FontWeight.w700),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -195,7 +285,7 @@ class _OfflineSheet extends StatelessWidget {
             l.offlineDescription,
             textAlign: TextAlign.center,
             style: AppTextStyles.bodySecondary.copyWith(
-                color: const Color(0xFF6B7280)),
+                color: AppColors.textSecondary),
           ),
 
           // Info ops en attente
@@ -231,7 +321,7 @@ class _OfflineSheet extends StatelessWidget {
             child: OutlinedButton(
               onPressed: () => Navigator.of(context).pop(),
               style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFF6B7280),
+                foregroundColor: AppColors.textSecondary,
                 side: BorderSide(color: Theme.of(context).semantic.borderSubtle),
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
@@ -239,7 +329,7 @@ class _OfflineSheet extends StatelessWidget {
               ),
               child: Text(l.close,
                   style: AppTextStyles.body.copyWith(
-                      color: const Color(0xFF6B7280))),
+                      color: AppColors.textSecondary)),
             ),
           ),
         ],
@@ -281,7 +371,7 @@ class OfflineBlockGuard extends ConsumerWidget {
         && !plan.isSuperAdmin
         && isFirstTimeOnDevice) {
       return Scaffold(
-        backgroundColor: const Color(0xFFF8F7FC),
+        backgroundColor: AppColors.background,
         body: SafeArea(
           child: Center(
             child: Padding(
@@ -307,7 +397,7 @@ class OfflineBlockGuard extends ConsumerWidget {
                     "Votre plan Normal nécessite une connexion internet. "
                         "Activez le plan Pro pour utiliser l'application hors ligne.",
                 style: AppTextStyles.bodySecondary.copyWith(
-                    color: const Color(0xFF6B7280)),
+                    color: AppColors.textSecondary),
                 textAlign: TextAlign.center),
             const SizedBox(height: 24),
             // Bouton upgrade
@@ -335,7 +425,7 @@ class OfflineBlockGuard extends ConsumerWidget {
               onPressed: () => ref.invalidate(isOfflineProvider),
               child: Text('Réessayer la connexion',
                   style: AppTextStyles.bodySecondary.copyWith(
-                      color: const Color(0xFF6B7280))),
+                      color: AppColors.textSecondary)),
             ),
             ],
           ),
