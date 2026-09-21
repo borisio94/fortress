@@ -27,6 +27,7 @@ import '../widgets/dish_details_sheet.dart';
 import '../widgets/dish_form_sheet.dart';
 import '../widgets/resto_dish_visuals.dart';
 import '../widgets/resto_empty_state.dart';
+import '../widgets/resto_pill_tabs.dart';
 import '../widgets/resto_surfaces.dart';
 
 /// La carte du restaurant — grille de plats avec filtres par catégorie.
@@ -820,7 +821,7 @@ class _SearchField extends StatelessWidget {
 class _CategoryBar extends StatelessWidget {
   final List<String> categories;
 
-  /// Nombre de plats par catégorie, et sous la clé `null` le total.
+  /// Nombre de plats par catégorie — `null` porte le total (« Tout »).
   final Map<String?, int> counts;
   final String? selected;
   final ValueChanged<String?> onSelect;
@@ -832,55 +833,27 @@ class _CategoryBar extends StatelessWidget {
     required this.onSelect,
   });
 
+  /// Les valeurs, dans l'ordre d'affichage : « Tout » puis les catégories.
+  List<String?> get _values => [null, ...categories];
+
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-      child: Row(children: [
-        _chip(context, label: 'Tout', value: null),
-        for (final c in categories) _chip(context, label: c, value: c),
-      ]),
-    );
-  }
-
-  Widget _chip(BuildContext context,
-      {required String label, required String? value}) {
-    final theme = Theme.of(context);
-    final sel = selected == value;
-    final radius = BorderRadius.circular(999);
-    final fg = sel ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface;
-    final n = counts[value] ?? 0;
-
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: Material(
-        // Active : accent plein. Inactive : la surface des cartes, qui laisse
-        // deviner le motif du fond comme le reste de l'écran.
-        color: sel ? theme.colorScheme.primary : restoGlassFill(context),
-        borderRadius: radius,
-        child: InkWell(
-          onTap: () => onSelect(value),
-          borderRadius: radius,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-            decoration: BoxDecoration(
-              borderRadius: radius,
-              border: Border.all(
-                color: sel
-                    ? theme.colorScheme.primary
-                    : restoGlassBorder(context),
-                width: 0.5,
-              ),
-            ),
-            // Le compteur est DANS le libellé, pas dans une pastille à côté :
-            // une seconde forme ferait varier la largeur sans rien apprendre
-            // de plus.
-            child: Text('$label · $n',
-                style: AppTextStyles.bodySmBold.copyWith(color: fg)),
-          ),
-        ),
-      ),
+    // LE RENDU EST DANS `RestoPillTabs`, partagé avec l'écran Stock depuis le
+    // 21/09/2026. Il vivait ici ; deux copies de la même pastille auraient
+    // divergé au premier ajustement, et c'est exactement la cohérence que le
+    // module tient depuis le tableau de bord.
+    //
+    // Cette classe garde ce qui lui est propre : le vocabulaire des catégories
+    // (`String?`, où `null` vaut « Tout »), qu'un onglet de stock n'a pas à
+    // connaître. Le widget partagé, lui, raisonne par index.
+    final values = _values;
+    return RestoPillTabs(
+      items: [
+        for (final v in values)
+          RestoPillTab(label: v ?? 'Tout', count: counts[v] ?? 0),
+      ],
+      selected: values.indexOf(selected).clamp(0, values.length - 1),
+      onSelect: (i) => onSelect(values[i]),
     );
   }
 }

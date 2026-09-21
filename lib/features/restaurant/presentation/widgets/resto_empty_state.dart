@@ -32,6 +32,17 @@ class RestoEmptyState extends StatelessWidget {
   /// parle du reste de l'application.
   final Widget? footer;
 
+  /// Rendu COMPACT : une ligne, icône et phrase, sans carte ni pastille.
+  ///
+  /// La carte dit « cette zone existe, elle est vide » — c'est juste quand
+  /// elle occupe l'écran. Sous une barre d'onglets qui porte déjà le nom et
+  /// le compte de ce qu'on regarde, elle répète ce qui est écrit juste
+  /// au-dessus et pousse le bouton d'action hors de vue.
+  ///
+  /// Même grammaire que le tableau de bord (`_EmptyBlock`) : icône de 19,
+  /// texte secondaire, alignés en haut.
+  final bool compact;
+
   const RestoEmptyState({
     super.key,
     required this.icon,
@@ -40,6 +51,7 @@ class RestoEmptyState extends StatelessWidget {
     this.actionLabel,
     this.onAction,
     this.footer,
+    this.compact = false,
   });
 
   /// Au-delà, la ligne de texte devient trop longue pour être lue d'un trait
@@ -49,6 +61,26 @@ class RestoEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+
+    if (compact) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 19, color: cs.onSurface.withValues(alpha: 0.35)),
+            const SizedBox(width: 9),
+            // Le TITRE est absorbé dans la phrase : en compact, « Aucun
+            // ingrédient » suivi de « Aucun ingrédient. Créez-en un ici » se
+            // lirait deux fois. C'est le sous-titre qui porte le sens, parce
+            // que c'est lui qui dit ce qu'on peut FAIRE.
+            Expanded(
+              child: Text(subtitle, style: AppTextStyles.bodySmSecondary),
+            ),
+          ],
+        ),
+      );
+    }
 
     final card = RestoGlassPanel(
       padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),

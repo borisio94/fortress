@@ -172,15 +172,25 @@ int _restaurantOrdersBadge(String shopId) {
 /// Alertes des finances restaurant — pastille sur l'item « Finances » :
 /// ingrédients + fournitures sous leur seuil, plus les charges fixes à régler
 /// bientôt ou en retard.
-int _restaurantFinanceBadge(String shopId) {
+/// Alertes de STOCK : ingrédients et fournitures sous leur seuil.
+///
+/// Séparé de la pastille Finances le 21/09/2026 : il comptait des articles de
+/// réserve sous une entrée qui parle d'argent, et envoyait donc le gérant au
+/// mauvais écran.
+int _restaurantStockBadge(String shopId) {
   if (shopId.isEmpty) return 0;
   var n = 0;
   for (final ing in IngredientService.forShop(shopId)) {
     if (ing.isLowStock) n++;
   }
   n += StockItemService.lowStock(shopId).length;
-  n += FixedChargeService.dueSoon(shopId).length;
   return n;
+}
+
+/// Alertes FINANCIÈRES : charges dont l'échéance approche.
+int _restaurantFinanceBadge(String shopId) {
+  if (shopId.isEmpty) return 0;
+  return FixedChargeService.dueSoon(shopId).length;
 }
 
 /// Tous les items de navigation, dans l'ordre d'affichage.
@@ -218,8 +228,28 @@ final List<ShellNavItem> kShellNavItems = [
     sectorIn:     kRestaurantSectors,
     primary:      true,
   ),
-  // ── Finances restaurant (PR-B) — hub Ingrédients / Activités / Stock ────
-  // Réservé admin/owner. Pastille = alertes stock (ingrédients + articles).
+  // ── Stock restaurant — ingrédients et fournitures ───────────────────────
+  //
+  // ENTRE MENU ET FINANCES, et l'ordre est le parcours d'usage : on compose sa
+  // carte, on gère ce qu'elle consomme, puis on regarde ce que ça coûte.
+  //
+  // Gardé par `canManageStock` et non par `isShopAdmin` : compter la réserve
+  // et lire les marges ne demandent pas les mêmes droits. C'est tout l'objet
+  // de la séparation du 21/09/2026.
+  //
+  // La pastille des alertes de stock l'a suivi : elle comptait des ingrédients
+  // et des fournitures sous une entrée « Finances ».
+  ShellNavItem(
+    icon:         Icons.inventory_2_outlined,
+    iconSelected: Icons.inventory_2_rounded,
+    label:        (_) => 'Stock',
+    route:        (id) => '/shop/$id/restaurant/stock',
+    visibleIf:    (p) => p.canManageStock,
+    sectorIn:     kRestaurantSectors,
+    badge:        _restaurantStockBadge,
+  ),
+  // ── Finances restaurant — Dépenses · Charges · Pertes · Activités ───────
+  // Réservé admin/owner. Pastille = charges à échéance.
   ShellNavItem(
     icon:         Icons.account_balance_wallet_outlined,
     iconSelected: Icons.account_balance_wallet_rounded,

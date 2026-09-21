@@ -50,6 +50,7 @@ import '../../features/restaurant/presentation/pages/bill_page.dart';
 import '../../features/restaurant/presentation/pages/restaurant_dashboard_page.dart';
 import '../../features/restaurant/presentation/pages/restaurant_menu_page.dart';
 import '../../features/restaurant/presentation/pages/finances_hub_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_stock_page.dart';
 import '../../features/restaurant/presentation/pages/inventory_reconcile_page.dart';
 import '../../features/restaurant/presentation/pages/cash_closure_page.dart';
 import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
@@ -324,6 +325,20 @@ final _shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
 /// Le service courant (plan de salle, cuisine, addition, clôture de caisse)
 /// reste ouvert à tout membre : ce sont les écrans de travail de l'équipe, et
 /// c'est le caissier lui-même qui compte son tiroir.
+/// Garde de l'écran STOCK : restaurant, et droit de gérer le stock.
+///
+/// Distinct de `_restaurantGuard(adminOnly:)` parce que le droit n'est pas le
+/// même. Même précaution qu'ailleurs sur l'hydratation des rôles : on ne
+/// renvoie que si l'on SAIT que l'utilisateur est un membre sans ce droit.
+String? _restaurantStockGuard(Ref ref, GoRouterState s) {
+  final id = s.pathParameters['shopId'] ?? '';
+  if (id.isEmpty) return null;
+  if (!isRestaurantShop(id)) return '/shop/$id/dashboard';
+  final perms = ref.read(permissionsProvider(id));
+  if (perms.isMember && !perms.canManageStock) return shopLandingRoute(id);
+  return null;
+}
+
 String? _restaurantGuard(Ref ref, GoRouterState s, {bool adminOnly = false}) {
   final id = s.pathParameters['shopId'] ?? '';
   if (id.isEmpty) return null;
@@ -860,7 +875,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           // chronologie du service.
           // Route « À emporter » supprimée avec son entrée de menu : les
           // commandes de comptoir se suivent depuis Commandes.
-          // Finances restaurant (PR-B) — hub Ingrédients / Activités / Stock.
+          // STOCK — ingrédients et fournitures, sortis du hub Finances le
+          // 21/09/2026.
+          //
+          // Gardé par `canManageStock` et NON par `adminOnly` : la séparation
+          // n'a de sens que si quelqu'un peut compter la réserve sans lire les
+          // marges. Le grain existait déjà (`inventory.stock`), le gérant
+          // l'accorde depuis « Accès à l'app » → groupe Inventaire → « Gérer le
+          // stock ». Nul n'y perd : ceux qui voyaient Finances sont admins, et
+          // `canManageStock` retombe sur `isShopAdmin` par défaut.
+          GoRoute(path: '/shop/:shopId/restaurant/stock',
+              redirect: (c, st) => _restaurantStockGuard(ref, st),
+              pageBuilder: (c, s) => _shellPage(s,
+                  RestaurantStockPage(shopId: s.pathParameters['shopId']!))),
+          // Finances restaurant — Dépenses · Charges · Pertes · Activités.
           GoRoute(path: '/shop/:shopId/restaurant/finances',
               redirect: (c, st) => _restaurantGuard(ref, st, adminOnly: true),
               pageBuilder: (c, s) => _shellPage(s,
