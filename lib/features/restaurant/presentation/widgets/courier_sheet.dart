@@ -13,7 +13,22 @@ class CourierChoice {
   final String name;
   final String phone;
 
-  const CourierChoice({required this.name, this.phone = ''});
+  /// Ce livreur est-il DÉCLARÉ AU PERSONNEL ?
+  ///
+  /// La feuille distinguait déjà les deux chemins — choisir une fiche, ou
+  /// saisir un nom — mais rendait le même objet dans les deux cas. La
+  /// distinction se perdait donc à la sortie.
+  ///
+  /// Elle décide de ce qu'on propose de lui verser : rien pour un salarié,
+  /// dont le coût est déjà dans la paie. Sans ce drapeau, le montant resterait
+  /// pré-rempli et la course serait payée deux fois.
+  final bool isStaff;
+
+  const CourierChoice({
+    required this.name,
+    this.phone = '',
+    this.isStaff = false,
+  });
 
   /// Ce qui est écrit sur la commande. Nom et téléphone dans une seule chaîne
   /// — `Sale` ne porte pas de colonne dédiée au téléphone du livreur, et en
@@ -72,8 +87,8 @@ class _CourierSheetState extends State<_CourierSheet> {
     super.dispose();
   }
 
-  void _pick(StaffMember s) => Navigator.of(context)
-      .pop(CourierChoice(name: s.fullName, phone: s.phone ?? ''));
+  void _pick(StaffMember s) => Navigator.of(context).pop(CourierChoice(
+      name: s.fullName, phone: s.phone ?? '', isStaff: true));
 
   void _confirmTemporary() {
     final name = _nameCtrl.text.trim();

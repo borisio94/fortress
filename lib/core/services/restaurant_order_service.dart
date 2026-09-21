@@ -3,10 +3,12 @@ import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import '../../features/caisse/data/repositories/sale_local_datasource.dart';
 import '../../features/caisse/domain/entities/sale.dart';
 import '../../features/caisse/domain/entities/sale_item.dart';
+import '../../features/restaurant/domain/courier_pay.dart';
 import '../../features/restaurant/domain/entities/restaurant_table.dart';
 import '../config/restaurant_mode.dart';
 import '../database/app_database.dart';
 import '../storage/hive_boxes.dart';
+import 'daily_expense_service.dart';
 import 'daily_menu_service.dart';
 import 'notification_service.dart';
 import 'restaurant_table_service.dart';
@@ -344,6 +346,20 @@ class RestaurantOrderService {
     String? clientPhone,
     String? address,
     double deliveryFee = 0,
+
+    /// Ce que reçoit le LIVREUR, et qui donne lieu à une dépense.
+    ///
+    /// Distinct des frais : l'établissement peut en garder une part. Nul pour
+    /// un salarié, dont le coût est déjà dans la paie.
+    double courierPay = 0,
+
+    /// Ce versement sort-il du TIROIR ?
+    ///
+    /// C'est lui qui décide si la dépense pèse sur la clôture de caisse :
+    /// `DailyExpenseService.cashOut` filtre sur `isCash`, et le service de
+    /// clôture le somme déjà. Un règlement Mobile Money sort de la banque.
+    bool courierPayIsCash = true,
+
     /// Livreur retenu, sous la forme « Nom · téléphone ». Exigé par le
     /// formulaire de prise de commande ; le paramètre reste nullable pour les
     /// appels programmatiques et les commandes anciennes.
@@ -374,6 +390,28 @@ class RestaurantOrderService {
       notes: (notes?.trim().isNotEmpty ?? false) ? notes!.trim() : null,
     );
     await _ds.saveOrder(order);
+
+    // CE QUE LA COURSE A COÛTÉ, écrit au moment où on le sait.
+    //
+    // Sans cette ligne, les frais étaient encaissés et le livreur payé sans
+    // qu'aucun des deux n'apparaisse : ni charge au bilan, ni sortie à la
+    // clôture. Un voisin payé du tiroir devenait un MANQUANT imputé au
+    // caissier le soir même — le même défaut que les avances sur salaire, et
+    // que les heures supplémentaires payées en liquide.
+    //
+    // Rattachée à la commande par sa description : `DailyExpense` ne porte pas
+    // de lien vers une vente, et en ajouter un aurait imposé une migration
+    // pour une information dont le seul usage est d'être LUE dans le journal.
+    if (courierPayNeedsExpense(courierPay)) {
+      await DailyExpenseService.record(
+        shopId: shopId,
+        description: 'Livraison — ${order.clientName}'
+            '${order.deliveryPersonName == null ? '' : ' · ${order.deliveryPersonName}'}',
+        amount: courierPay.round(),
+        kind: kCourierExpenseKind,
+        isCash: courierPayIsCash,
+      );
+    }
     return order;
   }
 

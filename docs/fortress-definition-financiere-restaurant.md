@@ -39,14 +39,31 @@ doit être écrite ici avec sa raison, sinon c'est un bug.
 
 **Compte** : les commandes au statut `completed`, et elles seules.
 
-**Formule** : `(articles − remise de commande) × (1 + TVA)`
+**Formule** : `(articles − remise de commande) × (1 + TVA) + livraison`
+
+Les **frais de livraison** s'ajoutent **bruts**, ni remisés ni taxés : la
+remise de l'addition porte sur les plats, pas sur la course. Ils sont entrés
+dans le CA le **21/09/2026** ; jusque-là ils en étaient exclus, faute d'une
+ligne qui portât le coût du livreur — voir la section 9.
 
 **N'entre pas dans le CA :**
 
 | Élément | Raison |
 |---|---|
 | Consignes de bouteilles | Caution rendue au client, flux de passage |
-| Livraison | Recette réelle, mais aucune ligne ne retranche le coût du livreur. Dette ouverte : à intégrer avec sa charge, pas seule. |
+
+**Le CA n'est pas le chiffre des plats.** Deux montants, et les confondre
+fausse tous les ratios de matière :
+
+| Montant | Ce qu'il porte | Ce qu'il sert à calculer |
+|---|---|---|
+| **CA** | plats + livraison | recette, bénéfice, courbe du tableau de bord |
+| **Ventes de plats** | plats seuls | food cost, couverture du coût, marge par secteur |
+
+Une course ne porte **aucune matière** : la compter au dénominateur du food
+cost diluerait le taux exactement comme le faisaient les boissons sans coût
+connu (section 9). Elle n'appartient pas davantage à une **activité** : la somme
+des secteurs vaut donc les ventes de plats, jamais le CA.
 
 **Ce qui n'existe pas aujourd'hui** : TVA (`taxRate` reste à 0), pourboire,
 frais de service.
@@ -296,15 +313,23 @@ montant système = fond de caisse
                 + commandes payées cash sans ligne de règlement
 ```
 
-Les sept canaux de sortie d'espèces sont branchés : dépenses et achats
-marché, consigne rendue, avances sur salaire, quinzaines, salaires versés,
-heures supplémentaires payées le jour même, primes de concours.
+Les huit canaux de sortie d'espèces sont branchés : dépenses et achats
+marché, consigne rendue, **versement au livreur**, avances sur salaire,
+quinzaines, salaires versés, heures supplémentaires payées le jour même,
+primes de concours.
 
-État au 19/09/2026, après le commit du chantier « Notation de l'équipe » :
-`StaffService.cashOut` en couvre QUATRE — avances en espèces, salaires payés
-en espèces, heures supplémentaires réglées de la main à la main, primes de
-concours. Les trois autres — dépenses, achats marché, consigne rendue — ne
-passent pas par ce service mais par `DailyExpenseService`.
+État au 21/09/2026, après le lot « livraison » : `StaffService.cashOut` en
+couvre QUATRE — avances en espèces, salaires payés en espèces, heures
+supplémentaires réglées de la main à la main, primes de concours. Les
+QUATRE autres — dépenses, achats marché, consigne rendue, versement au
+livreur — ne passent pas par ce service mais par `DailyExpenseService`.
+
+Le versement au livreur est le dernier arrivé, et il est de la même famille
+que les avances et les heures supplémentaires : de l'argent sorti du tiroir le
+soir même, que le comptage ne savait pas expliquer. **Seul le versement en
+espèces y entre** — un règlement Mobile Money est une charge, mais rien n'est
+sorti de la caisse ; le retrancher du fond attendu créerait un excédent aussi
+faux que le manquant qu'il corrige.
 
 Contrôle aveugle : le montant système n'est jamais affiché avant la saisie
 du comptage réel.
@@ -313,9 +338,12 @@ du comptage réel.
 
 ## 8. Écarts connus, non corrigés
 
-À traiter, dans cet ordre de gravité.
+**Aucun au 21/09/2026.** Le dernier — « la livraison est encaissée sans charge
+de livreur » — est passé en section 9 ce jour-là.
 
-**La livraison est encaissée sans charge de livreur.**
+Une section vide n'est pas une fin : c'est l'état à un instant. Tout écart
+constaté se pose ICI, par ordre de gravité, et n'en sort qu'avec le titre du
+commit qui l'a refermé.
 
 ---
 
@@ -727,6 +755,57 @@ code, pour les dix.
 **Ce que ce correctif ne fait pas** : sur une table protégée, l'opération
 restait déjà en file. Le sort de l'op est inchangé. Ce qui change est la
 justesse de la classification, sa testabilité, et un journal moins bavard.
+
+---
+
+### La livraison était encaissée sans charge de livreur
+
+*Corrigé le 21/09/2026 — « feat(restaurant): une livraison paie son livreur,
+et ses frais entrent enfin en recette ».*
+
+Le dernier écart de la section 8, et le plus ancien. Le client payait des
+frais, l'établissement les encaissait, un livreur était nommé sur la commande
+— et **rien ne disait ce qu'il recevait**. Ni recette, ni charge : deux flux
+réels, invisibles tous les deux.
+
+**Le plus grave n'était pas le bilan, c'était la caisse.** Le livreur de
+dépannage est payé en espèces, du tiroir, le soir même. `cashOut` ne le savait
+pas : chaque course ainsi réglée apparaissait au comptage aveugle comme un
+**manquant imputé au caissier**. C'est le même défaut que les avances sur
+salaire et les heures supplémentaires payées de la main à la main, refermé
+deux fois déjà ailleurs dans cette section.
+
+**Trois cas coexistent**, et la règle les porte tous les trois :
+
+- les frais reviennent **en entier** au livreur — le cas courant ;
+- ils sont **partagés**, l'établissement garde la différence ;
+- le livreur est un **salarié**, dont le coût est déjà dans la paie. Le champ
+  se met alors à **zéro tout seul**, avec sa mention : un zéro qu'il faudrait
+  saisir à la main serait oublié, et la course serait payée deux fois — une
+  fois en espèces le soir, une fois dans la quinzaine.
+
+**CE LOT FAIT MONTER LE CHIFFRE D'AFFAIRES SANS QU'AUCUNE VENTE N'AIT
+CHANGÉ.** C'est sa conséquence la plus visible et il faut s'y attendre : à
+articles strictement identiques, un bilan qui lisait 5 000 F lit désormais
+6 000 F si la course valait 1 000 F. Rien n'a été vendu de plus — une recette
+qui existait depuis toujours est simplement entrée dans le compte.
+
+La contrepartie est écrite en face, le même jour, sur la même commande : une
+dépense de transport de ce que le livreur a reçu. Le bénéfice net ne bouge donc
+que de la **différence** — 300 F sur une course facturée 1 000 et reversée 700.
+C'est exactement ce que l'établissement gagne à livrer, et il ne le savait pas.
+
+**Ce que ce correctif ne fait pas.** Les ratios de matière ne changent pas : le
+food cost et la couverture du coût se rapportent aux **ventes de plats**, pas
+au CA (section 2). La somme des secteurs non plus : une course n'appartient à
+aucune activité, et la ranger dans « Sans secteur » y ferait apparaître un
+montant que rien ne permet de rattacher — le gérant chercherait indéfiniment un
+plat manquant qui n'existe pas.
+
+**Le circuit de livraison e-commerce n'est pas concerné** : quartiers tarifés,
+partenaire-livreur, transferts de stock et livre partenaire sont un autre
+parcours, avec sa propre comptabilité de versements. Ce lot ne touche que la
+livraison prise au comptoir du restaurant.
 
 ---
 

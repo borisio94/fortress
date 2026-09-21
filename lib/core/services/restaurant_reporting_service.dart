@@ -133,7 +133,25 @@ class RestaurantFinanceReport {
 
   /// Un secteur par activité, plus « Sans secteur » si des plats non
   /// rattachés ont été vendus. Trié par chiffre d'affaires décroissant.
+  ///
+  /// Leur somme vaut [foodRevenue] et non [revenue] : les frais de livraison
+  /// n'appartiennent à aucune activité.
   final List<SectorLine> sectors;
+
+  /// FRAIS DE LIVRAISON encaissés sur la période, déjà compris dans
+  /// [revenue].
+  ///
+  /// Isolé parce qu'il ne se comporte pas comme une vente : il n'a ni plat,
+  /// ni secteur, ni matière. Le compter dans le dénominateur du food cost
+  /// diluerait le taux exactement comme le faisaient les boissons sans coût
+  /// connu — le défaut que [costedRevenue] a corrigé. Les ratios de matière
+  /// passent donc par [foodRevenue], pas par [revenue].
+  final double deliveryRevenue;
+
+  /// Chiffre d'affaires des PLATS — le CA moins ce que la livraison a
+  /// rapporté. Dénominateur de tout ce qui rapporte une matière à des ventes.
+  double get foodRevenue =>
+      (revenue - deliveryRevenue).clamp(0, double.infinity);
 
   /// Seuils camerounais du food cost (spec) : au-delà de 35 %, la carte ne
   /// dégage plus assez pour couvrir les charges.
@@ -170,6 +188,7 @@ class RestaurantFinanceReport {
     this.unallocatedPurchases = 0,
     this.purchasedMaterialLosses = 0,
     this.lossLines = const [],
+    this.deliveryRevenue = 0,
   });
 
   /// Achats de matières MOINS la matière perdue qu'ils contiennent — la
@@ -308,19 +327,23 @@ class RestaurantFinanceReport {
   ///
   /// Repli sur le chiffre d'affaires entier quand l'appelant ne renseigne
   /// rien : un rapport construit à la main garde l'ancien calcul.
-  double get costedRevenue => coveredRevenue ?? revenue;
+  double get costedRevenue => coveredRevenue ?? foodRevenue;
 
-  /// Part du chiffre d'affaires dont le coût matière est connu — de 0 à 1.
+  /// Part des ventes de PLATS dont le coût matière est connu — de 0 à 1.
+  ///
+  /// Rapportée à [foodRevenue] : les frais de livraison n'ont pas de coût
+  /// matière à connaître, les compter manquants ferait chuter la couverture
+  /// sans qu'aucune donnée ne manque.
   double get costCoverage =>
-      revenue <= 0 ? 1 : (costedRevenue / revenue).clamp(0.0, 1.0);
+      foodRevenue <= 0 ? 1 : (costedRevenue / foodRevenue).clamp(0.0, 1.0);
 
   /// FOOD COST % théorique — coût des recettes rapporté aux ventes.
   double get theoreticalFoodCostRate =>
       costedRevenue <= 0 ? 0 : (materialCost / costedRevenue) * 100;
 
-  /// FOOD COST % réel — achats de matières rapportés aux ventes.
+  /// FOOD COST % réel — achats de matières rapportés aux ventes de plats.
   double get realFoodCostRate =>
-      revenue <= 0 ? 0 : (netRealFoodCost / revenue) * 100;
+      foodRevenue <= 0 ? 0 : (netRealFoodCost / foodRevenue) * 100;
 
   /// Le taux à afficher en premier : le réel dès qu'il existe.
   double get foodCostRate =>
@@ -429,6 +452,8 @@ class RestaurantReportingService {
     // un sens. Les accompagnements n'y figurent pas — leur prix est déjà
     // compris dans la ligne du plat.
     final revenueByProduct = <String, double>{};
+    // Frais de livraison encaissés : du chiffre d'affaires sans plat.
+    var deliveryRevenue = 0.0;
     // Prix d'achat figé dans la ligne : le seul repli quand le produit a été
     // supprimé du catalogue depuis la vente.
     final frozenCost = <String, double>{};
@@ -466,9 +491,16 @@ class RestaurantReportingService {
         //     cautions rendues au client — pas un produit. Leur remboursement
         //     est exclu du bilan (`ExpenseKind.isCharge`) : exclues des deux
         //     côtés, elles se neutralisent ;
-        //   * la LIVRAISON : aucune ligne du bilan ne porte le coût du livreur.
-        //     Entrer la recette sans la charge gonflerait le bénéfice (dette
-        //     notée, audit des marges 2026-09-15).
+        //
+        // La LIVRAISON, elle, est ENTRÉE EN RECETTE le 21/09/2026. Elle en
+        // était exclue tant que rien ne portait le coût du livreur : la
+        // recette seule aurait gonflé le bénéfice. Ce lot écrit ce coût — une
+        // dépense au moment de la prise de commande — donc les deux côtés
+        // existent enfin et l'exclusion n'a plus de raison d'être.
+        //
+        // Elle s'ajoute BRUTE, ni remisée ni taxée, exactement comme
+        // `Sale.total` l'additionne : la remise de l'addition porte sur les
+        // plats, pas sur la course.
         //
         // La TVA suit `Sale.total` mais reste à 0 côté restaurant : chemin
         // inerte tant qu'aucun taux n'est saisi.
@@ -483,6 +515,17 @@ class RestaurantReportingService {
         final orderFactor = itemsTotal <= 0
             ? 0.0
             : (itemsTotal - orderDiscount) * (1 + taxRate / 100) / itemsTotal;
+
+        final fee = (o['delivery_price'] as num?)?.toDouble() ?? 0;
+        if (fee > 0) {
+          deliveryRevenue += fee;
+          revenueSeries[b] += fee;
+          // PAS DE SECTEUR. Une course n'appartient à aucune activité, et la
+          // ranger dans « Sans secteur » y ferait apparaître un montant que
+          // rien ne permet de rattacher : le gérant chercherait indéfiniment
+          // le plat manquant. La somme des secteurs vaut donc `foodRevenue`,
+          // pas `revenue` — et `revenueSeries` reste le chiffre d'affaires.
+        }
 
         for (final it in items) {
           final qty = ((it['quantity'] ?? it['qty']) as num?)?.toDouble() ?? 0;
@@ -859,6 +902,7 @@ class RestaurantReportingService {
       range: range,
       labels: labels,
       revenue: revenueSeries.fold(0, (s, v) => s + v),
+      deliveryRevenue: deliveryRevenue,
       materialCost: materialSeries.fold(0, (s, v) => s + v),
       realFoodCost: realFoodCost,
       purchasedMaterialLosses: purchasedMaterialLosses,

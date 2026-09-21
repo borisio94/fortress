@@ -244,15 +244,42 @@ void main() {
           deliveryPrice: 1500);
     });
 
-    test('la remise de l\'addition sort du CA (20 000 − 4 000 = 16 000)', () {
+    test('la remise de l\'addition sort des ventes (20 000 − 4 000 = 16 000)',
+        () {
+      // Le chiffre des PLATS. Ce test disait « du CA » jusqu'au 21/09/2026 :
+      // depuis, le CA porte aussi la livraison, et c'est `foodRevenue` qui
+      // isole ce que les assiettes ont rapporté.
       final r = RestaurantReportingService.build(shop, _range);
-      expect(r.revenue, closeTo(16000, 0.01));
+      expect(r.foodRevenue, closeTo(16000, 0.01));
     });
 
-    test('consigne et livraison n\'entrent pas dans le CA', () {
+    test('la consigne n\'entre pas dans le CA', () {
+      // Une caution rendue au client n'est pas un produit, et son
+      // remboursement est exclu du bilan : elle se neutralise des deux côtés.
+      // Inchangé par ce lot.
       final r = RestaurantReportingService.build(shop, _range);
       expect(r.revenue, isNot(closeTo(16000 + 1000, 0.01)));
-      expect(r.revenue, isNot(closeTo(16000 + 1500, 0.01)));
+    });
+
+    test('LA LIVRAISON, ELLE, ENTRE DANS LE CA (16 000 + 1 500)', () {
+      // Le renversement du 21/09/2026. Elle en était exclue tant qu'aucune
+      // ligne ne portait le coût du livreur ; ce coût est écrit désormais, au
+      // moment de la prise de commande, donc la recette peut entrer.
+      //
+      // Elle entre BRUTE : la remise de 4 000 porte sur les plats, pas sur la
+      // course, exactement comme `Sale.total` l'additionne.
+      final r = RestaurantReportingService.build(shop, _range);
+      expect(r.revenue, closeTo(17500, 0.01));
+      expect(r.deliveryRevenue, closeTo(1500, 0.01));
+    });
+
+    test('mais elle reste HORS du dénominateur du food cost', () {
+      // Sans quoi le taux se diluerait dans des recettes qui ne portent
+      // aucune matière — le défaut même que `costedRevenue` avait corrigé
+      // pour les boissons sans coût connu.
+      final r = RestaurantReportingService.build(shop, _range);
+      expect(r.foodRevenue, closeTo(r.revenue - r.deliveryRevenue, 0.01));
+      expect(r.foodRevenue, closeTo(16000, 0.01));
     });
 
     test('remise ventilée au prorata : cuisine 8 000, bar 8 000', () {
@@ -262,11 +289,15 @@ void main() {
       expect(bySector['ra_bar'], closeTo(8000, 0.01));
     });
 
-    test('somme des secteurs = CA, somme des buckets = CA', () {
+    test('somme des secteurs = ventes de plats, somme des buckets = CA', () {
+      // DEUX INVARIANTS DISTINCTS depuis le 21/09/2026, et c'est voulu : une
+      // course n'appartient à aucune activité. La ranger dans « Sans secteur »
+      // y ferait apparaître un montant que rien ne permet de rattacher — le
+      // gérant chercherait indéfiniment un plat manquant qui n'existe pas.
       final r = RestaurantReportingService.build(shop, _range);
       final sectors = r.sectors.fold<double>(0, (s, l) => s + l.revenue);
       final buckets = r.revenueSeries.fold<double>(0, (s, v) => s + v);
-      expect(sectors, closeTo(r.revenue, 0.01));
+      expect(sectors, closeTo(r.foodRevenue, 0.01));
       expect(buckets, closeTo(r.revenue, 0.01));
     });
 

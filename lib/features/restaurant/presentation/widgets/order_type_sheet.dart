@@ -14,6 +14,7 @@ import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../domain/entities/restaurant_table.dart';
 import '../../domain/entities/stock_item.dart';
+import '../../domain/courier_pay.dart';
 import 'courier_sheet.dart';
 
 /// ENREGISTREMENT D'UNE COMMANDE prise depuis le Menu — Module 3 du flux.
@@ -105,6 +106,19 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
   // ── À livrer seulement ─────────────────────────────────────────────────
   final _addressCtrl = TextEditingController();
   final _feeCtrl = TextEditingController();
+
+  /// Ce que reçoit le LIVREUR. Distinct des frais : l'établissement peut en
+  /// garder une part. Pré-rempli au montant des frais, remis à zéro dès qu'un
+  /// salarié est choisi — son coût est déjà dans la paie.
+  final _payCtrl = TextEditingController();
+
+  /// Le livreur est-il payé du TIROIR ?
+  ///
+  /// Décide si le versement pèse sur la clôture de caisse. Un paiement par
+  /// Mobile Money sort de la banque, pas du tiroir : le compter comme espèces
+  /// ferait apparaître un manquant au comptage du soir. Espèces par défaut,
+  /// parce que c'est ainsi qu'on paie un voisin qui rend service.
+  bool _payIsCash = true;
 
   /// Livreur retenu à la prise de commande — OBLIGATOIRE.
   ///
@@ -212,6 +226,7 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
     _phoneCtrl.dispose();
     _addressCtrl.dispose();
     _feeCtrl.dispose();
+    _payCtrl.dispose();
     super.dispose();
   }
 
@@ -292,6 +307,20 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
   double get _feeValue =>
       double.tryParse(_feeCtrl.text.trim().replaceAll(',', '.')) ?? 0;
 
+  /// Ce qui sera versé au livreur, tel que saisi.
+  double get _payValue =>
+      double.tryParse(_payCtrl.text.trim().replaceAll(',', '.')) ?? 0;
+
+  /// Repropose le montant du versement d'après les frais et la nature du
+  /// livreur. Appelé à chaque changement de l'un ou de l'autre.
+  void _refreshCourierPay() {
+    final proposed = courierPayDefault(
+      deliveryFee: _feeValue,
+      courierIsStaff: _courier?.isStaff ?? false,
+    );
+    _payCtrl.text = proposed <= 0 ? '' : proposed.toStringAsFixed(0);
+  }
+
   Future<void> _pickCourier() async {
     final choice = await showCourierSheet(
       context: context,
@@ -299,7 +328,13 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
       current: _courier?.name,
     );
     if (choice == null || !mounted) return;
-    setState(() => _courier = choice);
+    setState(() {
+      _courier = choice;
+      // UN SALARIÉ REMET LE MONTANT À ZÉRO, tout seul. Le laisser pré-rempli
+      // paierait la course deux fois : en espèces ce soir, dans la paie à la
+      // quinzaine.
+      _refreshCourierPay();
+    });
   }
 
   /// Le bon peut-il partir en préparation ?
@@ -387,6 +422,8 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
           clientPhone: _phoneCtrl.text.trim(),
           address: _addressCtrl.text.trim(),
           deliveryFee: _feeValue,
+          courierPay: _payValue,
+          courierPayIsCash: _payIsCash,
           courier: _courier?.label,
           notes: widget.notes,
         );
@@ -722,9 +759,10 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
             numbersOnly: true,
             keyboardType: TextInputType.number,
             prefixIcon: Icons.payments_outlined,
+            onChanged: (_) => setState(_refreshCourierPay),
           ),
           const SizedBox(height: 6),
-          Text('Ajoutés au total de la commande.',
+          Text('Ajoutés au total de la commande, et au chiffre d\'affaires.',
               style: AppTextStyles.captionHint),
 
           // ── Livreur ──────────────────────────────────────────────
@@ -734,8 +772,68 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
           _CourierTile(
             courier: _courier,
             onTap: _pickCourier,
-            onClear: () => setState(() => _courier = null),
+            onClear: () => setState(() {
+              _courier = null;
+              _refreshCourierPay();
+            }),
           ),
+
+          // ── Versé au livreur ─────────────────────────────────────
+          //
+          // LE POINT DE CE LOT. Les frais étaient encaissés et le livreur
+          // nommé, mais ce qu'il reçoit n'était écrit nulle part — ni en
+          // charge, ni en sortie de caisse. Un voisin payé du tiroir
+          // apparaissait le soir comme un MANQUANT imputé au caissier.
+          if (_courier?.isStaff ?? false) ...[
+            const SizedBox(height: 18),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.badge_outlined,
+                  size: 15, color: Theme.of(context).semantic.info),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                    'Livreur salarié : rien à verser ici, son coût est déjà '
+                    'dans la paie.',
+                    style: AppTextStyles.captionHint),
+              ),
+            ]),
+          ] else ...[
+            const SizedBox(height: 18),
+            const AppFieldLabel('Versé au livreur'),
+            const SizedBox(height: 8),
+            AppField(
+              controller: _payCtrl,
+              hint: '0',
+              numbersOnly: true,
+              keyboardType: TextInputType.number,
+              prefixIcon: Icons.local_shipping_outlined,
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 6),
+            Text(
+                _payValue <= 0
+                    ? 'Rien de saisi : aucune charge ne sera enregistrée.'
+                    : 'Enregistré en dépense « Transport ».',
+                style: AppTextStyles.captionHint),
+            // ESPÈCES OU NON — la question décide de la clôture de caisse.
+            // Un règlement Mobile Money sort de la banque, pas du tiroir.
+            if (_payValue > 0) ...[
+              const SizedBox(height: 4),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: _payIsCash,
+                onChanged: (v) => setState(() => _payIsCash = v),
+                title: const Text('Payé en espèces, du tiroir',
+                    style: AppTextStyles.bodySm),
+                subtitle: Text(
+                    _payIsCash
+                        ? 'Déduit du fond de caisse attendu ce soir.'
+                        : 'Hors caisse — Mobile Money, virement, plus tard.',
+                    style: AppTextStyles.captionHint),
+              ),
+            ],
+          ],
 
           // ── Total à encaisser ────────────────────────────────────
           // Plats + livraison. C'est le montant que le client réglera au
