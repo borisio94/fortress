@@ -7,7 +7,23 @@ import 'resto_surfaces.dart';
 class RestoPillTab {
   final String label;
   final int count;
-  const RestoPillTab({required this.label, required this.count});
+
+  /// Couleur de l'onglet ACTIF. `null` → l'accent de la palette.
+  ///
+  /// Sert à distinguer deux natures qu'on ne veut pas confondre — la matière
+  /// qui entre dans les plats et ce qui se consomme sans être servi. La
+  /// différence se voit alors AVANT de lire le libellé.
+  ///
+  /// Laisser `null` est le cas courant : des onglets qui listent la même
+  /// chose (les catégories d'une carte) n'ont aucune raison de changer de
+  /// couleur entre eux.
+  final Color? color;
+
+  const RestoPillTab({
+    required this.label,
+    required this.count,
+    this.color,
+  });
 }
 
 /// BARRE D'ONGLETS EN PASTILLES, avec compteur dans le libellé.
@@ -52,14 +68,18 @@ class RestoPillTabs extends StatelessWidget {
     final theme = Theme.of(context);
     final sel = selected == i;
     final radius = BorderRadius.circular(999);
-    final fg = sel ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface;
+    final accent = items[i].color ?? theme.colorScheme.primary;
+    // BLANC SUR FOND PLEIN, quelle que soit la teinte. `onPrimary` ne vaut que
+    // pour l'accent de la palette ; sur une couleur propre à l'onglet, il
+    // pourrait rendre un texte sombre sur un fond sombre.
+    final fg = sel ? Colors.white : theme.colorScheme.onSurface;
 
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: Material(
         // Active : accent plein. Inactive : la surface des cartes, qui laisse
         // deviner le motif du fond comme le reste de l'écran.
-        color: sel ? theme.colorScheme.primary : restoGlassFill(context),
+        color: sel ? accent : restoGlassFill(context),
         borderRadius: radius,
         child: InkWell(
           onTap: () => onSelect(i),
@@ -69,9 +89,7 @@ class RestoPillTabs extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: radius,
               border: Border.all(
-                color: sel
-                    ? theme.colorScheme.primary
-                    : restoGlassBorder(context),
+                color: sel ? accent : restoGlassBorder(context),
                 width: 0.5,
               ),
             ),

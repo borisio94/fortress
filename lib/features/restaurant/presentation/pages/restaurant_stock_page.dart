@@ -78,6 +78,7 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
   @override
   Widget build(BuildContext context) {
     final shopId = widget.shopId;
+    final sem = Theme.of(context).semantic;
     final nIng = IngredientService.forShop(shopId).length;
     final nSup = StockItemService.forShop(shopId).length;
 
@@ -97,12 +98,23 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
         children: [
           RestoSectionHeader(
             title: 'Stock',
-            subtitle: '${_plural(nIng, 'ingrédient')} · '
-                '${_plural(nSup, 'fourniture')}',
+            subtitle: '${_count(nIng, zero: 'aucun ingrédient', one: 'ingrédient')}'
+                ' · '
+                '${_count(nSup, zero: 'aucune fourniture', one: 'fourniture')}',
           ),
+          // DEUX COULEURS, parce que ce sont deux natures et non deux listes.
+          //
+          // L'ambre porte la matière qui entre dans les plats, l'accent de la
+          // palette ce qui se consomme sans être servi. La distinction se voit
+          // avant qu'on ait lu le libellé.
+          //
+          // Aucune teinte en dur : `warning` et `primary` suivent les huit
+          // palettes, en clair comme en sombre. Sur la palette par défaut —
+          // Violet Fortress — l'accent EST le violet.
           RestoPillTabs(
             items: [
-              RestoPillTab(label: 'Ingrédients', count: nIng),
+              RestoPillTab(
+                  label: 'Ingrédients', count: nIng, color: sem.warning),
               RestoPillTab(label: 'Fournitures', count: nSup),
             ],
             selected: _tab,
@@ -122,9 +134,19 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
     );
   }
 
-  /// « 0 ingrédient », « 1 ingrédient », « 4 ingrédients ».
-  static String _plural(int n, String word) =>
-      n <= 1 ? '$n $word' : '$n ${word}s';
+  /// « aucun ingrédient », « 1 ingrédient », « 4 ingrédients ».
+  ///
+  /// LE ZÉRO S'ÉCRIT EN TOUTES LETTRES, et il a un genre : « 0 ingrédient »
+  /// se lit comme une mesure ratée, « aucun ingrédient » comme un état. Et le
+  /// genre n'est pas dérivable du mot — c'est l'appelant qui le donne, parce
+  /// qu'aucune règle mécanique ne distingue « aucun ingrédient » d'« aucune
+  /// fourniture ».
+  static String _count(int n, {required String zero, required String one}) =>
+      n == 0
+          ? zero
+          : n == 1
+              ? '1 $one'
+              : '$n ${one}s';
 }
 
 /// Unités proposées pour un ingrédient — volontairement courte et concrète :
@@ -266,7 +288,9 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
         // La feuille ouverte est CELLE de la fiche plat (`IngredientQuickSheet`,
         // extraite le 21/09/2026) : mêmes champs, même écriture de la dépense
         // d'achat. Deux formulaires auraient divergé.
-        headerButton('Ingrédient', _createIngredient),
+        // Le bouton n'est ici QUE si la liste existe. Vide, l'action descend
+        // dans l'état vide, sous la phrase qui la promet.
+        if (items.isNotEmpty) headerButton('Ingrédient', _createIngredient),
         Expanded(
           child: items.isEmpty
               // COMPACT : la barre d'onglets juste au-dessus porte déjà
@@ -276,12 +300,19 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
               // La phrase dit ce qu'on PEUT FAIRE, pas seulement ce qui
               // manque : les deux chemins de création sont nommés, celui d'ici
               // en premier puisque c'est l'écran où l'on est.
-              ? const RestoEmptyState(
+              ? RestoEmptyState(
                   compact: true,
                   icon: Icons.eco_outlined,
                   title: 'Aucun ingrédient',
-                  subtitle: 'Aucun ingrédient. Créez-en un ici, ou en '
-                      'composant la recette d\'un plat.',
+                  // LA PHRASE DIT LA NOTION avant de dire le geste. « Aucun
+                  // ingrédient » ne range pas les barquettes : un restaurateur
+                  // doit savoir CE QUI va ici, sans quoi il mettra le gaz et
+                  // les emballages dans la même liste que le poisson.
+                  subtitle: 'Ce qui entre dans vos plats — poisson, huile, '
+                      'riz, épices. Créez-en un ici, ou en composant la '
+                      'recette d\'un plat.',
+                  actionLabel: 'Ingrédient',
+                  onAction: _createIngredient,
                 )
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
@@ -933,16 +964,21 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
               'tout seul à chaque vente.',
               style: AppTextStyles.captionHint),
         ),
-        headerButton('Fourniture', () => _edit(null)),
+        if (items.isNotEmpty) headerButton('Fourniture', () => _edit(null)),
         Expanded(
           child: items.isEmpty
-              ? const RestoEmptyState(
+              ? RestoEmptyState(
                   compact: true,
                   icon: Icons.inventory_2_outlined,
                   title: 'Aucune fourniture',
-                  subtitle: 'Aucune fourniture. Créez-en une ici — emballages, '
-                      'gaz, produits d\'entretien : tout ce qui se consomme '
-                      'sans être revendu.',
+                  // Le pendant exact de l'autre onglet : ce qui se consomme
+                  // SANS ÊTRE SERVI. C'est la frontière qui décide où ranger
+                  // une barquette, et elle n'est évidente pour personne.
+                  subtitle: 'Ce que vous consommez sans le servir — '
+                      'barquettes, gaz, produits d\'entretien. Créez-en une '
+                      'ici.',
+                  actionLabel: 'Fourniture',
+                  onAction: () => _edit(null),
                 )
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),

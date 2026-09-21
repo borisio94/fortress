@@ -48,8 +48,13 @@ abstract class RestoTabState<T extends StatefulWidget> extends State<T> {
     super.dispose();
   }
 
+  /// Bouton d'ajout en tête de liste.
+  ///
+  /// ALIGNÉ À GAUCHE, comme le titre, le sous-titre et les pastilles. Il était
+  /// à droite : sur un écran dont tout le reste commence au même bord, un seul
+  /// élément à l'opposé fait chercher l'œil sans rien apprendre.
   Widget headerButton(String label, VoidCallback onTap) => Align(
-        alignment: Alignment.centerRight,
+        alignment: Alignment.centerLeft,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: FilledButton.icon(

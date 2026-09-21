@@ -65,18 +65,47 @@ class RestoEmptyState extends StatelessWidget {
     if (compact) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
-        child: Row(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, size: 19, color: cs.onSurface.withValues(alpha: 0.35)),
-            const SizedBox(width: 9),
-            // Le TITRE est absorbé dans la phrase : en compact, « Aucun
-            // ingrédient » suivi de « Aucun ingrédient. Créez-en un ici » se
-            // lirait deux fois. C'est le sous-titre qui porte le sens, parce
-            // que c'est lui qui dit ce qu'on peut FAIRE.
-            Expanded(
-              child: Text(subtitle, style: AppTextStyles.bodySmSecondary),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon,
+                    size: 19, color: cs.onSurface.withValues(alpha: 0.35)),
+                const SizedBox(width: 9),
+                // Le TITRE est absorbé dans la phrase : en compact, « Aucun
+                // ingrédient » suivi de « Aucun ingrédient. Créez-en un ici »
+                // se lirait deux fois. C'est le sous-titre qui porte le sens,
+                // parce que c'est lui qui dit ce qu'on peut FAIRE.
+                Expanded(
+                  child: Text(subtitle, style: AppTextStyles.bodySmSecondary),
+                ),
+              ],
             ),
+            // L'ACTION EST ICI, sous la phrase qui la promet.
+            //
+            // Elle flottait 40 px plus haut, en pilule d'en-tête, pendant que
+            // le texte disait « créez-en un ici ». « Ici » ne désignait rien :
+            // l'œil devait remonter chercher le geste que la phrase venait
+            // d'annoncer. Décalée de la largeur de l'icône, elle se lit comme
+            // la suite du paragraphe.
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.only(left: 28),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton.icon(
+                    onPressed: onAction,
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: Text(actionLabel!),
+                    style:
+                        FilledButton.styleFrom(minimumSize: const Size(0, 40)),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       );
