@@ -42,7 +42,10 @@ void main() {
     });
 
     test('peut créer sa première boutique', () {
-      expect(mayCreateShop(ownsAShop: false, hasAnyMembership: false), isTrue);
+      expect(
+          mayCreateShop(
+              signedIn: true, ownsAShop: false, hasAnyMembership: false),
+          isTrue);
     });
   });
 
@@ -73,12 +76,47 @@ void main() {
 
   group('Créer une boutique', () {
     test('un propriétaire le peut toujours', () {
-      expect(mayCreateShop(ownsAShop: true, hasAnyMembership: true), isTrue);
-      expect(mayCreateShop(ownsAShop: true, hasAnyMembership: false), isTrue);
+      expect(
+          mayCreateShop(
+              signedIn: true, ownsAShop: true, hasAnyMembership: true),
+          isTrue);
+      expect(
+          mayCreateShop(
+              signedIn: true, ownsAShop: true, hasAnyMembership: false),
+          isTrue);
     });
 
     test('un employé invité ailleurs ne le peut pas', () {
-      expect(mayCreateShop(ownsAShop: false, hasAnyMembership: true), isFalse);
+      expect(
+          mayCreateShop(
+              signedIn: true, ownsAShop: false, hasAnyMembership: true),
+          isFalse);
+    });
+
+    test('UN COMPTE NON AUTHENTIFIÉ NE LE PEUT PAS', () {
+      // LE test de ce lot. La règle vivait en deux exemplaires, et ils ne
+      // répondaient pas pareil ici : le garde de `RouteNames.createShop`
+      // rendait `null` — donc AUTORISÉ — quand `currentUser` était nul, là où
+      // le bouton « Nouvelle boutique » rendait `false`.
+      //
+      // Rien ne disait laquelle des deux avait raison, et un commentaire
+      // demandait de les tenir en miroir à la main. C'est le bouton qui avait
+      // raison : un garde d'accès se ferme quand il ne sait pas.
+      //
+      // Le cas n'est pas théorique. Une connexion HORS LIGNE n'ouvre aucune
+      // session Supabase : `currentUser` y est nul alors que l'utilisateur est
+      // bel et bien entré. Le bouton lui refusait déjà la création — et elle
+      // ne peut de toute façon pas aboutir, l'identifiant de boutique venant
+      // du serveur.
+      for (final owns in [true, false]) {
+        for (final member in [true, false]) {
+          expect(
+              mayCreateShop(
+                  signedIn: false, ownsAShop: owns, hasAnyMembership: member),
+              isFalse,
+              reason: 'owns=$owns member=$member');
+        }
+      }
     });
   });
 
@@ -90,7 +128,8 @@ void main() {
       // expulsé avant d'avoir pu le faire.
       for (final owns in [true, false]) {
         for (final member in [true, false]) {
-          if (!mayCreateShop(ownsAShop: owns, hasAnyMembership: member)) {
+          if (!mayCreateShop(
+              signedIn: true, ownsAShop: owns, hasAnyMembership: member)) {
             continue;
           }
           final remembers = owns || member;

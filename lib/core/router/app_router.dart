@@ -112,7 +112,6 @@ import '../../shared/widgets/blocked_account_screen.dart';
 import 'registration_flag.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
-import '../storage/hive_boxes.dart';
 import '../../shared/widgets/adaptive_scaffold.dart';
 
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
@@ -781,28 +780,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         // un compte zombie à purger. Un test vérifie désormais qu'elles
         // s'accordent.
         //
-        // ⚠ Reste à tenir en miroir avec `_ShopListPageState._canCreateShop()`
-        // dans shop_list_page.dart. Sinon le bouton "Nouvelle boutique"
-        // pousserait vers /create qui redirigerait immédiatement → boucle
-        // perçue par l'user comme "l'app cherche à charger une boutique".
-        redirect: (ctx, state) {
-          final uid = Supabase.instance.client.auth.currentUser?.id;
-          if (uid == null) return null;
-
-          bool anyMatch(Iterable<dynamic> rows, String field) =>
-              rows.any((raw) {
-                try {
-                  return Map<String, dynamic>.from(raw as Map)[field] == uid;
-                } catch (_) { return false; }
-              });
-
-          return mayCreateShop(
-                  ownsAShop: anyMatch(HiveBoxes.shopsBox.values, 'owner_id'),
-                  hasAnyMembership:
-                      anyMatch(HiveBoxes.membershipsBox.values, 'user_id'))
-              ? null
-              : RouteNames.shopSelector;
-        },
+        // LA LECTURE EST PARTAGÉE avec le bouton « Nouvelle boutique » de
+        // `shop_list_page.dart`. Il y avait ici un « ⚠ Reste à tenir en miroir
+        // à la main », et le miroir était déjà brisé : ce garde autorisait
+        // quand personne n'était authentifié, le bouton refusait. Sinon le
+        // bouton pousserait vers /create qui redirigerait aussitôt — une
+        // boucle que l'utilisateur lit comme une application qui n'arrive pas
+        // à charger sa boutique.
+        redirect: (ctx, state) =>
+            currentUserMayCreateShop() ? null : RouteNames.shopSelector,
         builder: (c, s) => const CreateShopPage(),
       ),
       GoRoute(path: RouteNames.editShop,

@@ -10,8 +10,8 @@ import '../../../../core/router/route_names.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/database/app_database.dart';
+import '../../../../core/services/account_access_policy.dart';
 import '../../../../core/storage/local_storage_service.dart';
-import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/config/restaurant_mode.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/i18n/app_localizations.dart';
@@ -41,37 +41,14 @@ class _ShopListPageState extends ConsumerState<ShopListPage> {
   /// True si l'utilisateur courant peut entamer le flow de création
   /// d'une boutique.
   ///
-  /// Règles :
-  ///   - Owner d'au moins une boutique en local → autorisé (cas multi-shop).
-  ///   - 0 membership en local pour cet uid → nouvel inscrit qui crée sa
-  ///     première boutique → autorisé. Sans cette branche, le check ci-dessus
-  ///     refusait à tort le tout premier compte (catch-22 : pour créer la
-  ///     1ʳᵉ boutique, il fallait déjà en posséder une).
-  ///   - Au moins un membership mais aucun shop possédé → employé/admin
-  ///     invité dans une autre boutique → bloqué.
+  /// LA RÈGLE N'EST PLUS ÉCRITE ICI. Elle l'était, et le garde de
+  /// `RouteNames.createShop` en tenait une seconde copie, à la main, avec un
+  /// commentaire qui demandait de les maintenir en miroir. Elles avaient
+  /// divergé : sans session, ce bouton refusait et le garde autorisait.
   ///
   /// Voir AppPermissions.canStartCreateShop pour le cas où un owner délègue
   /// la permission à un admin précis (granulaire serveur).
-  bool _canCreateShop() {
-    final uid = Supabase.instance.client.auth.currentUser?.id;
-    if (uid == null) return false;
-
-    final ownsAShop = HiveBoxes.shopsBox.values.any((raw) {
-      try {
-        final m = Map<String, dynamic>.from(raw);
-        return m['owner_id'] == uid;
-      } catch (_) { return false; }
-    });
-    if (ownsAShop) return true;
-
-    final hasAnyMembership = HiveBoxes.membershipsBox.values.any((raw) {
-      try {
-        final m = Map<String, dynamic>.from(raw);
-        return m['user_id'] == uid;
-      } catch (_) { return false; }
-    });
-    return !hasAnyMembership;
-  }
+  bool _canCreateShop() => currentUserMayCreateShop();
 
   /// Helper : check la permission + le quota multi-shop avant de naviguer
   /// vers la création. Si limite atteinte → UpgradeSheet, si pas autorisé
