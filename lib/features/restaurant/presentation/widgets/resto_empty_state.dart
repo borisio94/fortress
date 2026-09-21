@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_text_styles.dart';
+import 'resto_dish_visuals.dart' show restoCardSurface;
 import 'resto_surfaces.dart';
 
 /// État vide des écrans du module restaurant.
@@ -32,16 +33,28 @@ class RestoEmptyState extends StatelessWidget {
   /// parle du reste de l'application.
   final Widget? footer;
 
-  /// Rendu COMPACT : une ligne, icône et phrase, sans carte ni pastille.
+  /// Rendu COMPACT : une carte dense, sous une barre d'onglets.
   ///
-  /// La carte dit « cette zone existe, elle est vide » — c'est juste quand
-  /// elle occupe l'écran. Sous une barre d'onglets qui porte déjà le nom et
-  /// le compte de ce qu'on regarde, elle répète ce qui est écrit juste
-  /// au-dessus et pousse le bouton d'action hors de vue.
+  /// Le mode plein occupe l'écran — pastille de 72 px, texte centré, largeur
+  /// bornée à 420. C'est juste quand l'état vide EST l'écran. Sous une barre
+  /// d'onglets qui porte déjà le nom et le compte de ce qu'on regarde, il
+  /// répète ce qui est écrit au-dessus et pousse le bouton hors de vue.
   ///
-  /// Même grammaire que le tableau de bord (`_EmptyBlock`) : icône de 19,
-  /// texte secondaire, alignés en haut.
+  /// Le compact garde la CARTE — même surface que les autres écrans du module
+  /// — et resserre tout : carré de 34 px, icône de 17, titre et phrase côte à
+  /// côte plutôt qu'empilés au centre.
+  ///
+  /// Une première version supprimait la carte. Le texte et le bouton
+  /// flottaient alors sur le fond géométrique, et l'icône seule devant un
+  /// paragraphe se lisait comme une PUCE DE LISTE.
   final bool compact;
+
+  /// Ligne CENTRÉE sous le bouton, dans la carte. `null` → aucune.
+  ///
+  /// Le second chemin, quand il y en a un : « ou en composant la recette d'un
+  /// plat ». Distincte du [subtitle], qui dit ce qu'est la notion, et du
+  /// [footer], qui sort de la carte pour parler d'un autre écran.
+  final String? footnote;
 
   const RestoEmptyState({
     super.key,
@@ -52,6 +65,7 @@ class RestoEmptyState extends StatelessWidget {
     this.onAction,
     this.footer,
     this.compact = false,
+    this.footnote,
   });
 
   /// Au-delà, la ligne de texte devient trop longue pour être lue d'un trait
@@ -63,48 +77,89 @@ class RestoEmptyState extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     if (compact) {
+      // UNE CARTE, pas un paragraphe flottant.
+      //
+      // Le texte et le bouton reposaient à nu sur le fond géométrique du
+      // module. Une icône de 18 px seule devant un paragraphe se lit comme une
+      // PUCE DE LISTE ; dans un carré de 34 px à côté d'un titre, elle se lit
+      // comme l'icône d'un état vide. La forme dit de quoi il s'agit avant que
+      // le texte soit lu.
+      //
+      // Même recette que les cartes du tableau de bord (`restoCardSurface`) :
+      // un état vide n'a aucune raison d'avoir sa propre surface.
       return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(icon,
-                    size: 19, color: cs.onSurface.withValues(alpha: 0.35)),
-                const SizedBox(width: 9),
-                // Le TITRE est absorbé dans la phrase : en compact, « Aucun
-                // ingrédient » suivi de « Aucun ingrédient. Créez-en un ici »
-                // se lirait deux fois. C'est le sous-titre qui porte le sens,
-                // parce que c'est lui qui dit ce qu'on peut FAIRE.
-                Expanded(
-                  child: Text(subtitle, style: AppTextStyles.bodySmSecondary),
-                ),
-              ],
-            ),
-            // L'ACTION EST ICI, sous la phrase qui la promet.
-            //
-            // Elle flottait 40 px plus haut, en pilule d'en-tête, pendant que
-            // le texte disait « créez-en un ici ». « Ici » ne désignait rien :
-            // l'œil devait remonter chercher le geste que la phrase venait
-            // d'annoncer. Décalée de la largeur de l'icône, elle se lit comme
-            // la suite du paragraphe.
-            if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.only(left: 28),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: FilledButton.icon(
-                    onPressed: onAction,
-                    icon: const Icon(Icons.add_rounded, size: 18),
-                    label: Text(actionLabel!),
-                    style:
-                        FilledButton.styleFrom(minimumSize: const Size(0, 40)),
+            Container(
+              padding: const EdgeInsets.all(15),
+              decoration: restoCardSurface(context, radius: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: cs.primary.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(icon, size: 17, color: cs.primary),
+                      ),
+                      const SizedBox(width: 11),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // 13 px semi-gras : l'échelon `body` de
+                            // l'échelle, en variante grasse. Pas de taille
+                            // inventée.
+                            Text(title,
+                                style: AppTextStyles.bodyBold
+                                    .copyWith(color: cs.onSurface)),
+                            const SizedBox(height: 3),
+                            // Ce qu'est la notion, avant le geste : « Aucun
+                            // ingrédient » ne dit pas où ranger une barquette.
+                            Text(subtitle, style: AppTextStyles.caption),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                ),
+                  // L'ACTION sous la phrase qui la promet, pleine largeur de
+                  // la carte. Elle flottait en pilule d'en-tête pendant que le
+                  // texte disait « créez-en un ici » — « ici » ne désignait
+                  // alors rien.
+                  if (actionLabel != null && onAction != null) ...[
+                    const SizedBox(height: 14),
+                    FilledButton.icon(
+                      onPressed: onAction,
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                      label: Text(actionLabel!),
+                      style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, 40)),
+                    ),
+                  ],
+                  // LE SECOND CHEMIN, quand il y en a un. Centré et discret :
+                  // c'est une alternative, pas une seconde action.
+                  if (footnote != null) ...[
+                    const SizedBox(height: 10),
+                    Text(footnote!,
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.captionHint),
+                  ],
+                ],
               ),
+            ),
+            // HORS de la carte : l'état vide dit ce qu'il n'y a pas ICI, le
+            // pied parle du reste de l'application.
+            if (footer != null) ...[
+              const SizedBox(height: 10),
+              footer!,
             ],
           ],
         ),

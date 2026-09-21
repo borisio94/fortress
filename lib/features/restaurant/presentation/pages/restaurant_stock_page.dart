@@ -84,7 +84,13 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
 
     return AppScaffold(
       shopId: shopId,
-      title: 'Stock',
+      // TITRE VIDE : « Stock » est déjà en tête du corps, avec ses compteurs.
+      // L'écrire deux fois volait une ligne à un écran qui n'en a pas de trop.
+      // La barre garde la cloche et le menu.
+      //
+      // Le tableau de bord, lui, garde son titre : son en-tête de corps dit
+      // « Bonjour… », pas « Tableau de bord ». Le doublon est propre à Stock.
+      title: '',
       isRootPage: false,
       actions: [
         IconButton(
@@ -94,7 +100,13 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
               context.push('/shop/$shopId/restaurant/inventory/reconcile'),
         ),
       ],
+      // TOUT SUR LA MÊME MARGE. Sans cette ligne, Flutter centre par défaut :
+      // l'en-tête et la rangée de pastilles, qui ont une largeur intrinsèque,
+      // se retrouvaient au milieu, tandis que les enfants sous `Expanded`
+      // remplissaient la largeur et paraissaient alignés. Quatre alignements
+      // sur un écran, pour un seul défaut.
       body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           RestoSectionHeader(
             title: 'Stock',
@@ -303,9 +315,11 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
         // La feuille ouverte est CELLE de la fiche plat (`IngredientQuickSheet`,
         // extraite le 21/09/2026) : mêmes champs, même écriture de la dépense
         // d'achat. Deux formulaires auraient divergé.
-        // Le bouton n'est ici QUE si la liste existe. Vide, l'action descend
-        // dans l'état vide, sous la phrase qui la promet.
-        if (items.isNotEmpty) headerButton('Ingrédient', _createIngredient),
+        //
+        // EN TÊTE SEULEMENT SI LA LISTE EXISTE. Vide, l'action descend dans la
+        // carte d'état vide, sous la phrase qui la promet.
+        if (items.isNotEmpty)
+          headerButton('Nouvel ingrédient', _createIngredient),
         Expanded(
           child: items.isEmpty
               // COMPACT : la barre d'onglets juste au-dessus porte déjà
@@ -324,10 +338,14 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
                   // doit savoir CE QUI va ici, sans quoi il mettra le gaz et
                   // les emballages dans la même liste que le poisson.
                   subtitle: 'Ce qui entre dans vos plats — poisson, huile, '
-                      'riz, épices. Créez-en un ici, ou en composant la '
-                      'recette d\'un plat.',
-                  actionLabel: 'Ingrédient',
+                      'riz, épices.',
+                  actionLabel: 'Nouvel ingrédient',
                   onAction: _createIngredient,
+                  // Le SECOND chemin, et il existe vraiment : composer la
+                  // recette d'un plat crée l'ingrédient au passage. Le dire
+                  // dans la phrase d'explication l'aurait répété sous le
+                  // bouton qui porte le premier.
+                  footnote: 'ou en composant la recette d\'un plat',
                 )
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
@@ -979,7 +997,8 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
               'tout seul à chaque vente.',
               style: AppTextStyles.captionHint),
         ),
-        if (items.isNotEmpty) headerButton('Fourniture', () => _edit(null)),
+        if (items.isNotEmpty)
+          headerButton('Nouvelle fourniture', () => _edit(null)),
         Expanded(
           child: items.isEmpty
               ? RestoEmptyState(
@@ -990,10 +1009,13 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
                   // SANS ÊTRE SERVI. C'est la frontière qui décide où ranger
                   // une barquette, et elle n'est évidente pour personne.
                   subtitle: 'Ce que vous consommez sans le servir — '
-                      'barquettes, gaz, produits d\'entretien. Créez-en une '
-                      'ici.',
-                  actionLabel: 'Fourniture',
+                      'barquettes, gaz, produits d\'entretien.',
+                  actionLabel: 'Nouvelle fourniture',
                   onAction: () => _edit(null),
+                  // OÙ SE FAIT L'ACHAT, hors de la carte : on crée une
+                  // fourniture ici, on l'achète là-bas. Depuis que Stock et
+                  // Finances sont deux écrans, rien ne disait plus le chemin.
+                  footer: _PurchasesLink(shopId: widget.shopId),
                 )
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
@@ -1114,6 +1136,64 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
       builder: (_) => _StockItemEditor(shopId: widget.shopId, existing: s),
     );
     if (mounted) setState(() {});
+  }
+}
+
+/// OÙ SE FAIT L'ACHAT D'UNE FOURNITURE.
+///
+/// On crée une fourniture ici, on l'achète au hub Finances. Depuis que les
+/// deux écrans sont séparés — 21/09/2026 —, plus rien ne disait le chemin, et
+/// une fourniture créée sans dépense ne pèse sur aucun bilan.
+///
+/// HORS de la carte d'état vide, séparé par un filet : celle-ci dit ce qu'il
+/// n'y a pas ici, ce renvoi parle d'un autre écran.
+///
+/// « Dépenses » est l'onglet d'index 0 du hub depuis la scission : pousser la
+/// route y atterrit sans qu'aucun paramètre d'onglet soit nécessaire.
+class _PurchasesLink extends StatelessWidget {
+  final String shopId;
+  const _PurchasesLink({required this.shopId});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final sem = Theme.of(context).semantic;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Divider(height: 1, color: sem.borderSubtle),
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => context.push('/shop/$shopId/restaurant/finances'),
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 11),
+              child: Row(children: [
+                Icon(Icons.receipt_long_outlined, size: 18, color: cs.primary),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Voir vos achats',
+                          style: AppTextStyles.bodySm
+                              .copyWith(color: cs.onSurface)),
+                      const SizedBox(height: 1),
+                      Text('Finances · Dépenses',
+                          style: AppTextStyles.micro
+                              .copyWith(color: AppColors.textHint)),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded,
+                    size: 18, color: AppColors.textHint),
+              ]),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 
