@@ -14,6 +14,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fortress/core/services/recipe_service.dart';
 
 void main() {
+  _mainLinked();
   group('Plat vivant ou non', () {
     test('un plat sans deleted_at compte', () {
       expect(
@@ -90,6 +91,29 @@ void main() {
 
     test('un ingrédient spécialisé n\'est jamais divisé', () {
       expect(lineCost(2, 500, 3, shared: false), 1000);
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  INGRÉDIENTS RATTACHÉS À AU MOINS UN PLAT (21/09/2026)
+//
+//  `linkedIngredientIds` alimente la pastille « aucun plat » de l'écran
+//  Stock. Elle lit Hive et n'est donc pas testable en unitaire — SAUF son
+//  repli, qui est justement le piège.
+//
+//  « Rien n'est rattaché » et « je ne sais pas » se ressemblent et ne disent
+//  pas la même chose. Un ensemble VIDE ferait afficher « aucun plat » sur
+//  toute la liste et enverrait le gérant corriger ce qui va bien ; `null`
+//  fait taire l'écran. Sans Hive, on est exactement dans le second cas.
+// ═══════════════════════════════════════════════════════════════════════
+
+void _mainLinked() {
+  group('Ingrédients rattachés — repli sans Hive', () {
+    test('boîte indisponible → null, et surtout PAS un ensemble vide', () {
+      final r = RecipeService.linkedIngredientIds('shop_1');
+      expect(r, isNull,
+          reason: 'un ensemble vide signifierait « rien n\'est rattaché »');
     });
   });
 }

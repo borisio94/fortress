@@ -30,7 +30,21 @@ import 'cost_method_picker.dart';
 
 class IngredientQuickSheet extends StatefulWidget {
   final String shopId;
-  const IngredientQuickSheet({super.key, required this.shopId});
+
+  /// Avertir que l'achat ne s'imputera à aucun plat.
+  ///
+  /// VRAI DEPUIS L'ÉCRAN STOCK, faux depuis la fiche d'un plat — et la
+  /// distinction n'est pas cosmétique. Sur la fiche d'un plat on est EN TRAIN
+  /// de rattacher l'ingrédient à une recette : l'avertissement y serait faux
+  /// deux secondes après avoir été lu. Depuis Stock, rien n'oblige à le
+  /// rattacher, et c'est ce qui produit des achats non rattachés.
+  final bool warnsAboutUnlinked;
+
+  const IngredientQuickSheet({
+    super.key,
+    required this.shopId,
+    this.warnsAboutUnlinked = false,
+  });
   @override
   State<IngredientQuickSheet> createState() => _IngredientQuickSheetState();
 }
@@ -340,6 +354,35 @@ class _IngredientQuickSheetState extends State<IngredientQuickSheet> {
                       : '→ retenu comme coût unitaire. Sans quantité, aucune '
                           'dépense n\'est créée.',
                   style: AppTextStyles.caption),
+              // CE QUE CET ACHAT VA DEVENIR, dit avant qu'il soit écrit.
+              //
+              // Conditionné au MONTANT, et à lui seul : la phrase parle de
+              // « cet achat », et sans montant il n'y en a aucun — l'afficher
+              // serait faux. En revanche elle n'est PAS conditionnée à
+              // « l'ingrédient est-il déjà sans recette » : à la création il
+              // l'est toujours, une condition qui vaut toujours vrai est du
+              // code mort déguisé.
+              //
+              // Le vocabulaire est celui du tableau de bord, mot pour mot
+              // (« achats non rattachés », lot 8 des marges) : le gérant doit
+              // reconnaître la même expression aux deux endroits.
+              if (widget.warnsAboutUnlinked) ...[
+                const SizedBox(height: 8),
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Icon(Icons.info_outline_rounded,
+                      size: 15, color: Theme.of(context).semantic.warningText),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                        'Cet ingrédient n\'entre encore dans aucune recette. '
+                        'Tant qu\'un plat ne le contient pas, cet achat ne '
+                        's\'impute à aucun plat : il apparaîtra en achats non '
+                        'rattachés dans l\'écart du tableau de bord.',
+                        style: AppTextStyles.caption.copyWith(
+                            color: Theme.of(context).semantic.warningText)),
+                  ),
+                ]),
+              ],
             ],
             const SizedBox(height: 10),
             InkWell(

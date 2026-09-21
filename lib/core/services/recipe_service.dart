@@ -80,6 +80,45 @@ class RecipeService {
     return products.length;
   }
 
+  /// Ids des ingrédients qu'AU MOINS UN plat vivant contient.
+  ///
+  /// UN SEUL PASSAGE, contrairement à [dishCountForIngredient] qui balaye la
+  /// boîte entière pour un seul ingrédient. Une liste de N ingrédients
+  /// l'appellerait N fois ; ici l'écran la calcule une fois et chaque ligne
+  /// interroge l'ensemble en temps constant.
+  ///
+  /// Même filtre que [dishCountForIngredient] : les plats supprimés sont
+  /// exclus. Sans ça, un ingrédient rattaché à un plat effacé passerait pour
+  /// rattaché alors que plus rien ne le consomme.
+  ///
+  /// N'ALTÈRE AUCUN CALCUL — c'est une lecture, ajoutée le 21/09/2026 pour
+  /// signaler à l'écran les ingrédients qu'aucune recette ne reprend.
+  ///
+  /// Rend `null` si la boîte est illisible, et JAMAIS un ensemble vide dans ce
+  /// cas : les deux se ressemblent et ne disent pas la même chose. Un ensemble
+  /// vide signifie « aucun ingrédient n'est rattaché », ce qui ferait afficher
+  /// l'avertissement sur toute la liste et enverrait le gérant corriger ce qui
+  /// va bien. `null` signifie « je ne sais pas » — l'écran se tait.
+  static Set<String>? linkedIngredientIds(String shopId) {
+    final out = <String>{};
+    try {
+      for (final raw in _raw().values) {
+        if (raw['shop_id']?.toString() != shopId) continue;
+        final ing = raw['ingredient_id']?.toString();
+        if (ing == null || ing.isEmpty) continue;
+        if (out.contains(ing)) continue;
+        final pid = raw['product_id']?.toString();
+        if (pid == null || pid.isEmpty) continue;
+        if (!_isLiveProduct(pid)) continue;
+        out.add(ing);
+      }
+    } catch (e) {
+      debugPrint('[Recipe] linkedIngredientIds err: $e');
+      return null;
+    }
+    return out;
+  }
+
   /// Le plat existe-t-il encore, non supprimé ?
   ///
   /// Lecture RAW volontaire : seul `deleted_at` est utile ici, et

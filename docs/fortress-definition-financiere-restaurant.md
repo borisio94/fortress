@@ -107,6 +107,39 @@ venant des réceptions.
 Un plat dont une ligne de fiche est incomplète sort entièrement du calcul :
 rendre sa seule part répartie afficherait un coût amputé.
 
+### Un ingrédient sans plat
+
+La conséquence ci-dessus a un revers, et il est arrivé à l'écran le
+**21/09/2026** : un ingrédient peut désormais être créé **depuis l'écran
+Stock**, sans passer par la recette d'un plat. Auparavant il fallait ouvrir un
+plat et composer sa recette — un détour que rien n'annonçait, pour inscrire de
+l'huile rouge dans sa réserve.
+
+**Ce que ça produit.** Un achat saisi sur un ingrédient qu'aucun plat ne
+contient entre dans l'assiette à répartir et **n'en sort par aucun plat**. Il
+grossit le `unallocated` de la répartition, donc les **achats non rattachés**
+que la section 9 a appris au tableau de bord à nommer.
+
+**Le chiffre reste juste.** L'identité de cette section l'absorbe —
+`vendu + perdu + non réparti + retiré = acheté` — et la décomposition du lot 8
+le montre pour ce qu'il est au lieu de l'attribuer à un gaspillage. Ce n'est
+pas un écart à corriger : c'est une dépense réelle, en attente d'un plat.
+
+**Règle** : *créer un ingrédient hors recette est permis, et l'écran doit dire
+ce que ça implique — jamais l'interdire.* Interdire renverrait le gérant au
+détour par la fiche d'un plat, qui était le vrai défaut. Deux garde-fous, et
+aucun blocage :
+
+- la feuille de création ouverte **depuis Stock** avertit, dès qu'un montant
+  est saisi, que cet achat apparaîtra en achats non rattachés — avec les mots
+  exacts du tableau de bord, pour qu'on les reconnaisse aux deux endroits ;
+- la liste des ingrédients marque **« aucun plat »** sur ceux qu'aucune recette
+  ne reprend. Discret quand rien n'a été acheté — l'ingrédient ne coûte alors
+  rien à personne —, en avertissement dès qu'un montant y est rattaché.
+
+**Le geste qui referme** : ajouter l'ingrédient à la recette d'un plat. À
+partir de la période suivante, son achat s'impute normalement.
+
 ---
 
 ## 4. Les pertes
@@ -509,6 +542,12 @@ messages distincts : le non-rattaché nommé pour ce qu'il est, puis le reliquat
 qui seul conserve les trois causes historiques.
 
 **Le chiffre ne change pas** : seule son interprétation est corrigée.
+
+**D'OÙ VIENT LE NON-RATTACHÉ, depuis le 21/09/2026.** Ce lot a nommé la chose ;
+la sous-section « Un ingrédient sans plat » de la section 3 dit désormais ce
+qui la produit. La création d'un ingrédient hors recette, ouverte avec l'écran
+Stock, en est une source directe — assumée, avertie à la saisie et signalée
+dans la liste, mais jamais bloquée.
 
 ---
 

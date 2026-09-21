@@ -6,7 +6,9 @@ import '../../../../core/database/app_database.dart';
 import '../../../../core/services/activity_service.dart';
 import '../../../../core/services/daily_expense_service.dart';
 import '../../../../core/services/ingredient_service.dart';
+import '../../../../core/services/recipe_service.dart';
 import '../../../../core/services/stock_item_service.dart';
+import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -159,7 +161,11 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
   /// La liste se rafraîchit par l'écoute de `ingredients`, comme toujours.
   Future<void> _createIngredient() => showAdaptiveFormSheet<Ingredient>(
         context: context,
-        builder: (_) => IngredientQuickSheet(shopId: widget.shopId),
+        builder: (_) => IngredientQuickSheet(
+          shopId: widget.shopId,
+          // Depuis STOCK : rien n'oblige à rattacher l'ingrédient ensuite.
+          warnsAboutUnlinked: true,
+        ),
       );
 
   @override
@@ -231,6 +237,10 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
     // Calculé une fois pour toute la liste : le faire par ligne relirait le
     // journal des dépenses à chaque ingrédient.
     final noCost = IngredientService.withoutCostData(widget.shopId);
+    // Un seul passage sur les lignes de recette pour toute la liste. `null`
+    // veut dire « illisible » et non « rien n'est rattaché » : dans ce cas
+    // aucune ligne n'affiche l'avertissement.
+    final linked = RecipeService.linkedIngredientIds(widget.shopId);
     return Column(
       children: [
         if (pending.isNotEmpty) RestoBackfillBanner(
@@ -280,6 +290,8 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
                   itemBuilder: (_, i) => _IngredientRow(
                     ing: items[i],
                     noCost: noCost.contains(items[i].id),
+                    unlinked:
+                        linked != null && !linked.contains(items[i].id),
                     onReceive: () => _receive(items[i]),
                     onEdit: () => _edit(items[i]),
                     onDelete: () => _delete(items[i]),
@@ -366,6 +378,13 @@ class _IngredientRow extends StatelessWidget {
   /// Aucune dépense rattachée : cet ingrédient ne coûte rien aux plats qui le
   /// contiennent, et leur marge est donc surévaluée.
   final bool noCost;
+
+  /// AUCUNE RECETTE ne le reprend — c'est un ingrédient oublié.
+  ///
+  /// Le créer depuis cet écran est possible depuis le 21/09/2026, et rien
+  /// n'oblige à le rattacher ensuite. La pastille aide à finir le travail.
+  final bool unlinked;
+
   final VoidCallback onReceive;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -376,6 +395,7 @@ class _IngredientRow extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     this.noCost = false,
+    this.unlinked = false,
   });
 
   @override
@@ -420,6 +440,21 @@ class _IngredientRow extends StatelessWidget {
                 if (noCost) ...[
                   const SizedBox(width: 6),
                   RestoPill('coût manquant', sem.warning),
+                ],
+                // AUCUN PLAT — deux niveaux, parce que les deux situations ne
+                // demandent pas la même urgence.
+                //
+                // Sans achat, c'est une information : l'ingrédient existe, il
+                // ne sert encore à rien, et il ne coûte rien à personne.
+                //
+                // AVEC des achats, c'est un avertissement : son montant entre
+                // dans l'assiette à répartir et n'en sort par aucun plat — il
+                // grossit les « achats non rattachés » de l'écart du tableau
+                // de bord (cf. lot 8 des marges).
+                if (unlinked) ...[
+                  const SizedBox(width: 6),
+                  RestoPill('aucun plat',
+                      noCost ? AppColors.textSecondary : sem.warning),
                 ],
               ]),
               Text(
