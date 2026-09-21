@@ -242,6 +242,49 @@ sauf sa première milliseconde.
 
 *Appliqué le 21/09/2026.*
 
+### La journée de service finit à minuit
+
+**Une vente appartient au JOUR CIVIL de son horodatage.** Un service qui
+commence à 19 h et se termine à 1 h du matin est donc coupé en deux : la
+clôture Z, le chiffre du jour, le coût matières journalier et le pointage se
+séparent au milieu du service.
+
+**C'est assumé, et ce n'est pas satisfaisant.** La règle est écrite ici pour
+qu'elle soit un choix et non un oubli.
+
+**Pourquoi ce choix.** Les deux alternatives coûtaient plus qu'elles ne
+réglaient :
+
+- **Une heure de bascule paramétrable** aurait pu réutiliser
+  `staff_settings.closing_time`, qui existe déjà. Mais ce réglage ne sert
+  aujourd'hui qu'à juger un départ anticipé (`shift_evaluation`) ; lui donner
+  un second sens — découper les finances — en ferait un champ dont on ne peut
+  plus changer la valeur sans **redécouper tout l'historique**. Et une boutique
+  qui ne l'a pas saisi devrait retomber sur le jour civil, donc deux
+  comportements à tenir.
+- **Une coupure fixe**, cinq heures par exemple, est un arbitraire imposé à
+  tous. Un établissement qui ferme à 6 h resterait coupé.
+
+**Ce qu'il faudra faire le jour où un restaurateur s'en plaint** — et c'est la
+bonne réponse à ce moment-là, pas avant :
+
+*Une heure de bascule PAR BOUTIQUE, propre aux finances et distincte de l'heure
+de fermeture du personnel.* Son coût, à connaître avant de la promettre :
+
+1. **tout l'historique se redécoupe** quand elle change. Une vente de 00 h 30
+   passe d'un jour à l'autre, donc d'un mois à l'autre en fin de mois, donc
+   d'une assiette de répartition à l'autre. Les marges déjà consultées
+   changent ;
+2. **la clôture de caisse doit suivre**, sinon le tiroir est compté sur une
+   fenêtre et le chiffre calculé sur une autre ;
+3. **le pointage aussi**, sans quoi une nuit de travail se répartit sur deux
+   journées de paie ;
+4. **toutes les fenêtres de la section 6 se décalent** : « aujourd'hui » ne
+   commence plus à minuit.
+
+Ce n'est donc pas un réglage : c'est un changement de référentiel. Il se décide
+après avoir vu tourner un service, pas avant.
+
 ---
 
 ## 7. La caisse
