@@ -58,3 +58,31 @@ const String kLocalDataOwnerKey = 'local_data_owner_id';
 /// du login puisse encore décider.
 Set<String> settingKeysToKeepOnLogout(Set<String> deviceKeys) =>
     {...deviceKeys, kLocalDataOwnerKey};
+
+/// Les comptes dont la fiche reste lisible dans `users` après la déconnexion.
+///
+/// EXACTEMENT UN, ou aucun : le dernier compte connecté. C'est ce qui rend la
+/// connexion hors ligne possible le lendemain d'une déconnexion.
+///
+/// POURQUOI IL EN FAUT UN. `_offlineLogin` cherche le compte dans cette boîte,
+/// puis compare le mot de passe caché dans SecureStorage. La purge vidait la
+/// boîte, tandis que `clearTokens` ne supprime PAS le mot de passe : on gardait
+/// ce qui a un coût de sécurité, on perdait ce qui a la valeur d'usage. Un
+/// commerçant déconnecté le soir ne rouvrait pas sa caisse sans réseau le
+/// lendemain — et son mot de passe en clair restait quand même sur l'appareil.
+///
+/// POURQUOI PAS PLUS D'UN. La boîte peut contenir les comptes de plusieurs
+/// personnes ayant utilisé l'appareil. N'en garder qu'un borne ce qui reste
+/// lisible, et interdit à un autre compte de se connecter hors ligne ici : il
+/// ne sera pas trouvé. Quand un autre compte se connecte EN LIGNE, la garde
+/// anti-fuite purge ce reliquat et efface son mot de passe.
+///
+/// On n'invente jamais de « dernier compte » : sans [currentUserId] connu, ou
+/// s'il ne figure pas dans la boîte, rien n'est conservé.
+Set<String> userKeysToKeepOnLogout({
+  required Iterable<String> allUserIds,
+  required String? currentUserId,
+}) {
+  if (currentUserId == null || currentUserId.isEmpty) return const {};
+  return allUserIds.contains(currentUserId) ? {currentUserId} : const {};
+}

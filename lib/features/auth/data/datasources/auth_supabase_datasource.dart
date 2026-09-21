@@ -139,6 +139,10 @@ class AuthSupabaseDataSource {
       if (previousOwner != null && previousOwner != userId) {
         debugPrint('[Auth] données locales d\'un autre compte '
             '($previousOwner ≠ $userId) → purge anti-fuite avant login');
+        // Son mot de passe caché part AVANT la purge : c'est la fiche qu'elle
+        // va effacer qui porte l'e-mail sous lequel il est rangé. Après, on ne
+        // saurait plus quel secret supprimer, et il resterait indéfiniment.
+        await _forgetOfflineSecretOf(previousOwner);
         await LocalStorageService.purgeOnLogout();
       }
 
@@ -252,6 +256,23 @@ class AuthSupabaseDataSource {
   }
 
   bool get isAuthenticated => _auth.currentUser != null;
+
+  /// Oublie le mot de passe hors ligne du compte [userId], s'il est connu.
+  ///
+  /// La contrepartie de « l'appareil garde de quoi rouvrir la session du
+  /// dernier compte » : dès qu'un autre se connecte, le précédent est oublié —
+  /// sa fiche par la purge, son secret par ici.
+  Future<void> _forgetOfflineSecretOf(String userId) async {
+    try {
+      final previous = LocalStorageService.getUser(userId);
+      final mail = previous?.email.trim().toLowerCase() ?? '';
+      if (mail.isEmpty) return;
+      await SecureStorageService.deletePassword(mail);
+      debugPrint('[Auth] mot de passe hors ligne du compte précédent effacé');
+    } catch (e) {
+      debugPrint('[Auth] _forgetOfflineSecretOf: $e');
+    }
+  }
 
   // ── Mot de passe pour login offline ──────────────────────────────────────
   // Stocké UNIQUEMENT dans le keystore système (Android Keystore / iOS

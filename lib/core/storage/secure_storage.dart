@@ -105,6 +105,12 @@ class SecureStorageService {
     return null;
   }
 
+  /// Efface le mot de passe caché du compte [email], s'il y en a un.
+  ///
+  /// Appelé quand un AUTRE compte se connecte sur cet appareil : la fiche du
+  /// compte précédent est purgée, son mot de passe doit partir avec. Sans
+  /// cela, la branche « on garde de quoi rouvrir la session du dernier
+  /// compte » laisserait s'accumuler les secrets de tous les précédents.
   static Future<void> deletePassword(String email) async {
     try { await _storage.delete(key: _pwdKey(email)); } catch (_) {}
     await HiveBoxes.settingsBox.delete(_legacyHivePwdKey(email));

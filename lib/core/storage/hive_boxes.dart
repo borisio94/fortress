@@ -360,6 +360,32 @@ class HiveBoxes {
           'envoyée(s) → file CONSERVÉE pour la prochaine session');
     }
 
+    // La fiche du DERNIER compte connecté est conservée : sans elle, la
+    // connexion hors ligne ne retrouve plus personne et refuse des
+    // identifiants pourtant justes. Lue AVANT la purge, comme le reste —
+    // `current_user_id` vit dans `settings`, qui est sur le point d'être vidé.
+    var keptUser = <String, dynamic>{};
+    try {
+      final uid = Hive.isBoxOpen(settings)
+          ? Hive.box(settings).get('current_user_id') as String?
+          : null;
+      if (Hive.isBoxOpen(users)) {
+        final box = Hive.box(users);
+        final ids = box.keys.map((k) => k.toString());
+        for (final id in userKeysToKeepOnLogout(
+            allUserIds: ids, currentUserId: uid)) {
+          final row = box.get(id);
+          if (row != null) keptUser[id] = row;
+        }
+      }
+    } catch (e) {
+      // Illisible : on ne conserve rien. Se tromper dans ce sens coûte une
+      // reconnexion en ligne ; dans l'autre, on garderait une identité qu'on
+      // ne sait plus attribuer.
+      keptUser = <String, dynamic>{};
+      debugPrint('[Hive] purge : fiche du dernier compte illisible ($e)');
+    }
+
     // 1. Snapshot des préférences device à conserver (match exact OU préfixe).
     final preserve = settingKeysToKeepOnLogout(preserveSettingsKeys);
     final keep = <String, dynamic>{};
@@ -396,6 +422,19 @@ class HiveBoxes {
       }
     } catch (e) {
       debugPrint('[Hive] purge restore err: $e');
+    }
+    // 4. Restaurer la fiche du dernier compte — et elle seule.
+    try {
+      if (keptUser.isNotEmpty && Hive.isBoxOpen(users)) {
+        final box = Hive.box(users);
+        for (final e in keptUser.entries) {
+          await box.put(e.key, e.value);
+        }
+        debugPrint('[Hive] purge : fiche du dernier compte conservée '
+            '→ connexion hors ligne possible');
+      }
+    } catch (e) {
+      debugPrint('[Hive] purge restore user err: $e');
     }
   }
 

@@ -114,7 +114,20 @@ class AuthRemoteDataSourceMock implements AuthRemoteDataSource {
     if (previousOwner != null && previousOwner != user.id) {
       debugPrint('[Auth] connexion hors ligne : données locales d\'un autre '
           'compte ($previousOwner ≠ ${user.id}) → purge anti-fuite');
+      // Même contrepartie qu'en ligne : le secret du compte précédent part
+      // AVANT la purge, tant que sa fiche porte encore son e-mail.
+      final previous = LocalStorageService.getUser(previousOwner);
+      final mail = previous?.email.trim().toLowerCase() ?? '';
+      if (mail.isNotEmpty) {
+        await SecureStorageService.deletePassword(mail);
+      }
       await LocalStorageService.purgeOnLogout();
+      // La purge a emporté la boîte `users`, DONT la fiche qu'on vient
+      // d'authentifier. Le chemin EN LIGNE la ré-écrit juste après (`saveUser`
+      // après la garde) ; celui-ci ne le faisait pas, et `setCurrentUserId`
+      // ci-dessous aurait pointé sur une fiche absente — session ouverte,
+      // utilisateur introuvable au redémarrage suivant.
+      await LocalStorageService.saveUser(user);
     }
 
     await SecureStorageService.saveAccessToken('offline_token_$normalEmail');
