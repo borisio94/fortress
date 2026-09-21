@@ -577,6 +577,31 @@ d'abandonner au cas par cas aurait concentré la perte au lieu de l'étaler.
 
 ---
 
+### Une clé étrangère manquante était jugée sans espoir
+
+*Corrigé le 21/09/2026 — « fix(sync): un parent en retard n'est pas une
+écriture perdue ».*
+
+Dix codes Postgres faisaient abandonner une opération. 23503 — la violation de
+clé étrangère — en faisait partie, et n'avait rien à y faire : les neuf autres
+décrivent une écriture INVALIDE, celui-là dit seulement que la ligne parente
+n'est pas encore arrivée.
+
+Le cas est devenu concret en protégeant `stock_movements`, `receptions` et
+`incidents` sans protéger `products`, `purchase_orders` et `suppliers`.
+
+**Correction** : `isDefinitiveSyncError(err, table)` remplace
+`_isPermanentError(err)`. 23503 devient temporaire **sur une table protégée
+seulement** — ailleurs, elle reste définitive, sinon on changerait le
+comportement de toute la file pour un cas de bord. Un test le vérifie code par
+code, pour les dix.
+
+**Ce que ce correctif ne fait pas** : sur une table protégée, l'opération
+restait déjà en file. Le sort de l'op est inchangé. Ce qui change est la
+justesse de la classification, sa testabilité, et un journal moins bavard.
+
+---
+
 ## 10. Ce que le tableau de bord doit expliquer
 
 Un commerçant doit pouvoir répondre seul à « pourquoi mon bénéfice a baissé ».
@@ -663,12 +688,68 @@ l'e-commerce. Les dépenses du restaurant vivent dans `daily_expenses`, avec sa
 propre boîte Hive, et n'étaient PAS protégées. Deux noms proches, deux sorts
 opposés. Les deux le sont désormais.
 
-⚠ **`sales` est protégée et n'est jamais mise en file par une vente.** Le seul
-chemin qui l'enfile est la remise à zéro d'une boutique (`op: delete`) ;
-`SaleRepositoryImpl.createSale` et `refundSale` l'enfileraient, mais
-`saleRepositoryProvider` n'est lu nulle part — ce code est inatteignable. Une
-vente est écrite dans `orders`. La table reste protégée : le jour où ce chemin
-revit, l'oubli coûterait des ventes.
+⚠ **`sales` est protégée, n'est jamais mise en file par une vente, et la table
+N'EXISTE PAS en base.** Trois constats qui se recoupent, établis séparément :
+
+- le seul chemin qui l'enfile est la remise à zéro d'une boutique
+  (`op: delete`) ; `SaleRepositoryImpl.createSale` et `refundSale`
+  l'enfileraient, mais `saleRepositoryProvider` n'est lu nulle part — ce code
+  est inatteignable ;
+- une vente est écrite dans `orders` ;
+- **vérifié en base le 20/09/2026 : il n'y a pas de table `sales`.**
+
+Elle n'est retirée d'aucune liste pour l'instant : le jour où ce chemin revit,
+l'oubli coûterait des ventes. Mais tant qu'elle figure dans les listes sans
+exister, elle est du bruit — à trancher, pas à oublier.
+
+#### Le corollaire : l'enfant orphelin
+
+**Protéger une table ne protège pas ce dont elle dépend**, et la règle
+ci-dessus ne le disait pas.
+
+Une ligne qui porte une clé étrangère ne peut pas être écrite avant son parent.
+`ON DELETE SET NULL` ne gouverne que la suppression : à l'insertion, la ligne
+parente doit EXISTER, sinon la base répond 23503. Or les trois tables partagées
+ont toutes un parent que rien ne protège :
+
+| Enfant (protégé) | Clé étrangère | Parent | Parent protégé ? |
+|---|---|---|---|
+| `stock_movements.product_id` | → `products(id)` | `products` | **non** |
+| `receptions.purchase_order_id` | → `purchase_orders(id)` | `purchase_orders` | **non** |
+| `receptions.supplier_id` | → `suppliers(id)` | `suppliers` | **non** |
+| `incidents.product_id` | → `products(id)` | `products` | **non** |
+
+Le scénario tient en une ligne : un parent abandonné après dix tentatives
+laisse derrière lui un enfant que la base refusera à chaque envoi. Avant la
+protection, l'enfant mourait avec son parent, en silence. Depuis, **il lui
+survit et se rejoue.**
+
+**Règle** : *la protection d'une table est un engagement sur ses parents.*
+Soit on les protège aussi, soit on accepte un résidu qui se rejoue — mais on ne
+le découvre pas six mois plus tard en regardant grossir une file.
+
+Deux réponses possibles, et **aucune des deux n'éteint le rejeu** :
+
+- **protéger les parents** — cohérent, mais `products`, `purchase_orders` et
+  `suppliers` ont leurs propres parents : le problème se déplace d'un cran ;
+- **reclasser 23503 en erreur TEMPORAIRE sur une table protégée** — ce qui a
+  été retenu (`sync_error_verdict.dart`). Une clé étrangère manquante dit « le
+  parent n'est pas encore là », pas « cette écriture est invalide » : c'est une
+  question d'ordre d'arrivée. L'exception s'arrête aux tables protégées, sinon
+  toute la file se mettrait à rejouer des écritures réellement invalides.
+
+**Ce que la seconde ne fait pas, et il faut le dire** : sur une table protégée,
+l'opération restait DÉJÀ en file quand 23503 était classée définitive. Le
+verdict ne change donc pas son sort — il rend la règle vraie et lisible, et
+évite qu'on relise un jour « 23503 = permanent » en concluant qu'une clé
+étrangère manquante est sans espoir.
+
+**Ce qui rend l'enfant orphelin visible** : rien de neuf n'a été ajouté, la
+chaîne existait. L'opération emporte sa cause serveur dès le premier échec,
+entre dans le journal à la troisième tentative, et rejoint les opérations
+bloquées de l'écran de synchronisation à la dixième — où elle s'abandonne à la
+main. Le compteur de tentatives suffit ; un seuil supplémentaire n'apporterait
+rien.
 
 #### Ce que la protection coûte
 

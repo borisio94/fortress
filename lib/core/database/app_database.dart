@@ -10,6 +10,7 @@ import '../services/notification_service.dart';
 import '../storage/hive_boxes.dart';
 import '../storage/local_storage_service.dart';
 import '../storage/schema_migrator.dart';
+import 'sync_error_verdict.dart';
 import 'sync_protected_tables.dart';
 import '../../features/auth/domain/entities/user.dart';
 import '../../features/shop_selector/domain/entities/shop_summary.dart';
@@ -1714,8 +1715,12 @@ class AppDatabase {
       op['_last_error'] = err;
       debugPrint('[DB] ✗ Op failed table=${op['table']} op=${op['op']} err=$err');
 
+      // Lu AVANT le verdict : depuis que la clé étrangère manquante est
+      // temporaire sur une table protégée, le verdict dépend de la table.
+      final failedTable = op['table'] as String? ?? '';
+
       // ── Erreurs PERMANENTES → supprimer de la queue (réessayer ne sert à rien)
-      if (_isPermanentError(err)) {
+      if (isDefinitiveSyncError(err, failedTable)) {
         // Duplicate key (23505) = idempotence normale (rejeu offline d'une op
         // déjà appliquée par realtime, double-tap UI, etc.). On avale
         // silencieusement, sinon la bannière "Synchro incomplète" reste
@@ -1735,7 +1740,6 @@ class AppDatabase {
         // de DROPPER l'op locale (la rejouer ne marchera jamais). Pas de
         // bannière critique pour ce cas — c'est une réconciliation
         // normale, pas une perte d'écriture.
-        final failedTable = op['table'] as String? ?? '';
         if (failedTable == 'orders'
             && err.contains('P0001')
             && err.contains('transition_interdite')) {
@@ -1800,41 +1804,6 @@ class AppDatabase {
       return false;
     }
   }
-
-  /// Erreurs qui ne peuvent pas être résolues en réessayant
-  static bool _isPermanentError(String err) =>
-      err.contains('23505') || // duplicate key
-          err.contains('23503') || // FK violation
-          err.contains('42501') || // permission denied
-          err.contains('42502') || // insufficient privilege
-          err.contains('23502') || // not null violation
-          // ── DÉRIVE DE SCHÉMA ────────────────────────────────────────────
-          // Client et base ne s'accordent plus. Réessayer la même charge
-          // utile ne changera jamais la réponse : seule une migration le
-          // peut. Ces trois cas tombaient jusqu'ici dans « erreur
-          // temporaire », d'où dix rejeux inutiles suivis du log aveugle
-          // « Abandoned after 10 retries » — un message qui a déjà fait
-          // conclure à tort à un succès, alors que l'écriture était perdue.
-          //
-          // Vécu deux fois : le CHECK `stock_movements.type` (hotfix_176) et
-          // la catégorie `storage` absente du CHECK `expenses` (hotfix_177).
-          //
-          // Sur les tables de `neverDropTables` cela ne change PAS le sort de
-          // l'op — elle reste en file dans les deux cas. Ce qui change est le
-          // journal : la vraie cause serveur est écrite dès le PREMIER échec,
-          // au lieu d'attendre la 3ᵉ tentative.
-          err.contains('23514') ||   // violation de contrainte CHECK
-          err.contains('42703') ||   // colonne inconnue (code Postgres brut)
-          // PostgREST n'expose pas toujours le code brut : pour une colonne
-          // absente de son cache de schéma, il répond PGRST204. Couvrir les
-          // deux formes supprime la dépendance à celle qui arrive.
-          err.contains('PGRST204') ||
-          // RAISE EXCEPTION métier (PL/pgSQL) — codes émis intentionnellement
-          // par les RPC pour signaler une règle de domaine violée
-          // (delete_sale → suppression_statut_invalide, motif_required, …).
-          // Réessayer la même charge utile ne changera jamais la réponse.
-          err.contains('P0001') || // raise_exception
-          err.contains('P0002');   // no_data_found
 
   /// Émet un bip + vibration pour signaler une erreur de sync à l'utilisateur
   /// (sans UI). Best-effort : si la plateforme ne supporte pas, on ignore.
@@ -2298,7 +2267,7 @@ end \$\$;""",
     // Seuil d'alerte d'ancienneté des dettes partenaires. Borné ici AUSSI,
     // et pas seulement par le CHECK SQL (hotfix_178) : une valeur hors
     // bornes partirait sinon jusqu'au serveur pour revenir en 23514, que
-    // `_isPermanentError` classe désormais comme définitif.
+    // `isDefinitiveSyncError` classe comme définitif.
     if (partnerDebtAlertDays != null) {
       payload['partner_debt_alert_days'] =
           partnerDebtAlertDays.clamp(1, 365);
