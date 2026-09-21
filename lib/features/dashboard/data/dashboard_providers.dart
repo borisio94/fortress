@@ -9,6 +9,7 @@ import '../../inventaire/domain/entities/stock_location.dart';
 import '../../inventaire/domain/entities/stock_level.dart';
 import '../../../core/services/partner_ledger_service.dart';
 import '../../parametres/domain/entities/partner_ledger_entry.dart';
+import '../../../core/utils/date_window.dart';
 
 /// Clés de catégorie de dépense CANONIQUES (mappées à un libellé/icône par
 /// ExpensesBreakdownWidget). Toute autre clé est un label libre (frais de
@@ -45,6 +46,22 @@ class DashRange {
 
   Duration get duration => to.difference(from);
 
+  /// Cet instant tombe-t-il dans la fenêtre ?
+  ///
+  /// DEMI-OUVERTE : `[from, to)`. Le début appartient à la fenêtre, la fin
+  /// appartient à la SUIVANTE.
+  ///
+  /// La convention était inclusive des deux côtés, sur vingt-deux sites. Or
+  /// les fenêtres s'enchaînent — « Hier » finit à minuit, « Aujourd'hui »
+  /// commence à minuit — et une vente enregistrée à exactement 00:00:00.000
+  /// tombait donc dans les DEUX. Il suffit d'une commande transférée à minuit
+  /// pile pour qu'un total cesse d'être juste, sans que rien ne le signale.
+  ///
+  /// Demi-ouverte, les périodes se succèdent sans trou ni recouvrement : le
+  /// double comptage devient impossible par construction, et non par
+  /// vigilance à chaque nouveau site de comparaison.
+  bool contains(DateTime at) => withinWindow(at, from, to);
+
   /// Nombre de buckets du graphique (heures, jours ou mois selon la plage).
   int get buckets {
     if (duration.inDays <= 1) return 24;   // par heure
@@ -78,6 +95,15 @@ class DashRange {
 
 DashRange rangeFor(DashPeriod p, {DateTime? customFrom, DateTime? customTo}) {
   final now = DateTime.now();
+  // TOUTES LES FENÊTRES SE FERMENT AU PROCHAIN MINUIT, jamais à `now`.
+  //
+  // Elles finissaient à l'instant présent : une vente faite deux minutes plus
+  // tard n'était donc pas « ce mois-ci », alors qu'elle était « aujourd'hui ».
+  // Les deux totaux ne se recoupaient pas, et le mois se rallongeait à chaque
+  // consultation. La journée en cours entre désormais ENTIÈRE.
+  //
+  // Borne EXCLUE (cf. `DashRange.contains`) : minuit appartient au lendemain.
+  final demain = DateTime(now.year, now.month, now.day + 1);
   switch (p) {
     case DashPeriod.today:
       final start = DateTime(now.year, now.month, now.day);
@@ -89,7 +115,7 @@ DashRange rangeFor(DashPeriod p, {DateTime? customFrom, DateTime? customTo}) {
     case DashPeriod.week:
       final start = DateTime(now.year, now.month, now.day)
           .subtract(const Duration(days: 6));
-      return DashRange(start, now);
+      return DashRange(start, demain);
     case DashPeriod.month:
       // LE MOIS CIVIL, et non trente jours glissants.
       //
@@ -101,18 +127,27 @@ DashRange rangeFor(DashPeriod p, {DateTime? customFrom, DateTime? customTo}) {
       //
       // Trente jours glissants a aussi un défaut propre : une paie mensuelle
       // peut y tomber deux fois, ou aucune.
-      return DashRange(DateTime(now.year, now.month), now);
+      return DashRange(DateTime(now.year, now.month), demain);
     case DashPeriod.quarter:
       // 3 mois glissants — cohérent avec la sémantique des autres "period"
-      // (fenêtre roulante terminant maintenant).
+      // (fenêtre roulante terminant à la fin du jour courant).
       final start = DateTime(now.year, now.month, now.day)
           .subtract(const Duration(days: 89));
-      return DashRange(start, now);
+      return DashRange(start, demain);
     case DashPeriod.year:
       final start = DateTime(now.year - 1, now.month + 1, 1);
-      return DashRange(start, now);
+      return DashRange(start, demain);
     case DashPeriod.custom:
-      return DashRange(customFrom ?? now, customTo ?? now);
+      // LE DERNIER JOUR CHOISI ENTRE EN ENTIER.
+      //
+      // Le sélecteur rend des JOURS à minuit : « du 1er au 15 » donnait
+      // `to = 15 à 00:00`. En bornes incluses, le 15 était déjà perdu sauf sa
+      // première milliseconde ; en demi-ouvert il disparaîtrait tout entier.
+      // On ferme donc au minuit SUIVANT le dernier jour choisi, ce qui fait
+      // enfin dire à la sélection ce que l'utilisateur a demandé.
+      final to = customTo ?? now;
+      return DashRange(customFrom ?? now,
+          DateTime(to.year, to.month, to.day + 1));
   }
 }
 
@@ -426,7 +461,7 @@ final scrapJournalProvider =
       if (resolvedStr == null) continue;
       final resolvedAt = DateTime.tryParse(resolvedStr);
       if (resolvedAt == null) continue;
-      if (resolvedAt.isBefore(range.from) || resolvedAt.isAfter(range.to)) {
+      if (!range.contains(resolvedAt)) {
         continue;
       }
       final qty = m['quantity'] as int? ?? 0;
@@ -533,7 +568,7 @@ FinancialSnapshot _computeFinancialSnapshot(String shopId, DashRange range,
     final effective = status == 'completed'
         ? (completedAt ?? createdAt)
         : createdAt;
-    if (effective.isBefore(range.from) || effective.isAfter(range.to)) continue;
+    if (!range.contains(effective)) continue;
 
     final items   = (o['items'] as List?) ?? [];
     final rawFees = o['fees'] as List?;
@@ -613,7 +648,7 @@ FinancialSnapshot _computeFinancialSnapshot(String shopId, DashRange range,
       final paidAt = DateTime.tryParse(m['paid_at']?.toString() ?? '')
           ?.toLocal();
       if (paidAt == null) continue;
-      if (paidAt.isBefore(range.from) || paidAt.isAfter(range.to)) continue;
+      if (!range.contains(paidAt)) continue;
       if (!expenseMatchesView(
           m['location_id'] as String?, viewFilter)) continue;
       operatingExpenses += (m['amount'] as num?)?.toDouble() ?? 0;
@@ -631,7 +666,7 @@ FinancialSnapshot _computeFinancialSnapshot(String shopId, DashRange range,
               m['resolved_at']?.toString() ?? '')?.toLocal()
           ?? DateTime.tryParse(m['created_at']?.toString() ?? '')?.toLocal();
       if (resolved == null) continue;
-      if (resolved.isBefore(range.from) || resolved.isAfter(range.to)) continue;
+      if (!range.contains(resolved)) continue;
       if (m['type'] == 'scrapped') {
         final qty = m['quantity'] as int? ?? 0;
         final pid = m['product_id'] as String?;
@@ -898,7 +933,7 @@ final dashDataProvider =
         ? DateTime.tryParse(completedRaw)?.toLocal()
         : (completedRaw is DateTime ? completedRaw.toLocal() : null);
     final effective = status == 'completed' ? (completedAt ?? created) : created;
-    if (effective.isBefore(range.from) || effective.isAfter(range.to)) continue;
+    if (!range.contains(effective)) continue;
 
     final bucket = range.bucketOf(effective);
     final items = (o['items'] as List?) ?? [];
@@ -1151,7 +1186,7 @@ final dashDataProvider =
       final effective = DateTime.tryParse(resolvedStr ?? '')?.toLocal()
           ?? DateTime.tryParse(createdStr ?? '')?.toLocal();
       if (effective == null) continue;
-      if (effective.isBefore(range.from) || effective.isAfter(range.to)) {
+      if (!range.contains(effective)) {
         continue;
       }
       final bucket = range.bucketOf(effective);
@@ -1188,7 +1223,7 @@ final dashDataProvider =
       if (m['shop_id'] != shopId) continue;
       final paidAt = DateTime.tryParse(m['paid_at']?.toString() ?? '')?.toLocal();
       if (paidAt == null) continue;
-      if (paidAt.isBefore(range.from) || paidAt.isAfter(range.to)) continue;
+      if (!range.contains(paidAt)) continue;
       if (!expenseMatchesView(
           m['location_id'] as String?, viewFilter)) continue;
       final amount = (m['amount'] as num?)?.toDouble() ?? 0;
@@ -1208,7 +1243,7 @@ final dashDataProvider =
   for (final e in PartnerLedgerService.entriesForShop(shopId)) {
     if (e.type != PartnerLedgerEntryType.partnerCharge) continue;
     final at = e.createdAt.toLocal();
-    if (at.isBefore(range.from) || at.isAfter(range.to)) continue;
+    if (!range.contains(at)) continue;
     if (!expenseMatchesView(e.partnerLocationId, viewFilter)) continue;
     final amount = e.amount.abs();
     if (amount <= 0) continue;

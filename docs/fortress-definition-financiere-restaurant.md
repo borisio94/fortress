@@ -216,6 +216,32 @@ marge n'a pas de sens. » Un vide silencieux se lirait comme une panne.
 nombre de commandes, pertes. « Hier » sert tous les matins, et ce n'est pas une
 rentabilité qu'on y cherche.
 
+### La convention de bornes
+
+**Une fenêtre est DEMI-OUVERTE : `[début, fin[`.** Le début lui appartient, la
+fin appartient à la suivante.
+
+Elle était inclusive des deux côtés sur vingt-deux sites. Or les fenêtres
+s'enchaînent — « Hier » finit à minuit, « Aujourd'hui » commence à minuit — et
+une vente enregistrée à exactement `00:00:00.000` tombait donc **dans les
+deux**. Il suffit d'une commande transférée à minuit pile pour qu'un total
+cesse d'être juste, sans que rien ne le signale.
+
+**Règle** : *le double comptage doit être impossible par construction, pas
+évité par vigilance.* Un vingt-troisième site de comparaison écrit demain ne
+doit pas avoir à se poser la question.
+
+**Toute fenêtre se ferme au minuit suivant, jamais à l'instant présent.** Elles
+finissaient à `now` : une vente faite deux minutes plus tard n'était pas « ce
+mois-ci » alors qu'elle était « aujourd'hui », et le mois se rallongeait à
+chaque consultation. La journée en cours entre désormais entière.
+
+Une **période libre** se ferme au minuit qui suit le dernier jour choisi. Le
+sélecteur rend des jours à minuit : « du 1er au 15 » perdait le 15 entier,
+sauf sa première milliseconde.
+
+*Appliqué le 21/09/2026.*
+
 ---
 
 ## 7. La caisse

@@ -450,7 +450,7 @@ class RestaurantReportingService {
             ? null
             : DateTime.tryParse(rawDate.toString())?.toLocal();
         if (date == null) continue;
-        if (date.isBefore(range.from) || date.isAfter(range.to)) continue;
+        if (!range.contains(date)) continue;
         final b = range.bucketOf(date);
 
         final items = [
@@ -949,7 +949,9 @@ class RestaurantReportingService {
 
     final days = <DateTime>[];
     for (var d = start; d.isBefore(end); d = DateTime(y, m, d.day + 1)) {
-      if (d.isBefore(range.from) || !d.isBefore(range.to)) continue;
+      // Ce site était déjà demi-ouvert quand les vingt et un autres ne
+      // l'étaient pas — il passe simplement au prédicat commun.
+      if (!range.contains(d)) continue;
       days.add(d);
     }
     return (days: days, inMonth: inMonth);
@@ -993,7 +995,10 @@ class RestaurantReportingService {
     return out;
   }
 
-  /// Date hors de la fenêtre (bornes incluses).
-  static bool _outside(DateTime d, DashRange range) =>
-      d.isBefore(range.from) || d.isAfter(range.to);
+  /// Date hors de la fenêtre, bornes DEMI-OUVERTES `[from, to)`.
+  ///
+  /// Disait « bornes incluses » : c'était vrai, et c'était le défaut. La
+  /// convention est désormais unique pour toute l'application, cf.
+  /// `core/utils/date_window.dart`.
+  static bool _outside(DateTime d, DashRange range) => !range.contains(d);
 }

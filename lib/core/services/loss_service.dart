@@ -4,6 +4,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../../features/restaurant/domain/entities/loss.dart';
 import '../database/app_database.dart';
 import '../storage/hive_boxes.dart';
+import '../utils/date_window.dart';
 
 /// Service Hive-first des déclarations de pertes (module finances — PR-C).
 /// Ids `ls_` + microsecondes. Push Supabase via `bgUpsert('losses')`.
@@ -113,8 +114,7 @@ class LossService {
   static int total(String shopId, {DateTime? from, DateTime? to}) {
     var sum = 0;
     for (final l in forShop(shopId)) {
-      if (from != null && l.date.isBefore(from)) continue;
-      if (to != null && l.date.isAfter(to)) continue;
+      if (!withinOptionalBounds(l.date, from: from, to: to)) continue;
       sum += l.amount;
     }
     return sum;

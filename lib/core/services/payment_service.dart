@@ -5,6 +5,7 @@ import '../../features/caisse/domain/entities/sale.dart' show PaymentMethod;
 import '../../features/restaurant/domain/entities/payment.dart';
 import '../database/app_database.dart';
 import '../storage/hive_boxes.dart';
+import '../utils/date_window.dart';
 
 /// Un règlement EN COURS DE SAISIE : ce que le caissier annonce avoir reçu,
 /// avant que le partage entre montant imputé et rendu monnaie soit calculé.
@@ -177,8 +178,9 @@ class PaymentService {
         if (raw['shop_id']?.toString() != shopId) continue;
         try {
           final p = Payment.fromMap(Map<String, dynamic>.from(raw));
-          if (from != null && p.createdAt.isBefore(from)) continue;
-          if (to != null && p.createdAt.isAfter(to)) continue;
+          if (!withinOptionalBounds(p.createdAt, from: from, to: to)) {
+            continue;
+          }
           list.add(p);
         } catch (_) {/* ligne corrompue : ignorée */}
       }

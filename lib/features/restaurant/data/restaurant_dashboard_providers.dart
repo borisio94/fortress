@@ -227,7 +227,7 @@ final restaurantDashProvider =
 
       // Répartition par canal : sur la période, commandes encaissées
       // uniquement — mélanger les annulées fausserait les parts.
-      if (date.isBefore(range.from) || date.isAfter(range.to)) continue;
+      if (!range.contains(date)) continue;
       if (status != 'completed') continue;
 
       switch (raw['order_type']?.toString()) {

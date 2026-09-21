@@ -17,6 +17,7 @@ import '../storage/hive_boxes.dart';
 import '../storage/local_storage_service.dart';
 import 'activity_log_service.dart';
 import 'staff_contest_service.dart';
+import '../utils/date_window.dart';
 
 /// Personnel du restaurant : fiches, pointage, avances et paie (Lot D).
 ///
@@ -284,8 +285,7 @@ class StaffService {
           final r = TimeRecord.fromMap(Map<String, dynamic>.from(raw));
           if (employeeId != null && r.employeeId != employeeId) continue;
           final at = r.clockIn ?? r.createdAt;
-          if (from != null && at.isBefore(from)) continue;
-          if (to != null && at.isAfter(to)) continue;
+          if (!withinOptionalBounds(at, from: from, to: to)) continue;
           list.add(r);
         } catch (_) {/* ligne corrompue : ignorée */}
       }
@@ -1033,7 +1033,7 @@ class StaffService {
   static int cashOut(String shopId, {DateTime? from, DateTime? to}) {
     var total = 0;
     bool inRange(DateTime d) =>
-        (from == null || !d.isBefore(from)) && (to == null || !d.isAfter(to));
+        withinOptionalBounds(d, from: from, to: to);
 
     for (final a in advances(shopId)) {
       // La date d'avance est une DATE (minuit) : on la compare à la journée,

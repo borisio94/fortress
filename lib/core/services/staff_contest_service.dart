@@ -5,6 +5,7 @@ import '../../features/restaurant/domain/entities/staff_contest.dart';
 import '../../features/restaurant/domain/entities/staff_member.dart';
 import '../database/app_database.dart';
 import '../storage/hive_boxes.dart';
+import '../utils/date_window.dart';
 
 /// PRIMES SPÉCIALES — concours à durée déterminée (hotfix_165).
 ///
@@ -120,8 +121,7 @@ class StaffContestService {
     for (final c in forShop(shopId)) {
       final paidAt = c.paidAt;
       if (paidAt == null || !c.paidCash) continue;
-      if (from != null && paidAt.isBefore(from)) continue;
-      if (to != null && paidAt.isAfter(to)) continue;
+      if (!withinOptionalBounds(paidAt, from: from, to: to)) continue;
       total += c.prize;
     }
     return total;

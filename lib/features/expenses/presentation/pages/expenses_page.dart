@@ -336,8 +336,7 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
     final range = _range;
     final view = ref.read(dashViewFilterProvider);
     return _rows.where((r) {
-      if (r.paidAt.isBefore(range.from)) return false;
-      if (r.paidAt.isAfter(range.to)) return false;
+      if (!range.contains(r.paidAt)) return false;
       if (_categoryFilter != null && r.category != _categoryFilter) return false;
       if (!_matchesLocationView(r, view)) return false;
       return true;

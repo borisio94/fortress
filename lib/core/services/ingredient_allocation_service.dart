@@ -4,6 +4,7 @@ import '../../features/restaurant/domain/entities/recipe_ingredient.dart';
 import '../storage/hive_boxes.dart';
 import 'daily_expense_service.dart';
 import 'recipe_service.dart';
+import '../utils/date_window.dart';
 
 /// Un lien plat ↔ ingrédient, réduit à ce dont la répartition a besoin.
 typedef DishLink = ({String productId, double weight});
@@ -239,7 +240,7 @@ class IngredientAllocationService {
             ? null
             : DateTime.tryParse(rawDate.toString())?.toLocal();
         if (date == null) continue;
-        if (date.isBefore(from) || date.isAfter(to)) continue;
+        if (!withinWindow(date, from, to)) continue;
 
         for (final rawItem in (o['items'] as List? ?? [])) {
           if (rawItem is! Map) continue;
