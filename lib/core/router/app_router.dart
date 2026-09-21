@@ -27,6 +27,7 @@ import '../../features/onboarding/presentation/pages/shop_onboarding_wizard.dart
 import '../../features/onboarding/presentation/pages/product_quick_add_page.dart';
 import '../../features/onboarding/presentation/providers/onboarding_seen_provider.dart';
 import '../../features/onboarding/data/onboarding_prefs.dart';
+import '../services/account_access_policy.dart';
 import '../../features/catalogue/presentation/pages/catalogue_page.dart';
 import '../../features/marketing/presentation/pages/landing_page.dart';
 import '../../features/promo_campaigns/presentation/pages/campaign_send_page.dart';
@@ -758,38 +759,34 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         // attribuée par le owner) peut créer une boutique. Les employés
         // qui tentent l'URL directement sont renvoyés au shop-selector.
         //
-        // ⚠ Cette logique DOIT rester en miroir avec
-        // `_ShopListPageState._canCreateShop()` dans shop_list_page.dart.
-        // Sinon le bouton "Nouvelle boutique" pousserait vers /create
-        // qui redirigerait immédiatement → boucle perçue par l'user
-        // comme "l'app cherche à charger une boutique".
+        // La règle vit dans `account_access_policy.dart`, avec celle qui dit
+        // ce qu'est un compte révoqué. Les deux lisaient le même état — « ni
+        // membership ni boutique » — et en tiraient des conclusions
+        // contraires : ce garde y voyait un nouvel inscrit, `SessionValidator`
+        // un compte zombie à purger. Un test vérifie désormais qu'elles
+        // s'accordent.
         //
-        // 3 cas :
-        //   1. Owner d'au moins une boutique en local → autorisé.
-        //   2. 0 membership en local pour cet uid → nouvel inscrit qui
-        //      crée sa première boutique → autorisé. Sans cette branche,
-        //      on rejette à tort le tout premier compte.
-        //   3. Au moins un membership mais aucun shop possédé → employé
-        //      invité dans une autre boutique → bloqué.
+        // ⚠ Reste à tenir en miroir avec `_ShopListPageState._canCreateShop()`
+        // dans shop_list_page.dart. Sinon le bouton "Nouvelle boutique"
+        // pousserait vers /create qui redirigerait immédiatement → boucle
+        // perçue par l'user comme "l'app cherche à charger une boutique".
         redirect: (ctx, state) {
           final uid = Supabase.instance.client.auth.currentUser?.id;
           if (uid == null) return null;
 
-          final ownsAShop = HiveBoxes.shopsBox.values.any((raw) {
-            try {
-              final m = Map<String, dynamic>.from(raw);
-              return m['owner_id'] == uid;
-            } catch (_) { return false; }
-          });
-          if (ownsAShop) return null;
+          bool anyMatch(Iterable<dynamic> rows, String field) =>
+              rows.any((raw) {
+                try {
+                  return Map<String, dynamic>.from(raw as Map)[field] == uid;
+                } catch (_) { return false; }
+              });
 
-          final hasAnyMembership = HiveBoxes.membershipsBox.values.any((raw) {
-            try {
-              final m = Map<String, dynamic>.from(raw);
-              return m['user_id'] == uid;
-            } catch (_) { return false; }
-          });
-          return hasAnyMembership ? RouteNames.shopSelector : null;
+          return mayCreateShop(
+                  ownsAShop: anyMatch(HiveBoxes.shopsBox.values, 'owner_id'),
+                  hasAnyMembership:
+                      anyMatch(HiveBoxes.membershipsBox.values, 'user_id'))
+              ? null
+              : RouteNames.shopSelector;
         },
         builder: (c, s) => const CreateShopPage(),
       ),

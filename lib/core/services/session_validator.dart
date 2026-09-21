@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../storage/hive_boxes.dart';
 import '../storage/local_storage_service.dart';
 import '../storage/secure_storage.dart';
+import 'account_access_policy.dart';
 
 /// Vérifie que la session courante correspond à un compte qui existe
 /// vraiment côté serveur ET qui a au moins un accès métier. Détecte :
@@ -9,12 +11,18 @@ import '../storage/secure_storage.dart';
 ///   1. JWT encore valide (5 min de TTL) mais auth.users a été supprimé
 ///      (ex: licenciement employé via delete_employee).
 ///   2. Profile supprimé côté serveur sans nettoyage côté client.
-///   3. **Compte zombie** : profile existe encore (delete_employee n'a pas
+///   3. **Accès révoqué** : profile existe encore (delete_employee n'a pas
 ///      purgé l'auth) MAIS aucune `shop_memberships` ni `shops.owner_id`
-///      pour cet utilisateur → il n'a aucun accès métier dans Fortress.
+///      côté serveur, ALORS QUE l'appareil garde la trace d'un accès.
 ///      Cas typique : owner supprime un employé, l'employé tente de se
 ///      reconnecter avec ses anciens identifiants et tombe sur une UI
 ///      vide. On le déconnecte automatiquement avec un message clair.
+///
+///      ⚠ LE SOUVENIR LOCAL EST DÉCISIF, et c'est ce qui distingue une
+///      révocation d'un compte NEUF. Un compte créé dont la création de
+///      boutique a échoué présente exactement le même vide côté serveur ;
+///      l'expulser l'enfermerait dehors, puisqu'il ne peut plus se
+///      réinscrire sous le même e-mail. Cf. `account_access_policy.dart`.
 ///
 /// Si la session est invalide :
 ///   - signOut Supabase
@@ -73,10 +81,32 @@ class SessionValidator {
           .limit(1);
       if (ownedShops.isNotEmpty) return true;
 
-      // Aucun accès → compte zombie (employé supprimé qui tente de se
-      // reconnecter, ou propriétaire dont la boutique a été supprimée).
-      debugPrint('[SessionValidator] ⊘ aucun membership / ownership '
-          'côté serveur → logout forcé (compte zombie)');
+      // Aucun accès CÔTÉ SERVEUR. Reste à savoir ce que ça veut dire, et
+      // c'est l'appareil qui le dit : garde-t-il la trace d'un accès que le
+      // serveur dément ?
+      //
+      //   * OUI  → révocation. Employé supprimé qui tente de se reconnecter,
+      //            propriétaire dont la boutique a été supprimée.
+      //   * NON  → compte NEUF. Typiquement une inscription dont la création
+      //            de boutique a échoué : `register_page` propose de réessayer,
+      //            il suffit d'avoir fermé l'application avant. L'expulser ici
+      //            l'enferme DEHORS — la réinscription échouera sur « Un compte
+      //            avec cet email existe déjà », et aucun écran ne rattache
+      //            plus ce compte auth à une boutique.
+      //
+      // `app_router` lisait déjà correctement cet état pour autoriser la
+      // création de boutique. Les deux règles sont désormais au même endroit
+      // (`account_access_policy.dart`) et un test vérifie qu'elles ne se
+      // contredisent plus.
+      final remembers = _deviceRemembersAccess(user.id);
+      if (!isRevokedAccount(
+          serverGrantsAccess: false, deviceRemembersAccess: remembers)) {
+        debugPrint('[SessionValidator] compte sans accès mais sans passé local '
+            '→ nouvel inscrit, session CONSERVÉE');
+        return true;
+      }
+      debugPrint('[SessionValidator] ⊘ accès révoqué (l\'appareil en gardait '
+          'la trace) → logout forcé');
       await _forceLogoutAndPurge();
       return false;
     } on AuthException {
@@ -89,6 +119,32 @@ class SessionValidator {
       // au prochain démarrage en ligne.
       debugPrint('[SessionValidator] check offline / erreur réseau : $e');
       return true;
+    }
+  }
+
+  /// L'appareil garde-t-il la trace d'un accès pour [userId] ?
+  ///
+  /// Mêmes lectures Hive que le garde de `RouteNames.createShop`, et c'est
+  /// voulu : les deux endroits doivent voir le même état, sans quoi l'un
+  /// expulse celui que l'autre autorise.
+  static bool _deviceRemembersAccess(String userId) {
+    bool anyMatch(Iterable<dynamic> rows, String field) => rows.any((raw) {
+          try {
+            return Map<String, dynamic>.from(raw as Map)[field] == userId;
+          } catch (_) {
+            return false;
+          }
+        });
+    try {
+      return anyMatch(HiveBoxes.shopsBox.values, 'owner_id') ||
+          anyMatch(HiveBoxes.membershipsBox.values, 'user_id');
+    } catch (e) {
+      // Hive illisible : on ne peut RIEN affirmer. On s'abstient de purger —
+      // se tromper vers la conservation coûte une session de trop ; se tromper
+      // vers la purge efface des écritures non envoyées.
+      debugPrint('[SessionValidator] mémoire locale illisible ($e) '
+          '→ pas de purge');
+      return false;
     }
   }
 
