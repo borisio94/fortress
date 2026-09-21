@@ -706,7 +706,7 @@ class LocalStorageService {
 
   /// Clés de PRÉFÉRENCES liées à l'APPAREIL (pas au compte) — conservées au
   /// logout. Tout le reste (caches compte/boutique `*_$userId`/`*_$shopId`,
-  /// `current_user_id`, tokens, ventes offline…) est purgé. Les chaînes sont
+  /// `current_user_id`, tokens…) est purgé. Les chaînes sont
   /// les clés posées par : TextScale (`text_scale`), DemoMode
   /// (`demo_mode_enabled`), ThemeMode (`app_theme_mode`), ThemePalette
   /// (`app_theme_palette*`), locale (`app_locale`), onboarding
@@ -725,6 +725,10 @@ class LocalStorageService {
     // au même titre que la taille du texte. La purger au logout rouvrirait la
     // barre déployée à chaque reconnexion.
     'nav_rail_collapsed',
+    // `local_data_owner_id` n'est PAS listé ici : ce n'est pas une préférence.
+    // `settingKeysToKeepOnLogout` (logout_purge_policy.dart) l'ajoute, et un
+    // test l'exige — il décrit l'appareil, pas la session, et sans lui la garde
+    // anti-fuite du login lirait `null` et ne se déclencherait jamais.
   };
 
   /// Préfixes de clés settings conservés au purge (clés dynamiques par uid).

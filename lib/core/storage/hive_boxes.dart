@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'logout_purge_policy.dart';
+
 /// Clés des boxes Hive — persistance locale (offline-first)
 class HiveBoxes {
   // Boxes existantes
@@ -315,11 +317,17 @@ class HiveBoxes {
     } catch (_) {}
   }
 
-  /// Vide TOUTES les box (logout / reset) en CONSERVANT un ensemble de clés de
-  /// la box `settings` (préférences device : taille de texte, thème, locale,
-  /// dernier email…). Anti-fuite inter-comptes sur appareil partagé : sans
-  /// cette purge, les données métier (produits, prix d'achat, clients, panier)
-  /// d'un compte survivaient à la déconnexion et fuyaient vers le suivant.
+  /// Vide les box (logout / reset) en CONSERVANT un ensemble de clés de la box
+  /// `settings` (préférences device : taille de texte, thème, locale, dernier
+  /// email…). Anti-fuite inter-comptes sur appareil partagé : sans cette purge,
+  /// les données métier (produits, prix d'achat, clients, panier) d'un compte
+  /// survivaient à la déconnexion et fuyaient vers le suivant.
+  ///
+  /// « TOUTES » n'est plus exact : `offline_queue_box` est CONSERVÉE tant
+  /// qu'elle porte des écritures non envoyées. Ce qu'elle contient n'existe
+  /// nulle part ailleurs — le vider ne ferme aucune fuite, ça perd la vente.
+  /// La règle est dans `logout_purge_policy.dart`, et elle est testée.
+  ///
   /// L'accès non typé `Hive.box(name)` est volontaire (même mécanisme que
   /// `_safeClose`) — `.clear()` ne dépend pas du type de la box.
   static Future<void> clearAllForLogout(
@@ -329,14 +337,38 @@ class HiveBoxes {
     // → le tour de bienvenue ne doit PAS réapparaître à chaque reconnexion.
     Set<String> preserveSettingsKeyPrefixes = const {},
   }) async {
+    // La file garde-t-elle du travail ? Lu AVANT toute purge, sinon la
+    // question n'aurait plus de sens au moment d'y répondre.
+    var queueHasPendingOps = false;
+    try {
+      if (Hive.isBoxOpen(offlineQueue)) {
+        queueHasPendingOps = Hive.box(offlineQueue).isNotEmpty;
+      }
+    } catch (e) {
+      // Boîte illisible : on la traite comme pleine. Se tromper dans ce sens
+      // laisse une boîte à purger plus tard ; se tromper dans l'autre perd
+      // des ventes.
+      queueHasPendingOps = true;
+      debugPrint('[Hive] purge : file illisible, conservée par prudence ($e)');
+    }
+    final toClear = boxesToClearOnLogout(
+        allBoxes: _allBoxes,
+        queueHasPendingOps: queueHasPendingOps,
+        queueBox: offlineQueue);
+    if (queueHasPendingOps) {
+      debugPrint('[Hive] purge : ${Hive.box(offlineQueue).length} op(s) non '
+          'envoyée(s) → file CONSERVÉE pour la prochaine session');
+    }
+
     // 1. Snapshot des préférences device à conserver (match exact OU préfixe).
+    final preserve = settingKeysToKeepOnLogout(preserveSettingsKeys);
     final keep = <String, dynamic>{};
     try {
       if (Hive.isBoxOpen(settings)) {
         final box = Hive.box(settings);
         for (final k in box.keys) {
           final key = k.toString();
-          final keepIt = preserveSettingsKeys.contains(key) ||
+          final keepIt = preserve.contains(key) ||
               preserveSettingsKeyPrefixes.any((p) => key.startsWith(p));
           if (!keepIt) continue;
           final v = box.get(k);
@@ -347,7 +379,7 @@ class HiveBoxes {
       debugPrint('[Hive] purge snapshot err: $e');
     }
     // 2. Vider chaque box ouverte.
-    for (final name in _allBoxes) {
+    for (final name in toClear) {
       try {
         if (Hive.isBoxOpen(name)) await Hive.box(name).clear();
       } catch (e) {

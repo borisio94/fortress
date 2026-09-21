@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/storage/secure_storage.dart';
 import '../../../../core/storage/local_storage_service.dart';
@@ -100,6 +102,19 @@ class AuthRemoteDataSourceMock implements AuthRemoteDataSource {
       throw const ServerException(
           message: 'Email ou mot de passe incorrect. Vérifiez vos identifiants.',
           statusCode: 401);
+    }
+
+    // ISOLATION (anti-fuite inter-comptes, appareil partagé) — même garde que
+    // le login EN LIGNE, qui l'avait et que celui-ci n'avait pas. L'écart est
+    // resté sans conséquence tant que la déconnexion emportait tout : plus
+    // rien ne subsistait d'un autre compte. Depuis que la file d'envoi survit
+    // à la déconnexion, l'écart devient une fuite — les écritures du compte
+    // précédent partiraient sous la session de celui-ci.
+    final previousOwner = LocalStorageService.getLocalDataOwnerId();
+    if (previousOwner != null && previousOwner != user.id) {
+      debugPrint('[Auth] connexion hors ligne : données locales d\'un autre '
+          'compte ($previousOwner ≠ ${user.id}) → purge anti-fuite');
+      await LocalStorageService.purgeOnLogout();
     }
 
     await SecureStorageService.saveAccessToken('offline_token_$normalEmail');
