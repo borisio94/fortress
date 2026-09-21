@@ -192,9 +192,29 @@ de zéro mardi. **Aucune marge journalière ou hebdomadaire n'a de sens.**
 Toute période plus courte que le mois sert à consulter des volumes — nombre
 de commandes, ventes encaissées — pas des marges.
 
-État actuel, non conforme : trois fenêtres coexistent — mois civil pour la
-fiche plat, 30 jours glissants pour le tableau de bord, 7 jours pour la
-semaine. À unifier.
+**Appliqué le 21/09/2026.** « Mois » est désormais le **mois civil** sur le
+tableau de bord — il valait trente jours glissants, où une paie mensuelle
+pouvait tomber deux fois ou pas du tout. Et les indicateurs de marge —
+bénéfice, marge brute, food cost — **ne s'affichent plus sur une fenêtre de
+moins de 28 jours** (la longueur du plus court mois civil : février doit porter
+sa marge).
+
+La règle porte sur la **nature de la période**, et non sur sa durée écoulée.
+Un mois en cours EST le mois, même le 3 — il est court, donc bruyant, et le
+gérant le sait puisqu'il vient de le choisir. Juger la durée écoulée aurait
+masqué les marges du 1er au 28, soit vingt-huit jours sur trente, sur la seule
+fenêtre que cette section rend autoritaire.
+
+Seule la période **libre** se juge à la longueur : elle n'annonce aucune
+intention et peut valoir trois jours comme trois ans.
+
+À la place, le tableau de bord dit la mécanique plutôt que l'absence — « Les
+achats d'une période se répartissent sur ses ventes : sur moins d'un mois, la
+marge n'a pas de sens. » Un vide silencieux se lirait comme une panne.
+
+**Les volumes restent visibles sur toutes les périodes** : ventes encaissées,
+nombre de commandes, pertes. « Hier » sert tous les matins, et ce n'est pas une
+rentabilité qu'on y cherche.
 
 ---
 

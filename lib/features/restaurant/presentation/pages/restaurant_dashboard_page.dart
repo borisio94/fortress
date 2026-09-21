@@ -23,6 +23,7 @@ import '../../../caisse/presentation/bloc/caisse_bloc.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
 import '../../../inventaire/domain/entities/product.dart';
 import '../../data/restaurant_dashboard_providers.dart';
+import '../../domain/margin_window.dart';
 import '../../domain/entities/staff_rating.dart';
 import '../widgets/resto_dish_visuals.dart';
 import '../widgets/resto_kpi_tile.dart';
@@ -97,6 +98,9 @@ class _RestaurantDashboardPageState
     final data = ref.watch(dashDataProvider(shopId));
     final resto = ref.watch(restaurantDashProvider(shopId));
     final finance = ref.watch(restaurantFinanceProvider(shopId));
+    // La période choisie décide si une marge a un sens — cf. `margin_window`.
+    final period = ref.watch(dashPeriodProvider);
+    final showsMargins = marginsMakeSenseOn(period, rangeFor(period));
 
     return AppScaffold(
       shopId: shopId,
@@ -139,10 +143,24 @@ class _RestaurantDashboardPageState
           _StaffScoreCard(shopId: shopId),
           const SizedBox(height: 16),
           // ── Rapport financier ─────────────────────────────────────────
-          _FinanceKpiRow(report: finance),
+          //
+          // LES MARGES NE S'AFFICHENT QUE SUR UN MOIS OU PLUS. Les achats
+          // d'une période se répartissent sur ses ventes : sur trois jours,
+          // un marché du lundi écrase le taux et le mardi le remet à zéro.
+          // Le chiffre existait, il ne mesurait rien. Cf.
+          // `margin_window.dart` et la section 6 de la définition.
+          //
+          // LES VOLUMES RESTENT, eux, sur toutes les périodes — ventes,
+          // commandes, pertes. « Hier » sert tous les matins.
+          if (showsMargins)
+            _FinanceKpiRow(report: finance)
+          else
+            const _MarginsUnavailableCard(),
           const SizedBox(height: 16),
-          _FoodCostCard(report: finance),
-          const SizedBox(height: 16),
+          if (showsMargins) ...[
+            _FoodCostCard(report: finance),
+            const SizedBox(height: 16),
+          ],
           _FinanceChartCard(report: finance),
           const SizedBox(height: 16),
           _SectorCard(report: finance),
@@ -898,6 +916,34 @@ extension _CurveX on _Curve {
         _Curve.expense => RestoSeriesColors.expense,
         _Curve.loss => RestoSeriesColors.loss,
       };
+}
+
+/// CE QU'ON MONTRE À LA PLACE D'UNE MARGE QUI NE VEUT RIEN DIRE.
+///
+/// Un vide silencieux ferait croire à une panne : le gérant changerait de
+/// période, ne comprendrait pas, et finirait par douter de l'application. La
+/// carte dit la MÉCANIQUE — et explique du même coup pourquoi son food cost
+/// bougeait tant d'un jour à l'autre avant qu'on la retire.
+class _MarginsUnavailableCard extends StatelessWidget {
+  const _MarginsUnavailableCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: restoCardSurface(context, radius: 14),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(Icons.calendar_month_outlined,
+            size: 19, color: cs.onSurface.withValues(alpha: 0.45)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(marginsUnavailableReason,
+              style: AppTextStyles.bodySmSecondary),
+        ),
+      ]),
+    );
+  }
 }
 
 /// Bandeau financier : ventes, bénéfice net, dépenses, pertes de la période.

@@ -91,9 +91,17 @@ DashRange rangeFor(DashPeriod p, {DateTime? customFrom, DateTime? customTo}) {
           .subtract(const Duration(days: 6));
       return DashRange(start, now);
     case DashPeriod.month:
-      final start = DateTime(now.year, now.month, now.day)
-          .subtract(const Duration(days: 29));
-      return DashRange(start, now);
+      // LE MOIS CIVIL, et non trente jours glissants.
+      //
+      // C'est la fenêtre que la section 6 de la définition financière rend
+      // SEULE AUTORITÉ pour une marge — et elle relevait elle-même l'écart :
+      // « mois civil pour la fiche plat, 30 jours glissants pour le tableau
+      // de bord. À unifier. » Le sélecteur affichait « Mois », le gérant
+      // lisait une marge, et ce n'était pas la fenêtre qui fait foi.
+      //
+      // Trente jours glissants a aussi un défaut propre : une paie mensuelle
+      // peut y tomber deux fois, ou aucune.
+      return DashRange(DateTime(now.year, now.month), now);
     case DashPeriod.quarter:
       // 3 mois glissants — cohérent avec la sémantique des autres "period"
       // (fenêtre roulante terminant maintenant).
