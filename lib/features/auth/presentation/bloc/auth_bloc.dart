@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' show Supabase, AuthChangeEvent;
+import 'package:supabase_flutter/supabase_flutter.dart' show Supabase;
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../core/services/pin_service.dart';
 import '../../../../core/services/session_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
+import '../../domain/auth_state_reaction.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../../domain/usecases/login_usecase.dart';
 import '../../domain/usecases/register_usecase.dart';
@@ -47,27 +48,41 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     // = false → redirect /login alors que la session est valide.
     add(AuthCheckRequested());
 
-    // Écoute les changements de session Supabase venant d'AILLEURS
-    // (ex : `SessionValidator.validate()` qui force un signOut quand un
-    // compte zombie tente de se reconnecter). Sans cet abonnement,
-    // AuthBloc reste en `AuthAuthenticated` après un signOut externe →
-    // le router ne redirige jamais vers /login.
+    // Écoute les changements de session Supabase venant d'AILLEURS : un
+    // `SessionValidator.validate()` qui force un signOut, une autre session
+    // qui expulse celle-ci, ou un jeton rafraîchi en arrière-plan.
+    //
+    // DEUX SENS, et le second manquait. Sans cet abonnement, AuthBloc restait
+    // en `AuthAuthenticated` après un signOut externe et le router ne
+    // redirigeait jamais vers /login. Mais il restait aussi en
+    // `AuthUnauthenticated` quand la session redevenait valable, et l'écran de
+    // connexion ne se relevait pas — `AuthCheckRequested` n'étant envoyé
+    // qu'une fois, ci-dessus, et jamais rejoué.
+    //
+    // La décision est dans `auth_state_reaction.dart`, et elle est testée
+    // évènement par évènement.
     _supaAuthSub =
         Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-      // Réagit uniquement aux signedOut externes : les login passent
-      // déjà par `_onLogin` (qui émet AuthAuthenticated correctement).
-      if (data.event == AuthChangeEvent.signedOut) {
-        // Si c'est NOTRE propre logout en cours qui a déclenché le signOut,
-        // _onLogout gère déjà tout le cleanup + l'emit : ne pas ré-ajouter
-        // un évènement redondant (évitait une double purge / double revoke).
-        if (_logoutInProgress) return;
-        // signOut EXTERNE (SessionValidator force un signOut sur compte
-        // zombie, kick d'une autre session). L'état Supabase est déjà
-        // nettoyé ; on déclenche la logique cleanup standard via
-        // AuthLogoutRequested (idempotent : la session est déjà révoquée).
-        if (state is! AuthUnauthenticated) {
+      final session = Supabase.instance.client.auth.currentSession;
+      final reaction = authReactionTo(
+        event:            data.event,
+        alreadySignedOut: state is AuthUnauthenticated,
+        logoutInProgress: _logoutInProgress,
+        hasValidSession:  session != null && !session.isExpired,
+      );
+      switch (reaction) {
+        case AuthReaction.none:
+          return;
+        case AuthReaction.logout:
+          // signOut EXTERNE. L'état Supabase est déjà nettoyé ; on déclenche la
+          // logique cleanup standard (idempotent : la session est déjà
+          // révoquée).
           add(AuthLogoutRequested());
-        }
+        case AuthReaction.recheck:
+          // La session est redevenue utilisable pendant qu'on affichait
+          // l'écran de connexion. On rejoue exactement le contrôle du
+          // démarrage — c'est lui qui décide, pas cet abonné.
+          add(AuthCheckRequested());
       }
     });
   }
