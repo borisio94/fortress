@@ -102,20 +102,35 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
                 ' · '
                 '${_count(nSup, zero: 'aucune fourniture', one: 'fourniture')}',
           ),
-          // DEUX COULEURS, parce que ce sont deux natures et non deux listes.
+          // DEUX NATURES, DEUX SIGNAUX : une icône et une couleur.
           //
-          // L'ambre porte la matière qui entre dans les plats, l'accent de la
-          // palette ce qui se consomme sans être servi. La distinction se voit
-          // avant qu'on ait lu le libellé.
+          // L'ICÔNE D'ABORD, parce que la couleur seule ne tient pas partout.
+          // Mesuré en ΔE76 (Lab) entre l'ambre sémantique et l'accent de
+          // chaque palette : 145 sur Violet Fortress, mais **17,7 sur la
+          // palette Amber en mode clair** — deux oranges voisins, où les deux
+          // onglets deviendraient difficiles à distinguer. L'icône ne dépend
+          // d'aucune palette, d'aucun mode, et sert aussi qui distingue mal
+          // les couleurs.
           //
-          // Aucune teinte en dur : `warning` et `primary` suivent les huit
-          // palettes, en clair comme en sombre. Sur la palette par défaut —
-          // Violet Fortress — l'accent EST le violet.
+          // Ce sont celles des états vides : la feuille pour ce qui entre dans
+          // les plats, le carton pour ce qui se consomme sans être servi. Un
+          // écran qui change de pictogramme entre sa liste vide et ses onglets
+          // ferait douter qu'il parle de la même chose.
+          //
+          // LA COULEUR RESTE, en renfort. Aucune teinte en dur : `warning` et
+          // `primary` suivent les huit palettes, en clair comme en sombre. Sur
+          // la palette par défaut — Violet Fortress — l'accent EST le violet.
           RestoPillTabs(
             items: [
               RestoPillTab(
-                  label: 'Ingrédients', count: nIng, color: sem.warning),
-              RestoPillTab(label: 'Fournitures', count: nSup),
+                  label: 'Ingrédients',
+                  count: nIng,
+                  color: sem.warning,
+                  icon: Icons.eco_outlined),
+              RestoPillTab(
+                  label: 'Fournitures',
+                  count: nSup,
+                  icon: Icons.inventory_2_outlined),
             ],
             selected: _tab,
             onSelect: (i) => setState(() => _tab = i),

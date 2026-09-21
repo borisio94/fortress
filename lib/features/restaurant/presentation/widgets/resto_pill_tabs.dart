@@ -19,10 +19,24 @@ class RestoPillTab {
   /// couleur entre eux.
   final Color? color;
 
+  /// Pictogramme posé AVANT le libellé. `null` → aucun.
+  ///
+  /// LA COULEUR NE SUFFIT PAS, et c'est mesurable. L'écart perceptuel entre
+  /// l'ambre sémantique et l'accent des huit palettes, calculé en ΔE76 (Lab),
+  /// va de 145 sur Violet Fortress à **17,7 sur la palette Amber en mode
+  /// clair** — deux oranges voisins. La distinction par la teinte y tient mal,
+  /// et elle ne tient pas du tout pour qui distingue mal les couleurs.
+  ///
+  /// L'icône est donc le signal PRINCIPAL, la couleur le renfort. Elle coûte
+  /// environ 22 px de largeur par pastille : acceptable à deux onglets,
+  /// à surveiller au-delà sur un téléphone.
+  final IconData? icon;
+
   const RestoPillTab({
     required this.label,
     required this.count,
     this.color,
+    this.icon,
   });
 }
 
@@ -96,8 +110,14 @@ class RestoPillTabs extends StatelessWidget {
             // Le compteur est DANS le libellé, pas dans une pastille à côté :
             // une seconde forme ferait varier la largeur sans rien apprendre
             // de plus.
-            child: Text('${items[i].label} · ${items[i].count}',
-                style: AppTextStyles.bodySmBold.copyWith(color: fg)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              if (items[i].icon != null) ...[
+                Icon(items[i].icon, size: 15, color: fg),
+                const SizedBox(width: 6),
+              ],
+              Text('${items[i].label} · ${items[i].count}',
+                  style: AppTextStyles.bodySmBold.copyWith(color: fg)),
+            ]),
           ),
         ),
       ),
