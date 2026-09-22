@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/permisions/subscription_provider.dart';
+import '../../../../core/database/app_database.dart';
 import '../../../../core/services/daily_menu_service.dart';
 import '../../../../core/services/invoice_printer.dart';
 import '../../../../core/services/manager_gate.dart';
@@ -20,6 +21,7 @@ import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../domain/entities/restaurant_table.dart';
+import '../../domain/order_author.dart';
 import '../widgets/deposit_sheet.dart';
 import '../widgets/packaging_sheet.dart';
 import '../widgets/payment_sheet.dart';
@@ -289,7 +291,8 @@ class _BillPageState extends ConsumerState<BillPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                _TableInfoCard(table: table, order: order),
+                _TableInfoCard(
+                    table: table, order: order, shopId: widget.shopId),
                 const SizedBox(height: 16),
                 _ItemsCard(order: order),
                 Row(
@@ -340,13 +343,30 @@ class _TableInfoCard extends StatelessWidget {
   final RestaurantTable table;
   final Sale order;
 
-  const _TableInfoCard({required this.table, required this.order});
+  /// Nécessaire pour mettre un NOM sur l'auteur de la commande : l'annuaire
+  /// des membres est indexé par boutique.
+  final String shopId;
+
+  const _TableInfoCard(
+      {required this.table, required this.order, required this.shopId});
 
   @override
   Widget build(BuildContext context) {
     final semantic = Theme.of(context).semantic;
     final duration = RestaurantOrderService.mealDuration(table, order);
-    final server = order.createdByUserId;
+    // QUI A PRIS LA COMMANDE. Cette ligne existait déjà et ne s'affichait
+    // jamais : `RestaurantOrderService` ne renseignait pas `createdByUserId`,
+    // et s'il l'avait fait, on aurait lu ici un UUID. Le nom vient du cache
+    // local des membres — lecture synchrone, hors ligne, comme le reste de
+    // cet écran.
+    final member = AppDatabase.cachedMember(
+        shopId, order.createdByUserId ?? '');
+    final profile = member?['profiles'];
+    final server = serverLabelFor(
+      userId: order.createdByUserId,
+      name: profile is Map ? profile['name'] as String? : null,
+      email: profile is Map ? profile['email'] as String? : null,
+    );
 
     return Container(
       padding: const EdgeInsets.all(14),

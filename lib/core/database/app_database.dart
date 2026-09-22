@@ -6403,6 +6403,20 @@ end \$\$;""",
     }
   }
 
+  /// Le membre [userId] de la boutique, tel que le CACHE local le connaît.
+  ///
+  /// Lecture SYNCHRONE et hors ligne : elle sert à mettre un nom sur l'auteur
+  /// d'une commande au moment de rendre une addition, et un rendu n'attend pas
+  /// le réseau. `null` si le cache ne le connaît pas — un membre parti, ou une
+  /// boutique dont la liste n'a jamais été tirée.
+  static Map<String, dynamic>? cachedMember(String shopId, String userId) {
+    if (shopId.isEmpty || userId.isEmpty) return null;
+    for (final m in _getShopMembersLocal(shopId)) {
+      if (m['user_id'] == userId) return m;
+    }
+    return null;
+  }
+
   static List<Map<String, dynamic>> _getShopMembersLocal(String shopId) {
     final raw = HiveBoxes.settingsBox.get('members_$shopId');
     if (raw == null) return [];

@@ -10,6 +10,7 @@ import '../../features/restaurant/domain/entities/restaurant_table.dart';
 import '../config/restaurant_mode.dart';
 import '../database/app_database.dart';
 import '../storage/hive_boxes.dart';
+import '../storage/local_storage_service.dart';
 import 'daily_expense_service.dart';
 import 'daily_menu_service.dart';
 import 'notification_service.dart';
@@ -26,6 +27,18 @@ class RestaurantOrderService {
   RestaurantOrderService._();
 
   static final SaleLocalDatasource _ds = SaleLocalDatasource();
+
+  /// QUI prend la commande, pour l'écrire dessus.
+  ///
+  /// `LocalStorageService` et NON `Supabase.instance.client.auth.currentUser` :
+  /// une connexion hors ligne n'ouvre aucune session gotrue, `currentUser` y
+  /// est nul — et c'est précisément en service, réseau coupé, qu'on prend des
+  /// commandes. Lire la session distante aurait laissé sans auteur exactement
+  /// celles qu'on cherche à attribuer.
+  static String? get _currentAuthorId {
+    final id = LocalStorageService.getCurrentUser()?.id;
+    return (id == null || id.isEmpty) ? null : id;
+  }
 
   /// Prix final d'une ligne, options comprises.
   ///
@@ -238,6 +251,7 @@ class RestaurantOrderService {
       paymentMethod: PaymentMethod.cash,
       status: SaleStatus.scheduled,
       createdAt: now,
+      createdByUserId: _currentAuthorId,
       orderType: 'dine_in',
       tableId: table.id,
       covers: covers,
@@ -314,6 +328,7 @@ class RestaurantOrderService {
       paymentMethod: PaymentMethod.cash,
       status: SaleStatus.scheduled,
       createdAt: now,
+      createdByUserId: _currentAuthorId,
       orderType: 'takeaway',
       tabLabel: label.isEmpty ? null : label,
       // Les listes de commandes affichent un nom de client : sans valeur, une
@@ -378,6 +393,7 @@ class RestaurantOrderService {
       paymentMethod: PaymentMethod.cash,
       status: SaleStatus.scheduled,
       createdAt: now,
+      createdByUserId: _currentAuthorId,
       orderType: 'delivery',
       tabLabel: label.isEmpty ? null : label,
       clientName: clientName.trim().isEmpty ? 'Livraison' : clientName.trim(),
@@ -508,6 +524,7 @@ class RestaurantOrderService {
       paymentMethod: PaymentMethod.cash,
       status: SaleStatus.scheduled,
       createdAt: now,
+      createdByUserId: _currentAuthorId,
       orderType: 'takeaway',
       // Les listes de commandes affichent le nom du client : sans valeur,
       // une commande de comptoir apparaîtrait vide et illisible.
