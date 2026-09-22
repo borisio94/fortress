@@ -35,6 +35,12 @@ class _StepShop extends StatelessWidget {
           // Type d'établissement — choix DÉFINITIF, non modifiable après
           // création (cf. kCreationSectors dans restaurant_mode.dart).
           //
+          // LE DIRE À L'ÉCRAN, et pas seulement ici. `create_shop_page` le
+          // disait ; ce tunnel — le chemin RÉEL par lequel une boutique naît —
+          // ne le disait pas. Le commerçant choisissait entre « E-commerce »
+          // et « Restaurant » sans savoir qu'il ne reviendrait pas dessus, et
+          // le découvrait en cherchant le réglage qui n'existe pas.
+          //
           // Il y avait ici un `...[` sans condition, vestige d'un
           // `if (!kEcommerceOnlyMode)` retiré. Il ne faisait rien, sinon
           // laisser croire qu'un garde subsistait.
@@ -68,6 +74,15 @@ class _StepShop extends StatelessWidget {
                       BorderSide(color: AppColors.divider)),
             ),
           ),
+          // L'avertissement est en `captionHint` et non en `micro` comme
+          // ailleurs : dix points pour dire « irréversible », c'est le
+          // chuchoter. Il reste calme — l'alarmer à chaque inscription
+          // ferait hésiter sur un choix qui, lui, est simple.
+          const SizedBox(height: 6),
+          Text(
+              'Ce choix est définitif : le type d\'établissement ne pourra '
+              'plus être modifié après la création.',
+              style: AppTextStyles.captionHint),
           const SizedBox(height: 14),
         ],
       ),

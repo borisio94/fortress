@@ -269,10 +269,15 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
                           ),
                           Padding(
                             padding: const EdgeInsets.only(top: 6, left: 2),
+                            // `captionHint` et non `micro` : le même
+                            // avertissement que dans le tunnel d'inscription,
+                            // au même échelon. Dix points pour dire
+                            // « irréversible », c'est le chuchoter.
                             child: Text(
-                              'Ce choix est définitif et ne pourra pas être '
-                              'modifié après la création.',
-                              style: AppTextStyles.micro,
+                              'Ce choix est définitif : le type '
+                              'd\'établissement ne pourra plus être modifié '
+                              'après la création.',
+                              style: AppTextStyles.captionHint,
                             ),
                           ),
                           const SizedBox(height: 14),
