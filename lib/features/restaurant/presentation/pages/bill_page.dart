@@ -156,7 +156,8 @@ class _BillPageState extends ConsumerState<BillPage> {
     );
     if (!ok || !mounted) return;
 
-    await RestaurantOrderService.applyDiscount(order, res.amount);
+    await RestaurantOrderService.applyDiscount(
+        order, res.amount, res.reason);
     if (!mounted) return;
     _load();
     AppSnack.success(
@@ -433,6 +434,14 @@ class _ItemsCard extends StatelessWidget {
             ),
           // Remise accordée par le gérant (geste sous PIN) : affichée en
           // clair sur l'addition, le client doit pouvoir la lire.
+          //
+          // LE MOTIF, LUI, EST POUR LA MAISON. Il était exigé à la saisie et
+          // n'atterrissait nulle part : le gérant qui relit une addition doit
+          // savoir POURQUOI elle a été remisée, pas seulement de combien.
+          //
+          // Il reste sur l'addition et NE PART PAS sur la facture remise au
+          // client : « erreur cuisine » ou « client mécontent » le regarde
+          // d'autant moins qu'il en est le sujet.
           if (order.discountAmount > 0) ...[
             const Divider(height: 18),
             Row(
@@ -444,6 +453,14 @@ class _ItemsCard extends StatelessWidget {
                         .copyWith(color: semantic.success)),
               ],
             ),
+            // Le motif, en retrait sous son montant. Absent des additions
+            // antérieures au hotfix_181 : il n'était alors écrit nulle part.
+            if ((order.discountReason ?? '').trim().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(order.discountReason!.trim(),
+                    style: AppTextStyles.captionHint),
+              ),
           ],
           // Frais éventuels (la commande partage le modèle de la caisse).
           if (order.totalFees > 0) ...[

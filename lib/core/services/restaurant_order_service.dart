@@ -4,6 +4,7 @@ import '../../features/caisse/data/repositories/sale_local_datasource.dart';
 import '../../features/caisse/domain/entities/sale.dart';
 import '../../features/caisse/domain/entities/sale_item.dart';
 import '../../features/restaurant/domain/courier_pay.dart';
+import '../../features/restaurant/domain/discount_reason.dart';
 import '../../features/restaurant/domain/settle_guard.dart';
 import '../../features/restaurant/domain/entities/restaurant_table.dart';
 import '../config/restaurant_mode.dart';
@@ -697,11 +698,22 @@ class RestaurantOrderService {
   ///
   /// Update CIBLÉ comme les autres transitions de service : une réécriture
   /// complète entrerait en course avec un autre poste sur `status`.
-  static Future<void> applyDiscount(Sale order, double amount) async {
+  /// [reason] accompagne le montant et suit son sort : retirer la remise
+  /// efface le motif, sinon « geste commercial » resterait collé à une
+  /// addition qui ne porte plus rien — voir `discount_reason.dart`.
+  ///
+  /// Le motif est EXIGÉ par la feuille de remise. Il partait jusqu'au
+  /// 22/09/2026 dans `activity_logs` et nulle part ailleurs : un champ imposé
+  /// au serveur, invisible sur l'addition comme sur la facture.
+  static Future<void> applyDiscount(
+      Sale order, double amount, String reason) async {
     final capped = amount < 0
         ? 0.0
         : (amount > order.subtotal ? order.subtotal : amount);
-    await _patchOrder(order, {'discount_amount': capped});
+    await _patchOrder(order, {
+      'discount_amount': capped,
+      'discount_reason': discountReasonFor(amount: capped, reason: reason),
+    });
   }
 
   /// Demande l'addition : la table passe en statut `addition`.

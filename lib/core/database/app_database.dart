@@ -4648,6 +4648,11 @@ end \$\$;""",
             'shop_id':        row['shop_id'],
             'status':         row['status'] ?? 'scheduled',
             'discount_amount': row['discount_amount'] ?? 0,
+            // Le motif suit le montant. `syncOrders` et `_onOrderChange`
+            // reconstruisent cette carte À LA MAIN : un champ ajouté dans un
+            // seul des deux revient à chaque resync dans un état, et dans
+            // l'autre au suivant.
+            'discount_reason': row['discount_reason'],
             'tax_rate':       row['tax_rate'] ?? 0,
             'payment_method': row['payment_method'] ?? 'cash',
             'client_id':      row['client_id'],
@@ -5169,6 +5174,8 @@ end \$\$;""",
           'shop_id':        row['shop_id'],
           'status':         row['status'] ?? 'scheduled',
           'discount_amount': row['discount_amount'] ?? 0,
+          // Le second des deux chemins — voir `syncOrders`.
+          'discount_reason': row['discount_reason'],
           'tax_rate':       row['tax_rate'] ?? 0,
           'payment_method': row['payment_method'] ?? 'cash',
           'client_id':      row['client_id'],

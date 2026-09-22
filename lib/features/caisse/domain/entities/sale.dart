@@ -226,6 +226,19 @@ class Sale extends Equatable {
   final String  shopId;
   final List<SaleItem> items;
   final double  discountAmount;
+
+  /// POURQUOI cette remise a été accordée — restauration uniquement.
+  ///
+  /// Exigé par la feuille de remise, qui refuse de valider sans lui. Il partait
+  /// jusqu'au 22/09/2026 dans `activity_logs` et nulle part ailleurs : un champ
+  /// imposé au serveur, invisible sur l'addition comme sur la facture.
+  ///
+  /// Il voyage désormais avec la commande (`orders.discount_reason`,
+  /// hotfix_181) — le journal n'est pas lisible hors ligne, et c'est là qu'un
+  /// restaurant travaille.
+  ///
+  /// NUL CÔTÉ E-COMMERCE : son chemin de remise ne demande aucun motif.
+  final String? discountReason;
   final double  taxRate;
   final List<Map<String, dynamic>> fees; // frais de commande [{id, label, amount}]
   final PaymentMethod paymentMethod;
@@ -396,6 +409,7 @@ class Sale extends Equatable {
     required this.shopId,
     required this.items,
     this.discountAmount = 0,
+    this.discountReason,
     this.taxRate        = 0,
     this.fees           = const [],
     required this.paymentMethod,
@@ -502,7 +516,7 @@ class Sale extends Equatable {
 
   Sale copyWith({
     String? id, String? shopId, List<SaleItem>? items,
-    double? discountAmount, double? taxRate,
+    double? discountAmount, String? discountReason, double? taxRate,
     List<Map<String, dynamic>>? fees,
     PaymentMethod? paymentMethod, SaleStatus? status,
     String? clientId, String? clientName, String? clientPhone,
@@ -552,6 +566,7 @@ class Sale extends Equatable {
     shopId:             shopId         ?? this.shopId,
     items:              items          ?? this.items,
     discountAmount:     discountAmount ?? this.discountAmount,
+    discountReason:     discountReason ?? this.discountReason,
     taxRate:            taxRate        ?? this.taxRate,
     fees:               fees           ?? this.fees,
     paymentMethod:      paymentMethod  ?? this.paymentMethod,
