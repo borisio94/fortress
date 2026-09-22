@@ -87,6 +87,9 @@ class CurrencyFormatter {
       'NGN': '₦',
       'MAD': 'MAD',
       'GBP': '£',
+      'CDF': 'FC',
+      'TND': 'DT',
+      'CAD': 'C\$',
     };
     return map[currency] ?? currency;
   }

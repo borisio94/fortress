@@ -7,6 +7,10 @@ part of '../pages/register_page.dart';
 // offline si la connectivité est tombée. Le CTA « Démarrer mon essai » est
 // géré par `_BottomBar` côté page racine.
 
+/// Devise qui sera posée sur la boutique, telle que l'étape 1 la déduit.
+String _recapCurrency(_RegisterPageState state) =>
+    currencyForCountry(_countryFromPhone(state._phoneFull));
+
 class _StepRecap extends StatelessWidget {
   final _RegisterPageState state;
   const _StepRecap({required this.state});
@@ -56,6 +60,18 @@ class _StepRecap extends StatelessWidget {
               label: 'Boutique',
               value:
                   '${state._shopNameCtrl.text.trim()} ($sectorLabel)'),
+          // LA DEVISE, ENFIN VISIBLE. Elle n'est demandée nulle part : elle se
+          // déduit de l'indicatif téléphonique saisi à l'étape 1, et fixe le
+          // formateur de TOUS les montants de l'application. La taire, c'était
+          // laisser découvrir une erreur à la première vente.
+          //
+          // Affichée, pas saisie : l'ajouter en champ ici allongerait un
+          // tunnel qu'on cherche à raccourcir, et elle se corrige d'un tap
+          // dans Réglages → Devise.
+          _RecapRow(
+              icon: Icons.payments_outlined,
+              label: 'Monnaie',
+              value: '${_recapCurrency(state)} — modifiable dans les réglages'),
           const SizedBox(height: 20),
           Container(
             padding: const EdgeInsets.all(14),

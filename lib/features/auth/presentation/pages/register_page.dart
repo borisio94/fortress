@@ -12,6 +12,7 @@ import '../../../../core/router/route_names.dart';
 import '../../../../core/router/registration_flag.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/utils/country_currency.dart';
 import '../../../../core/utils/country_phone_data.dart';
 import '../../../../core/validators/input_validators.dart';
 import '../../../../core/validators/password_policy.dart';
@@ -64,15 +65,6 @@ const _kSectors = <_SectorOption>[
   _SectorOption('restaurant',  'Restaurant / Café'),
   _SectorOption('fastfood',    'Fast-food'),
 ];
-
-const _countryCurrency = <String, String>{
-  'CM': 'XAF', 'TD': 'XAF', 'CF': 'XAF', 'CG': 'XAF', 'GA': 'XAF', 'GQ': 'XAF',
-  'SN': 'XOF', 'CI': 'XOF', 'BF': 'XOF', 'ML': 'XOF', 'NE': 'XOF', 'TG': 'XOF',
-  'BJ': 'XOF', 'GW': 'XOF',
-  'NG': 'NGN', 'GH': 'GHS', 'MA': 'MAD', 'TN': 'TND',
-  'FR': 'EUR', 'BE': 'EUR', 'DE': 'EUR', 'IT': 'EUR', 'ES': 'EUR',
-  'US': 'USD', 'CA': 'CAD', 'GB': 'GBP',
-};
 
 String _countryFromPhone(String? phone) {
   if (phone == null || phone.isEmpty) return 'CM';
@@ -233,7 +225,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   void _createShopAfterSignUp() {
     final country  = _countryFromPhone(_phoneFull);
-    final currency = _countryCurrency[country] ?? 'XAF';
+    final currency = currencyForCountry(country);
     context.read<ShopSelectorBloc>().add(CreateShopRequested(
       CreateShopParams(
         name:     _shopNameCtrl.text.trim(),
