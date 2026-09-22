@@ -5,7 +5,9 @@ import 'package:go_router/go_router.dart';
 import '../bloc/shop_selector_bloc.dart';
 import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/services/activity_log_service.dart';
+import '../../../../core/config/sector_identity.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/utils/country_phone_data.dart';
 import '../../../../core/storage/local_storage_service.dart';
@@ -343,7 +345,10 @@ class _CreateShopPageState extends ConsumerState<CreateShopPage> {
             Positioned(
               top: 12, right: 16,
               child: SafeArea(child: LanguageSwitcher(
-                  backgroundColor: Colors.white.withValues(alpha:0.92))),
+                  // Voir `forgot_password_page` : un voile blanc reste blanc
+                  // en mode sombre.
+                  backgroundColor:
+                      AppColors.surface.withValues(alpha: 0.92))),
             ),
           ]);
         },
@@ -394,7 +399,7 @@ class _ErrText extends StatelessWidget {
       padding: const EdgeInsets.only(top: 4, left: 2),
       child: Text(message,
           style: AppTextStyles.micro.copyWith(
-              color: const Color(0xFFEF4444))),
+              color: Theme.of(context).semantic.danger)),
     ),
   );
 }
@@ -409,10 +414,16 @@ class _SectorPicker extends StatelessWidget {
   // n'est plus modifiable après création (cf. kCreationSectors). Les
   // secteurs legacy (retail, supermarche, pharmacie, autre) restent valides
   // en base pour le parc existant mais ne sont plus proposés.
+  //
+  // Les COULEURS ne sont plus écrites ici : ce sont des couleurs d'identité,
+  // pas de statut, et elles vivent dans `sector_identity.dart` avec la raison
+  // pour laquelle elles ne passent ni par la palette ni par les jetons
+  // sémantiques. Au milieu d'un écran par ailleurs tokenisé, rien ne les
+  // distinguait d'un oubli.
   static const _sectors = [
-    ('ecommerce',   'E-commerce',    Icons.shopping_bag_rounded, Color(0xFFF59E0B)),
-    ('restaurant',  'Restaurant',    Icons.restaurant_rounded,   Color(0xFFEF4444)),
-    ('fastfood',    'Fast-food',     Icons.restaurant_rounded,   Color(0xFF10B981)),
+    ('ecommerce',   'E-commerce', Icons.shopping_bag_rounded),
+    ('restaurant',  'Restaurant', Icons.restaurant_rounded),
+    ('fastfood',    'Fast-food',  Icons.restaurant_rounded),
   ];
 
   @override
@@ -420,7 +431,8 @@ class _SectorPicker extends StatelessWidget {
     spacing: 8,
     runSpacing: 8,
     children: _sectors.map((s) {
-      final (key, label, icon, color) = s;
+      final (key, label, icon) = s;
+      final color = sectorColor(key);
       final selected = value == key;
       return GestureDetector(
         onTap: () => onChanged(key),

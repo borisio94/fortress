@@ -8,6 +8,7 @@ import '../../../../core/router/route_names.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/widgets/fortress_logo.dart';
+import '../../../../core/widgets/fortress_wordmark.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/language_switcher.dart';
 import '../../domain/login_password_check.dart';
@@ -230,16 +231,7 @@ class _MobileLayout extends StatelessWidget {
                   const SizedBox(height: 16),
                   const FortressLogo.light(size: 84),
                   const SizedBox(height: 10),
-                  Text(
-                    l.appName.toUpperCase(),
-                    style: TextStyle(
-                      fontFamily:    'Georgia',
-                      fontSize:      15,
-                      fontWeight:    FontWeight.w600,
-                      letterSpacing: 3,
-                      color:         cs.onSurface,
-                    ),
-                  ),
+                  const FortressWordmark(),
                   const SizedBox(height: 4),
                   Text(
                     l.loginPanelKicker,
@@ -299,16 +291,7 @@ class _LeftPanel extends StatelessWidget {
                 // désormais sur un fond presque blanc.
                 const FortressLogo.light(size: 128),
                 const SizedBox(height: 24),
-                Text(
-                  l.appName.toUpperCase(),
-                  style: TextStyle(
-                    fontFamily:    'Georgia',
-                    fontSize:      20,
-                    fontWeight:    FontWeight.w600,
-                    letterSpacing: 5,
-                    color:         cs.onSurface,
-                  ),
-                ),
+                const FortressWordmark(large: true),
                 const SizedBox(height: 6),
                 Text(
                   l.loginPanelKicker.toUpperCase(),
@@ -571,20 +554,24 @@ class _LoginFormState extends State<_LoginForm> {
               onPressed: widget.isLoading ? null : widget.onSubmit,
               style: ElevatedButton.styleFrom(
                 backgroundColor: cs.primary,
-                foregroundColor: Colors.white,
+                // `onPrimary` et non `Colors.white` : sur une palette claire
+                // — l'ambre, par exemple — du blanc sur le bouton devient
+                // illisible. Le thème sait quelle encre va sur sa couleur
+                // principale, pas nous.
+                foregroundColor: cs.onPrimary,
                 elevation:       0,
                 padding: EdgeInsets.symmetric(vertical: btnVPad),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8)),
                 minimumSize:  Size.zero,
                 textStyle: AppTextStyles.body.copyWith(
-                    fontWeight: FontWeight.w600, color: Colors.white),
+                    fontWeight: FontWeight.w600, color: cs.onPrimary),
               ),
               child: widget.isLoading
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 18, height: 18,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
+                          strokeWidth: 2, color: cs.onPrimary),
                     )
                   : Text(l.loginButton),
             ),
