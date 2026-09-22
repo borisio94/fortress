@@ -116,9 +116,14 @@ class _RestaurantDashboardPageState
           _Greeting(shopId: shopId),
           const SizedBox(height: 16),
           // ── Configuration incomplète ──────────────────────────────────
-          // Le routeur redirige déjà vers /restaurant/setup ; cette bannière
-          // couvre le cas où l'on atteint le tableau de bord par un chemin
-          // qui n'est pas gardé (retour arrière navigateur, lien direct).
+          // CETTE BANNIÈRE EST LE CHEMIN, pas un filet de sécurité. Elle a
+          // longtemps été décrite comme couvrant « le cas où l'on atteint le
+          // tableau de bord par un chemin qui n'est pas gardé », le routeur
+          // étant censé rediriger — il ne redirige plus, et à dessein
+          // (`app_router.dart`, `_restaurantGuard` : l'accompagnement PROPOSE
+          // au lieu d'imposer). Il n'existe aucune entrée « Configuration » au
+          // menu : cette bannière et la carte de progression de l'écran Menu
+          // sont les deux seules façons de trouver `/restaurant/setup`.
           if (!RestaurantSetupService.stepFor(shopId).isComplete) ...[
             _SetupBanner(shopId: shopId),
             const SizedBox(height: 16),

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart' hide User;
+import '../config/starter_units.dart';
 import '../config/supabase_config.dart';
 import '../services/notification_service.dart';
 import '../storage/hive_boxes.dart';
@@ -2178,6 +2179,42 @@ end \$\$;""",
     }
   }
 
+  /// Les unités proposées à une boutique neuve — voir `starter_units.dart`.
+  ///
+  /// Une boutique neuve n'en recevait aucune : le premier produit saisi butait
+  /// sur un champ « unité » sans le moindre choix, et il fallait deviner qu'on
+  /// pouvait en créer, dans un écran de paramètres qu'on ne cherche pas quand
+  /// on remplit une fiche produit.
+  ///
+  /// PAS PAR `saveUnit`, et c'est délibéré : elle journalise un
+  /// `unit_created` par appel. Six lignes « untel a créé une unité » au
+  /// journal d'activité d'une boutique de trente secondes attribueraient au
+  /// propriétaire une saisie qu'il n'a jamais faite. On écrit la liste d'un
+  /// coup et on pousse chaque ligne.
+  ///
+  /// Idempotent par construction : `onConflict` côté Supabase, et la clé Hive
+  /// est écrite en une fois.
+  static Future<void> _seedStarterUnits({
+    required String shopId,
+    required String sector,
+  }) async {
+    final units = starterUnitsFor(sector);
+    if (units.isEmpty) return;
+    try {
+      await HiveBoxes.settingsBox.put('units_$shopId', units);
+    } catch (e) {
+      debugPrint('[DB] unités d\'amorçage Hive err: $e');
+    }
+    for (final name in units) {
+      _bgWrite({
+        'table': 'units', 'op': 'upsert',
+        'data': {'shop_id': shopId, 'name': name},
+        'onConflict': 'shop_id,name',
+      });
+    }
+    _notify('units', shopId);
+  }
+
   static Future<ShopSummary> createShop({
     required String name, required String sector,
     required String currency, required String country,
@@ -2207,6 +2244,8 @@ end \$\$;""",
     await LocalStorageService.saveMembership(
         userId: userId, shopId: shop.id,
         shopName: shop.name, role: UserRole.admin);
+
+    await _seedStarterUnits(shopId: shop.id, sector: sector);
 
     // Amorce la liste des membres avec le créateur pour qu'il apparaisse
     // immédiatement dans l'onglet Membres, même avant le 1er fetch Supabase.
