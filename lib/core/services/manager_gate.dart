@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../permisions/app_permissions.dart';
+import '../permisions/missing_pin_policy.dart';
+import '../../shared/widgets/app_confirm_dialog.dart';
+import '../widgets/owner_pin_setup_dialog.dart';
 import '../widgets/lock_blocked_dialog.dart';
 import '../widgets/owner_pin_dialog.dart';
 import '../../shared/widgets/app_snack.dart';
@@ -62,10 +65,23 @@ extension ManagerActionX on ManagerAction {
 /// régression de sécurité pour la même fonction.
 ///
 /// Différence VOLONTAIRE avec [OwnerPinDialog.guard] : quand AUCUN PIN n'est
-/// configuré, l'action passe (avec un rappel) au lieu d'être refusée. Bloquer
-/// une annulation en plein service parce qu'un réglage manque paralyserait la
-/// salle — et le personnel contournerait par un chemin non tracé, ce qui est
-/// exactement ce qu'on cherche à éviter. La permission, elle, reste exigée.
+/// configuré, l'action passe au lieu d'être refusée. Bloquer une annulation en
+/// plein service parce qu'un réglage manque paralyserait la salle — et le
+/// personnel contournerait par un chemin non tracé, ce qui est exactement ce
+/// qu'on cherche à éviter. La permission, elle, reste exigée, et le geste est
+/// journalisé dans les deux cas.
+///
+/// CE QU'ON FAIT À LA PLACE, depuis le 22/09/2026 : on PROPOSE au propriétaire
+/// de poser le code sur-le-champ. C'était un `AppSnack.info` qui renvoyait
+/// chercher « Réglages → Sécurité » à la main, APRÈS que l'argent soit sorti —
+/// un cul-de-sac. Rien, nulle part, n'invitait jamais à définir ce code, et
+/// une boutique neuve restait indéfiniment sans.
+///
+/// Le moment est choisi : c'est le seul où l'on sait que la protection
+/// servirait à quelque chose. Une bannière de plus sur un tableau de bord se
+/// balaie ; une proposition au moment du geste se lit. Voir
+/// `missing_pin_policy.dart` pour qui la reçoit, et pourquoi les autres ne
+/// lisent plus rien.
 class ManagerGate {
   ManagerGate._();
 
@@ -112,15 +128,16 @@ class ManagerGate {
         }
         return false;
       }
-    } else if (context.mounted) {
-      AppSnack.info(
-          context,
-          'Aucun code PIN gérant configuré : cette action n\'est pas '
-          'protégée. Réglages → Sécurité pour en définir un.');
+    } else if (missingPinResponse(isShopOwner: perms.isShopOwner) ==
+            MissingPinResponse.offerSetup &&
+        context.mounted) {
+      await _offerPinSetup(context, action);
     }
 
     // Journalisé APRÈS l'aval et AVANT l'exécution : ce qui compte est qu'un
-    // gérant a autorisé le geste, pas qu'il ait abouti techniquement.
+    // gérant a autorisé le geste, pas qu'il ait abouti techniquement. Et sans
+    // PIN AUSSI : c'est cette ligne qui fait que l'absence de code n'efface
+    // pas la trace, seulement l'autorisation.
     await ActivityLogService.log(
       action: action.logAction,
       targetType: 'order',
@@ -130,5 +147,34 @@ class ManagerGate {
       details: details,
     );
     return true;
+  }
+
+  /// Propose de poser le code, puis laisse l'action se poursuivre.
+  ///
+  /// NE BLOQUE JAMAIS, quelle que soit la réponse — c'est la règle de ce
+  /// garde, et ce n'est pas une proposition déguisée en obligation. « Plus
+  /// tard » est une réponse valable, et l'action qui suit s'exécute
+  /// exactement comme avant.
+  ///
+  /// ET ON NE REDEMANDE PAS LE CODE qu'il vient de poser : il a prouvé son
+  /// identité en le choisissant, trois secondes plus tôt. Le lui réclamer
+  /// aussitôt ferait de la mise en sécurité une punition.
+  static Future<void> _offerPinSetup(
+      BuildContext context, ManagerAction action) async {
+    final wants = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.lock_outline_rounded,
+      title: 'Protéger « ${action.title} » ?',
+      body: const Text(
+          'Aucun code gérant n\'est défini : ce geste — et les deux autres '
+          'qui font sortir de l\'argent — ne sont protégés par rien.\n\n'
+          'Vous pouvez en poser un maintenant, en quelques secondes. '
+          'L\'action en cours se poursuivra dans tous les cas.'),
+      cancelLabel: 'Plus tard',
+      confirmLabel: 'Définir un code',
+      onConfirm: () {},
+    );
+    if (wants != true || !context.mounted) return;
+    await OwnerPinSetupDialog.show(context);
   }
 }
