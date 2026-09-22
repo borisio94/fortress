@@ -22,6 +22,8 @@ import 'features/caisse/presentation/bloc/caisse_bloc.dart';
 import 'features/hub_central/presentation/bloc/hub_bloc.dart';
 import 'shared/widgets/alerts/scheduled_alerts_overlay.dart';
 import 'shared/widgets/demo_tap_indicator.dart';
+import 'features/hr/data/providers/employees_provider.dart'
+    show permissionsSignalProvider;
 import 'core/services/notification_service.dart';
 import 'core/services/stock_service.dart';
 import 'core/providers/demo_mode_provider.dart';
@@ -59,6 +61,14 @@ class _PosAppState extends ConsumerState<PosApp>
     _caisseBloc = CaisseBloc();
     _hubBloc    = ref.read(hubBlocProvider);
 
+    // RELIRE SES DROITS QUAND LE RÉSEAU REVIENT.
+    //
+    // `_onNetworkRestored` notifie `shop_memberships` après une coupure : les
+    // permissions ont pu être modifiées pendant qu'on ne regardait pas. Le
+    // provider ne sait pas se redemander tout seul, c'est ce compteur qui l'y
+    // oblige.
+    AppDatabase.addListener(_onPermissionsMayHaveChanged);
+
     // Écoute les deep-links (fortress://reset-password, universal links)
     // une fois le router construit — ref.read est sûr dans addPostFrameCallback.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -73,12 +83,27 @@ class _PosAppState extends ConsumerState<PosApp>
       // Fire-and-forget : ne bloque pas le thread UI au réveil.
       // ignore: discarded_futures
       AppDatabase.onAppResumed();
+      // Le second des deux moments où l'on relit ses droits. Sur le web,
+      // c'est le retour sur l'onglet — l'instant exact où quelqu'un revient
+      // après qu'on a pu modifier ses permissions ailleurs.
+      _bumpPermissions();
     }
+  }
+
+  /// Relit les permissions de l'utilisateur courant au prochain rendu.
+  void _bumpPermissions() {
+    if (!mounted) return;
+    ref.read(permissionsSignalProvider.notifier).state++;
+  }
+
+  void _onPermissionsMayHaveChanged(String table, String shopId) {
+    if (table == 'shop_memberships') _bumpPermissions();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    AppDatabase.removeListener(_onPermissionsMayHaveChanged);
     DeepLinkService.dispose();
     _shopSelectorBloc.close();
     _caisseBloc.close();

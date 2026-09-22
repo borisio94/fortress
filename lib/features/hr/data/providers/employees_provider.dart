@@ -374,8 +374,33 @@ final employeesProvider = AsyncNotifierProvider.family<
 // La valeur est un AsyncValue dans le provider mais lue via `valueOrNull`
 // par `permissionsProvider` (synchrone) avec fallback `null` (legacy).
 
+/// COMPTEUR DE RELECTURE DES PERMISSIONS.
+///
+/// Il n'existait rien pour redemander ses droits. Le provider ci-dessous les
+/// lisait UNE FOIS, et `grep invalidate(currentUserShopPermissionsProvider`
+/// ne rendait aucune ligne dans tout `lib/`. Un gérant qui retirait une
+/// permission à un serveur en plein service ne la lui retirait pas : le
+/// serveur la gardait jusqu'à ce qu'il recharge l'application. Le sens inverse
+/// était vrai aussi — une permission accordée n'apparaissait jamais.
+///
+/// Incrémenter ce compteur relit. Il l'est à DEUX moments, et le choix est le
+/// même qu'ailleurs dans l'application : quand elle revient au premier plan,
+/// et quand le réseau revient. Ce sont les deux instants où l'on sait que le
+/// monde a pu bouger sans nous.
+///
+/// CE QUE ÇA NE FAIT PAS. L'application n'est pas immédiate : un droit retiré
+/// pendant que l'écran reste affiché et le réseau stable ne sera vu qu'au
+/// prochain de ces deux moments. Une souscription Realtime sur
+/// `shop_memberships` le rendrait instantané — la table n'y est pas
+/// aujourd'hui, et l'ajouter demande de vérifier la publication Supabase, ce
+/// qui ne se lit pas depuis le dépôt.
+final permissionsSignalProvider = StateProvider<int>((ref) => 0);
+
 final currentUserShopPermissionsProvider = FutureProvider.family<
     MemberPermissions?, String>((ref, shopId) async {
+  // La dépendance qui rend ce provider relisible. Sans elle, il n'y a aucun
+  // moyen de redemander ses droits sans redémarrer.
+  ref.watch(permissionsSignalProvider);
   final cacheKey = 'my_perms_$shopId';
   MemberPermissions? cached;
   try {

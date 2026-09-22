@@ -659,6 +659,12 @@ class AppDatabase {
         _notify('products',     shopId);
         _notify('clients',      shopId);
         _notify('stock_levels', shopId);
+        // LES DROITS AUSSI ONT PU CHANGER PENDANT LA COUPURE, et rien ne les
+        // relisait : `shop_memberships` n'est pas une table synchronisée, elle
+        // est lue à la demande par `currentUserShopPermissionsProvider`. Cette
+        // notification n'annonce pas une donnée reçue — elle dit « relis », ce
+        // qui est exactement ce qu'on sait après un retour de réseau.
+        _notify('shop_memberships', shopId);
         // Rejoue les alertes stock après resync — les changements survenus
         // pendant l'offline arrivent en bloc via syncProducts (pas via
         // Realtime), donc _emitStockNotification ne s'est pas déclenché.
