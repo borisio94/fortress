@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/permisions/subscription_provider.dart';
+import '../../../../core/permisions/user_plan.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/router/registration_flag.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -20,8 +22,11 @@ import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/auth_fields.dart';
 import '../../../../shared/widgets/language_switcher.dart';
 import '../../../../shared/widgets/phone_field.dart';
+import '../../../../shared/providers/current_shop_provider.dart';
+import '../../../shop_selector/domain/entities/shop_summary.dart';
 import '../../../shop_selector/domain/usecases/create_shop_usecase.dart';
 import '../../../shop_selector/presentation/bloc/shop_selector_bloc.dart';
+import '../../domain/post_signup_entry.dart';
 import '../bloc/auth_bloc.dart';
 import '../bloc/auth_event.dart';
 import '../bloc/auth_state.dart';
@@ -241,6 +246,67 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
     ));
   }
 
+  /// Vrai dès que l'attente du plan commence — voir le garde du listener.
+  bool _entering = false;
+
+  /// ON N'INTERROMPT PLUS LE PARCOURS PAR UNE DÉCONNEXION.
+  ///
+  /// Jusqu'au 22/09/2026, la création de la boutique se terminait par
+  /// `AuthLogoutRequested` et « Connectez-vous pour commencer » : l'utilisateur
+  /// ressaisissait les identifiants qu'il venait de choisir, trente secondes
+  /// plus tôt, pour son premier contact avec l'application.
+  ///
+  /// La raison était bonne. L'essai de 14 jours est créé par le déclencheur
+  /// SQL `create_trial_subscription` à l'insertion de la ligne `shops`, et
+  /// enchaîner appelait parfois `get_user_plan` AVANT qu'il y soit visible —
+  /// le compte neuf tombait alors sur un paywall « Expiré ». Le remède était
+  /// trop large : la session était valide, on la jetait par précaution.
+  ///
+  /// On REDEMANDE, cinq fois, avec un délai croissant plafonné à deux
+  /// secondes. La course se résout en quelques centaines de millisecondes. Un
+  /// essai qui n'arrive jamais signale autre chose — une table `plans` sans
+  /// ligne `trial` — et là, l'ancien chemin reprend : déconnexion et retour au
+  /// login, qui relit le plan depuis zéro.
+  ///
+  /// `registrationInProgress` reste posé pendant toute l'attente : c'est lui
+  /// qui empêche le routeur de trancher sur un plan en cours de chargement.
+  Future<void> _enterAfterShopCreated(ShopSummary shop) async {
+    for (var attempt = 0;; attempt++) {
+      await ref.read(subscriptionProvider.notifier).load();
+      if (!mounted) return;
+      final plan =
+          ref.read(subscriptionProvider).valueOrNull ?? UserPlan.empty();
+      final outcome = postSignUpOutcome(
+        trialVisible:
+            trialIsVisible(hasPlan: plan.hasPlan, isActive: plan.isActive),
+        attempt: attempt,
+      );
+
+      if (outcome == PostSignUpOutcome.retry) {
+        await Future<void>.delayed(trialLookupDelay(attempt));
+        if (!mounted) return;
+        continue;
+      }
+
+      registrationInProgress = false;
+      if (outcome == PostSignUpOutcome.enter) {
+        ref.read(currentShopProvider.notifier).setShop(shop);
+        ref.read(myShopsProvider.notifier).addShop(shop);
+        AppSnack.success(
+            context, 'Bienvenue ! Votre essai de 14 jours est activé.');
+        context.go(shopLandingRoute(shop.id));
+      } else {
+        context.read<AuthBloc>().add(AuthLogoutRequested());
+        AppSnack.success(
+            context,
+            'Compte créé ! Votre essai de 14 jours est activé. '
+            'Connectez-vous pour commencer.');
+        context.go(RouteNames.login);
+      }
+      return;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -262,19 +328,13 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
           ),
           BlocListener<ShopSelectorBloc, ShopSelectorState>(
             listener: (ctx, state) {
-              if (state is ShopCreated && _submitting) {
-                // Nouveau flux (2026-06-06) : l'essai 14 jours est DÉJÀ activé
-                // en base par le trigger create_trial_subscription. Plutôt que
-                // d'enchaîner en auto-login (où get_user_plan pouvait être
-                // appelé AVANT que le trial soit visible → paywall « Expiré »),
-                // on déconnecte et on renvoie vers l'écran de connexion. Au
-                // login suivant, le trial existe → aucun paywall.
-                context.read<AuthBloc>().add(AuthLogoutRequested());
-                AppSnack.success(ctx,
-                    'Compte créé ! Votre essai de 14 jours est activé. '
-                    'Connectez-vous pour commencer.');
-                ctx.go(RouteNames.login);
-                registrationInProgress = false;
+              if (state is ShopCreated && _submitting && !_entering) {
+                // L'attente du plan dure plusieurs secondes dans le pire cas.
+                // Un second passage y lancerait une deuxième boucle, et deux
+                // navigations concurrentes à l'arrivée.
+                _entering = true;
+                // ignore: discarded_futures
+                _enterAfterShopCreated(state.shop);
               } else if (state is ShopSelectorError && _submitting) {
                 // Compte créé OK mais shop KO → on envoie l'utilisateur sur
                 // le formulaire create-shop classique pour qu'il retente
