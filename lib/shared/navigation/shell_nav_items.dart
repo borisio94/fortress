@@ -224,7 +224,23 @@ final List<ShellNavItem> kShellNavItems = [
     iconSelected: Icons.inventory_2_rounded,
     label:        (_) => 'Menu',
     route:        (id) => '/shop/$id/inventaire',
-    visibleIf:    (p) => p.isShopAdmin && p.canViewProducts,
+    // OUVERT AU SERVICE, et pas seulement au gérant. Cette entrée était
+    // gardée par `isShopAdmin && canViewProducts` — or c'est le SEUL écran
+    // d'où part une commande au restaurant. Un serveur y atterrissait à la
+    // connexion (`shopLandingRoute` renvoie un restaurant sur `/inventaire`,
+    // route sans garde), touchait « Salle » ou « Commandes », et n'avait plus
+    // aucun moyen d'y revenir. Cent fois par jour, sur un téléphone.
+    //
+    // `canViewProducts` seul : il vaut déjà `true` pour tout membre
+    // (`legacy: true`), et un gérant qui refuse `inventoryView` à quelqu'un le
+    // lui retire ici aussi. C'est la même clé que « voir la carte », parce que
+    // c'est exactement ce que cet écran montre.
+    //
+    // L'ÉCRAN SAIT DÉJÀ SE TENIR : `_onDishTap` ouvre la fiche au lieu du
+    // formulaire sans `canEditProduct`, et la corbeille, la disponibilité du
+    // jour et le menu de débordement sont gardés un par un. Aucun prix d'achat
+    // ni marge n'y est rendu. C'était la porte qui était fermée, pas la pièce.
+    visibleIf:    (p) => p.canViewProducts,
     sectorIn:     kRestaurantSectors,
     primary:      true,
   ),
