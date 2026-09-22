@@ -23,7 +23,12 @@ abstract class AuthRemoteDataSource {
 // ─────────────────────────────────────────────────────────────────────────────
 // Supabase Auth + fallback Hive offline
 // ─────────────────────────────────────────────────────────────────────────────
-class AuthRemoteDataSourceMock implements AuthRemoteDataSource {
+/// L'IMPLÉMENTATION RÉELLE. Elle s'appelait `AuthRemoteDataSourceMock`
+/// jusqu'au 21/09/2026, et c'est la seule qui existe : `injection_container`
+/// la câble en production, chaque connexion et chaque inscription passent par
+/// elle. Le nom a trompé un audit du parcours d'entrée, qui a cherché ailleurs
+/// le code qui authentifie vraiment.
+class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   final _supabase = AuthSupabaseDataSource();
 
   @override
@@ -130,7 +135,10 @@ class AuthRemoteDataSourceMock implements AuthRemoteDataSource {
       await LocalStorageService.saveUser(user);
     }
 
-    await SecureStorageService.saveAccessToken('offline_token_$normalEmail');
+    // PAS DE JETON FACTICE. On écrivait ici `offline_token_<email>` dans le
+    // stockage sécurisé ET dans Hive. Rien ne l'a jamais relu : la session
+    // réelle appartient à gotrue, et une connexion hors ligne n'en ouvre
+    // aucune. Ça donnait l'apparence d'un jeton là où il n'y en a pas.
     await LocalStorageService.setCurrentUserId(user.id);
     await LocalStorageService.setLocalDataOwnerId(user.id);
     return UserModel.fromEntity(user);

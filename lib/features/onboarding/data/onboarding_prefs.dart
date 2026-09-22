@@ -22,9 +22,6 @@ class OnboardingPrefs {
   OnboardingPrefs._();
 
   // ─── Clés (toutes préfixées 'onboarding_') ──────────────────────────────
-  /// True si l'utilisateur a vu (ou skippé) les slides marketing.
-  /// Une fois positionné, l'app n'affichera plus les slides au démarrage.
-  static const _kSlidesSeen          = 'onboarding_seen';
   /// Tooltip d'aide première vente (PR-3).
   static const _kFirstSaleTooltip    = 'onboarding_first_sale_tooltip_seen';
   /// Bannière "Confirmez votre email" — l'utilisateur peut la fermer.
@@ -43,23 +40,12 @@ class OnboardingPrefs {
       'onboarding_checklist_${uid}_$step';
 
   // ─── Slides ────────────────────────────────────────────────────────────
-  static Future<bool> hasSeenSlides() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getBool(_kSlidesSeen) ?? false;
-    } catch (_) {
-      // Fallback safe : considère que oui pour ne pas spammer les slides
-      // si SharedPreferences est cassé (cas test ou plateforme exotique).
-      return true;
-    }
-  }
-
-  static Future<void> markSlidesSeen() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_kSlidesSeen, true);
-    } catch (_) {/* silencieux */}
-  }
+  //
+  // RIEN ICI. `hasSeenSlides` et `markSlidesSeen` sont partis le 21/09/2026
+  // avec les slides elles-mêmes : la clé `onboarding_seen` n'alimentait plus
+  // qu'un cache que personne ne lisait. La clé reste dans SharedPreferences
+  // des appareils existants, inerte — la retirer demanderait une migration
+  // pour gagner un booléen.
 
   // ─── First-sale tooltip (PR-3) ─────────────────────────────────────────
   static Future<bool> hasSeenFirstSaleTooltip() async {

@@ -34,39 +34,41 @@ class _StepShop extends StatelessWidget {
           const SizedBox(height: 14),
           // Type d'établissement — choix DÉFINITIF, non modifiable après
           // création (cf. kCreationSectors dans restaurant_mode.dart).
-          ...[
-            const AppFieldLabel('Type d\'établissement', required: true),
-            DropdownButtonFormField<String>(
-              initialValue: state._sector,
-              items: _kSectors
-                  .map((o) => DropdownMenuItem(
-                      value: o.value,
-                      child: Text(o.label, style: AppTextStyles.body)))
-                  .toList(),
-              onChanged: (v) {
-                if (v != null) {
-                  // ignore: invalid_use_of_protected_member
-                  state.setState(() => state._sector = v);
-                }
-              },
-              decoration: InputDecoration(
-                prefixIcon: Icon(Icons.category_outlined,
-                    size: 18, color: AppColors.textSecondary),
-                isDense: true,
-                filled: true,
-                fillColor: AppColors.inputFill,
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        BorderSide(color: AppColors.divider)),
-                enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        BorderSide(color: AppColors.divider)),
-              ),
+          //
+          // Il y avait ici un `...[` sans condition, vestige d'un
+          // `if (!kEcommerceOnlyMode)` retiré. Il ne faisait rien, sinon
+          // laisser croire qu'un garde subsistait.
+          const AppFieldLabel('Type d\'établissement', required: true),
+          DropdownButtonFormField<String>(
+            initialValue: state._sector,
+            items: _kSectors
+                .map((o) => DropdownMenuItem(
+                    value: o.value,
+                    child: Text(o.label, style: AppTextStyles.body)))
+                .toList(),
+            onChanged: (v) {
+              if (v != null) {
+                // ignore: invalid_use_of_protected_member
+                state.setState(() => state._sector = v);
+              }
+            },
+            decoration: InputDecoration(
+              prefixIcon: Icon(Icons.category_outlined,
+                  size: 18, color: AppColors.textSecondary),
+              isDense: true,
+              filled: true,
+              fillColor: AppColors.inputFill,
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      BorderSide(color: AppColors.divider)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      BorderSide(color: AppColors.divider)),
             ),
-            const SizedBox(height: 14),
-          ],
+          ),
+          const SizedBox(height: 14),
         ],
       ),
     );

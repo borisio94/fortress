@@ -10,26 +10,24 @@ class SecureStorageService {
     ),
   );
 
-  static const _accessTokenKey  = 'access_token';
   static const _refreshTokenKey = 'refresh_token';
+  /// Plus jamais ÉCRITE — seulement effacée. Les appareils installés avant le
+  /// 21/09/2026 portent un faux jeton `offline_token_<email>` sous cette clé,
+  /// et `clearTokens` doit continuer de les en débarrasser.
+  static const _legacyAccessTokenKey = 'access_token';
   static const _userIdKey       = 'user_id';
 
   // ── Tokens ─────────────────────────────────────────────────────────────────
 
-  static Future<void> saveAccessToken(String token) async {
-    try { await _storage.write(key: _accessTokenKey, value: token); } catch (_) {}
-    // Fallback Hive
-    await HiveBoxes.settingsBox.put('_token_access', token);
-  }
-
-  static Future<String?> getAccessToken() async {
-    try {
-      final v = await _storage.read(key: _accessTokenKey);
-      if (v != null && v.isNotEmpty) return v;
-    } catch (_) {}
-    // Fallback Hive
-    return HiveBoxes.settingsBox.get('_token_access') as String?;
-  }
+  // PAS DE JETON D'ACCÈS ICI. `saveAccessToken` et `getAccessToken` sont
+  // partis le 21/09/2026 : la première n'avait qu'un appelant — l'écriture
+  // d'un faux jeton `offline_token_<email>` à la connexion hors ligne — et la
+  // seconde n'en avait aucun. La vraie session de l'application appartient à
+  // gotrue, qui la stocke lui-même.
+  //
+  // `clearTokens` et `clearAll` continuent de supprimer `access_token` et
+  // `_token_access` : les appareils déjà installés portent le faux jeton, et
+  // il doit s'en aller.
 
   static Future<void> saveRefreshToken(String token) async {
     try { await _storage.write(key: _refreshTokenKey, value: token); } catch (_) {}
@@ -47,7 +45,7 @@ class SecureStorageService {
   /// Efface uniquement les tokens (pas les mots de passe)
   static Future<void> clearTokens() async {
     try {
-      await _storage.delete(key: _accessTokenKey);
+      await _storage.delete(key: _legacyAccessTokenKey);
       await _storage.delete(key: _refreshTokenKey);
       await _storage.delete(key: _userIdKey);
     } catch (_) {}

@@ -24,7 +24,6 @@ import 'shared/widgets/alerts/scheduled_alerts_overlay.dart';
 import 'shared/widgets/demo_tap_indicator.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/stock_service.dart';
-import 'features/onboarding/presentation/providers/onboarding_seen_provider.dart';
 import 'core/providers/demo_mode_provider.dart';
 import 'core/providers/text_scale_provider.dart';
 
@@ -59,13 +58,6 @@ class _PosAppState extends ConsumerState<PosApp>
     );
     _caisseBloc = CaisseBloc();
     _hubBloc    = ref.read(hubBlocProvider);
-
-    // Amorçage du cache `onboarding_seen` (PR-1). Lu en async depuis
-    // SharedPreferences puis rendu disponible synchroniquement au
-    // `redirect` GoRouter pour décider d'afficher les slides marketing
-    // au tout premier lancement.
-    // ignore: discarded_futures
-    primeOnboardingSeenCache(ref);
 
     // Écoute les deep-links (fortress://reset-password, universal links)
     // une fois le router construit — ref.read est sûr dans addPostFrameCallback.

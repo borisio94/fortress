@@ -1,3 +1,16 @@
+/// LES TRADUCTIONS VIVENT ICI, ET NULLE PART AILLEURS.
+///
+/// `pubspec.yaml` porte `generate: true` et le dépôt contient
+/// `lib/core/i18n/l10n/app_fr.arb` et `app_en.arb` — mais ce fichier est écrit
+/// À LA MAIN et ne dérive pas d'eux. Une clé ajoutée ou corrigée dans un ARB
+/// n'apparaît jamais à l'écran tant qu'elle n'est pas portée ici.
+///
+/// Les deux ARB portent le même avertissement depuis le 21/09/2026. Les
+/// remettre en source demanderait de basculer sur `flutter gen-l10n`, ce qui
+/// touche chaque chaîne de l'application : c'est un chantier, pas un
+/// correctif.
+library;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 

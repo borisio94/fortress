@@ -1,6 +1,8 @@
 {
   "@@locale": "en",
 
+  "@@__WARNING__": "THIS FILE IS NOT THE SOURCE OF TRANSLATIONS. Despite `generate: true` in pubspec.yaml, the strings shown on screen come from lib/core/i18n/app_localizations.dart, which is hand-written. Adding or fixing a key HERE has NO EFFECT: it must also be carried into that Dart file. Found on 2026-09-21 by the entry-path audit and left as is — moving to flutter gen-l10n would touch every string in the app and needs its own piece of work.",
+
   "appName": "Fortress",
 
   "loginTitle": "Welcome back 👋",

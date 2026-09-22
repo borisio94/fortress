@@ -20,13 +20,7 @@ import '../../features/super_admin/presentation/pages/platform_stats_page.dart';
 import '../../features/super_admin/presentation/pages/platform_incidents_page.dart';
 import '../../features/super_admin/presentation/pages/platform_export_page.dart';
 import '../../features/super_admin/presentation/pages/super_admin_deleted_hub_page.dart';
-import '../../features/onboarding/presentation/pages/onboarding_slides_page.dart';
-import '../../features/onboarding/presentation/pages/auth_choice_page.dart';
-import '../../features/onboarding/presentation/pages/register_simplified_page.dart';
-import '../../features/onboarding/presentation/pages/shop_onboarding_wizard.dart';
 import '../../features/onboarding/presentation/pages/product_quick_add_page.dart';
-import '../../features/onboarding/presentation/providers/onboarding_seen_provider.dart';
-import '../../features/onboarding/data/onboarding_prefs.dart';
 import '../services/account_access_policy.dart';
 import '../../features/catalogue/presentation/pages/catalogue_page.dart';
 import '../../features/marketing/presentation/pages/landing_page.dart';
@@ -181,13 +175,6 @@ class AuthRouterNotifier extends ChangeNotifier {
     final wasAuth = _isAuthenticated;
     _isAuthenticated = state is AuthAuthenticated;
     if (!wasAuth && _isAuthenticated) {
-      // Toute authentification réussie marque les slides d'onboarding
-      // comme « vues » — y compris pour un user qui a contourné les
-      // slides (inscription directe /auth/register, lien d'invitation,
-      // import de session existante). Sinon, au logout, le redirect le
-      // renverrait sur l'onboarding au lieu de /login.
-      unawaited(OnboardingPrefs.markSlidesSeen());
-      _ref?.read(onboardingSeenCacheProvider.notifier).state = true;
       // Vient de se connecter → charger plan + memberships EN PARALLÈLE
       // avec la validation serveur de la session (compte zombie : profile
       // ou membership supprimés côté serveur sans purge auth). Si invalide,
@@ -206,8 +193,12 @@ class AuthRouterNotifier extends ChangeNotifier {
           // notifyListeners → la garde « Boutique suspendue » du shell voit le
           // bon statut dès le 1er build (même principe que le blocage/plan).
           _syncUserShops(),
-          // Flag serveur des slides d'intro (1 fois par compte, cross-device).
-          loadOnboardingSlidesSeen(ref),
+          // UN ALLER-RETOUR DE MOINS, retiré le 21/09/2026. On lisait ici
+          // `profiles.onboarding_slides_seen` à CHAQUE connexion, et le seul
+          // lecteur du résultat gardait une route que plus personne ne
+          // pouvait atteindre : les slides d'intro n'avaient plus aucun
+          // appelant. La connexion attendait une réponse dont rien ne
+          // dépendait.
         ]).whenComplete(() {
           _syncing = false;
           notifyListeners();
@@ -234,9 +225,6 @@ class AuthRouterNotifier extends ChangeNotifier {
     } else if (wasAuth && !_isAuthenticated) {
       _ref?.read(subscriptionProvider.notifier).reset();
       _ref?.read(shopRolesMapProvider.notifier).state = {};
-      // Réinitialise le flag slides → rechargé à la prochaine connexion
-      // (un autre compte sur le même appareil doit être réévalué).
-      _ref?.read(onboardingSlidesSeenProvider.notifier).state = null;
       // Vider la boutique active et notifier le dashboard
       try {
         _ref?.read(currentShopProvider.notifier).clearShop();
@@ -421,12 +409,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final isLandingRoute       = loc == RouteNames.landing;
       final isPricingRoute       = loc == RouteNames.pricing;
       final isPublicMarketing    = isLandingRoute || isPricingRoute;
-      // Onboarding routes (PR-1) : slides marketing + auth choice +
-      // register simplifié + wizard boutique. Toutes accessibles sans
-      // auth — un visiteur 1ʳᵉ ouverture est explicitement envoyé ici
-      // par le redirect ci-dessous quand `onboarding_seen` est absent.
-      final isOnboardingRoute    = loc.startsWith('/onboarding');
-
       // ── /accept-invite : page publique, jamais rediriger ───────────
       // Gère elle-même l'état (invité/connecté/mauvais compte)
       if (isAcceptInviteRoute) return null;
@@ -459,13 +441,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       // ── Non connecté ───────────────────────────────────────────────
       if (!isLoggedIn) {
-        // /onboarding/* et /auth/* sont publics par construction.
-        if (isOnboardingRoute) return null;
+        // /auth/* est public par construction.
         if (isAuthRoute)       return null;
-        // Les slides d'intro ne sont PLUS un tunnel pré-login : elles
-        // s'affichent uniquement après la 1ʳᵉ connexion d'un compte (flag
-        // serveur, cf. branche connectée + hotfix_099). Un visiteur anonyme
-        // sur une route protégée va donc directement au login.
+        // Un visiteur anonyme sur une route protégée va directement au login.
+        // Il n'y a plus rien avant : les slides d'intro et le tunnel
+        // `/onboarding/*` sont partis le 21/09/2026, faute d'appelant.
         return RouteNames.login;
       }
 
@@ -522,28 +502,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (!plan.isSuperAdmin &&
           (loc.startsWith('/super-admin') || loc.startsWith('/admin'))) {
         return postAuthDestination();
-      }
-
-      // ── Slides d'intro : UNE FOIS par compte, à la 1ʳᵉ connexion ────
-      // Flag serveur profiles.onboarding_slides_seen (hotfix_099), chargé au
-      // login dans AuthRouterNotifier. Le super admin n'a pas de tunnel
-      // onboarding. On N'INTERROMPT PAS le tunnel d'inscription /onboarding/*
-      // (register simplifié + wizard boutique) : les slides s'afficheront
-      // quand l'utilisateur arrive sur une vraie route applicative.
-      // `null` = en chargement → attendre (pas de flash). `false` = compte
-      // neuf → slides. `true` = déjà vu.
-      if (!plan.isSuperAdmin) {
-        final slidesSeen = ref.read(onboardingSlidesSeenProvider);
-        // Les slides d'intro s'affichent UNIQUEMENT à la fin de la création
-        // de compte : le flux d'inscription (RegisterPage / wizard onboarding)
-        // navigue EXPLICITEMENT vers `/onboarding/slides`. On ne FORCE plus
-        // les slides via le redirect — un compte existant qui se (re)connecte
-        // ne doit jamais les revoir. Seul garde-fou conservé : si on atterrit
-        // sur la page slides alors qu'elles sont déjà vues (refresh / retour
-        // arrière), on entre directement dans l'app.
-        if (loc == RouteNames.onboardingSlides && slidesSeen == true) {
-          return postAuthDestination();
-        }
       }
 
       // ── CAS 1 — Super Admin ────────────────────────────────────────
@@ -713,16 +671,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             : 'Votre accès à cette boutique a été suspendu par un administrateur.';
         return SuspendedShopScreen(reason: reason);
       }),
-      // Onboarding 1ʳᵉ ouverture (PR-1).
-      GoRoute(path: RouteNames.onboardingSlides,
-          builder: (c, s) => const OnboardingSlidesPage()),
-      GoRoute(path: RouteNames.onboardingAuthChoice,
-          builder: (c, s) => const AuthChoicePage()),
-      GoRoute(path: RouteNames.onboardingRegister,
-          builder: (c, s) => const RegisterSimplifiedPage()),
-      // Wizard boutique (PR-2) — 3 étapes + sélecteur palette.
-      GoRoute(path: RouteNames.onboardingShop,
-          builder: (c, s) => const ShopOnboardingWizard()),
       GoRoute(path: RouteNames.adminPanel,      builder: (c, s) => const AdminPanelPage()),
       GoRoute(path: RouteNames.superAdminHome,  builder: (c, s) => const SuperAdminPage()),
       GoRoute(path: RouteNames.adminSubscriptions,

@@ -1,6 +1,8 @@
 {
   "@@locale": "fr",
 
+  "@@__AVERTISSEMENT__": "CE FICHIER N'EST PAS LA SOURCE DES TRADUCTIONS. Malgré `generate: true` dans pubspec.yaml, les chaînes affichées viennent de lib/core/i18n/app_localizations.dart, qui est écrit À LA MAIN. Ajouter ou corriger une clé ICI n'a AUCUN EFFET à l'écran : il faut aussi la porter dans ce fichier Dart. Constaté le 21/09/2026 par l'audit du parcours d'entrée, laissé en l'état — basculer sur flutter gen-l10n toucherait chaque chaîne de l'application et demande son propre chantier.",
+
   "appName": "Fortress",
 
   "loginTitle": "Bon retour 👋",

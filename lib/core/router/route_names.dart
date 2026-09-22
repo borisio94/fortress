@@ -63,15 +63,12 @@ class RouteNames {
   /// Page centralisée des exports (CSV/PDF) — une card par type.
   static const exportsPage       = '/shop/:shopId/parametres/exports';
 
-  // Onboarding (PR-1 + PR-2) — flow nouveau utilisateur.
-  /// Slides marketing 1ʳᵉ ouverture (3 cartes).
-  static const onboardingSlides     = '/onboarding/slides';
-  /// Choix « créer un compte » / « j'ai déjà un compte ».
-  static const onboardingAuthChoice = '/onboarding/auth-choice';
-  /// Inscription minimale 3 champs (nom · email · password).
-  static const onboardingRegister   = '/onboarding/register';
-  /// Wizard boutique 3 étapes (PR-2) — appelle CreateShopUseCase à la fin.
-  static const onboardingShop       = '/onboarding/shop';
+  // Onboarding — il ne reste que l'ajout éclair.
+  //
+  // Les quatre routes `/onboarding/*` — slides, choix de compte, inscription
+  // simplifiée, assistant boutique — ont été retirées le 21/09/2026 avec les
+  // pages qu'elles servaient : plus rien ne naviguait vers elles. Une route
+  // enregistrée que personne n'appelle est une porte sans gardien.
   /// Ajout produit éclair 3 champs (PR-2). Utilisé par la checklist.
   static const quickAddProduct      = '/shop/:shopId/inventaire/quick-add';
 
