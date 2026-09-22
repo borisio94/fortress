@@ -4,6 +4,7 @@ import '../../features/caisse/data/repositories/sale_local_datasource.dart';
 import '../../features/caisse/domain/entities/sale.dart';
 import '../../features/caisse/domain/entities/sale_item.dart';
 import '../../features/restaurant/domain/courier_pay.dart';
+import '../../features/restaurant/domain/settle_guard.dart';
 import '../../features/restaurant/domain/entities/restaurant_table.dart';
 import '../config/restaurant_mode.dart';
 import '../database/app_database.dart';
@@ -711,6 +712,19 @@ class RestaurantOrderService {
   static Future<RestaurantTable> requestBill(RestaurantTable table) =>
       RestaurantTableService.requestBill(table);
 
+  /// Refuse une seconde clôture — voir `settle_guard.dart`.
+  ///
+  /// LIT LE STOCKAGE, pas l'objet reçu. L'appelant travaille sur une copie en
+  /// mémoire qui peut dater : c'est précisément le cas qu'on couvre, celui du
+  /// second appareil dont Hive n'a pas encore reçu l'encaissement du premier.
+  /// Vérifier le statut de la copie ne protégerait que du double-tap.
+  static void _refuseIfAlreadySettled(String id) {
+    final current = _ds.getOrderById(id);
+    if (current != null && isAlreadySettled(current.status)) {
+      throw const DejaEncaisseeException();
+    }
+  }
+
   /// Encaisse la commande et libère la table.
   ///
   /// Délègue la clôture à `updateOrderStatus`, qui centralise déjà tout le
@@ -740,6 +754,7 @@ class RestaurantOrderService {
     if (id == null || id.isEmpty) {
       return (order: null, stock: DailyConsumeReport.clean);
     }
+    _refuseIfAlreadySettled(id);
 
     // Mode de règlement dominant + FIN DE SERVICE, écrits AVANT la clôture par
     // un update ciblé : `updateOrderStatus` ne touche pas à ces champs, et une
@@ -864,6 +879,7 @@ class RestaurantOrderService {
   }) async {
     final id = order.id;
     if (id == null || id.isEmpty) return DailyConsumeReport.clean;
+    _refuseIfAlreadySettled(id);
     // `served` + `finished` forcés : remettre une commande au client, c'est
     // clore son service. Même raison qu'en salle — cf. [settleAndRelease].
     await _patchOrder(order, {
