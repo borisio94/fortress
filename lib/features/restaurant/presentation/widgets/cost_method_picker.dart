@@ -6,11 +6,24 @@ import '../../domain/entities/ingredient.dart';
 
 /// Sélecteur de la méthode de chiffrage d'UN ingrédient.
 ///
-/// Groupe de deux boutons radio. L'explication de chaque méthode n'est PAS
-/// affichée en permanence : elle tient en quatre lignes chacune, et deux
-/// pavés de texte au-dessus d'un formulaire de six champs se sautent au lieu
-/// de se lire. Elle est derrière une icône d'information, à portée de doigt de
-/// qui hésite, invisible pour qui sait déjà.
+/// TROIS RÈGLES, posées le 22/09/2026 après avoir vu le résultat des
+/// précédentes.
+///
+/// LE LIBELLÉ NOMME L'USAGE, PAS LA COMPTABILITÉ. « Répartition des achats »
+/// et « Fiche technique » décrivaient le calcul, qui n'est pas la question
+/// que se pose le restaurateur. « Sans peser » et « Quantité connue »
+/// décrivent ce qu'il fait dans sa cuisine, et il sait lequel est le sien.
+///
+/// LES EXEMPLES VIENNENT DU MÉTIER. Ndolé, poisson braisé, poulet DG d'un
+/// côté ; chawarma, glace, boisson de l'autre. On se reconnaît dans une des
+/// deux listes en une seconde, là où une définition demande de se traduire.
+///
+/// L'EXPLICATION NE SE CACHE PLUS DERRIÈRE UNE ICÔNE. Elle était dans un ⓘ,
+/// au motif que deux pavés de texte au-dessus d'un formulaire se sautent au
+/// lieu de se lire. C'était vrai du pavé, pas de l'icône : personne n'ouvre
+/// une infobulle AVANT de choisir — on la découvre après s'être trompé. Deux
+/// lignes sous chaque option, toujours visibles, remplacent deux icônes qu'on
+/// ignorait.
 class CostMethodPicker extends StatelessWidget {
   final String value;
   final ValueChanged<String> onChanged;
@@ -21,54 +34,36 @@ class CostMethodPicker extends StatelessWidget {
     required this.onChanged,
   });
 
-  static const _explanations = <String, ({String what, String note})>{
-    Ingredient.costRepartition: (
-      what: 'Les achats du mois se répartissent entre les plats vendus qui '
-          'contiennent l\'ingrédient. Aucune quantité à peser. Le coût suit '
-          'la trésorerie et varie d\'un mois à l\'autre.',
-      note: 'Convient à ce qui s\'achète en tas et ne se pèse pas : piment, '
-          'cubes, épices.',
+  /// Les deux choix, dans l'ordre où ils sont proposés.
+  ///
+  /// `label` répond à « qu'est-ce que je fais ? », `what` à « qu'est-ce que
+  /// ça calcule ? », `example` à « est-ce que c'est ma cuisine ? ». C'est le
+  /// troisième qui tranche le plus vite, et c'est pour ça qu'il est là.
+  static const _options =
+      <({String value, String label, String what, String example})>[
+    (
+      value: Ingredient.costRepartition,
+      label: 'Sans peser',
+      what: 'Vos achats du mois se répartissent sur les plats vendus. '
+          'Aucune quantité par portion à saisir.',
+      example: 'Ndolé, poisson braisé, poulet DG — ce qui mijote en marmite '
+          'et se sert à la louche.',
     ),
-    Ingredient.costSheet: (
-      what: 'La quantité utilisée par portion est définie dans la fiche '
-          'technique du plat. Le coût est calculé sur la quantité réelle '
-          'consommée à chaque vente.',
-      note: 'Nécessite de renseigner les quantités par portion dans chaque '
-          'fiche recette, et la quantité achetée à la création.',
+    (
+      value: Ingredient.costSheet,
+      label: 'Quantité connue',
+      what: 'Vous dites combien il en faut par portion. Le coût suit ce qui '
+          'est réellement consommé, vente par vente.',
+      example: 'Chawarma, glace, boisson — ce qui se compte à l\'unité ou se '
+          'dose au gramme.',
     ),
-  };
-
-  void _explain(BuildContext context, String method, String label) {
-    final e = _explanations[method]!;
-    showDialog<void>(
-      context: context,
-      builder: (dialogCtx) => AlertDialog(
-        icon: const Icon(Icons.info_outline_rounded),
-        title: Text(label, style: AppTextStyles.subtitle),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(e.what, style: AppTextStyles.body.copyWith(height: 1.55)),
-            const SizedBox(height: 10),
-            Text(e.note, style: AppTextStyles.caption),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(),
-            child: const Text('Compris'),
-          ),
-        ],
-      ),
-    );
-  }
+  ];
 
   @override
   Widget build(BuildContext context) {
     final sem = Theme.of(context).semantic;
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: sem.borderSubtle, width: 0.5),
@@ -76,19 +71,20 @@ class CostMethodPicker extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Méthode de calcul du coût matières',
+          // La question, pas le nom du calcul. « Méthode de calcul du coût
+          // matières » annonçait un chapitre de comptabilité au-dessus de
+          // deux cases à cocher.
+          Text('Comment chiffrer cet ingrédient ?',
               style:
                   AppTextStyles.caption.copyWith(fontWeight: FontWeight.w500)),
           const SizedBox(height: 4),
-          for (final entry in const [
-            (Ingredient.costRepartition, 'Répartition des achats'),
-            (Ingredient.costSheet, 'Fiche technique'),
-          ])
+          for (final o in _options)
             _MethodRadio(
-              label: entry.$2,
-              selected: value == entry.$1,
-              onSelect: () => onChanged(entry.$1),
-              onInfo: () => _explain(context, entry.$1, entry.$2),
+              label: o.label,
+              what: o.what,
+              example: o.example,
+              selected: value == o.value,
+              onSelect: () => onChanged(o.value),
             ),
         ],
       ),
@@ -96,67 +92,67 @@ class CostMethodPicker extends StatelessWidget {
   }
 }
 
-/// Une ligne du groupe : `ⓘ  ◉  libellé`.
+/// Une ligne du groupe : `◉  libellé` + ce que ça veut dire + un exemple.
 ///
-/// L'icône d'information est DEVANT le bouton radio et porte sa propre zone
-/// tactile : la toucher explique, elle ne sélectionne pas. Sans cette
-/// séparation, on changerait de méthode en cherchant simplement à comprendre
-/// laquelle choisir.
+/// PLUS D'ICÔNE D'INFORMATION. Elle était devant le bouton radio, avec sa
+/// propre zone tactile, pour qu'on puisse comprendre sans sélectionner. Le
+/// raisonnement tenait, mais il supposait qu'on la touche — or on ne cherche
+/// pas à comprendre un choix qu'on croit avoir compris. L'explication est
+/// maintenant sous le libellé, où elle se lit sans rien demander.
 class _MethodRadio extends StatelessWidget {
   final String label;
+  final String what;
+  final String example;
   final bool selected;
   final VoidCallback onSelect;
-  final VoidCallback onInfo;
 
   const _MethodRadio({
     required this.label,
+    required this.what,
+    required this.example,
     required this.selected,
     required this.onSelect,
-    required this.onInfo,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Row(children: [
-      IconButton(
-        onPressed: onInfo,
-        tooltip: 'À quoi sert « $label » ?',
-        visualDensity: VisualDensity.compact,
-        constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
-        padding: EdgeInsets.zero,
-        icon: Icon(Icons.info_outline_rounded,
-            size: 18, color: theme.colorScheme.onSurfaceVariant),
-      ),
-      Expanded(
-        child: InkWell(
-          onTap: onSelect,
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-            child: Row(children: [
-              Icon(
-                  selected
-                      ? Icons.radio_button_checked_rounded
-                      : Icons.radio_button_off_rounded,
-                  size: 20,
-                  color: selected
-                      ? theme.colorScheme.primary
-                      : theme.colorScheme.onSurfaceVariant),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: (selected
-                            ? AppTextStyles.bodySmBold
-                            : AppTextStyles.bodySm)
-                        .copyWith(color: theme.colorScheme.onSurface)),
+    return InkWell(
+      onTap: onSelect,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+                selected
+                    ? Icons.radio_button_checked_rounded
+                    : Icons.radio_button_off_rounded,
+                size: 20,
+                color: selected
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: (selected
+                              ? AppTextStyles.bodySmBold
+                              : AppTextStyles.bodySm)
+                          .copyWith(color: theme.colorScheme.onSurface)),
+                  const SizedBox(height: 2),
+                  Text(what, style: AppTextStyles.caption),
+                  const SizedBox(height: 1),
+                  Text(example, style: AppTextStyles.captionHint),
+                ],
               ),
-            ]),
-          ),
+            ),
+          ],
         ),
       ),
-    ]);
+    );
   }
 }

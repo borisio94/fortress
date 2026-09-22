@@ -1187,7 +1187,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
               const SizedBox(height: 2),
               Text(
                   _hasSheetLine
-                      ? 'Les ingrédients en fiche technique demandent la '
+                      ? 'Les ingrédients en « Quantité connue » demandent la '
                           'quantité contenue dans UNE assiette. Une seule '
                           'manquante et le plat perd son coût — mieux vaut ça '
                           'qu\'un chiffre sous-évalué et crédible. Les autres '
@@ -1519,7 +1519,7 @@ class _PortionRow extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(left: 2, top: 2),
               child: Text(
-                  'Quantité saisie avant le retour de la fiche technique — '
+                  'Quantité héritée d\'une version antérieure — '
                   'vérifiez-la, elle ne compte pas encore.',
                   style: AppTextStyles.micro
                       .copyWith(color: sem.warningText)),

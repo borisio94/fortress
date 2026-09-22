@@ -687,8 +687,8 @@ class _IngredientEditorState extends State<_IngredientEditor> {
     // la recette. Même refus qu'à la création.
     if (_qtyRequired && _qtyValue <= 0) {
       setState(() => _err =
-          'La fiche technique exige une quantité : le coût unitaire se déduit '
-          'du montant divisé par elle.');
+          '« Quantité connue » exige une quantité : le coût unitaire se '
+          'déduit du montant divisé par elle.');
       return;
     }
     // `alertThreshold` n'est PAS passé : le seuil d'alerte n'est plus dans ce

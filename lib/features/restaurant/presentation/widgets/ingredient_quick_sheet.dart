@@ -196,7 +196,7 @@ class _IngredientQuickSheetState extends State<IngredientQuickSheet> {
     // tard », c'est le diviseur sans lequel le coût unitaire est absurde.
     if (_qtyRequired && _qtyValue <= 0) {
       setState(() => _err =
-          'La fiche technique exige la quantité achetée : le coût unitaire '
+          '« Quantité connue » exige la quantité achetée : le coût unitaire '
           'se déduit du montant divisé par cette quantité.');
       return;
     }
