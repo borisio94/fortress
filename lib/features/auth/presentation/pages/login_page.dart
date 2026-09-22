@@ -10,6 +10,7 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/widgets/fortress_logo.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/language_switcher.dart';
+import '../../domain/login_password_check.dart';
 import '../bloc/auth_bloc.dart';
 import '../bloc/auth_event.dart';
 import '../bloc/auth_state.dart';
@@ -533,11 +534,12 @@ class _LoginFormState extends State<_LoginForm> {
                     setState(() => _obscurePass = !_obscurePass),
               ),
             ),
-            validator: (v) {
-              if (v == null || v.isEmpty) return l.errPasswordRequired;
-              if (v.length < 6)            return l.errPasswordShort;
-              return null;
-            },
+            // AUCUN CONTRÔLE DE LONGUEUR ICI, et ce n'est pas un oubli :
+            // voir `login_password_check.dart`, qui porte le raisonnement et
+            // le test qui l'épingle. Un écran de connexion transmet, il ne
+            // juge pas — le serveur sait ce qui est acceptable, pas lui.
+            validator: (v) =>
+                loginPasswordError(v, requiredMessage: l.errPasswordRequired),
           ),
           SizedBox(height: forgotGap),
 
