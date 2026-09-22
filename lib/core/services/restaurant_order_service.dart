@@ -645,17 +645,21 @@ class RestaurantOrderService {
   ///
   /// JAMAIS bloquant : la vente est déjà enregistrée, une erreur de
   /// bookkeeping ne doit pas la faire échouer.
-  static Future<void> consumeStockFor(
+  /// Rend le BILAN du décrément — voir `DailyConsumeReport`.
+  ///
+  /// PLUS DE `try/catch` ICI, et c'est une correction. Il y en avait un, qui
+  /// journalisait dans un `debugPrint` invisible en production. Il ne servait
+  /// à rien : `DailyMenuService.read` et `_write` ont chacun le leur et ne
+  /// lèvent jamais, donc `consumeForOrder` non plus. On se protégeait d'une
+  /// exception qui n'existe pas, pendant que la vraie perte — le rabot à zéro
+  /// et l'écriture refusée — passait par-dessous sans un mot.
+  static Future<DailyConsumeReport> consumeStockFor(
       String shopId, List<SaleItem> items) async {
-    try {
-      if (!isRestaurantShop(shopId)) return;
-      // Disponibilités du jour seulement. Le stock des ingrédients ne se
-      // décrémente plus à la vente : sans quantité par plat, il n'y a rien à
-      // retirer (cf. `RecipeService`).
-      await DailyMenuService.consumeForOrder(shopId, items);
-    } catch (e) {
-      debugPrint('[Restaurant] décrément service err: $e');
-    }
+    if (!isRestaurantShop(shopId)) return DailyConsumeReport.clean;
+    // Disponibilités du jour seulement. Le stock des ingrédients ne se
+    // décrémente plus à la vente : sans quantité par plat, il n'y a rien à
+    // retirer (cf. `RecipeService`).
+    return DailyMenuService.consumeForOrder(shopId, items);
   }
 
   /// Ajoute une ligne de frais à la commande (consigne d'emballages, Lot B).
@@ -720,15 +724,22 @@ class RestaurantOrderService {
   /// « entièrement payé » ; une valeur inférieure au total laisse une
   /// créance client (cas d'un règlement partiel accepté par le gérant).
   ///
-  /// Retourne la commande clôturée, relue depuis le stockage.
-  static Future<Sale?> settleAndRelease({
+  /// Retourne la commande clôturée ET le bilan du décrément du jour.
+  ///
+  /// LES DEUX, parce que le second était perdu. Un enregistrement en clair —
+  /// un champ de plus sur un objet de retour — oblige l'appelant à le
+  /// regarder ; un effet de bord silencieux, non. C'est le compilateur qui
+  /// tient la garde, pas la bonne volonté.
+  static Future<({Sale? order, DailyConsumeReport stock})> settleAndRelease({
     required Sale order,
     required RestaurantTable table,
     double? amountPaid,
     PaymentMethod? method,
   }) async {
     final id = order.id;
-    if (id == null || id.isEmpty) return null;
+    if (id == null || id.isEmpty) {
+      return (order: null, stock: DailyConsumeReport.clean);
+    }
 
     // Mode de règlement dominant + FIN DE SERVICE, écrits AVANT la clôture par
     // un update ciblé : `updateOrderStatus` ne touche pas à ces champs, et une
@@ -759,7 +770,7 @@ class RestaurantOrderService {
 
     // Le stock suit la clôture, pas l'inverse : si `updateOrderStatus` lève,
     // rien n'a été vendu et rien ne doit sortir de l'inventaire.
-    await consumeStockFor(table.shopId, order.items);
+    final stock = await consumeStockFor(table.shopId, order.items);
 
     // Libération APRÈS clôture réussie : si `updateOrderStatus` lève (GF-4,
     // stock insuffisant…), la table doit rester occupée plutôt que d'être
@@ -785,7 +796,7 @@ class RestaurantOrderService {
     // La commande GARDE son `table_id` : c'est un fait historique utile aux
     // statistiques par table et à la relecture d'une facture. Seule la table
     // oublie la commande (`current_order_id` remis à null par `release`).
-    return _ds.getOrderById(id);
+    return (order: _ds.getOrderById(id), stock: stock);
   }
 
   /// Durée du service en cours, base du « temps de repas » de l'addition.
@@ -844,13 +855,15 @@ class RestaurantOrderService {
   /// [method] écrit le mode de règlement dominant (le détail des règlements
   /// vit dans `payments`). Aucune table à libérer ici, contrairement à
   /// [settleAndRelease].
-  static Future<void> collectTakeaway(
+  ///
+  /// Rend le bilan du décrément du jour, pour la même raison qu'elle.
+  static Future<DailyConsumeReport> collectTakeaway(
     Sale order, {
     double? amountPaid,
     PaymentMethod? method,
   }) async {
     final id = order.id;
-    if (id == null || id.isEmpty) return;
+    if (id == null || id.isEmpty) return DailyConsumeReport.clean;
     // `served` + `finished` forcés : remettre une commande au client, c'est
     // clore son service. Même raison qu'en salle — cf. [settleAndRelease].
     await _patchOrder(order, {
@@ -865,7 +878,7 @@ class RestaurantOrderService {
       completedAt: DateTime.now(),
       amountPaidOnComplete: amountPaid,
     );
-    await consumeStockFor(order.shopId, order.items);
+    return consumeStockFor(order.shopId, order.items);
   }
 
   /// Bons de cuisine en cours : envoyés et pas encore prêts.

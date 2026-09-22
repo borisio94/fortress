@@ -114,6 +114,12 @@ class ServiceIncidentService {
     // sinon l'inventaire annonce une matière que la poubelle a déjà emportée,
     // et la réconciliation la retrouve en écart au lieu de la voir ici.
     // La perte ci-dessous, elle, ne porte que le versant financier.
+    // Le bilan du décrément est IGNORÉ ICI, à dessein : la tournée est partie
+    // en cuisine et le plat est à la poubelle. Un dépassement du décompte du
+    // jour y est normal — on retire de la matière qu'on n'a pas vendue — et
+    // avertir « vendu au-delà du stock » sur une annulation enverrait chercher
+    // une erreur de service qui n'existe pas. La perte, elle, est enregistrée
+    // juste en dessous.
     await RestaurantOrderService.consumeStockFor(shopId, order.items);
 
     await _releaseTableOf(order);

@@ -24,6 +24,83 @@ class DailyAvailability {
   bool get isSoldOut => enabled && count != null && count! <= 0;
 }
 
+/// CE QU'UN DÉCRÉMENT DU JOUR A RÉELLEMENT FAIT.
+///
+/// Rien ne le disait. `consume` rabotait à zéro — `next < 0 ? 0 : next` — et
+/// `_write` avalait un refus de Hive dans un `debugPrint` : trois portions
+/// restantes, une commande de cinq, on écrivait 0 et personne n'apprenait
+/// qu'on en avait vendu deux de trop.
+///
+/// Le `try/catch` qui entourait l'appel, lui, était du code mort : `read` et
+/// `_write` ne lèvent jamais, donc `consumeForOrder` non plus. On cherchait
+/// une exception là où il n'y en avait aucune ; la perte était dans le rabot.
+class DailyConsumeReport {
+  /// Plat par plat, ce qui a été vendu AU-DELÀ du stock du jour.
+  final Map<String, int> oversold;
+
+  /// Toutes les écritures ont-elles été acceptées par Hive ?
+  final bool allStored;
+
+  const DailyConsumeReport({required this.oversold, required this.allStored});
+
+  static const clean =
+      DailyConsumeReport(oversold: <String, int>{}, allStored: true);
+
+  /// Rien à signaler : aucun dépassement, aucune écriture perdue.
+  bool get isClean => oversold.isEmpty && allStored;
+
+  /// Total des portions vendues au-delà du décompte, tous plats confondus.
+  int get totalOversold => oversold.values.fold(0, (s, v) => s + v);
+}
+
+/// Ce que le serveur doit lire, ou `null` si tout s'est bien passé.
+///
+/// LES PLATS SONT NOMMÉS, pas identifiés : `oversold` est indexé par
+/// identifiant de produit, illisible pour qui tient un plateau. Les noms
+/// viennent des lignes de la commande, qui les portent déjà figés.
+///
+/// Deux pertes distinctes, deux phrases : un dépassement du décompte dit
+/// d'aller vérifier la réserve ; une écriture refusée dit que le décompte de
+/// la journée est faux à partir de maintenant. Les confondre enverrait
+/// compter des portions dans le premier cas comme dans le second.
+String? oversoldMessage(DailyConsumeReport report, List<SaleItem> items) {
+  if (report.isClean) return null;
+
+  if (report.oversold.isEmpty) {
+    return 'Décompte du jour non enregistré : les quantités restantes ne sont '
+        'plus fiables.';
+  }
+
+  final names = <String>[];
+  for (final entry in report.oversold.entries) {
+    final line = items.where((i) => i.productId == entry.key);
+    final name = line.isEmpty ? entry.key : line.first.productName;
+    names.add('$name (${entry.value})');
+  }
+
+  final total = report.totalOversold;
+  final head = total > 1
+      ? '$total portions vendues au-delà du stock du jour'
+      : '1 portion vendue au-delà du stock du jour';
+  final tail = report.allStored
+      ? ''
+      : ' — et le décompte n\'a pas pu être enregistré';
+  return '$head : ${names.join(', ')}.$tail';
+}
+
+/// Ce qui MANQUE quand on retire [qty] d'un décompte de [count].
+///
+/// `null` = aucune limite fixée, donc aucun manque possible : le plat ne
+/// décrémente pas (cf. `consume`). Zéro quand tout passe.
+///
+/// Séparé du décrément lui-même pour être vérifiable sans Hive : c'est
+/// l'arithmétique qui perdait l'information, pas le stockage.
+int shortfallOf({required int? count, required int qty}) {
+  if (count == null) return 0;
+  final missing = qty - count;
+  return missing > 0 ? missing : 0;
+}
+
 /// Disponibilités du jour de la carte d'un restaurant (LOCAL, par appareil).
 ///
 /// Chaque matin l'admin (ré)active les plats du jour et peut fixer un stock.
@@ -72,7 +149,13 @@ class DailyMenuService {
     }
   }
 
-  static Future<void> _write(
+  /// Écrit l'état du jour. Rend `false` si Hive a refusé la ligne.
+  ///
+  /// L'issue était perdue : le `catch` se contentait d'un `debugPrint`, donc un
+  /// décrément refusé disparaissait sans laisser de trace et sans même réveiller
+  /// les écrans. Les appelants qui annoncent quelque chose à l'utilisateur
+  /// doivent pouvoir le savoir — même convention que `RestaurantTableService`.
+  static Future<bool> _write(
       String shopId, String productId, DailyAvailability a) async {
     try {
       await HiveBoxes.dailyMenuAvailabilityBox
@@ -83,8 +166,10 @@ class DailyMenuService {
       });
       // Réveille les écrans qui affichent la dispo (rebuild immédiat).
       revision.value++;
+      return true;
     } catch (e) {
       debugPrint('[DailyMenu] write err: $e');
+      return false;
     }
   }
 
@@ -108,22 +193,44 @@ class DailyMenuService {
 
   /// Décrémente le stock du jour d'un plat de [qty] (jamais sous 0). No-op si
   /// aucune limite n'est fixée (count == null = illimité).
-  static Future<void> consume(String shopId, String productId, int qty) async {
+  ///
+  /// Rend ce qui MANQUE et si l'écriture a tenu. Le rabot à zéro reste — on ne
+  /// va pas inventer un stock négatif — mais il ne se fait plus en silence :
+  /// c'est l'appelant qui décide quoi en dire.
+  static Future<({int shortfall, bool stored})> consume(
+      String shopId, String productId, int qty) async {
     final cur = read(shopId, productId);
-    if (cur.count == null) return;
+    if (cur.count == null) return (shortfall: 0, stored: true);
+    final missing = shortfallOf(count: cur.count, qty: qty);
     final next = cur.count! - qty;
-    await _write(shopId, productId,
+    final stored = await _write(shopId, productId,
         DailyAvailability(enabled: cur.enabled, count: next < 0 ? 0 : next));
+    return (shortfall: missing, stored: stored);
   }
 
   /// Applique le décrément à toutes les lignes d'une commande restaurant —
   /// appelé après l'enregistrement d'une vente (cf. CaisseBloc).
-  static Future<void> consumeForOrder(
+  ///
+  /// Rend le bilan de l'opération. Il vaut [DailyConsumeReport.clean] dans le
+  /// cas courant ; tout ce qui s'en écarte doit être DIT, parce que personne
+  /// d'autre ne le verra : ce décompte est local à l'appareil et ne remonte
+  /// nulle part.
+  ///
+  /// Les lignes sont CUMULÉES par plat : une commande peut porter deux fois le
+  /// même plat, et deux manques de 1 valent un manque de 2.
+  static Future<DailyConsumeReport> consumeForOrder(
       String shopId, List<SaleItem> items) async {
+    final oversold = <String, int>{};
+    var allStored = true;
     for (final it in items) {
       final pid = it.productId;
       if (pid.isEmpty) continue;
-      await consume(shopId, pid, it.quantity);
+      final r = await consume(shopId, pid, it.quantity);
+      if (r.shortfall > 0) {
+        oversold[pid] = (oversold[pid] ?? 0) + r.shortfall;
+      }
+      if (!r.stored) allStored = false;
     }
+    return DailyConsumeReport(oversold: oversold, allStored: allStored);
   }
 }

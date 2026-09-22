@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/permisions/subscription_provider.dart';
+import '../../../../core/services/daily_menu_service.dart';
 import '../../../../core/services/invoice_printer.dart';
 import '../../../../core/services/manager_gate.dart';
 import '../../../../core/services/payment_service.dart';
@@ -186,7 +187,7 @@ class _BillPageState extends ConsumerState<BillPage> {
 
     setState(() => _settling = true);
     try {
-      final settled = await RestaurantOrderService.settleAndRelease(
+      final res = await RestaurantOrderService.settleAndRelease(
         order: order,
         table: table,
         // Addition soldée → `null` force « entièrement payé » et absorbe les
@@ -197,6 +198,7 @@ class _BillPageState extends ConsumerState<BillPage> {
             : (order.amountPaid + split.applied),
         method: split.dominantMethod,
       );
+      final settled = res.order;
       if (!mounted) return;
 
       // Règlements enregistrés APRÈS la clôture : si `settleAndRelease` lève
@@ -217,6 +219,14 @@ class _BillPageState extends ConsumerState<BillPage> {
               ? '${table.name} encaissée — rendre '
                   '${CurrencyFormatter.format(split.change.toDouble())}'
               : '${table.name} encaissée et libérée');
+
+      // APRÈS le succès : l'addition est réglée, la table libérée. Ce qui suit
+      // avertit que la réserve ne correspond plus au décompte du jour — un
+      // dépassement, ou une écriture que Hive a refusée. Sans ça, le serveur
+      // ne l'apprenait qu'au prochain inventaire, sans pouvoir le rattacher à
+      // une vente.
+      final warn = oversoldMessage(res.stock, order.items);
+      if (warn != null && mounted) AppSnack.warning(context, warn);
 
       // Facture générée automatiquement après encaissement (spec §7).
       if (settled != null) {

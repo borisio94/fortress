@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/services/daily_menu_service.dart';
 import '../../../../core/services/invoice_printer.dart';
 import '../../../../core/services/payment_service.dart';
 import '../../../../core/services/restaurant_order_service.dart';
@@ -46,13 +47,17 @@ Future<bool> settleRestaurantOrder({
   final shopId = order.shopId;
   try {
     Sale? settled;
+    // Ce que le décompte du jour a perdu, s'il a perdu quelque chose. Il est
+    // rendu par les deux chemins de clôture, et il faut le DIRE : ce décompte
+    // est local à l'appareil, personne d'autre ne le verra.
+    DailyConsumeReport stock;
     final tableId = order.tableId;
     final table =
         tableId == null ? null : RestaurantTableService.tableById(tableId);
     if (table != null) {
       // En salle : clôture + libération conditionnelle de la table (elle peut
       // porter d'autres comptes).
-      settled = await RestaurantOrderService.settleAndRelease(
+      final res = await RestaurantOrderService.settleAndRelease(
         order: order,
         table: table,
         // Soldée → `null` force « entièrement payé » et absorbe les décimales
@@ -62,8 +67,10 @@ Future<bool> settleRestaurantOrder({
             split.isSettled ? null : (order.amountPaid + split.applied),
         method: split.dominantMethod,
       );
+      settled = res.order;
+      stock = res.stock;
     } else {
-      await RestaurantOrderService.collectTakeaway(
+      stock = await RestaurantOrderService.collectTakeaway(
         order,
         amountPaid:
             split.isSettled ? null : (order.amountPaid + split.applied),
@@ -91,6 +98,11 @@ Future<bool> settleRestaurantOrder({
             ? 'Encaissée — rendre '
                 '${CurrencyFormatter.format(split.change.toDouble())}'
             : 'Commande encaissée');
+
+    // APRÈS le succès, et pas à sa place : la vente a bien eu lieu, le client
+    // a payé. Ce qui suit est un avertissement sur la réserve, pas un échec.
+    final warn = oversoldMessage(stock, order.items);
+    if (warn != null && context.mounted) AppSnack.warning(context, warn);
 
     // Facture après encaissement, comme sur l'addition de table.
     if (settled != null && context.mounted) {
