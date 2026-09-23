@@ -550,7 +550,9 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   /// tiers de l'écran — la carte doit rester l'écran principal.
   double _cartPaneWidth(BuildContext context) {
     final w = MediaQuery.of(context).size.width;
-    return w < 720 ? w : (w / 3).clamp(320.0, 420.0);
+    // Le seuil est partagé avec le panier, qui doit savoir s'il recouvre la
+    // carte pour proposer d'y revenir. Voir `kCartPaneFullWidthBelow`.
+    return w < kCartPaneFullWidthBelow ? w : (w / 3).clamp(320.0, 420.0);
   }
 
   Widget _buildMenu(

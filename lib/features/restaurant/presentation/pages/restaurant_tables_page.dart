@@ -18,6 +18,8 @@ import '../../../../shared/widgets/app_snack.dart';
 import '../widgets/resto_empty_state.dart';
 import '../widgets/table_form_sheet.dart';
 import '../../domain/entities/restaurant_table.dart';
+import '../../domain/table_service_age.dart';
+import '../../../../shared/providers/order_attach_provider.dart';
 import '../../../../core/services/restaurant_order_service.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/services/restaurant_tab_service.dart';
@@ -608,6 +610,15 @@ class _TableCard extends StatelessWidget {
     // bordure de la carte, pas une pastille discrète en coin.
     final waiting = RestaurantOrderService.waitingServiceFor(table).length;
     final border = waiting > 0 ? semantic.warning : accent;
+    // DEPUIS QUAND CETTE TABLE EST OUVERTE. `null` sur une table libre, et sur
+    // une horloge déréglée — voir `table_service_age.dart`.
+    //
+    // Calculé au build et non rafraîchi par une horloge : la carte se redessine
+    // à chaque changement de commande, ce qui suffit très largement pour une
+    // durée qu'on lit en minutes puis en heures. Un `Timer` par table ferait
+    // battre tout le plan de salle pour une information qui ne bouge pas.
+    final open = tableOpenFor(openedAt: table.openedAt, now: DateTime.now());
+    final age = open == null ? null : tableServiceOf(open);
 
     return Material(
       color: status.surface(semantic),
@@ -670,6 +681,61 @@ class _TableCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.bodySmBold.copyWith(color: accent),
                 ),
+              ],
+              // ── DEPUIS QUAND ────────────────────────────────────────
+              //
+              // Le plan de salle n'a jamais rien dit du temps : une table
+              // ouverte depuis dix minutes et une table oubliée depuis
+              // vendredi s'y affichaient de façon strictement identique. La
+              // durée existait pourtant, mais dans l'addition seule — donc
+              // jamais pour la table que personne ne rouvre.
+              //
+              // UNE LIGNE, TROIS TONS, et rien d'autre. Ni bordure ni pastille :
+              // les deux sont déjà prises par « À SERVIR », qui appelle une
+              // action DANS LA MINUTE. Une table qui dort n'est pas urgente,
+              // elle est anormale — elle doit se remarquer sans couvrir ce qui
+              // presse.
+              if (open != null && age != null) ...[
+                const SizedBox(height: 5),
+                Builder(builder: (context) {
+                  final caption = AppTextStyles.caption;
+                  final color = switch (age) {
+                    TableService.courte => caption.color,
+                    TableService.longue => semantic.warningText,
+                    TableService.dormante => semantic.dangerText,
+                  };
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                          // L'icône change AUSSI, pas seulement la couleur :
+                          // une alerte qui ne tient qu'à une teinte n'existe
+                          // pas pour qui ne distingue pas le rouge.
+                          age == TableService.dormante
+                              ? Icons.error_outline_rounded
+                              : Icons.schedule_rounded,
+                          size: 12,
+                          color: color),
+                      const SizedBox(width: 3),
+                      Flexible(
+                        child: Text(
+                          // « oubliée ? » et non « dormante » : le libellé dit
+                          // au serveur ce qu'il a à VÉRIFIER, pas le nom que
+                          // le code donne à l'état.
+                          age == TableService.dormante
+                              ? '${tableServiceLabel(open)} · oubliée ?'
+                              : tableServiceLabel(open),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: (age == TableService.courte
+                                  ? caption
+                                  : AppTextStyles.microBold)
+                              .copyWith(color: color),
+                        ),
+                      ),
+                    ],
+                  );
+                }),
               ],
               const SizedBox(height: 6),
               Text(
@@ -754,14 +820,25 @@ class _StepperButton extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         customBorder: const CircleBorder(),
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Icon(
-            icon,
-            size: 22,
-            color: enabled
-                ? theme.colorScheme.primary
-                : theme.colorScheme.onSurface.withValues(alpha: 0.35),
+        // 48 dp, LE MINIMUM MATERIAL. Ce bouton faisait 42 — un `Padding` de
+        // 10 autour d'une icône de 22 — et c'est le plus mal visé de l'écran :
+        // on l'atteint d'une main qui tient déjà un plateau, et on le répète
+        // autant de fois qu'il y a de convives à la table.
+        //
+        // Un `SizedBox` et non un `Padding` élargi : la taille est ce qu'on
+        // veut garantir, autant l'écrire. L'icône garde ses 22 — c'est la
+        // ZONE qui grandit, pas le dessin, et le cercle passe de 42 à 48.
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: Center(
+            child: Icon(
+              icon,
+              size: 22,
+              color: enabled
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurface.withValues(alpha: 0.35),
+            ),
           ),
         ),
       ),
@@ -799,6 +876,26 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
 
   void _reload() => setState(() => _tabs =
       RestaurantTabService.tabsForTable(widget.shopId, widget.table.id));
+
+  /// AJOUTER DES PLATS à ce compte, sans refaire la prise de commande.
+  ///
+  /// Même geste que depuis l'addition, atteignable une étape plus tôt : le
+  /// serveur qui passe devant la table n'a pas à ouvrir l'addition — donc à
+  /// voir un bouton « Encaisser » — pour ajouter un café.
+  void _addDishes(RestaurantTab tab) {
+    // Le routeur est capturé AVANT le pop : après lui, ce `context` est
+    // démonté et `context.go` ne trouverait plus rien.
+    final router = GoRouter.of(context);
+    ref.read(orderAttachProvider.notifier).aim(
+          tableId: widget.table.id,
+          tableName: widget.table.name,
+          // Le libellé BRUT — voir `_addDishes` de l'addition : `displayLabel`
+          // rendrait « Sans nom » et ouvrirait un second compte.
+          tabLabel: tab.label.trim(),
+        );
+    Navigator.of(context).pop();
+    router.go('/shop/${widget.shopId}/inventaire');
+  }
 
   Future<void> _transfer(RestaurantTab tab) async {
     final others =
@@ -1078,12 +1175,15 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
                   enabled: !_busy,
                   tooltip: 'Actions',
                   onSelected: (v) => switch (v) {
+                    'add' => _addDishes(tab),
                     'transfer' => _transfer(tab),
                     'merge' => _merge(tab),
                     'cancel_round' => _cancelRound(tab),
                     _ => _unpaid(tab),
                   },
                   itemBuilder: (_) => [
+                    const PopupMenuItem(
+                        value: 'add', child: Text('Ajouter des plats…')),
                     const PopupMenuItem(
                         value: 'transfer', child: Text('Transférer…')),
                     if (_tabs.length > 1)

@@ -1,5 +1,17 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+/// En dessous de cette largeur, le volet panier occupe TOUTE la fenêtre.
+///
+/// Le seuil vivait en double : `restaurant_menu_page` dimensionnait le volet
+/// avec, et le panier ignorait qu'il pouvait recouvrir la carte. C'est ce que
+/// ce constat a révélé — un bouton « Carte » n'a de sens que là où la carte
+/// est cachée, donc exactement sous ce nombre. Une seule source.
+///
+/// 720 et non 600 : c'est la largeur à partir de laquelle deux colonnes
+/// tiennent côte à côte sans que la grille de plats tombe à une seule carte
+/// par ligne.
+const double kCartPaneFullWidthBelow = 720;
+
 /// Volet panier de droite VISIBLE ou replié — RESTAURATION.
 ///
 /// Le volet ne s'ouvre pas sur un état booléen seul : il apparaît quand le
@@ -24,6 +36,16 @@ class CartPaneVisibleNotifier extends Notifier<bool> {
   bool build() => true;
 
   void toggle() => state = !state;
+
+  /// Replie le volet pour rendre la carte.
+  ///
+  /// Le pendant de [show], et il manquait. Replier n'était possible que par le
+  /// bouton 🛒 de la barre du haut — le coin le plus éloigné du pouce — alors
+  /// que sous [kCartPaneFullWidthBelow] le volet recouvre TOUTE la carte : il
+  /// fallait donc y retourner entre chaque plat d'une même commande.
+  void hide() {
+    if (state) state = false;
+  }
 
   /// Rouvre le volet. Appelé à l'ajout d'un article : sans ça, ajouter un plat
   /// alors que le volet est replié ne produirait RIEN à l'écran — le serveur

@@ -15,6 +15,7 @@ import '../../../../shared/widgets/app_primary_button.dart';
 import '../../domain/entities/restaurant_table.dart';
 import '../../domain/entities/stock_item.dart';
 import '../../domain/courier_pay.dart';
+import '../../domain/order_attach.dart';
 import 'courier_sheet.dart';
 
 /// ENREGISTREMENT D'UNE COMMANDE prise depuis le Menu — Module 3 du flux.
@@ -54,6 +55,19 @@ Future<Sale?> showOrderTypeSheet({
   /// feuille s'ouvre alors directement sur sa section. `null` = la feuille
   /// pose la question comme avant. Toute autre valeur est ignorée.
   String? initialOrderType,
+
+  /// AJOUT À UNE TABLE DÉJÀ OUVERTE — l'identifiant de cette table.
+  ///
+  /// Renseigné, la feuille ne pose plus AUCUNE des quatre questions dont la
+  /// réponse est connue : le type est « sur place », la table est celle-ci, le
+  /// compte est [tabLabel], et les couverts ne bougent pas. Il ne reste que
+  /// l'envoi. C'est tout l'objet du constat n° 7 : un dessert coûtait le même
+  /// parcours qu'une commande entière.
+  ///
+  /// Si la table n'existe plus — libérée pendant que le serveur composait sa
+  /// sélection —, la feuille retombe sur le parcours complet plutôt que
+  /// d'échouer : les plats sont dans le panier, il faut pouvoir les servir.
+  String? initialTableId,
 }) =>
     showAdaptiveFormSheet<Sale>(
       context: context,
@@ -63,6 +77,7 @@ Future<Sale?> showOrderTypeSheet({
         tabLabel: tabLabel,
         notes: notes,
         initialOrderType: initialOrderType,
+        initialTableId: initialTableId,
       ),
     );
 
@@ -76,6 +91,7 @@ class _OrderTypeSheet extends StatefulWidget {
   final String? tabLabel;
   final String? notes;
   final String? initialOrderType;
+  final String? initialTableId;
 
   const _OrderTypeSheet({
     required this.shopId,
@@ -83,6 +99,7 @@ class _OrderTypeSheet extends StatefulWidget {
     this.tabLabel,
     this.notes,
     this.initialOrderType,
+    this.initialTableId,
   });
 
   @override
@@ -95,6 +112,14 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
   // ── Sur place ──────────────────────────────────────────────────────────
   RestaurantTable? _table;
   int _covers = 1;
+
+  /// Ces plats REJOIGNENT une addition en cours au lieu d'en ouvrir une.
+  ///
+  /// Posé une fois dans `initState`, jamais ensuite : le rattachement n'est
+  /// pas un mode qu'on active à l'écran, c'est la façon dont la feuille a été
+  /// ouverte. Il gouverne trois choses — le titre, la disparition du choix de
+  /// table et de couverts, et le calcul des couverts à l'envoi.
+  bool _attaching = false;
 
   // ── À emporter ET à livrer ─────────────────────────────────────────────
   // Les trois premiers champs servent aux deux canaux : le comptoir crie un
@@ -210,6 +235,20 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
   @override
   void initState() {
     super.initState();
+    // RATTACHEMENT D'ABORD : il fixe le type lui-même et rend inutile tout ce
+    // qui suit.
+    final attachId = (widget.initialTableId ?? '').trim();
+    if (attachId.isNotEmpty) {
+      for (final t in RestaurantTableService.tablesForShop(widget.shopId)) {
+        if (t.id != attachId) continue;
+        _attaching = true;
+        _table = t;
+        _applyChoice(_ServiceType.dineIn);
+        return;
+      }
+      // Table introuvable — libérée ou supprimée entre-temps. On NE bloque
+      // pas : le panier est plein, et la feuille complète reste le chemin.
+    }
     final t = switch (widget.initialOrderType) {
       'dine_in' => _ServiceType.dineIn,
       'takeaway' => _ServiceType.takeaway,
@@ -396,18 +435,24 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
     try {
       Sale order;
       if (_type == _ServiceType.dineIn) {
+        // LES COUVERTS NE SE CALCULENT PLUS ICI. La règle distingue une
+        // NOUVELLE tablée d'un AJOUT, et c'est une distinction qui n'existait
+        // pas : `_seated + _covers` rejoué pour un dessert aurait ajouté un
+        // couvert par article commandé en cours de repas. Voir
+        // `order_attach.dart`, et le test qui l'épingle.
+        final c = coversForTableOrder(
+          attaching: _attaching,
+          seated: _seated(_table!),
+          newCovers: _covers,
+        );
         // `saveTableOrder` occupe la table, pose les couverts et l'heure
         // d'ouverture au passage — pas besoin d'un `openService` séparé, qui
         // ferait deux écritures pour le même fait.
         order = await RestaurantOrderService.saveTableOrder(
           table: _table!,
           items: widget.items,
-          covers: _covers,
-          // Couverts de la TABLE : ceux déjà assis PLUS la nouvelle tablée.
-          // Sans ce cumul, asseoir 3 convives à une table qui en portait 5 la
-          // ramenait à 3 — les cinq premiers disparaissaient du plan de salle
-          // et leurs places redevenaient libres à l'écran.
-          tableCovers: _seated(_table!) + _covers,
+          covers: c.orderCovers,
+          tableCovers: c.tableCovers,
           tabLabel: (widget.tabLabel ?? '').trim().isEmpty
               ? null
               : widget.tabLabel!.trim(),
@@ -462,12 +507,14 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
     final sem = Theme.of(context).semantic;
 
     return AdaptiveFormFrame(
-      title: switch (_type) {
-        null => 'Type de commande',
-        _ServiceType.dineIn => 'Manger sur place',
-        _ServiceType.takeaway => 'À emporter',
-        _ServiceType.delivery => 'À livrer',
-      },
+      title: _attaching
+          ? 'Ajouter des plats'
+          : switch (_type) {
+              null => 'Type de commande',
+              _ServiceType.dineIn => 'Manger sur place',
+              _ServiceType.takeaway => 'À emporter',
+              _ServiceType.delivery => 'À livrer',
+            },
       subtitle: '${widget.items.length} article'
           '${widget.items.length > 1 ? 's' : ''} · '
           '${CurrencyFormatter.format(_total)}',
@@ -488,6 +535,12 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
             else ...[
               // Revenir sur le type sans tout ressaisir : l'erreur de tap est
               // fréquente, et refermer la feuille perdrait la commande.
+              //
+              // ABSENT EN RATTACHEMENT : le type n'a pas été choisi ici, il
+              // découle de la table visée. Proposer d'en changer laisserait
+              // croire qu'on peut emporter des plats commandés pour une
+              // table qui, elle, reste occupée.
+              if (!_attaching)
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
@@ -571,6 +624,62 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
   // ── Étape 2A — sur place ───────────────────────────────────────────────
 
   List<Widget> _buildDineIn(ColorScheme cs) {
+    // ── RATTACHEMENT : plus rien à demander ─────────────────────────────
+    //
+    // Ni table — elle est visée —, ni couverts — les convives sont assis
+    // depuis le plat principal. Un récapitulatif à la place, parce qu'un
+    // formulaire qui ne demande rien doit au moins dire OÙ ça part : sans
+    // lui, « Envoyer en préparation » serait un bouton sans destination
+    // visible.
+    final attached = _table;
+    if (_attaching && attached != null) {
+      final sem = Theme.of(context).semantic;
+      return [
+        const AppFieldLabel('Ces plats rejoignent'),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: sem.elevatedSurface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: sem.borderSubtle),
+          ),
+          child: Row(children: [
+            Icon(Icons.table_restaurant_outlined,
+                size: 18, color: cs.primary),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(attached.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.bodyBold
+                          .copyWith(color: cs.onSurface)),
+                  Text(
+                      // Le libellé BRUT peut être vide : c'est le compte
+                      // « Sans nom », et il en existe un par table. Voir
+                      // `RestaurantTab.displayLabel`.
+                      (widget.tabLabel ?? '').trim().isEmpty
+                          ? 'Sans nom'
+                          : widget.tabLabel!.trim(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.caption),
+                ],
+              ),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 10),
+        Text(
+            'Les couverts de la table ne changent pas : ces convives sont '
+            'déjà comptés.',
+            style: AppTextStyles.captionHint),
+      ];
+    }
     final tables = _availableTables;
     if (tables.isEmpty) {
       return [

@@ -21,6 +21,8 @@ import '../../../crm/domain/entities/client.dart';
 import '../../../crm/presentation/pages/clients_page.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/autocomplete_text_field.dart';
+import '../../../../shared/providers/cart_pane_provider.dart';
+import '../../../../shared/providers/order_attach_provider.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../parametres/data/shop_settings_store.dart';
@@ -328,7 +330,7 @@ String _fmtRate(double v) =>
     v == v.truncateToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
 
 // ─── Header ───────────────────────────────────────────────────────────────────
-class _CartHeader extends StatelessWidget {
+class _CartHeader extends ConsumerWidget {
   final CaisseState state;
   final String      shopId;
   final String?     serviceType;
@@ -341,7 +343,7 @@ class _CartHeader extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l      = context.l10n;
     // Mobile : header dense pour libérer de l'espace pour la liste.
     // Desktop : valeurs Material standard.
@@ -422,14 +424,30 @@ class _CartHeader extends StatelessWidget {
                     style: AppTextStyles.microBold
                         .copyWith(color: Colors.white)),
               ),
-            // En restauration, le pied de panier porte déjà un bouton
-            // « Vider » : ce raccourci rouge en tête faisait doublon, et deux
-            // commandes destructrices à deux endroits invitent à l'erreur.
-            if (state.items.isNotEmpty && !isRestaurantShop(shopId)) ...[
+            // « VIDER » EST ICI POUR TOUT LE MONDE DEPUIS LE CONSTAT n° 6.
+            //
+            // Il vivait au pied du panier en restauration, et l'en-tête le
+            // taisait pour ne pas doubler une commande destructrice. Mais le
+            // pied n'a que deux places, et la plus utile revient au retour à
+            // la carte : sous `kCartPaneFullWidthBelow`, le volet recouvre
+            // tout, et sans ce retour il fallait viser le 🛒 du coin haut
+            // droit entre CHAQUE plat d'une même commande.
+            //
+            // L'arbitrage se résume ainsi : vider un panier arrive une fois
+            // par erreur, revenir à la carte arrive à chaque plat. Le geste
+            // fréquent prend le bas de l'écran, le geste rare remonte — et il
+            // reste unique, donc l'argument du doublon tient toujours.
+            if (state.items.isNotEmpty) ...[
               SizedBox(width: isCompact ? 4 : 8),
               TextButton(
-                onPressed: () =>
-                    context.read<CaisseBloc>().add(ClearCart()),
+                onPressed: () {
+                  context.read<CaisseBloc>().add(ClearCart());
+                  // DÉSARMER EN MÊME TEMPS. Sans ça, un panier vidé laisserait
+                  // la cible en place et la commande SUIVANTE partirait sur une
+                  // table que le serveur ne vise plus — il ne le verrait qu'au
+                  // moment où le bon sort en cuisine.
+                  ref.read(orderAttachProvider.notifier).clear();
+                },
                 style: TextButton.styleFrom(
                   foregroundColor: AppColors.error,
                   padding: EdgeInsets.symmetric(
@@ -1493,7 +1511,7 @@ class _TotalBand extends StatelessWidget {
   );
 }
 
-class _CartFooter extends StatelessWidget {
+class _CartFooter extends ConsumerWidget {
   final String shopId;
   final CaisseState state;
   final AppLocalizations l;
@@ -1514,7 +1532,7 @@ class _CartFooter extends StatelessWidget {
       state.discountAmount > 0 || state.deliveryPrice > 0;
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context, WidgetRef ref) => Container(
     padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(
         // En restauration, TRANSPARENT : le panier peint déjà son fond
@@ -1681,23 +1699,39 @@ class _CartFooter extends StatelessWidget {
                   // comptoir.
                   final bloc  = context.read<CaisseBloc>();
                   final st    = bloc.state;
+                  // AJOUT À UNE ADDITION EN COURS, s'il y en a un d'armé. La
+                  // cible l'emporte sur le canal choisi en tête de panier :
+                  // on ne rattache pas des plats à une table « à emporter ».
+                  final attach = ref.read(orderAttachProvider);
                   final order = await showOrderTypeSheet(
                     context:  context,
                     shopId:   shopId,
                     items:    st.items,
-                    tabLabel: st.tabLabel,
+                    // Le libellé de la CIBLE, brut : c'est lui qui décide à
+                    // quel compte les plats se rattachent, et `RestaurantTab`
+                    // regroupe sur le libellé exact.
+                    tabLabel: attach?.tabLabel ?? st.tabLabel,
                     notes:    st.note,
                     // Canal déjà choisi en tête de panier : la feuille ouvre
                     // directement sa section au lieu de reposer la question.
-                    initialOrderType: serviceType,
+                    initialOrderType:
+                        attach != null ? 'dine_in' : serviceType,
+                    initialTableId: attach?.tableId,
                   );
-                  if (order == null) return;          // renoncé
+                  // Renoncé — la cible RESTE armée : le serveur a fermé la
+                  // feuille, pas abandonné son ajout. Le bandeau du panier
+                  // porte la croix qui, elle, désarme.
+                  if (order == null) return;
                   if (!context.mounted) return;
                   bloc.add(ClearCart());
+                  ref.read(orderAttachProvider.notifier).clear();
                   // Celui-ci RESTE : le panier se vide et le volet se referme,
                   // rien à l'écran ne dirait que la commande est partie.
-                  AppSnack.success(context,
-                      'Commande envoyée en préparation.');
+                  AppSnack.success(
+                      context,
+                      attach == null
+                          ? 'Commande envoyée en préparation.'
+                          : 'Plats ajoutés à ${attach.tableName}.');
                   onOrderPlaced?.call();
                   return;
                 }
@@ -1801,18 +1835,84 @@ class _CartFooter extends StatelessWidget {
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(999)),
               );
-              return Row(children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    style: secondaryStyle,
-                    onPressed: state.items.isEmpty
-                        ? null
-                        : () => context.read<CaisseBloc>().add(ClearCart()),
-                    icon: Icon(Icons.delete_sweep_outlined, size: iconSize),
-                    label: const Text('Vider'),
+              // ── BANDEAU D'AJOUT ───────────────────────────────────────
+              //
+              // « Commander » ne fait plus la même chose selon qu'une cible est
+              // armée ou non. Une action qui change de sens sans le dire est
+              // exactement ce qui fait envoyer un bon à la mauvaise table : le
+              // bandeau est la seule chose qui rend la différence visible, et
+              // sa croix le seul moyen d'y renoncer.
+              final attach = ref.watch(orderAttachProvider);
+              return Column(mainAxisSize: MainAxisSize.min, children: [
+                if (attach != null) ...[
+                  Container(
+                    padding:
+                        const EdgeInsets.fromLTRB(10, 6, 4, 6),
+                    margin: const EdgeInsets.only(bottom: 8),
+                    decoration: BoxDecoration(
+                      color: restoOpaqueOverlay(context, 0.10),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(children: [
+                      Icon(Icons.playlist_add_rounded,
+                          size: iconSize, color: cs.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Ajout à ${attach.tableName}'
+                          '${attach.tabLabel.trim().isEmpty ? '' : ' · '
+                              '${attach.tabLabel.trim()}'}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTextStyles.caption
+                              .copyWith(color: cs.onSurface),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Annuler l\'ajout',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () =>
+                            ref.read(orderAttachProvider.notifier).clear(),
+                        icon: Icon(Icons.close_rounded,
+                            size: iconSize, color: cs.onSurface),
+                      ),
+                    ]),
                   ),
-                ),
-                const SizedBox(width: 10),
+                ],
+                Row(children: [
+                // ── RETOUR À LA CARTE ────────────────────────────────────
+                //
+                // SEULEMENT là où le volet recouvre la carte. Au-dessus du
+                // seuil, les deux sont côte à côte : un bouton « Carte »
+                // renverrait vers ce qui est déjà sous les yeux, et replier le
+                // panier en pleine composition n'a aucun sens.
+                //
+                // Il remplace « Vider », remonté dans l'en-tête : le pied n'a
+                // que deux places, et celle-ci sert à chaque plat quand
+                // l'autre servait une fois par erreur.
+                if (MediaQuery.of(context).size.width <
+                    kCartPaneFullWidthBelow) ...[
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: secondaryStyle,
+                      onPressed: () {
+                        ref.read(cartPaneVisibleProvider.notifier).hide();
+                        // Le panier s'affiche aussi depuis la Caisse, qui
+                        // n'est pas la carte : replier n'y rendrait rien. On
+                        // ramène alors au Menu, comme le fait déjà le bouton
+                        // 🛒 du shell.
+                        final menu = '/shop/$shopId/inventaire';
+                        if (GoRouterState.of(context).matchedLocation !=
+                            menu) {
+                          context.go(menu);
+                        }
+                      },
+                      icon: Icon(Icons.arrow_back_rounded, size: iconSize),
+                      label: const Text('Carte'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                ],
                 // Action principale — prise de commande seule : type de
                 // service, détails, transfert en cuisine. Le règlement viendra
                 // plus tard, depuis « À emporter » ou l'addition de la table.
@@ -1842,6 +1942,7 @@ class _CartFooter extends StatelessWidget {
                     ),
                   ),
                 ),
+              ]),
               ]);
             }
 

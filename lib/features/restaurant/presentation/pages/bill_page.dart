@@ -22,6 +22,7 @@ import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../domain/entities/restaurant_table.dart';
 import '../../domain/order_author.dart';
+import '../../../../shared/providers/order_attach_provider.dart';
 import '../widgets/deposit_sheet.dart';
 import '../widgets/packaging_sheet.dart';
 import '../widgets/payment_sheet.dart';
@@ -50,6 +51,31 @@ class BillPage extends ConsumerStatefulWidget {
 class _BillPageState extends ConsumerState<BillPage> {
   RestaurantTable? _table;
   Sale? _order;
+
+  /// AJOUTER DES PLATS à cette addition, sans refaire la prise de commande.
+  ///
+  /// Le dessert commandé après le plat coûtait le parcours entier — panier,
+  /// « Commander », type de service, table, couverts, envoi — pour un seul
+  /// article. Quatre de ces cinq questions ont déjà leur réponse ici.
+  ///
+  /// On ARME la cible et on renvoie à la carte. Le rattachement est consommé
+  /// au panier, par « Commander ». Voir `order_attach_provider.dart`.
+  void _addDishes() {
+    final table = _table;
+    final order = _order;
+    if (table == null || order == null) return;
+    ref.read(orderAttachProvider.notifier).aim(
+          tableId: table.id,
+          tableName: table.name,
+          // LE LIBELLÉ BRUT, tel qu'il est écrit sur la commande — pas
+          // `displayLabel`. `RestaurantTabService` regroupe les commandes sur
+          // le libellé EXACT : envoyer « Sans nom » à la place d'une chaîne
+          // vide ouvrirait un SECOND compte au lieu de rejoindre celui-ci, et
+          // l'addition se scinderait sous les yeux du serveur.
+          tabLabel: (order.tabLabel ?? '').trim(),
+        );
+    context.go('/shop/${widget.shopId}/inventaire');
+  }
 
   /// Nombre de parts pour le partage. 1 = pas de partage.
   int _shares = 1;
@@ -295,9 +321,19 @@ class _BillPageState extends ConsumerState<BillPage> {
                     table: table, order: order, shopId: widget.shopId),
                 const SizedBox(height: 16),
                 _ItemsCard(order: order),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
+                // `Wrap` et non `Row` : le quatrième bouton — « Ajouter des
+                // plats », arrivé avec le constat n° 7 — débordait sur un
+                // téléphone. Ils passent à la ligne au lieu de se couper.
+                Wrap(
+                  alignment: WrapAlignment.end,
                   children: [
+                    // EN TÊTE, et c'est voulu : c'est le seul des quatre qui
+                    // continue le service. Les trois autres le terminent.
+                    TextButton.icon(
+                      onPressed: _settling ? null : _addDishes,
+                      icon: const Icon(Icons.playlist_add_rounded, size: 18),
+                      label: const Text('Ajouter des plats'),
+                    ),
                     TextButton.icon(
                       onPressed: _settling ? null : _addPackaging,
                       icon: const Icon(Icons.takeout_dining_outlined, size: 18),
