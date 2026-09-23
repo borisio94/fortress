@@ -1055,362 +1055,28 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
   /// Bandeau de synthèse de la sélection courante, coloré par nature :
   /// déjà encaissé (acquis, vert) et reste à encaisser (dû, ambre ; vert à
   /// zéro). Masqué quand la liste est vide (rien à résumer).
-  Widget _summaryBar(double totalPaid, double totalDue) {
-    final sem = Theme.of(context).semantic;
-    Widget cell(IconData icon, String label, String value, Color color) =>
-        Expanded(
-          child: Row(children: [
-            Icon(icon, size: 16, color: color),
-            const SizedBox(width: 7),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(label,
-                    style: AppTextStyles.micro
-                        .copyWith(color: AppColors.textSecondary)),
-                Text(value,
-                    style: AppTextStyles.bodySmBold
-                        .copyWith(color: color, fontWeight: FontWeight.w800)),
-              ],
-            ),
-          ]),
-        );
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppColors.primary.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.primary.withValues(alpha: 0.12)),
-      ),
-      child: Row(children: [
-        cell(Icons.check_circle_outline_rounded, 'Encaissé',
-            CurrencyFormatter.format(totalPaid), sem.success),
-        Container(width: 1, height: 28, color: sem.borderSubtle),
-        const SizedBox(width: 12),
-        cell(Icons.payments_outlined, 'Reste à encaisser',
-            CurrencyFormatter.format(totalDue),
-            totalDue > 0 ? sem.warning : sem.success),
-      ]),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Dette partenaire pour TOUTES les commandes visibles, en une seule
-    // passe Hive (offline-first) au build de la liste — pas un calcul par
-    // card. Recalculé quand le ledger change (cf. _onDataChanged écoute
-    // 'partner_ledger_entries').
-    // Socle filtré une fois pour la liste, le bandeau de synthèse et les
-    // compteurs d'onglets.
-    final base    = _baseList;
-    final counts  = _countsByStatus(base);
-    // UNE SEULE PASSE pour les huit rangs, et sur la MÊME base filtrée que la
-    // liste : un compteur qui ignorerait la recherche annoncerait des
-    // commandes que l'onglet ne montrerait pas.
-    final restoCounts = _isResto
-        ? serviceTabCounts(_listForStatus('all', base))
-        : const <ServiceTab, int>{};
-    // « En retard / à planifier » : commandes programmées hors radar. Les
-    // compteurs sont tirés de la liste FILTRÉE (recherche comprise) : la barre
-    // annonce exactement ce que le filtre affichera.
-    final lateList       = _lateUnplanned(base);
-    final unplannedCount = lateList.where((o) => o.scheduledAt == null).length;
-    final lateCount      = lateList.length - unplannedCount;
-    final hasLate  = lateList.isNotEmpty;
-    final showLate = _lateFilter && hasLate;
-    // Versement partenaire en attente, par commande (une passe ledger Hive).
-    // Garde-fou « nouvelles commandes » basé sur la date de l'ÉCRITURE
-    // (cf. `since`) : les commandes historiques (écritures anciennes) restent
-    // exclues, MAIS une ancienne commande repassée en programmée puis
-    // re-finalisée (écriture fraîche) participe bien à la logique « à verser ».
-    final pendingRemit = PartnerLedgerService.pendingRemittanceByOrder(
-        widget.shopId,
-        base.map((o) => o.id).whereType<String>(),
-        since: _remitTrackingSince);
-    // Même règle que ci-dessus : compteur et total suivent la recherche.
-    final remitList  = _pendingRemitList(base, pendingRemit);
-    final remitCount = remitList.length;
-    final remitTotal = remitList.fold<double>(
-        0, (s, o) => s + (pendingRemit[o.id] ?? 0));
-    final hasRemit   = remitCount > 0;
-    final showRemit  = _remitFilter && hasRemit;
-    // LE REGROUPEMENT DU SERVICE, en restauration seulement.
-    //
-    // `_listForStatus` filtre sur `o.status.name` — juste en e-commerce, où le
-    // statut PORTE l'avancement. En restauration il ne bouge qu'à
-    // l'encaissement : l'onglet « Programmée » contenait aussi bien une
-    // commande que personne n'avait envoyée en cuisine qu'un client finissant
-    // son dessert. Voir `service_tabs.dart`.
-    //
-    // La recherche et la fenêtre de dates restent celles de `_listForStatus` :
-    // on regroupe autrement, on ne filtre pas autrement. `'all'` lui rend donc
-    // la base déjà filtrée, sur laquelle le rang s'applique ensuite.
-    final orders   = showRemit
-        ? remitList
-        : showLate
-            ? lateList
-            : _isResto
-                ? ordersForServiceTab(
-                    _serviceTab, _listForStatus('all', base))
-                : _listForStatus(_filters[_filter.index].$1, base);
-    final orderDebts = PartnerLedgerService.debtByOrder(
-        widget.shopId, orders.map((o) => o.id).whereType<String>());
-    // Synthèse de la sélection courante : déjà encaissé + reste à encaisser.
-    // « Encaissé » inclut ce que le partenaire a perçu pour la boutique
-    // (`amountPaid` reste au total) : le client, lui, a soldé.
-    final totalPaid = orders.fold<double>(0, (s, o) => s + o.amountPaid);
-    final totalDue  = orders.fold<double>(0, (s, o) => s + o.amountDue);
-    return Column(children: [
-      // ── Emplacements : Globale / Boutique / Partenaires ─────────────
-      // Le filtre s'applique aux lignes via `orderToPartnerLocId` plus haut
-      // dans `_orders` (cf. ref.watch(dashViewFilterProvider)).
-      //
-      // MASQUÉ EN RESTAURATION, et au SITE D'APPEL, pas dans le widget : il a
-      // cinq appelants dont quatre e-commerce. Sans partenaire de livraison —
-      // le cas d'un restaurant — la barre masque déjà « Globale » et ne laisse
-      // qu'une pastille unique portant le nom de la boutique, qui ne filtre
-      // rien et ne se compare à rien.
-      if (!_isResto)
-        ViewFilterChipBar(shopId: widget.shopId, compactPills: true),
-
-      // ── En-tête de service (restauration) ────────────────────────────
-      if (_isResto) _restoHeader(restoCounts, totalDue),
-
-      // ── Filtres ─────────────────────────────────────────────
-      //
-      // PASTILLES en restauration, `TabBar` ailleurs. Même grammaire que le
-      // Menu et le Stock : `RestoPillTabs` est déjà partagée par les deux, et
-      // en écrire une troisième les aurait fait diverger au premier ajustement.
-      if (_isResto)
-        RestoPillTabs(
-          items: [
-            for (final t in ServiceTab.ordered)
-              RestoPillTab(
-                label: t.label,
-                count: restoCounts[t] ?? 0,
-                color: t == ServiceTab.toutes ? null : t.color(context),
-              ),
-          ],
-          selected: ServiceTab.ordered.indexOf(_serviceTab),
-          onSelect: (i) =>
-              setState(() => _serviceTab = ServiceTab.ordered[i]),
-        )
-      else
-      Container(
-        // Opacité des cartes en restauration : ces bandeaux de filtres
-        // étaient les derniers aplats pleins de la page.
-        color: restoDecorActive
-            ? restoGlassFill(context)
-            : Theme.of(context).colorScheme.surface,
-        child: TabBar(
-          controller: _filter,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          labelColor:           AppColors.primary,
-          unselectedLabelColor: AppColors.textHint,
-          indicatorColor:       AppColors.primary,
-          indicatorWeight:      2,
-          labelStyle: AppTextStyles.bodySmBold,
-          tabs: [
-            for (var i = 0; i < _filters.length; i++)
-              Tab(child: _tabLabel(_filters[i].$2,
-                  counts[_filters[i].$1] ?? 0)),
-          ],
-        ),
-      ),
-      Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
-
-      // ── Barre d'alerte unique : livraisons à traiter + versements ─────────
-      // Disparaît quand tout est à zéro.
-      if (hasLate || hasRemit)
-        _alertBar(
-          lateCount:      lateCount,
-          unplannedCount: unplannedCount,
-          remitCount:     remitCount,
-          remitTotal:     remitTotal,
-          showLate:       showLate,
-          showRemit:      showRemit,
-        ),
-
-      // ── Recherche + filtres sur UNE ligne (densité) ──────────
-      // Recherche extensible + filtre date + export en icônes compactes
-      // (au lieu de 2 lignes). La plage de dates active affiche son libellé.
-      Container(
-        color: restoDecorActive
-            ? restoGlassFill(context)
-            : Theme.of(context).colorScheme.surface,
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-        child: Row(children: [
-          // Barre de recherche (prend tout l'espace restant)
-          Expanded(
-            child: SizedBox(
-              height: 38,
-              child: TextField(
-                controller: _searchCtrl,
-                style: AppTextStyles.bodySm,
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: 'Rechercher (client, téléphone, ville…)',
-                  hintStyle: AppTextStyles.bodySm
-                      .copyWith(color: AppColors.textHint),
-                  prefixIcon: Icon(Icons.search_rounded,
-                      size: 16, color: AppColors.textHint),
-                  suffixIcon: _query.isEmpty ? null : IconButton(
-                    icon: Icon(Icons.close_rounded,
-                        size: 14, color: AppColors.textHint),
-                    splashRadius: 16,
-                    onPressed: () => _searchCtrl.clear(),
-                  ),
-                  contentPadding: EdgeInsets.zero,
-                  filled: true, fillColor: AppColors.inputFill,
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(
-                          color: Theme.of(context).semantic.borderSubtle)),
-                  focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: AppColors.primary)),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          // Filtre date — icône seule (inactif) ou puce avec plage (actif).
-          Tooltip(
-            message: _dateRange == null
-                ? 'Filtrer par date' : _formatRange(_dateRange!),
-            child: InkWell(
-              onTap: _pickDateRange,
-              borderRadius: BorderRadius.circular(20),
-              child: Container(
-                height: 38,
-                padding: EdgeInsets.symmetric(
-                    horizontal: _dateRange != null ? 10 : 9),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: _dateRange != null
-                      ? AppColors.primary.withValues(alpha: 0.10)
-                      : AppColors.inputFill,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                      color: _dateRange != null
-                          ? AppColors.primary.withValues(alpha: 0.4)
-                          : Theme.of(context).semantic.borderSubtle),
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.event_rounded, size: 16,
-                      color: _dateRange != null
-                          ? AppColors.primary : AppColors.textSecondary),
-                  if (_dateRange != null) ...[
-                    const SizedBox(width: 5),
-                    Text(_formatRange(_dateRange!),
-                        style: AppTextStyles.captionBold
-                            .copyWith(color: AppColors.primary)),
-                    const SizedBox(width: 3),
-                    InkWell(
-                      onTap: () => setState(() => _dateRange = null),
-                      child: Icon(Icons.close_rounded,
-                          size: 14, color: AppColors.textHint),
-                    ),
-                  ],
-                ]),
-              ),
-            ),
-          ),
-          // Export — icône seule.
-          if (ref.watch(permissionsProvider(widget.shopId))
-              .canExportOrders) ...[
-            const SizedBox(width: 6),
-            Tooltip(
-              message: 'Exporter',
-              child: InkWell(
-                onTap: _openExport,
-                borderRadius: BorderRadius.circular(20),
-                // Même poids visuel que le bouton date au repos : l'export
-                // est un outil, pas l'action principale de l'écran.
-                child: Container(
-                  height: 38, width: 40,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: AppColors.inputFill,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color: Theme.of(context).semantic.borderSubtle),
-                  ),
-                  child: Icon(Icons.download_rounded,
-                      size: 16, color: AppColors.textSecondary),
-                ),
-              ),
-            ),
-          ],
-        ]),
-      ),
-      Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
-
-      // ── Synthèse de la sélection (encaissé + reste à encaisser) ──
-      if (orders.isNotEmpty) ...[
-        const SizedBox(height: 8),
-        _summaryBar(totalPaid, totalDue),
-      ],
-
-      // ── Liste commandes ──────────────────────────────────────
-      Expanded(
-        child: RefreshIndicator(
-          onRefresh: _pullAndReload,
-          child: orders.isEmpty
-            ? ListView(children: [
-                if (_isResto)
-                  // COMPACT, et sous la barre d'onglets : le rendu plein
-                  // occupait tout l'écran avec une pastille de 72 px et
-                  // répétait le nom de l'onglet écrit juste au-dessus.
-                  //
-                  // ET IL PROPOSE UNE ACTION. Un service sans commande n'a pas
-                  // besoin qu'on le lui dise, il a besoin d'un chemin pour en
-                  // prendre une — et ce chemin est la carte.
-                  RestoEmptyState(
-                    compact: true,
-                    icon: Icons.receipt_long_outlined,
-                    title: _serviceTab == ServiceTab.toutes
-                        ? 'Aucune commande'
-                        : 'Rien dans « ${_serviceTab.label} »',
-                    subtitle: _serviceTab == ServiceTab.toutes
-                        ? 'Les commandes prises au Menu ou au plan de salle '
-                            'arrivent ici.'
-                        : 'Les autres onglets en portent peut-être.',
-                    actionLabel: _serviceTab == ServiceTab.toutes
-                        ? 'Prendre une commande'
-                        : null,
-                    onAction: _serviceTab == ServiceTab.toutes
-                        ? () => context.go('/shop/${widget.shopId}/inventaire')
-                        : null,
-                  )
-                else
-                  EmptyStateWidget(
-                    icon: Icons.inbox_outlined,
-                    title: _filter.index == 0
-                        ? 'Aucune commande'
-                        : 'Aucune commande '
-                            '${_filters[_filter.index].$2.toLowerCase()}',
-                    subtitle:
-                        'Les commandes que tu encaisses apparaîtront ici.',
-                  ),
-              ])
-            : ListView.separated(
-          padding: EdgeInsets.all(_isResto && !_gridView ? 8 : 12),
-          itemCount: orders.length,
-          // EN LISTE, les lignes se touchent : un filet les separe, sans
-          // espace. C'est ce qui fait la densite — huit pixels entre vingt
-          // commandes, c'est un ecran de moins par service.
-          separatorBuilder: (_, __) => _isResto && !_gridView
-              ? const SizedBox(height: 4)
-              : const SizedBox(height: 8),
-          itemBuilder: (_, i) {
+  /// UNE CARTE DE COMMANDE, par index dans la liste courante.
+  ///
+  /// Extrait du `itemBuilder` le 2026-09-23, sans qu'une seule ligne de rappel
+  /// soit réécrite : la GRILLE avait besoin de construire une carte hors d'un
+  /// `ListView`, et quinze rappels inlinés ne s'appellent pas depuis deux
+  /// endroits.
+  ///
+  /// Les trois collections arrivent en paramètre plutôt que d'être relues :
+  /// elles sont calculées une fois par build, en une passe Hive chacune, et
+  /// les recalculer par carte annulerait tout le bénéfice.
+  Widget _cardFor(
+    int i, {
+    required List<Sale> orders,
+    required Map<String, PartnerDebtInfo> orderDebts,
+    required Map<String, double> pendingRemit,
+    bool grid = false,
+  }) {
             final perms = ref.watch(permissionsProvider(widget.shopId));
             return _OrderCard(
             order:    orders[i],
             dense:    _isResto && !_gridView,
+            grid:     grid,
             debt:     orderDebts[orders[i].id],
             // Versement partenaire encore attendu pour cette commande (null
             // = rien à recevoir). Affiche un bandeau + un bouton de marquage.
@@ -1916,7 +1582,443 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               }
             },
           );
-          },
+  }
+
+  /// LES DEUX CHIFFRES DE LA SÉLECTION, EN DEUX CARTES.
+  ///
+  /// C'était un bandeau pleine largeur : deux nombres et un filet vertical au
+  /// milieu d'une bande de mille pixels. Il prenait une ligne entière pour
+  /// dire ce que deux cartes disent côte à côte, et il ne ressemblait à aucun
+  /// autre bloc du module — le tableau de bord et le Stock comptent déjà en
+  /// cartes.
+  ///
+  /// CHAQUE CARTE PREND LA COULEUR DE SON CHIFFRE, fond compris. Le bandeau
+  /// teintait tout en accent et coloriait seulement les valeurs : on lisait
+  /// deux nombres avant de comprendre lequel était un acquis et lequel une
+  /// attente.
+  Widget _summaryBar(double totalPaid, double totalDue) {
+    final sem = Theme.of(context).semantic;
+    // « Reste à encaisser » vire au vert à zéro : il n'y a plus d'attente, et
+    // l'ambre d'un zéro ferait chercher un problème qui n'existe pas.
+    final dueColor = totalDue > 0 ? sem.warning : sem.success;
+
+    Widget card(IconData icon, String label, String value, Color color) =>
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: color.withValues(alpha: 0.22)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(children: [
+                  Icon(icon, size: 15, color: color),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.micro),
+                  ),
+                ]),
+                const SizedBox(height: 4),
+                Text(value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.bodyBold.copyWith(color: color)),
+              ],
+            ),
+          ),
+        );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+      child: Row(children: [
+        card(Icons.check_circle_outline_rounded, 'Encaissé',
+            CurrencyFormatter.format(totalPaid), sem.success),
+        const SizedBox(width: 8),
+        card(Icons.payments_outlined, 'Reste à encaisser',
+            CurrencyFormatter.format(totalDue), dueColor),
+      ]),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Dette partenaire pour TOUTES les commandes visibles, en une seule
+    // passe Hive (offline-first) au build de la liste — pas un calcul par
+    // card. Recalculé quand le ledger change (cf. _onDataChanged écoute
+    // 'partner_ledger_entries').
+    // Socle filtré une fois pour la liste, le bandeau de synthèse et les
+    // compteurs d'onglets.
+    final base    = _baseList;
+    final counts  = _countsByStatus(base);
+    // UNE SEULE PASSE pour les huit rangs, et sur la MÊME base filtrée que la
+    // liste : un compteur qui ignorerait la recherche annoncerait des
+    // commandes que l'onglet ne montrerait pas.
+    final restoCounts = _isResto
+        ? serviceTabCounts(_listForStatus('all', base))
+        : const <ServiceTab, int>{};
+    // « En retard / à planifier » : commandes programmées hors radar. Les
+    // compteurs sont tirés de la liste FILTRÉE (recherche comprise) : la barre
+    // annonce exactement ce que le filtre affichera.
+    final lateList       = _lateUnplanned(base);
+    final unplannedCount = lateList.where((o) => o.scheduledAt == null).length;
+    final lateCount      = lateList.length - unplannedCount;
+    final hasLate  = lateList.isNotEmpty;
+    final showLate = _lateFilter && hasLate;
+    // Versement partenaire en attente, par commande (une passe ledger Hive).
+    // Garde-fou « nouvelles commandes » basé sur la date de l'ÉCRITURE
+    // (cf. `since`) : les commandes historiques (écritures anciennes) restent
+    // exclues, MAIS une ancienne commande repassée en programmée puis
+    // re-finalisée (écriture fraîche) participe bien à la logique « à verser ».
+    final pendingRemit = PartnerLedgerService.pendingRemittanceByOrder(
+        widget.shopId,
+        base.map((o) => o.id).whereType<String>(),
+        since: _remitTrackingSince);
+    // Même règle que ci-dessus : compteur et total suivent la recherche.
+    final remitList  = _pendingRemitList(base, pendingRemit);
+    final remitCount = remitList.length;
+    final remitTotal = remitList.fold<double>(
+        0, (s, o) => s + (pendingRemit[o.id] ?? 0));
+    final hasRemit   = remitCount > 0;
+    final showRemit  = _remitFilter && hasRemit;
+    // LE REGROUPEMENT DU SERVICE, en restauration seulement.
+    //
+    // `_listForStatus` filtre sur `o.status.name` — juste en e-commerce, où le
+    // statut PORTE l'avancement. En restauration il ne bouge qu'à
+    // l'encaissement : l'onglet « Programmée » contenait aussi bien une
+    // commande que personne n'avait envoyée en cuisine qu'un client finissant
+    // son dessert. Voir `service_tabs.dart`.
+    //
+    // La recherche et la fenêtre de dates restent celles de `_listForStatus` :
+    // on regroupe autrement, on ne filtre pas autrement. `'all'` lui rend donc
+    // la base déjà filtrée, sur laquelle le rang s'applique ensuite.
+    final orders   = showRemit
+        ? remitList
+        : showLate
+            ? lateList
+            : _isResto
+                ? ordersForServiceTab(
+                    _serviceTab, _listForStatus('all', base))
+                : _listForStatus(_filters[_filter.index].$1, base);
+    final orderDebts = PartnerLedgerService.debtByOrder(
+        widget.shopId, orders.map((o) => o.id).whereType<String>());
+    // Synthèse de la sélection courante : déjà encaissé + reste à encaisser.
+    // « Encaissé » inclut ce que le partenaire a perçu pour la boutique
+    // (`amountPaid` reste au total) : le client, lui, a soldé.
+    final totalPaid = orders.fold<double>(0, (s, o) => s + o.amountPaid);
+    final totalDue  = orders.fold<double>(0, (s, o) => s + o.amountDue);
+    return Column(children: [
+      // ── Emplacements : Globale / Boutique / Partenaires ─────────────
+      // Le filtre s'applique aux lignes via `orderToPartnerLocId` plus haut
+      // dans `_orders` (cf. ref.watch(dashViewFilterProvider)).
+      //
+      // MASQUÉ EN RESTAURATION, et au SITE D'APPEL, pas dans le widget : il a
+      // cinq appelants dont quatre e-commerce. Sans partenaire de livraison —
+      // le cas d'un restaurant — la barre masque déjà « Globale » et ne laisse
+      // qu'une pastille unique portant le nom de la boutique, qui ne filtre
+      // rien et ne se compare à rien.
+      if (!_isResto)
+        ViewFilterChipBar(shopId: widget.shopId, compactPills: true),
+
+      // ── En-tête de service (restauration) ────────────────────────────
+      if (_isResto) _restoHeader(restoCounts, totalDue),
+
+      // ── Filtres ─────────────────────────────────────────────
+      //
+      // PASTILLES en restauration, `TabBar` ailleurs. Même grammaire que le
+      // Menu et le Stock : `RestoPillTabs` est déjà partagée par les deux, et
+      // en écrire une troisième les aurait fait diverger au premier ajustement.
+      if (_isResto)
+        RestoPillTabs(
+          items: [
+            for (final t in ServiceTab.ordered)
+              RestoPillTab(
+                label: t.label,
+                count: restoCounts[t] ?? 0,
+                color: t == ServiceTab.toutes ? null : t.color(context),
+              ),
+          ],
+          selected: ServiceTab.ordered.indexOf(_serviceTab),
+          onSelect: (i) =>
+              setState(() => _serviceTab = ServiceTab.ordered[i]),
+        )
+      else
+      Container(
+        // Opacité des cartes en restauration : ces bandeaux de filtres
+        // étaient les derniers aplats pleins de la page.
+        color: restoDecorActive
+            ? restoGlassFill(context)
+            : Theme.of(context).colorScheme.surface,
+        child: TabBar(
+          controller: _filter,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          labelColor:           AppColors.primary,
+          unselectedLabelColor: AppColors.textHint,
+          indicatorColor:       AppColors.primary,
+          indicatorWeight:      2,
+          labelStyle: AppTextStyles.bodySmBold,
+          tabs: [
+            for (var i = 0; i < _filters.length; i++)
+              Tab(child: _tabLabel(_filters[i].$2,
+                  counts[_filters[i].$1] ?? 0)),
+          ],
+        ),
+      ),
+      Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
+
+      // ── Barre d'alerte unique : livraisons à traiter + versements ─────────
+      // Disparaît quand tout est à zéro.
+      if (hasLate || hasRemit)
+        _alertBar(
+          lateCount:      lateCount,
+          unplannedCount: unplannedCount,
+          remitCount:     remitCount,
+          remitTotal:     remitTotal,
+          showLate:       showLate,
+          showRemit:      showRemit,
+        ),
+
+      // ── Recherche + filtres sur UNE ligne (densité) ──────────
+      // Recherche extensible + filtre date + export en icônes compactes
+      // (au lieu de 2 lignes). La plage de dates active affiche son libellé.
+      Container(
+        color: restoDecorActive
+            ? restoGlassFill(context)
+            : Theme.of(context).colorScheme.surface,
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        child: Row(children: [
+          // Barre de recherche (prend tout l'espace restant)
+          Expanded(
+            child: SizedBox(
+              height: 38,
+              child: TextField(
+                controller: _searchCtrl,
+                style: AppTextStyles.bodySm,
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'Rechercher (client, téléphone, ville…)',
+                  hintStyle: AppTextStyles.bodySm
+                      .copyWith(color: AppColors.textHint),
+                  prefixIcon: Icon(Icons.search_rounded,
+                      size: 16, color: AppColors.textHint),
+                  suffixIcon: _query.isEmpty ? null : IconButton(
+                    icon: Icon(Icons.close_rounded,
+                        size: 14, color: AppColors.textHint),
+                    splashRadius: 16,
+                    onPressed: () => _searchCtrl.clear(),
+                  ),
+                  contentPadding: EdgeInsets.zero,
+                  filled: true, fillColor: AppColors.inputFill,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                          color: Theme.of(context).semantic.borderSubtle)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: AppColors.primary)),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Filtre date — icône seule (inactif) ou puce avec plage (actif).
+          Tooltip(
+            message: _dateRange == null
+                ? 'Filtrer par date' : _formatRange(_dateRange!),
+            child: InkWell(
+              onTap: _pickDateRange,
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                height: 38,
+                padding: EdgeInsets.symmetric(
+                    horizontal: _dateRange != null ? 10 : 9),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _dateRange != null
+                      ? AppColors.primary.withValues(alpha: 0.10)
+                      : AppColors.inputFill,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                      color: _dateRange != null
+                          ? AppColors.primary.withValues(alpha: 0.4)
+                          : Theme.of(context).semantic.borderSubtle),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.event_rounded, size: 16,
+                      color: _dateRange != null
+                          ? AppColors.primary : AppColors.textSecondary),
+                  if (_dateRange != null) ...[
+                    const SizedBox(width: 5),
+                    Text(_formatRange(_dateRange!),
+                        style: AppTextStyles.captionBold
+                            .copyWith(color: AppColors.primary)),
+                    const SizedBox(width: 3),
+                    InkWell(
+                      onTap: () => setState(() => _dateRange = null),
+                      child: Icon(Icons.close_rounded,
+                          size: 14, color: AppColors.textHint),
+                    ),
+                  ],
+                ]),
+              ),
+            ),
+          ),
+          // Export — icône seule.
+          if (ref.watch(permissionsProvider(widget.shopId))
+              .canExportOrders) ...[
+            const SizedBox(width: 6),
+            Tooltip(
+              message: 'Exporter',
+              child: InkWell(
+                onTap: _openExport,
+                borderRadius: BorderRadius.circular(20),
+                // Même poids visuel que le bouton date au repos : l'export
+                // est un outil, pas l'action principale de l'écran.
+                child: Container(
+                  height: 38, width: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppColors.inputFill,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                        color: Theme.of(context).semantic.borderSubtle),
+                  ),
+                  child: Icon(Icons.download_rounded,
+                      size: 16, color: AppColors.textSecondary),
+                ),
+              ),
+            ),
+          ],
+        ]),
+      ),
+      Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
+
+      // ── Synthèse de la sélection (encaissé + reste à encaisser) ──
+      if (orders.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _summaryBar(totalPaid, totalDue),
+      ],
+
+      // ── Liste commandes ──────────────────────────────────────
+      Expanded(
+        child: RefreshIndicator(
+          onRefresh: _pullAndReload,
+          child: orders.isEmpty
+            ? ListView(children: [
+                if (_isResto)
+                  // COMPACT, et sous la barre d'onglets : le rendu plein
+                  // occupait tout l'écran avec une pastille de 72 px et
+                  // répétait le nom de l'onglet écrit juste au-dessus.
+                  //
+                  // ET IL PROPOSE UNE ACTION. Un service sans commande n'a pas
+                  // besoin qu'on le lui dise, il a besoin d'un chemin pour en
+                  // prendre une — et ce chemin est la carte.
+                  RestoEmptyState(
+                    compact: true,
+                    icon: Icons.receipt_long_outlined,
+                    title: _serviceTab == ServiceTab.toutes
+                        ? 'Aucune commande'
+                        : 'Rien dans « ${_serviceTab.label} »',
+                    subtitle: _serviceTab == ServiceTab.toutes
+                        ? 'Les commandes prises au Menu ou au plan de salle '
+                            'arrivent ici.'
+                        : 'Les autres onglets en portent peut-être.',
+                    actionLabel: _serviceTab == ServiceTab.toutes
+                        ? 'Prendre une commande'
+                        : null,
+                    onAction: _serviceTab == ServiceTab.toutes
+                        ? () => context.go('/shop/${widget.shopId}/inventaire')
+                        : null,
+                  )
+                else
+                  EmptyStateWidget(
+                    icon: Icons.inbox_outlined,
+                    title: _filter.index == 0
+                        ? 'Aucune commande'
+                        : 'Aucune commande '
+                            '${_filters[_filter.index].$2.toLowerCase()}',
+                    subtitle:
+                        'Les commandes que tu encaisses apparaîtront ici.',
+                  ),
+              ])
+            : (_isResto && _gridView)
+              // ── VRAIE GRILLE ────────────────────────────────────────
+              //
+              // La bascule ne changeait RIEN : « grille » rendait la même
+              // colonne de cartes pleine largeur que « liste ». Deux modes
+              // pour un seul rendu.
+              //
+              // `Wrap` ET NON `GridView`, et c'est le point technique du lot :
+              // une carte de commande se DÉPLIE, donc sa hauteur varie.
+              // `GridView` impose une hauteur commune à toute une rangée — la
+              // carte dépliée aurait débordé, ou forcé les trois autres à sa
+              // taille. `Wrap` laisse chaque tuile mesurer sa propre hauteur.
+              //
+              // TROIS COLONNES au-delà de 1200, deux au-delà de 800, une en
+              // dessous : une carte de commande porte un repère, un état, son
+              // contenu et un bouton — sous 320 px de large, le bouton passe à
+              // la ligne et la tuile cesse d'être compacte.
+              ? SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+                  child: LayoutBuilder(builder: (ctx, box) {
+                    final cols = box.maxWidth >= 1200
+                        ? 3
+                        : box.maxWidth >= 800
+                            ? 2
+                            : 1;
+                    const gap = 10.0;
+                    final w = (box.maxWidth - gap * (cols - 1)) / cols;
+                    return Wrap(
+                      spacing: gap,
+                      runSpacing: gap,
+                      children: [
+                        for (var i = 0; i < orders.length; i++)
+                          SizedBox(
+                              width: w,
+                              child: _cardFor(i,
+                                  orders: orders,
+                                  orderDebts: orderDebts,
+                                  pendingRemit: pendingRemit,
+                                  grid: true)),
+                        // ── LA CASE « NOUVELLE COMMANDE », EN FIN DE GRILLE ──
+                        //
+                        // Le geste le plus fréquent du service n'avait AUCUN
+                        // point d'entrée depuis cet écran : il fallait revenir
+                        // à la carte par le tiroir. En fin de grille et non en
+                        // tête — on vient d'abord voir ce qui est en cours, et
+                        // une case de création au premier rang repousserait la
+                        // commande la plus ancienne hors de vue.
+                        SizedBox(
+                          width: w,
+                          child: _NewOrderTile(
+                            onTap: () => context
+                                .go('/shop/${widget.shopId}/inventaire'),
+                          ),
+                        ),
+                      ],
+                    );
+                  }),
+                )
+            : ListView.separated(
+          padding: EdgeInsets.all(_isResto && !_gridView ? 8 : 12),
+          itemCount: orders.length,
+          // EN LISTE, les lignes se touchent : un filet les separe, sans
+          // espace. C'est ce qui fait la densite — huit pixels entre vingt
+          // commandes, c'est un ecran de moins par service.
+          separatorBuilder: (_, __) => _isResto && !_gridView
+              ? const SizedBox(height: 4)
+              : const SizedBox(height: 8),
+          itemBuilder: (_, i) => _cardFor(i,
+              orders: orders,
+              orderDebts: orderDebts,
+              pendingRemit: pendingRemit),
         ),
         ),
       ),
@@ -2236,8 +2338,16 @@ class _OrderCard extends ConsumerStatefulWidget {
   /// les gardes sont exactement les mêmes objets.
   final bool dense;
 
+  /// Rendu GRILLE — une tuile compacte, en colonnes.
+  ///
+  /// Troisième disposition de la même carte, et toujours pas un troisième
+  /// widget : `dense` et `grid` ne changent que la LIGNE RÉSUMÉ. Le
+  /// dépliement, les actions et les gardes restent les mêmes objets.
+  final bool grid;
+
   const _OrderCard({required this.order,
     this.dense = false,
+    this.grid = false,
     this.debt,
     this.pendingRemittance,
     required this.onUpdate,
@@ -2375,7 +2485,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
             // d'actions de la carte, sur un écran qui n'a jamais tourné et que
             // zéro test de widget ne couvre. Le tap déplie, et tout reste
             // atteignable à un geste.
-            if (widget.dense) ..._denseSummary(context) else
+            if (widget.grid) ..._gridSummary(context)
+            else if (widget.dense) ..._denseSummary(context) else
             // ── Ligne résumé (toujours visible) — disposition « card client »
             //    avatar à gauche · nom + méta empilés · montant à droite.
             Row(children: [
@@ -2395,26 +2506,26 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     spacing: 6, runSpacing: 4,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      // Statut (+ marqueur "reprogrammée")
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 3),
-                        decoration: BoxDecoration(
-                            color: color.withValues(alpha:0.12),
-                            borderRadius: BorderRadius.circular(6)),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Text(_statusLabel(s),
-                              style: AppTextStyles.microBold
-                                  .copyWith(color: color)),
-                          if (s == SaleStatus.scheduled
-                              && (widget.order.rescheduleReason ?? '').isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(left: 4),
-                              child: Icon(Icons.event_repeat_rounded,
-                                  size: 10, color: color),
-                            ),
-                        ]),
-                      ),
+                      // ── LE STATUT COMMERCIAL A QUITTÉ LA CARTE ────────
+                      //
+                      // « Programmée » et l'état de service disaient la même
+                      // chose deux fois, côte à côte — et le premier était le
+                      // moins vrai des deux : il valait « Programmée » aussi
+                      // bien sur une commande que personne n'avait envoyée en
+                      // cuisine que sur un client finissant son dessert.
+                      //
+                      // RIEN N'EST PERDU : depuis le regroupement du service,
+                      // `serviceTabOf` couvre TOUS les statuts — « Encaissées »
+                      // pour `completed`, « Sans suite » pour annulée, refusée
+                      // et remboursée. Un seul badge, et c'est le plus précis.
+                      //
+                      // SEULE EXCEPTION, conservée : le marqueur de
+                      // reprogrammation. Il ne se déduit d'aucun drapeau de
+                      // cuisine, et il dit qu'une date a été déplacée — ce que
+                      // le rang de service ne saura jamais.
+                      if ((widget.order.rescheduleReason ?? '').isNotEmpty)
+                        Icon(Icons.event_repeat_rounded,
+                            size: 12, color: color),
                       // ÉTAT DE SERVICE (restauration) — « En cuisine »,
                       // « Prête », « Servie ». Le statut commercial seul
                       // (« Programmée ») ne dit rien de l'avancement du plat :
@@ -2440,10 +2551,12 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                                     .copyWith(color: AppColors.primary)),
                           ]),
                         ),
-                      // Pastille statut paiement (hors annulée/refusée).
-                      if (s != SaleStatus.cancelled
-                          && s != SaleStatus.refused)
-                        _PaymentStatusPill(status: widget.order.paymentStatus),
+                      // LA PASTILLE DE PAIEMENT EST DESCENDUE SOUS LE MONTANT.
+                      //
+                      // Trois pastilles sur une ligne de huit mots : plus rien
+                      // ne ressortait. Et celle-ci parlait d'argent au milieu
+                      // de deux qui parlaient de service — elle appartient à
+                      // la colonne du montant, pas à la ligne d'état.
                       // Badge "Web"/"WhatsApp" si source != 'pos'.
                       if (widget.order.source != 'pos')
                         OrderSourceBadge(source: widget.order.source),
@@ -2464,7 +2577,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                 ]),
               ),
               const SizedBox(width: 8),
-              // Montant + chevron à droite.
+              // Montant + état de paiement + chevron à droite.
               Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   mainAxisSize: MainAxisSize.min,
@@ -2475,6 +2588,18 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       fontWeight: FontWeight.w900,
                       color: AppColors.primary),
                 ),
+                // EN TEXTE, PAS EN PASTILLE. Sous le montant, il le qualifie ;
+                // dans la ligne d'état, il concurrençait deux pastilles qui
+                // parlent de service. Une pastille de plus ne hiérarchise pas,
+                // elle égalise.
+                if (s != SaleStatus.cancelled && s != SaleStatus.refused)
+                  Text(widget.order.paymentStatus.label,
+                      maxLines: 1,
+                      style: AppTextStyles.micro.copyWith(
+                          color: widget.order.paymentStatus ==
+                                  PaymentStatus.paid
+                              ? sem.successText
+                              : sem.warningText)),
                 const SizedBox(height: 2),
                 AnimatedRotation(
                   turns: _expanded ? 0.5 : 0,
@@ -2485,6 +2610,23 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                 ),
               ]),
             ]),
+
+            // ── L'ACTION DU SERVICE, SUR LA CARTE REPLIÉE ───────────────
+            //
+            // Elle vivait DANS le bloc déplié : pour faire avancer un bon, le
+            // serveur devait d'abord ouvrir la carte. Un tap de plus par
+            // commande, trente fois par service, sur le geste le plus fréquent
+            // de l'écran.
+            //
+            // C'EST LE MÊME BOUTON, au même appel : `_buildServiceProgress`
+            // n'est pas dupliqué, il est REMONTÉ — il a disparu du bloc déplié
+            // dans le même mouvement. Sa logique, ses gardes et sa cascade sont
+            // intactes.
+            //
+            // PAS EN MODE DENSE : la ligne y tient sur une hauteur de ligne,
+            // et un bouton pleine largeur la doublerait — c'est exactement la
+            // densité qu'on est venu chercher en basculant.
+            if (!widget.dense) ..._buildServiceProgress(context, s),
 
             // ── Bandeau dette enregistrée envers le partenaire ────
             // Synchronisé : `widget.debt` est calculé groupé par le parent
@@ -2587,12 +2729,12 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     const SizedBox(height: 8),
                   ],
 
-                  // Avancement du SERVICE (restauration) — envoyé en cuisine,
-                  // prêt, servi. Ces trois évènements n'avaient plus aucune
-                  // porte depuis que l'écran de service a quitté le menu : une
-                  // fois la cuisine terminée, le bon sortait de l'écran Cuisine
-                  // et plus personne ne pouvait le déclarer prêt ni servi.
-                  ..._buildServiceProgress(context, s),
+                  // AVANCEMENT DU SERVICE — REMONTÉ SUR LA CARTE REPLIÉE.
+                  //
+                  // Il n'est plus ici : l'ouvrir pour avancer un bon coûtait un
+                  // tap par commande. Il reste rendu en mode DENSE, où la ligne
+                  // n'a pas la place de le porter.
+                  if (widget.dense) ..._buildServiceProgress(context, s),
                   // EMBALLAGE — bouton direct, au moment où il sert.
                   ..._buildPackagingAction(context, s),
                   // LIVREUR — commandes à livrer uniquement.
@@ -4541,6 +4683,70 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         .join(', ');
   }
 
+  /// TUILE DE GRILLE — compacte, en colonne, sur un tiers de largeur.
+  ///
+  /// La rangée pleine largeur — avatar de 36 px, nom, quatre pastilles, montant
+  /// et chevron — ne tient pas dans 320 px : elle y déborderait ou
+  /// s'ellipserait jusqu'à ne plus rien dire. La tuile empile ce que la rangée
+  /// alignait.
+  ///
+  /// L'AVATAR DISPARAÎT. Il portait l'initiale du client, c'est-à-dire, en
+  /// restauration, celle de la TABLE — « T » pour toutes les tables de la
+  /// salle. Trente-six pixels pour une lettre qui ne distingue rien.
+  List<Widget> _gridSummary(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return [
+      Row(children: [
+        Expanded(
+          child: Text(_repere(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.bodySmBold.copyWith(color: cs.onSurface)),
+        ),
+        const SizedBox(width: 6),
+        Text(_hhmm(), style: AppTextStyles.micro),
+      ]),
+      const SizedBox(height: 6),
+      // L'état sur sa propre ligne : à un tiers de largeur, le poser à côté du
+      // repère l'aurait fait ellipser l'un ou l'autre.
+      Align(
+        alignment: Alignment.centerLeft,
+        child: _ServiceChip(
+            label: _tab.label, icon: _tab.icon, color: _tab.color(context)),
+      ),
+      const SizedBox(height: 6),
+      // DEUX LIGNES pour le contenu : une seule coupe « 2× Ndolè, 1× Jus… »
+      // après le premier plat, et la tuile ne dirait plus ce qu'elle porte.
+      Text(_contenu(),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: AppTextStyles.caption),
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(
+          child: Text(CurrencyFormatter.format(widget.order.total),
+              maxLines: 1,
+              style: AppTextStyles.bodyBold.copyWith(color: cs.primary)),
+        ),
+        if (widget.order.status != SaleStatus.cancelled &&
+            widget.order.status != SaleStatus.refused)
+          Text(widget.order.paymentStatus.label,
+              maxLines: 1,
+              style: AppTextStyles.micro.copyWith(
+                  color: widget.order.paymentStatus == PaymentStatus.paid
+                      ? Theme.of(context).semantic.successText
+                      : Theme.of(context).semantic.warningText)),
+        const SizedBox(width: 4),
+        AnimatedRotation(
+          turns: _expanded ? 0.5 : 0,
+          duration: const Duration(milliseconds: 200),
+          child: Icon(Icons.keyboard_arrow_down_rounded,
+              size: 18, color: cs.onSurfaceVariant),
+        ),
+      ]),
+    ];
+  }
+
   /// LIGNE DENSE — une commande par ligne, deux sous le seuil.
   List<Widget> _denseSummary(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -5451,6 +5657,49 @@ class _ViewModeToggle extends StatelessWidget {
         seg(Icons.grid_view_rounded, true, 'Cartes'),
         seg(Icons.view_list_rounded, false, 'Liste dense'),
       ]),
+    );
+  }
+}
+
+/// CASE « NOUVELLE COMMANDE », en fin de grille.
+///
+/// Le geste le plus fréquent du service n'avait AUCUN point d'entrée depuis cet
+/// écran : pour prendre une commande, il fallait ressortir par le tiroir et
+/// rouvrir la carte. Trois taps pour le geste qu'on répète trente fois.
+///
+/// EN POINTILLÉ ET SANS FOND : c'est une place vide qui attend, pas une
+/// commande de plus. Un aplat plein l'aurait comptée parmi les autres.
+class _NewOrderTile extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _NewOrderTile({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        // Hauteur MINIMALE et non fixe : la case s'aligne sur la plus petite
+        // carte de sa rangée sans jamais forcer les autres.
+        constraints: const BoxConstraints(minHeight: 96),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+              color: cs.primary.withValues(alpha: 0.35),
+              width: 1),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.add_circle_outline_rounded, size: 26, color: cs.primary),
+          const SizedBox(height: 6),
+          Text('Nouvelle commande',
+              style: AppTextStyles.bodySmBold.copyWith(color: cs.primary)),
+          const SizedBox(height: 2),
+          Text('Ouvre la carte', style: AppTextStyles.micro),
+        ]),
+      ),
     );
   }
 }

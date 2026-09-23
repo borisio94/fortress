@@ -68,7 +68,25 @@ class RestoPillTabs extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => SingleChildScrollView(
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    // ── LA BARRE DIT QU'ELLE CONTINUE ────────────────────────────────────
+    //
+    // Elle défilait déjà, sans le montrer : à huit onglets, le dernier était
+    // coupé en plein mot et rien n'annonçait qu'il y en avait d'autres. Une
+    // barre qui se termine par un libellé tronqué se lit comme un défaut
+    // d'affichage, pas comme une invitation à faire glisser.
+    //
+    // UN DÉGRADÉ ET UN CHEVRON, et non une flèche cliquable : la barre se
+    // fait glisser au doigt comme au trackpad, et un bouton de défilement
+    // réclamerait des taps répétés pour parcourir ce qu'un geste traverse.
+    // Le dégradé dit « ça continue », le chevron dit dans quel sens.
+    //
+    // `Stack` plutôt qu'un `ShaderMask` : le masque aurait aussi délavé les
+    // pastilles actives en fin de course, alors qu'on veut voiler ce qui est
+    // coupé, pas ce qui est sélectionné.
+    return Stack(children: [
+      SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         padding: padding,
         child: Row(
@@ -76,7 +94,34 @@ class RestoPillTabs extends StatelessWidget {
             for (var i = 0; i < items.length; i++) _chip(context, i),
           ],
         ),
-      );
+      ),
+      // Posé à droite, ignoré par le doigt : sans `IgnorePointer`, la zone
+      // voilée cesserait de répondre au glissement — c'est-à-dire que
+      // l'indice de défilement empêcherait de défiler.
+      Positioned(
+        right: 0,
+        top: 0,
+        bottom: 0,
+        child: IgnorePointer(
+          child: Container(
+            width: 36,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  cs.surface.withValues(alpha: 0),
+                  cs.surface,
+                ],
+              ),
+            ),
+            alignment: Alignment.centerRight,
+            padding: const EdgeInsets.only(right: 2),
+            child: Icon(Icons.chevron_right_rounded,
+                size: 18, color: cs.onSurfaceVariant),
+          ),
+        ),
+      ),
+    ]);
+  }
 
   Widget _chip(BuildContext context, int i) {
     final theme = Theme.of(context);
