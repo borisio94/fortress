@@ -61,6 +61,19 @@ class StaffMember {
   /// justifier un départ anticipé quotidien.
   final String? closingTime;
 
+  /// LE COMPTE auquel cette fiche correspond, quand elle en vient.
+  ///
+  /// `null` pour le personnel SANS accès à l'application — veilleur, plongeur,
+  /// homme de ménage —, saisi à la main parce qu'aucun compte ne le porte.
+  /// `null` AUSSI pour toute fiche créée avant le hotfix_182 : on ne devine
+  /// pas rétroactivement à quel compte chacune correspondait.
+  ///
+  /// Sans lui, le rapprochement fiche ↔ compte se faisait sur le NOM, et deux
+  /// homonymes se confondaient — la fiche du premier rendait le compte du
+  /// second inéligible, sans que rien ne l'explique. Voir
+  /// `staff_account_link.dart`.
+  final String? userId;
+
   final DateTime createdAt;
 
   const StaffMember({
@@ -78,6 +91,7 @@ class StaffMember {
     this.pinSalt,
     this.hasAppAccess = true,
     this.closingTime,
+    this.userId,
   });
 
   /// L'employé peut-il badger ? Sans PIN configuré, il faut passer par une
@@ -131,6 +145,7 @@ class StaffMember {
     String? pinSalt,
     bool? hasAppAccess,
     String? closingTime,
+    String? userId,
 
     /// Retire le code de pointage : `copyWith(pinHash: null)` serait un no-op
     /// silencieux et l'employé continuerait de pouvoir badger.
@@ -155,9 +170,10 @@ class StaffMember {
         hasAppAccess: hasAppAccess ?? this.hasAppAccess,
         closingTime:
             clearClosingTime ? null : (closingTime ?? this.closingTime),
+        userId: userId ?? this.userId,
       );
 
-  static const int currentSchemaVersion = 3;
+  static const int currentSchemaVersion = 4;
   static const SchemaMigrator _migrator = SchemaMigrator(
     currentVersion: currentSchemaVersion,
     steps: {
@@ -175,6 +191,14 @@ class StaffMember {
       1: _markLegacyAsAccountHolder,
       // v2 → v3 — heure de fermeture propre à un employé. Purement additif :
       // absente, elle vaut null et l'employé suit l'horaire de la boutique.
+      //
+      // v3 → v4 — lien vers le compte (hotfix_182). AUCUNE step, et c'est un
+      // choix : une fiche antérieure n'a pas de lien, et on ne peut pas le
+      // deviner. Le poser au hasard — en rapprochant les noms, par exemple —
+      // rendrait DÉFINITIVE l'erreur que ce lot corrige, sur des fiches qui
+      // fonctionnent aujourd'hui par un repli assumé. `fromMap` rend `null`,
+      // le repli par le nom continue de les couvrir, et chaque fiche gagne son
+      // lien le jour où quelqu'un la modifie.
     },
   );
 
@@ -197,6 +221,7 @@ class StaffMember {
         'pin_salt': pinSalt,
         'has_app_access': hasAppAccess,
         'closing_time': closingTime,
+        'user_id': userId,
         'created_at': createdAt.toUtc().toIso8601String(),
       };
 
@@ -217,6 +242,7 @@ class StaffMember {
       pinSalt: _nullIfEmpty(m['pin_salt']),
       hasAppAccess: m['has_app_access'] as bool? ?? true,
       closingTime: _nullIfEmpty(m['closing_time']),
+      userId: _nullIfEmpty(m['user_id']),
       createdAt: m['created_at'] == null
           ? DateTime.now()
           : (DateTime.tryParse(m['created_at'].toString())?.toLocal() ??

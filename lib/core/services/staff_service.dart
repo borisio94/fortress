@@ -90,6 +90,9 @@ class StaffService {
     String? station,
     bool hasAppAccess = true,
     String? closingTime,
+    /// Le compte dont cette fiche vient, quand elle en vient. Voir
+    /// `staff_account_link.dart` : sans lui, deux homonymes se confondent.
+    String? userId,
   }) async {
     final s = StaffMember(
       id: _id('em'),
@@ -102,6 +105,7 @@ class StaffService {
       station: station,
       hasAppAccess: hasAppAccess,
       closingTime: closingTime,
+      userId: userId,
       createdAt: DateTime.now(),
     );
     return saveMember(s);

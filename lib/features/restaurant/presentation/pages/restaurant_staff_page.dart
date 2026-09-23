@@ -24,6 +24,7 @@ import '../../domain/entities/salary_advance.dart';
 import '../../domain/entities/shift_evaluation.dart';
 import '../../domain/entities/staff_absence.dart';
 import '../../domain/entities/staff_member.dart';
+import '../../domain/staff_account_link.dart';
 import '../../domain/entities/staff_penalty.dart';
 import '../../domain/entities/time_record.dart';
 import '../widgets/resto_empty_state.dart';
@@ -329,15 +330,27 @@ class _StaffEditorState extends State<_StaffEditor> {
 
   bool get _isEdit => widget.existing != null;
 
-  /// Noms déjà inscrits au personnel, en minuscules — sert à retirer de la
-  /// liste les comptes qui ont déjà leur fiche. Le rapprochement se fait sur
-  /// le NOM faute de lien stocké entre les deux notions : c'est imparfait
-  /// (deux homonymes seraient confondus) mais c'est exactement ce que la
-  /// sélection vient supprimer comme risque, puisque le nom ne se tape plus.
-  late final Set<String> _alreadyStaffNames = {
+  /// Le personnel déjà inscrit, réduit à ce qui permet de le rapprocher d'un
+  /// compte — sert à retirer de la liste ceux qui ont déjà leur fiche.
+  ///
+  /// Le rapprochement se faisait sur le NOM seul, faute de lien stocké, et
+  /// deux homonymes se confondaient : la fiche de la première « Awa Ndiaye »
+  /// rendait le compte de la seconde inéligible, sans que rien ne l'explique.
+  /// `StaffMember.userId` porte le lien depuis le hotfix_182 ; le nom ne sert
+  /// plus que de repli, sur les fiches qui n'en ont pas. Voir
+  /// `staff_account_link.dart`.
+  late final List<StaffLink> _staffLinks = [
     for (final s in StaffService.forShop(widget.shopId))
-      if (s.id != widget.existing?.id) s.fullName.trim().toLowerCase(),
-  };
+      if (s.id != widget.existing?.id)
+        (userId: s.userId, fullName: s.fullName),
+  ];
+
+  /// Le compte retenu dans la liste, pour l'écrire sur la fiche.
+  ///
+  /// En modification, c'est celui que la fiche porte déjà — une fiche
+  /// antérieure au hotfix_182 n'en a pas, et n'en gagnera un que si l'on
+  /// rechoisit la personne.
+  late String? _selectedUserId = widget.existing?.userId;
 
   @override
   void dispose() {
@@ -386,7 +399,8 @@ class _StaffEditorState extends State<_StaffEditor> {
     // (la liste retirait déjà les comptes déjà inscrits) ; il devient
     // indispensable dès que le nom se tape.
     if (!_hasAccount &&
-        _alreadyStaffNames.contains(name.toLowerCase())) {
+        _staffLinks.any(
+            (s) => s.fullName.trim().toLowerCase() == name.toLowerCase())) {
       setState(() => _err = '$name figure déjà dans le personnel.');
       return;
     }
@@ -434,6 +448,7 @@ class _StaffEditorState extends State<_StaffEditor> {
             // drapeau, `copyWith(closingTime: null)` serait un no-op et
             // l'horaire particulier resterait collé à la fiche.
             clearClosingTime: _closing == null,
+            userId: _selectedUserId,
           )
         : await StaffService.createMember(
             shopId: widget.shopId,
@@ -444,6 +459,8 @@ class _StaffEditorState extends State<_StaffEditor> {
             phone: phone,
             hasAppAccess: _hasAccount,
             closingTime: _closing,
+            // Nul pour une saisie libre : la personne n'a pas de compte.
+            userId: _hasAccount ? _selectedUserId : null,
           );
     if (_isEdit) await StaffService.saveMember(member);
     if (pin.isNotEmpty) {
@@ -777,8 +794,9 @@ class _StaffEditorState extends State<_StaffEditor> {
               _AccountPicker(
                 shopId: widget.shopId,
                 selected: _name.text,
-                taken: _alreadyStaffNames,
-                onSelect: (name, jobTitle) => setState(() {
+                staffLinks: _staffLinks,
+                onSelect: (userId, name, jobTitle) => setState(() {
+                  _selectedUserId = userId;
                   _name.text = name;
                   _role.text = jobTitle;
                 }),
@@ -2742,15 +2760,23 @@ class _ReadOnlyField extends StatelessWidget {
 class _AccountPicker extends ConsumerWidget {
   final String shopId;
   final String selected;
-  final Set<String> taken;
-  /// `(nom, fonction)` — la fonction vient du compte et est recopiée sur
-  /// la fiche : elle n'est plus choisie deux fois.
-  final void Function(String name, String jobTitle) onSelect;
+
+  /// Le personnel déjà inscrit, réduit au lien et au nom. Voir
+  /// `staff_account_link.dart` pour la règle de rapprochement.
+  final List<StaffLink> staffLinks;
+
+  /// `(identifiant, nom, fonction)`. L'IDENTIFIANT est le point de ce lot :
+  /// sans lui, la fiche ne saurait pas de quel compte elle vient, et deux
+  /// homonymes se confondraient à la prochaine ouverture du formulaire.
+  ///
+  /// La fonction vient du compte et est recopiée sur la fiche : elle n'est
+  /// plus choisie deux fois.
+  final void Function(String userId, String name, String jobTitle) onSelect;
 
   const _AccountPicker({
     required this.shopId,
     required this.selected,
-    required this.taken,
+    required this.staffLinks,
     required this.onSelect,
   });
 
@@ -2761,16 +2787,22 @@ class _AccountPicker extends ConsumerWidget {
     final names = [
       for (final e in all)
         if (e.fullName.trim().isNotEmpty &&
-            !taken.contains(e.fullName.trim().toLowerCase()))
+            !accountHasStaffRecord(
+                userId: e.userId,
+                fullName: e.fullName,
+                staff: staffLinks))
           e.fullName.trim(),
     ]..sort();
-    // Retrouver la fonction du compte à partir du nom choisi : la liste
-    // déroulante ne sait rendre qu'une chaîne.
-    String titleFor(String name) {
+    // Retrouver le COMPTE à partir du nom choisi : la liste déroulante ne sait
+    // rendre qu'une chaîne. Deux homonymes tous deux éligibles restent
+    // indiscernables ICI — le premier de la liste l'emporte. C'est une limite
+    // de la liste déroulante, pas du rapprochement : dès que l'un des deux a
+    // sa fiche, l'autre reste seul proposé.
+    Employee? accountFor(String name) {
       for (final e in all) {
-        if (e.fullName.trim() == name) return e.jobTitle.trim();
+        if (e.fullName.trim() == name) return e;
       }
-      return '';
+      return null;
     }
 
     if (async.isLoading && all.isEmpty) {
@@ -2802,7 +2834,11 @@ class _AccountPicker extends ConsumerWidget {
       items: names,
       value: selected.isEmpty ? null : selected,
       icon: Icons.person_outline_rounded,
-      onChanged: (name) => onSelect(name, titleFor(name)),
+      onChanged: (name) {
+        final account = accountFor(name);
+        if (account == null) return;
+        onSelect(account.userId, name, account.jobTitle.trim());
+      },
     );
   }
 }
