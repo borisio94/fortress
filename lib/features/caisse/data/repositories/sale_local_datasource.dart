@@ -11,6 +11,7 @@ import '../../../../core/utils/uuid.dart';
 import '../../domain/entities/sale.dart';
 import '../../domain/entities/sale_item.dart';
 import '../../domain/approval_closure.dart';
+import '../../domain/cart_codec.dart';
 import '../../domain/stock_engagement.dart';
 
 /// Datasource local Hive pour les ventes offline et le panier persistant.
@@ -40,26 +41,46 @@ class SaleLocalDatasource {
 
   Future<void> removePendingSale(String key) => _box.delete(key);
 
-  Future<void> saveCart(List<SaleItem> items) async {
-    await HiveBoxes.cartBox
-        .put('cart', jsonEncode(items.map(_itemToMap).toList()));
+  /// Écrit le panier d'UNE boutique.
+  ///
+  /// Ces trois méthodes n'avaient AUCUN appelant, et les deux premières ne se
+  /// parlaient même pas : l'écriture posait dix clés, la lecture en cherchait
+  /// quatre sous d'autres noms, et `e['name'] as String` sur un `null` levait
+  /// une erreur de type. La correspondance vit désormais dans `cart_codec.dart`,
+  /// en un seul endroit, avec un test qui exige l'aller-retour à l'identique.
+  ///
+  /// La clé était `'cart'`, littérale et unique pour tout l'appareil : un
+  /// propriétaire à deux boutiques aurait restauré le panier de l'autre.
+  Future<void> saveCart(String shopId, List<SaleItem> items) async {
+    await HiveBoxes.cartBox.put(
+        cartKeyFor(shopId), jsonEncode(items.map(cartItemToMap).toList()));
   }
 
-  Future<List<SaleItem>> loadCart() async {
-    final raw = HiveBoxes.cartBox.get('cart');
-    if (raw == null) return [];
-    final list = jsonDecode(raw as String) as List;
-    return list
-        .map((e) => SaleItem(
-      productId: e['product_id'] as String,
-      productName: e['name'] as String,
-      unitPrice: (e['price'] as num).toDouble(),
-      quantity: e['qty'] as int,
-    ))
-        .toList();
+  /// Relit le panier d'UNE boutique.
+  ///
+  /// Une ligne illisible est ÉCARTÉE, pas fatale : mieux vaut restituer neuf
+  /// articles sur dix que rien du tout, et une exception ici viderait
+  /// l'écran d'accueil du restaurant.
+  Future<List<SaleItem>> loadCart(String shopId) async {
+    final raw = HiveBoxes.cartBox.get(cartKeyFor(shopId));
+    if (raw is! String || raw.isEmpty) return [];
+    try {
+      final list = jsonDecode(raw) as List;
+      return [
+        for (final e in list)
+          if (e is Map)
+            if (cartItemFromMap(Map<String, dynamic>.from(e))
+                case final item?)
+              item,
+      ];
+    } catch (e) {
+      debugPrint('[Cart] panier illisible pour $shopId : $e');
+      return [];
+    }
   }
 
-  Future<void> clearCart() => HiveBoxes.cartBox.delete('cart');
+  Future<void> clearCart(String shopId) =>
+      HiveBoxes.cartBox.delete(cartKeyFor(shopId));
 
   Future<void> enqueueOfflineAction(Map<String, dynamic> action) async {
     await HiveBoxes.offlineQueueBox.add(action);

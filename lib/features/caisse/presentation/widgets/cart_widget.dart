@@ -1703,7 +1703,7 @@ class _CartFooter extends ConsumerWidget {
                   // cible l'emporte sur le canal choisi en tête de panier :
                   // on ne rattache pas des plats à une table « à emporter ».
                   final attach = ref.read(orderAttachProvider);
-                  final order = await showOrderTypeSheet(
+                  final res = await showOrderTypeSheet(
                     context:  context,
                     shopId:   shopId,
                     items:    st.items,
@@ -1721,17 +1721,26 @@ class _CartFooter extends ConsumerWidget {
                   // Renoncé — la cible RESTE armée : le serveur a fermé la
                   // feuille, pas abandonné son ajout. Le bandeau du panier
                   // porte la croix qui, elle, désarme.
-                  if (order == null) return;
+                  if (res == null) return;
                   if (!context.mounted) return;
                   bloc.add(ClearCart());
                   ref.read(orderAttachProvider.notifier).clear();
                   // Celui-ci RESTE : le panier se vide et le volet se referme,
                   // rien à l'écran ne dirait que la commande est partie.
-                  AppSnack.success(
-                      context,
-                      attach == null
-                          ? 'Commande envoyée en préparation.'
-                          : 'Plats ajoutés à ${attach.tableName}.');
+                  final done = attach == null
+                      ? 'Commande envoyée en préparation.'
+                      : 'Plats ajoutés à ${attach.tableName}.';
+                  // UN SEUL MESSAGE, et c'est voulu. `AppSnack` masque le
+                  // message courant avant d'en poser un autre : deux appels
+                  // successifs n'en laisseraient qu'un à l'écran, et ce serait
+                  // le hasard de l'ordre qui déciderait lequel. Quand la table
+                  // a bougé sous la feuille, le succès et l'écart tiennent
+                  // donc dans la même phrase.
+                  if (res.drift != null) {
+                    AppSnack.warning(context, '$done ${res.drift!}');
+                  } else {
+                    AppSnack.success(context, done);
+                  }
                   onOrderPlaced?.call();
                   return;
                 }

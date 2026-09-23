@@ -16,6 +16,7 @@ import '../../domain/entities/restaurant_table.dart';
 import '../../domain/entities/stock_item.dart';
 import '../../domain/courier_pay.dart';
 import '../../domain/order_attach.dart';
+import '../../domain/table_drift.dart';
 import 'courier_sheet.dart';
 
 /// ENREGISTREMENT D'UNE COMMANDE prise depuis le Menu — Module 3 du flux.
@@ -44,8 +45,16 @@ import 'courier_sheet.dart';
 /// par le piano, et nommer l'étape d'après un seul département laissait croire
 /// qu'il en faudrait une par poste.
 ///
-/// Retourne la commande créée, `null` si l'opérateur a renoncé.
-Future<Sale?> showOrderTypeSheet({
+/// Retourne la commande créée ET l'écart constaté sur la table, `null` si
+/// l'opérateur a renoncé.
+///
+/// UN ENREGISTREMENT ET NON LA SEULE COMMANDE, pour que le compilateur oblige
+/// l'appelant à regarder `drift`. Deux serveurs travaillent sur le même plan
+/// de salle : si la table a changé pendant la saisie, la commande part quand
+/// même — on ne bloque pas un service — mais l'écran doit le DIRE. Rendre la
+/// commande seule aurait laissé ce message facultatif, c'est-à-dire absent.
+/// Voir `table_drift.dart`.
+Future<({Sale order, String? drift})?> showOrderTypeSheet({
   required BuildContext context,
   required String shopId,
   required List<SaleItem> items,
@@ -69,7 +78,7 @@ Future<Sale?> showOrderTypeSheet({
   /// d'échouer : les plats sont dans le panier, il faut pouvoir les servir.
   String? initialTableId,
 }) =>
-    showAdaptiveFormSheet<Sale>(
+    showAdaptiveFormSheet<({Sale order, String? drift})>(
       context: context,
       builder: (_) => _OrderTypeSheet(
         shopId: shopId,
@@ -120,6 +129,12 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
   /// ouverte. Il gouverne trois choses — le titre, la disparition du choix de
   /// table et de couverts, et le calcul des couverts à l'envoi.
   bool _attaching = false;
+
+  /// Ce que la table a fait pendant qu'on remplissait la feuille.
+  ///
+  /// `null` dans l'immense majorité des cas — et alors on ne dit rien : un
+  /// message à chaque commande cesserait d'être lu au bout d'un service.
+  String? _drift;
 
   // ── À emporter ET à livrer ─────────────────────────────────────────────
   // Les trois premiers champs servent aux deux canaux : le comptoir crie un
@@ -435,6 +450,27 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
     try {
       Sale order;
       if (_type == _ServiceType.dineIn) {
+        // LA TABLE EST RELUE ICI, et ce n'est pas un détail.
+        //
+        // `_table` est l'objet capturé à l'OUVERTURE de la feuille. Entre-temps,
+        // l'autre serveur a pu ouvrir la même table : le temps réel le lui a
+        // dit, mais ce champ-là, lui, ne bouge pas. Le calcul des couverts se
+        // faisait donc sur un instantané périmé — B choisit une table libre, A
+        // l'ouvre pour 4, B valide, et `0 + 3` efface les quatre couverts de A.
+        //
+        // `orElse` rend l'instantané : une table supprimée pendant la saisie
+        // est un cas si rare qu'échouer ici coûterait plus que d'écrire la
+        // commande sur ce qu'on avait. Elle part au push, elle reviendra.
+        final snapshot = _table!;
+        final live = RestaurantTableService.tablesForShop(widget.shopId)
+            .firstWhere((t) => t.id == snapshot.id, orElse: () => snapshot);
+        // L'écart se constate AVANT l'écriture, sur les deux états, et se dira
+        // après. Voir `table_drift.dart`.
+        _drift = tableDriftMessage(
+          tableName: live.name,
+          seatedBefore: _seated(snapshot),
+          seatedAfter: _seated(live),
+        );
         // LES COUVERTS NE SE CALCULENT PLUS ICI. La règle distingue une
         // NOUVELLE tablée d'un AJOUT, et c'est une distinction qui n'existait
         // pas : `_seated + _covers` rejoué pour un dessert aurait ajouté un
@@ -442,14 +478,14 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
         // `order_attach.dart`, et le test qui l'épingle.
         final c = coversForTableOrder(
           attaching: _attaching,
-          seated: _seated(_table!),
+          seated: _seated(live),
           newCovers: _covers,
         );
         // `saveTableOrder` occupe la table, pose les couverts et l'heure
         // d'ouverture au passage — pas besoin d'un `openService` séparé, qui
         // ferait deux écritures pour le même fait.
         order = await RestaurantOrderService.saveTableOrder(
-          table: _table!,
+          table: live,
           items: widget.items,
           covers: c.orderCovers,
           tableCovers: c.tableCovers,
@@ -487,7 +523,7 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
       // Créer puis envoyer : le canevas ne connaît pas d'état intermédiaire
       // entre « commande prise » et « en préparation ».
       await RestaurantOrderService.sendToKitchen(order);
-      if (mounted) Navigator.of(context).pop(order);
+      if (mounted) Navigator.of(context).pop((order: order, drift: _drift));
     } catch (e) {
       // Sans ce filet, l'échec laisserait le bouton tourner indéfiniment et
       // l'opérateur ne saurait pas s'il doit ressaisir la commande.

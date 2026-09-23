@@ -104,6 +104,17 @@ class UpdateOrderFee extends CaisseEvent {
 class ProcessSale extends CaisseEvent {}
 class ClearCart  extends CaisseEvent {}
 
+/// Remet dans le panier ce qu'un rechargement de page en avait chassé.
+///
+/// Sur le web, un F5 vidait le panier : rien ne le persistait. C'est le seul
+/// évènement qui REMPLACE les lignes au lieu d'en ajouter — il ne se déclenche
+/// que sur un panier vide, à l'ouverture de la carte.
+class RestoreCart extends CaisseEvent {
+  final List<SaleItem> items;
+  RestoreCart(this.items);
+  @override List<Object?> get props => [items];
+}
+
 /// Compte (addition) du panier, reporté sur `Sale.tabLabel`.
 class SetOrderTab extends CaisseEvent {
   final String? label;
@@ -599,6 +610,18 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
     });
     on<LoadOrderForEdit>(_onLoadOrderForEdit);
     on<CompleteSale>(_onCompleteSale);
+    on<RestoreCart>(_onRestoreCart);
+  }
+
+  /// Ne restaure QUE sur un panier vide.
+  ///
+  /// La garde est ici et pas seulement chez l'appelant : une restauration qui
+  /// arriverait pendant que le serveur compose une commande écraserait sa
+  /// saisie par un panier d'hier — et c'est précisément le genre de perte que
+  /// ce lot existe pour empêcher.
+  void _onRestoreCart(RestoreCart event, Emitter<CaisseState> emit) {
+    if (state.items.isNotEmpty || event.items.isEmpty) return;
+    emit(state.copyWith(items: List<SaleItem>.from(event.items)));
   }
 
   void _onAdd(AddItemToCart event, Emitter<CaisseState> emit) {

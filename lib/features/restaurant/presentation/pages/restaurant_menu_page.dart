@@ -13,9 +13,11 @@ import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
+import '../../../caisse/domain/entities/sale_item.dart';
 import '../../../caisse/presentation/bloc/caisse_bloc.dart';
 import '../../../../features/inventaire/domain/entities/product.dart';
 import '../../../../features/subscription/presentation/widgets/product_quota_guard.dart';
+import '../../../../features/caisse/data/repositories/sale_local_datasource.dart';
 import '../../../../shared/providers/cart_pane_provider.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
@@ -94,6 +96,14 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   /// irréversible depuis l'application.
   bool _showRetired = false;
 
+  /// Écriture et relecture du panier de CETTE boutique.
+  ///
+  /// Le panier vit dans un Bloc créé UNE FOIS au démarrage de l'application,
+  /// qui ne connaît aucune boutique. C'est donc à l'écran de composition —
+  /// celui-ci, le seul où l'on remplit un panier au restaurant — de dire de
+  /// quelle boutique il s'agit.
+  final _cartStore = SaleLocalDatasource();
+
   @override
   void initState() {
     super.initState();
@@ -111,6 +121,33 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     // commande) — y compris quand le décrément vient d'une vente encaissée
     // depuis le panier alors que cette page est encore montée sous le sheet.
     DailyMenuService.revision.addListener(_onAvailabilityChanged);
+    _restoreCart();
+  }
+
+  /// Rend le panier qu'un rechargement de page avait chassé.
+  ///
+  /// SEULEMENT si le panier en mémoire est vide. Au retour sur la carte après
+  /// avoir composé une commande, le Bloc a déjà les lignes : les remplacer par
+  /// celles du disque ferait revenir un état plus ancien que l'écran.
+  Future<void> _restoreCart() async {
+    final bloc = context.read<CaisseBloc>();
+    if (bloc.state.items.isNotEmpty) return;
+    final saved = await _cartStore.loadCart(widget.shopId);
+    if (!mounted || saved.isEmpty) return;
+    bloc.add(RestoreCart(saved));
+  }
+
+  /// Écrit le panier après chaque changement de lignes.
+  ///
+  /// Sans `await` et sans garde de montage : c'est une écriture Hive locale,
+  /// et son échec ne doit pas interrompre un service. Le panier en mémoire
+  /// reste la vérité de l'instant ; le disque n'est là que pour le F5.
+  void _persistCart(List<SaleItem> items) {
+    if (items.isEmpty) {
+      _cartStore.clearCart(widget.shopId);
+    } else {
+      _cartStore.saveCart(widget.shopId, items);
+    }
   }
 
   void _onAvailabilityChanged() {
@@ -439,51 +476,63 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
       // L'ouverture et la fermeture ne sont donc PAS un état à part : elles se
       // déduisent du panier lui-même. Un état booléen se serait fatalement
       // désynchronisé du contenu (panier vidé ailleurs, commande enregistrée).
-      body: BlocBuilder<CaisseBloc, CaisseState>(
-        buildWhen: (p, c) => p.items.length != c.items.length,
-        builder: (context, cart) {
-          // Deux conditions, pas une : il faut quelque chose à montrer ET que
-          // l'utilisateur n'ait pas replié le volet depuis le bouton 🛒.
-          final open = cart.items.isNotEmpty && paneVisible;
-          return Row(children: [
-            Expanded(child: _buildMenu(products, isAdmin,
-                canDelete: canDelete, canEdit: canEdit, canAdd: canAdd)),
-            // Animé en largeur : le volet glisse au lieu d'apparaître d'un
-            // bloc, ce qui rend visible d'où il vient.
-            // Le panier est un BLOC À PART : coins arrondis et écart avec la
-            // carte, comme la maquette. L'écart est compris DANS la largeur
-            // animée — ajouté à côté, il apparaîtrait d'un coup au premier
-            // article pendant que le panier, lui, glisse encore.
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              width: open ? _cartPaneWidth(context) + _kCartGap : 0,
-              child: open
-                  // `ClipRect` + `OverflowBox` : pendant l'animation, la
-                  // largeur imposée est inférieure à la largeur finale du
-                  // panier. Sans ces deux-là, Flutter tenterait de comprimer
-                  // sa mise en page à chaque image et lèverait un débordement.
-                  ? ClipRect(
-                      child: OverflowBox(
-                        alignment: Alignment.centerLeft,
-                        maxWidth: _cartPaneWidth(context) + _kCartGap,
-                        child: Padding(
-                          padding: const EdgeInsets.only(left: _kCartGap),
-                          child: SizedBox(
-                            width: _cartPaneWidth(context),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(16),
-                              child: CartWidget(
-                                  shopId: widget.shopId, isEcommerce: true),
+      //
+      // SAUVEGARDE DU PANIER — sur les LIGNES, pas sur leur nombre.
+      //
+      // Le `buildWhen` du constructeur ci-dessous ne regarde que la longueur,
+      // parce que le volet ne s'ouvre et ne se ferme qu'au premier et au
+      // dernier article. Ici, il faut plus : changer une quantité ou négocier
+      // un prix ne change pas le compte de lignes, et se perdrait au premier
+      // F5 — c'est-à-dire exactement le cas que ce lot referme.
+      body: BlocListener<CaisseBloc, CaisseState>(
+        listenWhen: (p, c) => p.items != c.items,
+        listener: (_, s) => _persistCart(s.items),
+        child: BlocBuilder<CaisseBloc, CaisseState>(
+          buildWhen: (p, c) => p.items.length != c.items.length,
+          builder: (context, cart) {
+            // Deux conditions, pas une : il faut quelque chose à montrer ET que
+            // l'utilisateur n'ait pas replié le volet depuis le bouton 🛒.
+            final open = cart.items.isNotEmpty && paneVisible;
+            return Row(children: [
+              Expanded(child: _buildMenu(products, isAdmin,
+                  canDelete: canDelete, canEdit: canEdit, canAdd: canAdd)),
+              // Animé en largeur : le volet glisse au lieu d'apparaître d'un
+              // bloc, ce qui rend visible d'où il vient.
+              // Le panier est un BLOC À PART : coins arrondis et écart avec la
+              // carte, comme la maquette. L'écart est compris DANS la largeur
+              // animée — ajouté à côté, il apparaîtrait d'un coup au premier
+              // article pendant que le panier, lui, glisse encore.
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                width: open ? _cartPaneWidth(context) + _kCartGap : 0,
+                child: open
+                    // `ClipRect` + `OverflowBox` : pendant l'animation, la
+                    // largeur imposée est inférieure à la largeur finale du
+                    // panier. Sans ces deux-là, Flutter tenterait de comprimer
+                    // sa mise en page à chaque image et lèverait un débordement.
+                    ? ClipRect(
+                        child: OverflowBox(
+                          alignment: Alignment.centerLeft,
+                          maxWidth: _cartPaneWidth(context) + _kCartGap,
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: _kCartGap),
+                            child: SizedBox(
+                              width: _cartPaneWidth(context),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: CartWidget(
+                                    shopId: widget.shopId, isEcommerce: true),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-          ]);
-        },
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ]);
+          },
+        ),
       ),
     );
   }
