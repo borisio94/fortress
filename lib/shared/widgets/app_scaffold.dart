@@ -49,7 +49,6 @@ class AppScaffold extends ConsumerStatefulWidget {
 }
 
 class _AppScaffoldState extends ConsumerState<AppScaffold> {
-  bool _railExpanded = true;
   static const double _kDesktop = 900;
 
   @override
@@ -203,7 +202,13 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
       backgroundColor: theme.colorScheme.surface,
       elevation: 0,
       scrolledUnderElevation: 0,
-      leading: _buildLeading(context, isDesktop: isDesktop),
+      leading: _buildLeading(context),
+      // EXPLICITE, parce que `leading` peut désormais valoir `null` : sans ce
+      // faux, Material irait chercher un bouton retour dans le Navigator. Il
+      // n'y en a pas — GoRouter ne pousse pas dessus — mais s'en remettre à
+      // une absence est exactement ce qui fait réapparaître une flèche le jour
+      // où la navigation change.
+      automaticallyImplyLeading: false,
       title: Text(
         widget.title,
         style: AppTextStyles.subtitleBold,
@@ -225,7 +230,26 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
     );
   }
 
-  Widget _buildLeading(BuildContext context, {required bool isDesktop}) {
+  /// Le bouton de gauche de la barre : une flèche de retour, ou rien.
+  ///
+  /// IL Y AVAIT TROIS BRANCHES. Les deux autres servaient une page « racine »
+  /// et offraient la navigation du châssis : un bouton qui repliait
+  /// `AppDrawerRail` sur desktop, un hamburger qui ouvrait `AppDrawer` sur
+  /// mobile. Les deux sont parties avec `app_drawer.dart`, et le hamburger
+  /// aurait désormais appelé `openDrawer()` sur un Scaffold SANS TIROIR —
+  /// c'est-à-dire levé une exception.
+  ///
+  /// ELLES ÉTAIENT DE TOUTE FAÇON INATTEIGNABLES, et le restent : ce corps de
+  /// méthode n'est exécuté que HORS du `ShellRoute` — `build` se court-circuite
+  /// dès qu'un `AdaptiveScaffold` est au-dessus — et les seules pages hors
+  /// shell sont les cinq écrans super-admin, toutes en `isRootPage: false`.
+  ///
+  /// `null` PLUTÔT QU'UN BOUTON MUET pour le cas racine : un châssis qui n'a
+  /// plus aucune navigation à offrir ne doit pas prétendre le contraire. Si
+  /// une page racine était un jour routée hors du shell, elle s'afficherait
+  /// sans bouton de gauche — visible, silencieux, et corrigible — au lieu de
+  /// lever une exception au premier tap.
+  Widget? _buildLeading(BuildContext context) {
     if (!widget.isRootPage) {
       return IconButton(
         icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
@@ -246,26 +270,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
         },
       );
     }
-    if (isDesktop) {
-      return IconButton(
-        icon: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          child: Icon(
-            _railExpanded ? Icons.menu_open_rounded : Icons.menu_rounded,
-            key: ValueKey(_railExpanded), size: 22,
-          ),
-        ),
-        color: AppColors.textPrimary,
-        onPressed: () => setState(() => _railExpanded = !_railExpanded),
-      );
-    }
-    return Builder(
-      builder: (ctx) => IconButton(
-        icon: const Icon(Icons.menu_rounded, size: 22),
-        color: AppColors.textPrimary,
-        onPressed: () => Scaffold.of(ctx).openDrawer(),
-      ),
-    );
+    return null;
   }
 }
 
