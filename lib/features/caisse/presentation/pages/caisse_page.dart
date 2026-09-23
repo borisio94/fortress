@@ -25,10 +25,13 @@ import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../domain/usecases/order_receipt_usecase.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/providers/cart_pane_provider.dart';
+import '../../../../core/services/pin_service.dart';
+import '../../../restaurant/domain/order_actions.dart';
 import '../../../restaurant/domain/order_tile.dart';
 import '../../../restaurant/domain/service_tabs.dart';
 import '../../../restaurant/presentation/widgets/resto_empty_state.dart';
 import '../../../restaurant/presentation/widgets/resto_pill_tabs.dart';
+import '../../../restaurant/presentation/widgets/order_action_visuals.dart';
 import '../../../restaurant/presentation/widgets/service_tab_visuals.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
@@ -2653,6 +2656,26 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
               secondChild: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  const SizedBox(height: 6),
+                  // L'IDENTITÉ DE LA COMMANDE, et rien d'autre en tête.
+                  //
+                  // La ligne 1 n'est PAS répétée ici : le résumé n'est jamais
+                  // démonté au dépliement, il reste au-dessus. Le déplié n'a
+                  // donc qu'à ajouter ce que le replié tait — l'identifiant,
+                  // pour retrouver la commande dans un journal ou au
+                  // téléphone, et les couverts, qui ne se déduisent ni du
+                  // nombre de plats ni de la table.
+                  Text(
+                    [
+                      '#${(widget.order.id ?? '').length > 8
+                          ? widget.order.id!.substring(0, 8)
+                          : widget.order.id ?? '—'}',
+                      if ((widget.order.covers ?? 0) > 0)
+                        '${widget.order.covers} couvert'
+                            '${widget.order.covers! > 1 ? 's' : ''}',
+                    ].join('  ·  '),
+                    style: AppTextStyles.microSecondary,
+                  ),
                   const SizedBox(height: 8),
                   Divider(height: 1, color: AppColors.inputFill),
                   const SizedBox(height: 8),
@@ -2743,201 +2766,24 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   // LIVREUR — commandes à livrer uniquement.
                   ..._buildCourierAction(context, s),
 
-                  // Actions
-                  Row(children: [
-                    // Tournée « à choisir sur place » en cours : le stock est
-                    // géré par close/cancelApprovalOrder, on n'expose donc PAS
-                    // le menu de transition générique (qui re-décrémenterait /
-                    // restaurerait le stock à tort). À la place : 2 actions
-                    // dédiées (clôturer / annuler la tournée).
-                    if (widget.order.isApprovalSale
-                        && (s == SaleStatus.scheduled
-                            || s == SaleStatus.processing)) ...[
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => _closeApproval(context),
-                          icon: const Icon(Icons.fact_check_outlined,
-                              size: 16),
-                          label: const Text('Clôturer la tournée'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.primary,
-                            side: BorderSide(
-                                color: AppColors.primary
-                                    .withValues(alpha: 0.5)),
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 8),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8)),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      _ActionBtn(
-                        icon: Icons.cancel_outlined,
-                        color: AppColors.error,
-                        bgColor: AppColors.error.withValues(alpha: 0.12),
-                        tooltip: 'Annuler la tournée',
-                        onTap: () => _cancelApproval(context),
-                      ),
-                      const SizedBox(width: 6),
-                    ] else ...[
-                      // Plus de menu déroulant de statut : un bouton
-                      // d'évènement contextuel (avancer la commande) +
-                      // une pastille lecture seule pour les états terminaux.
-                      // Desktop : bouton dimensionné au CONTENU (pas étiré sur
-                      // toute la largeur) + Spacer pour garder les icônes à
-                      // droite. Mobile : pleine largeur (confort tactile).
-                      if (MediaQuery.of(context).size.width > 800) ...[
-                        _buildStatusAction(s),
-                        const Spacer(),
-                      ] else
-                        Expanded(child: _buildStatusAction(s)),
-                      // Annuler / Refuser (évènements négatifs) — commandes
-                      // non finalisées, hors paire « Annulée par client »
-                      // déjà affichée à échéance.
-                      if (widget.canCancel
-                          && (s == SaleStatus.scheduled
-                              || s == SaleStatus.processing)
-                          && !_canConfirmClient()) ...[
-                        const SizedBox(width: 6),
-                        _ActionBtn(
-                          icon: Icons.do_not_disturb_on_outlined,
-                          color: AppColors.error,
-                          bgColor: AppColors.error.withValues(alpha: 0.12),
-                          tooltip: 'Annuler ou refuser',
-                          onTap: () => _askCancelOrRefuse(context),
-                        ),
-                      ],
-                      const SizedBox(width: 6),
-                    ],
-                    if (widget.order.status == SaleStatus.completed) ...[
-                      // Repasser en programmée (correction / re-finalisation) —
-                      // réservé admin. Restitue stock + paiement + écritures
-                      // partenaire via l'évènement onUpdate(scheduled).
-                      if (widget.canCancel) ...[
-                        _ActionBtn(
-                          icon: Icons.undo_rounded,
-                          color: AppColors.warning,
-                          bgColor: AppColors.warning.withValues(alpha: 0.12),
-                          tooltip: 'Repasser en programmée',
-                          onTap: () => _reopenPaidSale(context),
-                        ),
-                        const SizedBox(width: 6),
-                      ],
-                      _ActionBtn(
-                        icon: Icons.picture_as_pdf_rounded,
-                        color: AppColors.primary,
-                        tooltip: 'Facture (PDF avec logo)',
-                        onTap: () => _previewBrandedInvoice(context),
-                      ),
-                      const SizedBox(width: 6),
-                      _ActionBtn(
-                        icon: (_sendingInvoice || _preparingInvoice)
-                            ? Icons.hourglass_top_rounded
-                            : Icons.send_rounded,
-                        color: AppColors.whatsapp,
-                        tooltip: _preparingInvoice
-                            ? 'Préparation de la facture…'
-                            : 'Envoyer la facture par WhatsApp',
-                        onTap: (_sendingInvoice || _preparingInvoice)
-                            ? null
-                            : () => _sendInvoiceWhatsApp(context),
-                      ),
-                      const SizedBox(width: 6),
-                      // NB : l'ancien bouton « $ » (dépense en dette
-                      // partenaire) a été fusionné dans le sheet « Modifier
-                      // les frais » (icône fourgonnette) — un seul point
-                      // d'entrée pour tous les coûts d'une commande.
-                    ],
-                    // Bouton "Enregistrer un acompte" — visible si commande
-                    // en attente de paiement (pas annulée/refusée/refunded)
-                    // ET solde dû > 0. Permet à l'opérateur d'enregistrer
-                    // un encaissement boutique partiel avant la livraison ;
-                    // le partner_ledger calculera ensuite uniquement le
-                    // solde réellement encaissé par le partenaire.
-                    if (widget.order.amountDue > 0
-                        && widget.order.status != SaleStatus.cancelled
-                        && widget.order.status != SaleStatus.refused
-                        && widget.order.status != SaleStatus.refunded) ...[
-                      _ActionBtn(
-                        icon: Icons.payments_outlined,
-                        color: AppColors.warning,
-                        bgColor: AppColors.warning.withValues(alpha: 0.12),
-                        tooltip: 'Enregistrer un acompte',
-                        onTap: () => _recordAcompte(context),
-                      ),
-                      const SizedBox(width: 6),
-                    ],
-                    // Bouton "Relancer le client" — visible UNIQUEMENT pour
-                    // les commandes en cours / programmées (pas après
-                    // completed/cancelled/refused/refunded). Exclu pour les
-                    // commandes web : elles ont déjà le bouton large dédié
-                    // « Relancer le client » plus haut.
-                    if ((widget.order.status == SaleStatus.scheduled ||
-                            widget.order.status == SaleStatus.processing)
-                        && widget.order.source != 'web') ...[
-                      _ActionBtn(
-                        icon: Icons.notifications_active_outlined,
-                        color: AppColors.whatsapp,
-                        tooltip: context.l10n.orderRelaunchBtn,
-                        onTap: () => _relaunchClient(context),
-                      ),
-                      const SizedBox(width: 6),
-                    ],
-                    // Bouton "Modifier les frais" — disponible même après
-                    // complétion (les frais de livraison sont souvent connus
-                    // APRÈS la livraison). Aucun verrouillage des frais ;
-                    // seuls les articles sont figés une fois la commande
-                    // complétée (cf. _onSaveOrder). Masqué sur annulée/
-                    // refusée/remboursée (frais sans objet).
-                    // Masqué en restauration : ce sheet porte les frais de
-                    // LIVRAISON et la dette partenaire, deux notions sans
-                    // objet quand le client emporte lui-même sa commande.
-                    if (!_isResto
-                        && widget.canEdit
-                        && widget.order.status != SaleStatus.cancelled
-                        && widget.order.status != SaleStatus.refused
-                        && widget.order.status != SaleStatus.refunded) ...[
-                      _ActionBtn(
-                        icon: Icons.local_shipping_outlined,
-                        color: AppColors.primary,
-                        bgColor: AppColors.primarySurface,
-                        tooltip: 'Modifier les frais (livraison…)',
-                        onTap: () => _editFees(context),
-                      ),
-                      const SizedBox(width: 6),
-                    ],
-                    // Édition des articles interdite sur une commande déjà
-                    // complétée (les articles sont figés). Les frais restent
-                    // modifiables via le bouton dédié ci-dessus.
-                    if (widget.canEdit
-                        && widget.order.status != SaleStatus.completed) ...[
-                      _ActionBtn(
-                        icon: Icons.edit_rounded,
-                        color: AppColors.primary,
-                        bgColor: AppColors.primarySurface,
-                        tooltip: 'Modifier la commande',
-                        onTap: () => _showEditOrder(context),
-                      ),
-                      const SizedBox(width: 6),
-                    ],
-                    // hotfix_084 : le bouton n'apparaît que si la commande
-                    // est éligible (statut ouvert non-payé). Évite à
-                    // l'opérateur de cliquer pour se voir refuser dans le
-                    // dialog — sécurise aussi par construction puisque le
-                    // use case et la RPC enforce les mêmes règles.
-                    if (widget.canDelete
-                        && DeleteSaleUseCase.allowedStatuses
-                            .contains(widget.order.status)
-                        && widget.order.amountPaid <= 0)
-                      _ActionBtn(
-                        icon: Icons.delete_outline_rounded,
-                        color: AppColors.error,
-                        bgColor: AppColors.error.withValues(alpha: 0.12),
-                        tooltip: 'Supprimer',
-                        onTap: () => _confirmDelete(context),
-                      ),
-                  ]),
+                  // ── LA SURFACE D'ACTIONS ────────────────────────────
+                  //
+                  // Elle était un `Row` nu de SIX contrôles au maximum : une
+                  // action principale à libellé, puis jusqu'à cinq icônes de
+                  // 30 px sans libellé — chiffre établi par balayage exhaustif
+                  // dans `order_actions_test.dart`, pas estimé. Dans une tuile
+                  // de grille de 342 px (311 utiles), « Encaisser & finaliser »
+                  // à 195 px plus cinq icônes et leurs écarts font 381 px :
+                  // DÉBORDEMENT de 70 px, franc, sans repli ni défilement.
+                  //
+                  // LA CAUSE N'ÉTAIT PAS LA DENSITÉ MAIS UNE MESURE FAUSSE :
+                  // la rangée choisissait sa disposition sur
+                  // `MediaQuery.size.width > 800`, c'est-à-dire la largeur de
+                  // l'ÉCRAN. Dans une grille à trois colonnes sur 1070 px,
+                  // elle prenait donc la branche « bureau », conçue pour une
+                  // carte pleine largeur, à l'intérieur d'une tuile trois fois
+                  // plus étroite. Plus rien ici ne lit la largeur d'écran.
+                  ..._buildActionRow(context, s),
                   // Historique des transferts retiré : l'envoi se fait
                   // désormais manuellement via copier-coller dans WhatsApp,
                   // plus aucune trace ne transite par l'app.
@@ -4980,9 +4826,14 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       Row(children: [
         Expanded(
           child: _WideActionButton(
+            // EN CONTOUR TEINTÉ À LA COULEUR DE L'ÉTAT, pas en accent fixe.
+            // Le contour, il l'était déjà (`filled` vaut faux) ; ce qui change
+            // est la teinte, désormais celle de l'onglet et du liseré. Sur
+            // deux cartes un fond plein passe ; sur six, les boutons
+            // deviennent le seul élément visible et le liseré ne se lit plus.
             icon: icon,
             label: label,
-            color: AppColors.primary,
+            color: _tab.color(context),
             onPressed: () async {
               try {
                 await action();
@@ -5012,6 +4863,210 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       ]),
       const SizedBox(height: 8),
     ];
+  }
+
+  /// LES ACTIONS DE LA CARTE — trois contrôles au plus, tous nommés.
+  ///
+  /// L'action principale pleine largeur, puis « Facture » et « Plus
+  /// d'actions » en contour. Le reste part dans une feuille qui défile, donc
+  /// plus rien ne peut être coupé quelle que soit la largeur de la tuile.
+  ///
+  /// LA DEUXIÈME PLACE NE CHANGE JAMAIS DE SENS. Quand « Facture » n'est pas
+  /// disponible — elle n'existe que sur une commande encaissée — elle reste
+  /// VIDE et « Plus d'actions » prend toute la largeur. Y glisser la première
+  /// action disponible ferait porter à la même place « Facture » ici et
+  /// « Relancer » là : le serveur ne peut plus mémoriser où taper, et c'est le
+  /// geste qu'il fait cent fois par service. Une place vide se mémorise ; une
+  /// place qui change de sens, non.
+  List<Widget> _buildActionRow(BuildContext context, SaleStatus s) {
+    final o = widget.order;
+    final acts = orderActionsFor(
+      status:           s,
+      isApprovalSale:   o.isApprovalSale,
+      amountDue:        o.amountDue,
+      amountPaid:       o.amountPaid,
+      source:           o.source,
+      canCancel:        widget.canCancel,
+      canEdit:          widget.canEdit,
+      canDelete:        widget.canDelete,
+      isResto:          _isResto,
+      canConfirmClient: _canConfirmClient(),
+    );
+
+    // L'ACTION PRINCIPALE GARDE SON WIDGET D'ORIGINE. `_buildStatusAction`
+    // n'est ni dupliqué ni réécrit : il porte la cascade des transitions et
+    // rend une pastille en lecture seule sur les états terminaux.
+    final OrderAction? principale =
+        acts.contains(OrderAction.closeApprovalRound)
+            ? OrderAction.closeApprovalRound
+            : acts.contains(OrderAction.advanceStatus)
+                ? OrderAction.advanceStatus
+                : null;
+
+    final secondaires = acts.where((a) => a != principale).toList();
+
+    return [
+      if (principale == OrderAction.closeApprovalRound)
+        SizedBox(
+          width: double.infinity,
+          child: _WideActionButton(
+            icon: principale!.icon,
+            label: principale.label,
+            color: principale.color(context),
+            filled: true,
+            onPressed: () => _runAction(context, principale),
+          ),
+        )
+      else if (principale == OrderAction.advanceStatus)
+        SizedBox(width: double.infinity, child: _buildStatusAction(s))
+      else
+        // États terminaux : `_buildStatusAction` rend une pastille, qui n'est
+        // pas une action et ne s'étire donc pas.
+        Align(alignment: Alignment.centerLeft, child: _buildStatusAction(s)),
+      if (secondaires.isNotEmpty) ...[
+        const SizedBox(height: 6),
+        Row(children: [
+          if (secondaires.contains(OrderAction.invoicePdf)) ...[
+            Expanded(
+              child: _WideActionButton(
+                icon: OrderAction.invoicePdf.icon,
+                label: 'Facture',
+                color: OrderAction.invoicePdf.color(context),
+                onPressed: () =>
+                    _runAction(context, OrderAction.invoicePdf),
+              ),
+            ),
+            const SizedBox(width: 6),
+          ],
+          Expanded(
+            child: _WideActionButton(
+              icon: Icons.more_horiz_rounded,
+              label: "Plus d'actions",
+              color: AppColors.primary,
+              onPressed: () => _openActionsSheet(context, secondaires),
+            ),
+          ),
+        ]),
+      ],
+    ];
+  }
+
+  /// LA FEUILLE « PLUS D'ACTIONS ».
+  ///
+  /// Trois règles, et elles répondent chacune à un défaut constaté :
+  ///   * PLUS AUCUNE ICÔNE MUETTE. Les boutons de 30 px portaient bien un
+  ///     `Tooltip`, mais un tooltip demande un survol ou un appui long : sur
+  ///     une tablette en plein service, personne ne le découvre.
+  ///   * LE PIN EST ANNONCÉ AVANT LE TAP, plus découvert après.
+  ///   * LA FEUILLE DÉFILE — `AdaptiveFormFrame` scrolle son corps dans les
+  ///     deux modes — donc aucune action ne peut plus être coupée.
+  ///
+  /// L'ORDRE EST CELUI DE LA RANGÉE, destructives exceptées qui descendent
+  /// sous un filet. Il n'avait jamais été écrit nulle part, mais c'est celui
+  /// que l'usage a fixé ; le rendre « logique » ferait chercher.
+  Future<void> _openActionsSheet(
+      BuildContext context, List<OrderAction> acts) async {
+    // LE BADGE SE DÉCIDE SUR L'ÉTAT RÉEL DU PIN, pas sur le drapeau seul.
+    // `ManagerGate.require` n'ouvre `OwnerPinDialog` que si un PIN existe ;
+    // sans PIN posé il propose une création au propriétaire et laisse passer
+    // un délégué. Annoncer « PIN » là où rien ne sera demandé serait aussi
+    // faux que de ne pas l'annoncer là où il l'est.
+    final pinPose =
+        acts.any((a) => a.pinGated) && await PinService.hasPIN();
+    if (!context.mounted) return;
+
+    final o      = widget.order;
+    final sem    = Theme.of(context).semantic;
+    final graves = acts.where((a) => a.destructive).toList();
+    final autres = acts.where((a) => !a.destructive).toList();
+
+    final choix = await showAdaptiveFormSheet<OrderAction>(
+      context: context,
+      builder: (ctx) => AdaptiveFormFrame(
+        title: 'Actions de la commande',
+        subtitle: '${_repere()} · ${CurrencyFormatter.format(o.total)}',
+        icon: Icons.more_horiz_rounded,
+        body: Column(mainAxisSize: MainAxisSize.min, children: [
+          for (final a in autres) _actionTile(ctx, a, pinPose),
+          if (graves.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Divider(height: 1, color: sem.borderSubtle),
+            const SizedBox(height: 6),
+            for (final a in graves) _actionTile(ctx, a, pinPose),
+          ],
+        ]),
+      ),
+    );
+
+    if (choix == null || !context.mounted) return;
+    await _runAction(context, choix);
+  }
+
+  /// Une ligne de la feuille : icône, LIBELLÉ, et le badge PIN le cas échéant.
+  Widget _actionTile(BuildContext ctx, OrderAction a, bool pinPose) {
+    // La facture WhatsApp reste indisponible pendant sa préparation, comme le
+    // faisait son bouton — même garde, même état.
+    final occupe = a == OrderAction.invoiceWhatsApp &&
+        (_sendingInvoice || _preparingInvoice);
+    final teinte = occupe ? AppColors.textHint : a.color(ctx);
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(
+          occupe ? Icons.hourglass_top_rounded : a.icon,
+          size: 20, color: teinte),
+      title: Text(
+          occupe ? 'Préparation de la facture…' : a.label,
+          style: AppTextStyles.body.copyWith(color: teinte)),
+      trailing: (a.pinGated && pinPose)
+          ? Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                  color: Theme.of(ctx).semantic.warning,
+                  borderRadius: BorderRadius.circular(6)),
+              child: Text('PIN',
+                  style: AppTextStyles.microBold
+                      .copyWith(color: Theme.of(ctx).semantic.warningText)),
+            )
+          : null,
+      onTap: occupe ? null : () => Navigator.of(ctx).pop(a),
+    );
+  }
+
+  /// L'AIGUILLAGE — une action vers SON gestionnaire, inchangé.
+  ///
+  /// Aucune garde n'est déplacée ici : chaque branche appelle exactement la
+  /// méthode que le bouton d'origine appelait, avec les mêmes arguments.
+  Future<void> _runAction(BuildContext context, OrderAction a) async {
+    switch (a) {
+      case OrderAction.closeApprovalRound:
+        return _closeApproval(context);
+      case OrderAction.cancelApprovalRound:
+        return _cancelApproval(context);
+      case OrderAction.advanceStatus:
+        // Jamais routée ici : elle est rendue par `_buildStatusAction`, qui
+        // porte sa propre cascade de transitions.
+        return;
+      case OrderAction.cancelOrRefuse:
+        return _askCancelOrRefuse(context);
+      case OrderAction.reopenPaidSale:
+        return _reopenPaidSale(context);
+      case OrderAction.invoicePdf:
+        return _previewBrandedInvoice(context);
+      case OrderAction.invoiceWhatsApp:
+        return _sendInvoiceWhatsApp(context);
+      case OrderAction.collectBalance:
+        return _recordAcompte(context);
+      case OrderAction.relaunchClient:
+        return _relaunchClient(context);
+      case OrderAction.editFees:
+        return _editFees(context);
+      case OrderAction.editOrder:
+        return _showEditOrder(context);
+      case OrderAction.deleteOrder:
+        return _confirmDelete(context);
+    }
   }
 
   Widget _buildStatusAction(SaleStatus s) {
