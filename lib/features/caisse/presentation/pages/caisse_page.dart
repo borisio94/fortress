@@ -24,6 +24,7 @@ import '../../../onboarding/presentation/widgets/first_sale_tooltip.dart';
 import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../domain/usecases/order_receipt_usecase.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
+import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/empty_state_widget.dart';
 import '../../../../shared/widgets/order_source_badge.dart';
 import '../../../../shared/widgets/view_filter_chip_bar.dart';
@@ -1285,37 +1286,26 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                       'programmée requiert la permission "sales.cancel".');
                   return;
                 }
-                final ok = await showDialog<bool>(
+                // `onConfirm` vide, et le travail APRÈS le `await` : le
+                // sheet appelle `onConfirm` une fois refermé, donc tout ce
+                // qu'on y mettrait tournerait sur un contexte démonté. Le
+                // booléen rendu suffit, et c'est l'usage partout ici.
+                final ok = await AppConfirmDialog.show(
                   context: context,
-                  builder: (dc) => AlertDialog(
-                    backgroundColor: Theme.of(context).colorScheme.surface,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                    title: const Text('Repasser en programmée ?',
-                        style: AppTextStyles.subtitleBold),
-                    content: Text(
-                        'La commande redeviendra « programmée » : le stock '
-                        'sera restitué, le paiement remis à zéro et les '
-                        'écritures partenaire liées (encaissement, frais) '
-                        'seront annulées. À utiliser pour corriger une erreur '
-                        'puis re-finaliser.',
-                        style: AppTextStyles.bodySecondary),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(dc).pop(false),
-                        child: Text('Annuler',
-                            style: TextStyle(color: AppColors.textSecondary)),
-                      ),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.warning,
-                            foregroundColor: Colors.white,
-                            elevation: 0),
-                        onPressed: () => Navigator.of(dc).pop(true),
-                        child: const Text('Repasser en programmée'),
-                      ),
-                    ],
-                  ),
+                  icon: Icons.schedule_rounded,
+                  iconColor: AppColors.warning,
+                  title: 'Repasser en programmée ?',
+                  body: Text(
+                      'La commande redeviendra « programmée » : le stock '
+                      'sera restitué, le paiement remis à zéro et les '
+                      'écritures partenaire liées (encaissement, frais) '
+                      'seront annulées. À utiliser pour corriger une erreur '
+                      'puis re-finaliser.',
+                      style: AppTextStyles.bodySecondary),
+                  cancelLabel: 'Annuler',
+                  confirmLabel: 'Repasser en programmée',
+                  confirmColor: AppColors.warning,
+                  onConfirm: () {},
                 );
                 if (ok != true) return;
                 // Purge les mouvements partenaires de la commande (saleCollected
@@ -4478,51 +4468,23 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   Future<void> _confirmRemitReceived(BuildContext context) async {
     final amount = widget.pendingRemittance ?? 0;
     if (amount <= 0 || widget.onRemitReceived == null) return;
-    final ok = await showDialog<bool>(
+    // La pastille d'icône était dessinée à la main ici — carré de 32, fond à
+    // 14 %, rayon 8. `FormSheetHeader` la dessine pour tout le monde : c'est
+    // `icon` + `iconColor` qui la remplacent.
+    final ok = await AppConfirmDialog.show(
       context: context,
-      builder: (dc) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
-        title: Row(children: [
-          Container(
-            width: 32, height: 32,
-            decoration: BoxDecoration(
-                color: AppColors.info.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(8)),
-            child: const Icon(Icons.account_balance_wallet_outlined,
-                size: 18, color: AppColors.info),
-          ),
-          const SizedBox(width: 10),
-          const Expanded(
-            child: Text('Versement reçu ?',
-                style: AppTextStyles.subtitleBold),
-          ),
-        ]),
-        content: Text(
-            'Confirmer la réception de '
-            '${CurrencyFormatter.format(amount)} versés par le partenaire '
-            'pour cette commande ? Le livre partenaire sera mis à jour.',
-            style: AppTextStyles.body.copyWith(height: 1.4)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dc).pop(false),
-            child: Text('Annuler',
-                style: TextStyle(color: AppColors.textSecondary)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.info,
-              foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-            ),
-            onPressed: () => Navigator.of(dc).pop(true),
-            child: const Text('Confirmer le versement'),
-          ),
-        ],
-      ),
+      icon: Icons.account_balance_wallet_outlined,
+      iconColor: AppColors.info,
+      title: 'Versement reçu ?',
+      body: Text(
+          'Confirmer la réception de '
+          '${CurrencyFormatter.format(amount)} versés par le partenaire '
+          'pour cette commande ? Le livre partenaire sera mis à jour.',
+          style: AppTextStyles.body.copyWith(height: 1.4)),
+      cancelLabel: 'Annuler',
+      confirmLabel: 'Confirmer le versement',
+      confirmColor: AppColors.info,
+      onConfirm: () {},
     );
     if (ok == true) await widget.onRemitReceived!.call();
   }
@@ -4568,50 +4530,24 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   void _showEditOrder(BuildContext context) {
     // Avertissement si commande complétée
     if (widget.order.status == SaleStatus.completed) {
-      showDialog(
+      // SEUL des quatre à travailler dans `onConfirm`, et c'est exact ici :
+      // `AppConfirmDialog` l'appelle APRÈS avoir refermé le sheet — le même
+      // ordre que l'ancien dialogue écrivait à la main (`pop()` puis
+      // `_openEditSheet`). La méthode reste synchrone, comme avant.
+      AppConfirmDialog.show(
         context: context,
-        builder: (dc) => AlertDialog(
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16)),
-          title: Row(children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                  color: AppColors.warning.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8)),
-              child: const Icon(Icons.warning_amber_rounded,
-                  size: 18, color: AppColors.warning),
-            ),
-            const SizedBox(width: 10),
-            const Text('Commande complétée',
-                style: AppTextStyles.subtitleBold),
-          ]),
-          content: Text(
-              'Cette commande a déjà été complétée. '
-                  'La modifier peut affecter la comptabilité. '
-                  'Continuer quand même ?',
-              style: AppTextStyles.bodySecondary),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.of(dc).pop(),
-                child: Text('Annuler',
-                    style: TextStyle(color: AppColors.textSecondary))),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(dc).pop();
-                _openEditSheet(context);
-              },
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.warning,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10))),
-              child: const Text('Modifier quand même'),
-            ),
-          ],
-        ),
+        icon: Icons.warning_amber_rounded,
+        iconColor: AppColors.warning,
+        title: 'Commande complétée',
+        body: Text(
+            'Cette commande a déjà été complétée. '
+            'La modifier peut affecter la comptabilité. '
+            'Continuer quand même ?',
+            style: AppTextStyles.bodySecondary),
+        cancelLabel: 'Annuler',
+        confirmLabel: 'Modifier quand même',
+        confirmColor: AppColors.warning,
+        onConfirm: () => _openEditSheet(context),
       );
     } else {
       _openEditSheet(context);
@@ -4700,25 +4636,20 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   /// Annule une tournée « à choisir sur place » après confirmation : tout le
   /// stock réservé est restauré (callback parent → `cancelApprovalOrder`).
   Future<void> _cancelApproval(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
+    // Le seul des quatre qui n'avait NI fond de surface NI forme arrondie :
+    // un `AlertDialog` nu, au châssis par défaut de Material. Il prend ici la
+    // même carte que les trois autres.
+    final confirmed = await AppConfirmDialog.show(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Annuler la tournée'),
-        content: const Text(
-            'Tous les articles réservés seront remis en stock et la commande '
-            'sera annulée. Continuer ?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Retour'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(foregroundColor: AppColors.error),
-            child: const Text('Annuler la tournée'),
-          ),
-        ],
-      ),
+      icon: Icons.cancel_outlined,
+      title: 'Annuler la tournée',
+      body: Text(
+          'Tous les articles réservés seront remis en stock et la commande '
+          'sera annulée. Continuer ?',
+          style: AppTextStyles.bodySecondary),
+      cancelLabel: 'Retour',
+      confirmLabel: 'Annuler la tournée',
+      onConfirm: () {},
     );
     if (confirmed != true) return;
     await widget.onCancelApproval();

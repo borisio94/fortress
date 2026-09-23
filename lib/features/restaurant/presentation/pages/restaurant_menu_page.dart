@@ -30,15 +30,6 @@ import '../widgets/resto_empty_state.dart';
 import '../widgets/resto_pill_tabs.dart';
 import '../widgets/resto_surfaces.dart';
 
-/// La carte du restaurant — grille de plats avec filtres par catégorie.
-///
-/// Remplace l'écran d'inventaire pour les boutiques de restauration : on y
-/// consulte et gère la carte, et on y prend une commande à emporter au
-/// comptoir.
-///
-/// Deux gestes distincts sur une même carte :
-///   • tap sur la carte → fiche du plat (prix, photo, options, stock) ;
-///   • bouton « Ajouter » → ajoute au panier à emporter en cours.
 /// Tables dont un changement doit redessiner cet écran.
 ///
 /// `products` pour la carte elle-même ; les quatre autres pour la progression
@@ -52,6 +43,27 @@ const _kWatchedTables = {
   'daily_expenses',
 };
 
+/// La carte du restaurant — grille de plats avec filtres par catégorie.
+///
+/// Remplace l'écran d'inventaire pour les boutiques de restauration : on y
+/// consulte et gère la carte, et on y prend une commande à emporter au
+/// comptoir.
+///
+/// DEUX ZONES TACTILES sur une même carte, et AUCUN bouton « Ajouter » :
+///   • la PHOTO ajoute au panier à emporter quand le plat est disponible —
+///     c'est le geste du service, celui qu'on répète toute la soirée. Sur un
+///     plat indisponible elle ouvre la fiche : il n'y a plus rien à ajouter ;
+///   • le BLOC TEXTE ouvre toujours la fiche du plat (prix, photo,
+///     composition, stock). C'est le seul chemin vers elle pour un serveur
+///     sans droit d'édition, à qui le menu ⋮ ne s'affiche pas.
+///
+/// Ce partage tient dans `tapAdds` (`_DishCard`) : `onTap: tapAdds ? onAdd :
+/// onTap` sur la photo, `onTap:` seul sur le texte. Le bouton « Ajouter »
+/// que ce commentaire annonçait n'a jamais existé dans ce fichier.
+///
+/// Ce bloc documentait `_kWatchedTables` jusqu'ici : rien ne le séparait du
+/// commentaire de la constante, et la page elle-même n'avait aucune
+/// description. Il revient sur la classe qu'il décrit.
 class RestaurantMenuPage extends ConsumerStatefulWidget {
   final String shopId;
 
