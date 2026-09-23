@@ -1,6 +1,5 @@
 // ─── Barrel exports — shared/widgets ─────────────────────────────────────────
 export 'app_scaffold.dart';
-export 'app_drawer.dart';
 export 'app_snack.dart';
 export 'app_field.dart';
 export 'app_primary_button.dart';

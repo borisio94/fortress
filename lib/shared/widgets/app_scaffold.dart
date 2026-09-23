@@ -14,7 +14,6 @@ import '../../core/i18n/app_localizations.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../features/caisse/presentation/bloc/caisse_bloc.dart';
 import 'adaptive_scaffold.dart';
-import 'app_drawer.dart';
 import 'offline_banner_widget.dart';
 import 'pin_lock_banner.dart';
 import 'sync_status_banner.dart';
@@ -143,47 +142,45 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
           : Theme.of(context).scaffoldBackgroundColor;
 
   Widget _buildDesktop(BuildContext context) {
+    // PLUS DE RAIL DE NAVIGATION ICI, et c'est le point de ce lot.
+    //
+    // `AppDrawerRail` occupait cette colonne avec la liste de navigation
+    // e-commerce de `app_drawer.dart` — Tableau de bord · Boutique ·
+    // Inventaire · Clients · Finances · Partenaires · Historique.
+    //
+    // Cette branche n'est atteinte que HORS du `ShellRoute` : dès qu'un
+    // `AdaptiveScaffold` est au-dessus, `build` se court-circuite bien avant.
+    // Or les seules pages hors shell qui passent ici sont les cinq écrans
+    // super-admin (`/super-admin/plans`, `broadcast`, `stats`, `incidents`,
+    // `export`), que le routeur construit en `const PlansPage()` — donc avec
+    // `shopId: ''`. Le rail fabriquait donc `/shop//dashboard` et six autres
+    // liens du même genre : SEPT LIENS MORTS, tous affichés, parce que
+    // `_canAccess` recevait un rôle nul sur une boutique vide et laissait tout
+    // passer.
+    //
+    // On ne retire donc pas une navigation, on retire une colonne de liens qui
+    // ne menaient nulle part. Ces cinq pages gardent leur barre de titre et
+    // leur flèche de retour — elles sont toutes en `isRootPage: false`.
     return Scaffold(
       backgroundColor: _scaffoldBg(context),
-      body: Row(children: [
-        ClipRect(
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeInOut,
-            width: _railExpanded ? 220 : 64,
-            child: AppDrawerRail(
-              shopId: widget.shopId,
-              expanded: _railExpanded,
-              onToggle: () => setState(() => _railExpanded = !_railExpanded),
-            ),
-          ),
+      appBar: _buildAppBar(context, isDesktop: true) as PreferredSizeWidget,
+      body: OfflineBlockGuard(
+        child: Column(
+          children: [
+            const PinLockBanner(),
+            const SyncStatusBanner(),
+            const SubscriptionBanner(),
+            Expanded(child: widget.body),
+          ],
         ),
-        Container(width: 1, color: Theme.of(context).semantic.borderSubtle),
-        Expanded(
-          child: Scaffold(
-            backgroundColor: _scaffoldBg(context),
-            appBar: _buildAppBar(context, isDesktop: true) as PreferredSizeWidget,
-            body: OfflineBlockGuard(
-              child: Column(
-                children: [
-                  const PinLockBanner(),
-                  const SyncStatusBanner(),
-                  const SubscriptionBanner(),
-                  Expanded(child: widget.body),
-                ],
-              ),
-            ),
-            floatingActionButton: widget.floatingActionButton,
-          ),
-        ),
-      ]),
+      ),
+      floatingActionButton: widget.floatingActionButton,
     );
   }
 
   Widget _buildMobile(BuildContext context) {
     return Scaffold(
       backgroundColor: _scaffoldBg(context),
-      drawer: widget.isRootPage ? AppDrawer(shopId: widget.shopId) : null,
       appBar: _buildAppBar(context, isDesktop: false) as PreferredSizeWidget,
       body: OfflineBlockGuard(
         child: Column(
