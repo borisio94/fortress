@@ -16,6 +16,16 @@ import '../../../../core/theme/app_text_styles.dart';
 class RestoSectionHeader extends StatelessWidget {
   final String title;
 
+  /// Action posée à DROITE du titre, sur la même ligne.
+  ///
+  /// Elle existe pour que le bouton de création cesse d'occuper une ligne à
+  /// lui seul entre les onglets et la liste. Sur un écran large, cette ligne
+  /// ne portait qu'un bouton de 160 px et huit cents de vide — et elle
+  /// repoussait la première ligne de la liste d'autant.
+  ///
+  /// `null` = en-tête inchangé, exactement comme avant.
+  final Widget? trailing;
+
   /// Ce que l'écran contient, déjà mis en mots par l'appelant — « 4 ingrédients
   /// · 2 fournitures ». Écrit là-bas et non ici : chaque écran compte des
   /// choses différentes, et les accorder au pluriel depuis un widget générique
@@ -26,6 +36,7 @@ class RestoSectionHeader extends StatelessWidget {
     super.key,
     required this.title,
     required this.subtitle,
+    this.trailing,
   });
 
   @override
@@ -33,13 +44,33 @@ class RestoSectionHeader extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text(title,
-              style: AppTextStyles.label.copyWith(color: cs.onSurface)),
-          const SizedBox(height: 2),
-          Text(subtitle, style: AppTextStyles.caption),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.label.copyWith(color: cs.onSurface)),
+                const SizedBox(height: 2),
+                Text(subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.caption),
+              ],
+            ),
+          ),
+          // L'action à droite du titre, quand l'appelant en fournit une. Le
+          // `Row` reste même sans elle : le rendu d'une colonne seule dans un
+          // `Expanded` est identique à celui d'avant, et deux dispositions
+          // parallèles auraient divergé au premier ajustement de marge.
+          if (trailing != null) ...[
+            const SizedBox(width: 12),
+            trailing!,
+          ],
         ],
       ),
     );

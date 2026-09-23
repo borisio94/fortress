@@ -113,6 +113,29 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
             subtitle: '${_count(nIng, zero: 'aucun ingrédient', one: 'ingrédient')}'
                 ' · '
                 '${_count(nSup, zero: 'aucune fourniture', one: 'fourniture')}',
+            // LE BOUTON DE CRÉATION MONTE ICI.
+            //
+            // Il occupait une ligne à lui seul entre les onglets et la liste :
+            // sur un écran large, cent soixante pixels de bouton et huit cents
+            // de vide, qui repoussaient la première ligne d'autant.
+            //
+            // L'ACTION SUIT L'ONGLET ACTIF, et les deux feuilles remontent ici
+            // pour ça — l'une comme l'autre ne demandait que le `shopId` et un
+            // contexte. Les laisser dans leur onglet aurait obligé à les
+            // atteindre par une clé globale, c'est-à-dire à rendre la page
+            // dépendante de l'état interne de ses enfants.
+            //
+            // MASQUÉ SUR UNE LISTE VIDE : l'état vide porte déjà son propre
+            // bouton, sous la phrase qui le promet. Deux appels à la même
+            // action, à quinze centimètres, se concurrenceraient.
+            trailing: (_tab == 0 ? nIng : nSup) == 0
+                ? null
+                : _HeaderAddButton(
+                    label: _tab == 0 ? 'Ingrédient' : 'Fourniture',
+                    onTap: _tab == 0
+                        ? () => _createIngredient(context, shopId)
+                        : () => _createStockItem(context, shopId),
+                  ),
           ),
           // DEUX NATURES, DEUX SIGNAUX : une icône et une couleur.
           //
@@ -160,6 +183,30 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
       ),
     );
   }
+
+  /// Crée un ingrédient — MÊME feuille que la fiche d'un plat.
+  ///
+  /// `IngredientQuickSheet` écrit l'ingrédient et, si un montant est saisi, la
+  /// dépense d'achat qui va avec. La liste se rafraîchit par l'écoute de
+  /// `ingredients`, comme toujours — aucun `setState` n'est nécessaire ici.
+  ///
+  /// `warnsAboutUnlinked` : créé depuis STOCK, rien n'oblige à le rattacher à
+  /// une recette ensuite, et la feuille le dit.
+  static Future<void> _createIngredient(BuildContext context, String shopId) =>
+      showAdaptiveFormSheet<Ingredient>(
+        context: context,
+        builder: (_) => IngredientQuickSheet(
+          shopId: shopId,
+          warnsAboutUnlinked: true,
+        ),
+      );
+
+  /// Crée une fourniture. Même remontée, même raison.
+  static Future<void> _createStockItem(BuildContext context, String shopId) =>
+      showAdaptiveFormSheet<bool>(
+        context: context,
+        builder: (_) => _StockItemEditor(shopId: shopId),
+      );
 
   /// « aucun ingrédient », « 1 ingrédient », « 4 ingrédients ».
   ///
@@ -290,6 +337,11 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
     // veut dire « illisible » et non « rien n'est rattaché » : dans ce cas
     // aucune ligne n'affiche l'avertissement.
     final linked = RecipeService.linkedIngredientIds(widget.shopId);
+    // `null` veut dire « illisible » : dans ce cas on n'annonce RIEN plutôt
+    // que d'annoncer zéro, qui se lirait comme « tout est rattaché ».
+    final unlinkedCount = linked == null
+        ? 0
+        : items.where((i) => !linked.contains(i.id)).length;
     return Column(
       children: [
         if (pending.isNotEmpty) RestoBackfillBanner(
@@ -299,27 +351,13 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
           busy: _backfilling,
           onRun: _backfill,
         ),
-        // UN BOUTON « Ingrédient » ICI, et c'est un revirement assumé.
+        // LE BOUTON DE CRÉATION EST REMONTÉ DANS L'EN-TÊTE DE L'ÉCRAN.
         //
-        // Cet écran n'en portait pas, à dessein : un ingrédient existe parce
-        // qu'un plat le contient, et le créer hors de toute recette produit
-        // des lignes orphelines. Le raisonnement tenait tant que cet onglet
-        // vivait dans « Finances », où l'on vient lire des marges.
+        // Il est resté une ligne entière ici jusqu'au 2026-09-23, entre les
+        // onglets et la liste. Sur un écran large, cette ligne ne portait
+        // qu'un bouton et du vide — cf. `RestoSectionHeader.trailing`.
         //
-        // Il ne tient plus sur un écran qui s'appelle STOCK. Un gérant qui
-        // veut inscrire l'huile rouge dans sa réserve devait ouvrir un plat,
-        // composer une recette, et créer l'ingrédient au passage — un détour
-        // que rien à l'écran n'annonçait, et que l'état vide énonçait comme
-        // une règle plutôt que comme un chemin.
-        //
-        // La feuille ouverte est CELLE de la fiche plat (`IngredientQuickSheet`,
-        // extraite le 21/09/2026) : mêmes champs, même écriture de la dépense
-        // d'achat. Deux formulaires auraient divergé.
-        //
-        // EN TÊTE SEULEMENT SI LA LISTE EXISTE. Vide, l'action descend dans la
-        // carte d'état vide, sous la phrase qui la promet.
-        if (items.isNotEmpty)
-          headerButton('Nouvel ingrédient', _createIngredient),
+        // Il reste dans l'état vide, où il est le seul chemin annoncé.
         Expanded(
           child: items.isEmpty
               // COMPACT : la barre d'onglets juste au-dessus porte déjà
@@ -349,9 +387,31 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
                 )
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                  itemCount: items.length,
+                  // +1 pour le bandeau, quand il y a quelque chose à dire.
+                  itemCount: items.length + (unlinkedCount > 0 ? 1 : 0),
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) => _IngredientRow(
+                  itemBuilder: (_, raw) {
+                    // ── « AUCUN PLAT » EN BANDEAU, PAS EN PASTILLE ──────
+                    //
+                    // La pastille était juste, et répétée seize fois elle ne
+                    // disait plus rien : une liste dont chaque ligne porte le
+                    // même avertissement n'avertit de rien. Le bandeau le dit
+                    // UNE fois, avec le compte, et surtout avec un chemin —
+                    // c'est la carte qu'il faut ouvrir pour rattacher un
+                    // ingrédient à une recette.
+                    //
+                    // La ligne, elle, garde une mention en texte gris : sans
+                    // quoi le bandeau annoncerait un nombre sans dire
+                    // LESQUELS.
+                    if (unlinkedCount > 0 && raw == 0) {
+                      return _UnlinkedBanner(
+                        count: unlinkedCount,
+                        onOpenMenu: () =>
+                            context.go('/shop/${widget.shopId}/inventaire'),
+                      );
+                    }
+                    final i = raw - (unlinkedCount > 0 ? 1 : 0);
+                    return _IngredientRow(
                     ing: items[i],
                     noCost: noCost.contains(items[i].id),
                     unlinked:
@@ -359,7 +419,8 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
                     onReceive: () => _receive(items[i]),
                     onEdit: () => _edit(items[i]),
                     onDelete: () => _delete(items[i]),
-                  ),
+                  );
+                  },
                 ),
         ),
       ],
@@ -430,6 +491,84 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
   }
 }
 
+/// BOUTON DE CRÉATION, dans l'en-tête de l'écran.
+///
+/// Compact et sans fond plein : il partage sa ligne avec le titre, qui doit
+/// rester ce qu'on lit en premier. `FilledButton.tonal` plutôt que `Filled` —
+/// un aplat d'accent à côté d'un titre en attirerait tout le regard.
+///
+/// Le libellé perd son « Nouvel » : « Ingrédient » précédé d'un plus se lit
+/// sans ambiguïté, et deux mots de moins tiennent sur un téléphone.
+class _HeaderAddButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+
+  const _HeaderAddButton({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => FilledButton.tonalIcon(
+        onPressed: onTap,
+        icon: const Icon(Icons.add_rounded, size: 17),
+        label: Text(label),
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          textStyle: AppTextStyles.bodySm,
+        ),
+      );
+}
+
+/// BANDEAU « AUCUN PLAT » — dit une fois ce que seize pastilles répétaient.
+///
+/// La pastille par ligne était juste et illisible : une liste dont chaque
+/// ligne porte le même avertissement n'avertit de rien. Le bandeau donne le
+/// COMPTE — ce que la pastille ne pouvait pas faire — et surtout un CHEMIN :
+/// un ingrédient se rattache en composant la recette d'un plat, et c'est la
+/// carte qu'il faut ouvrir.
+///
+/// Ambre et non rouge : rien n'est cassé. Ces ingrédients existent, ils ne
+/// sont simplement dans aucune recette — et tant qu'ils n'ont pas d'achat
+/// enregistré, ils ne faussent aucune marge. Le rouge est pris par le stock
+/// bas, qui appelle une action dans la journée.
+class _UnlinkedBanner extends StatelessWidget {
+  final int count;
+  final VoidCallback onOpenMenu;
+
+  const _UnlinkedBanner({required this.count, required this.onOpenMenu});
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: sem.warning.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: sem.warning.withValues(alpha: 0.35)),
+      ),
+      child: Row(children: [
+        Icon(Icons.link_off_rounded, size: 18, color: sem.warningText),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+              count == 1
+                  ? '1 ingrédient n\'entre dans aucun plat.'
+                  : '$count ingrédients n\'entrent dans aucun plat.',
+              style: AppTextStyles.bodySm
+                  .copyWith(color: sem.warningText)),
+        ),
+        TextButton(
+          onPressed: onOpenMenu,
+          style: TextButton.styleFrom(
+              foregroundColor: sem.warningText,
+              visualDensity: VisualDensity.compact),
+          child: const Text('Voir la carte'),
+        ),
+      ]),
+    );
+  }
+}
+
 /// Une ligne d'ingrédient : trois boutons explicites, et une carte INERTE.
 ///
 /// La carte ne réagit plus au toucher. Elle ouvrait l'éditeur, ce qui faisait
@@ -486,13 +625,21 @@ class _IngredientRow extends StatelessWidget {
                       style: AppTextStyles.bodyBold
                           .copyWith(color: cs.onSurface)),
                 ),
-                // Méthode de chiffrage — l'information la plus structurante
-                // de la ligne : elle dit si cet ingrédient se pèse ou se
-                // répartit, donc ce qu'on attend de l'utilisateur dans les
-                // fiches recette.
-                const SizedBox(width: 6),
-                RestoPill(ing.costMethodLabel,
-                    ing.usesTechnicalSheet ? cs.primary : sem.warning),
+                // MÉTHODE DE CHIFFRAGE — SEULE L'EXCEPTION SE DIT.
+                //
+                // La pastille s'affichait sur CHAQUE ligne, et la répartition
+                // étant le défaut, elle répétait « Sans peser » quinze fois
+                // sur seize. Une information portée par presque toutes les
+                // lignes ne distingue plus rien : elle occupe la place et
+                // repousse celles qui, elles, appellent une action.
+                //
+                // Le défaut se tait, l'exception parle. C'est la règle du
+                // module — le plat retiré, le stock bas et le coût manquant
+                // fonctionnent déjà ainsi.
+                if (ing.usesTechnicalSheet) ...[
+                  const SizedBox(width: 6),
+                  RestoPill(ing.costMethodLabel, cs.primary),
+                ],
                 if (ing.isShared) ...[
                   const SizedBox(width: 6),
                   RestoPill('partagé', cs.primary),
@@ -505,30 +652,20 @@ class _IngredientRow extends StatelessWidget {
                   const SizedBox(width: 6),
                   RestoPill('coût manquant', sem.warning),
                 ],
-                // AUCUN PLAT — deux niveaux, parce que les deux situations ne
-                // demandent pas la même urgence.
-                //
-                // Sans achat, c'est une information : l'ingrédient existe, il
-                // ne sert encore à rien, et il ne coûte rien à personne.
-                //
-                // AVEC des achats, c'est un avertissement : son montant entre
-                // dans l'assiette à répartir et n'en sort par aucun plat — il
-                // grossit les « achats non rattachés » de l'écart du tableau
-                // de bord (cf. lot 8 des marges).
-                if (unlinked) ...[
-                  const SizedBox(width: 6),
-                  RestoPill('aucun plat',
-                      noCost ? AppColors.textSecondary : sem.warning),
-                ],
+                // « AUCUN PLAT » N'EST PLUS UNE PASTILLE — voir le bandeau en
+                // tête de liste. Il reste en texte gris sous la ligne, pour
+                // que le compte annoncé là-haut désigne des lignes précises.
               ]),
               Text(
-                  // Unité et quantité sont FACULTATIVES : un ingrédient saisi
-                  // au nom et au prix afficherait sinon « 0 F/ · stock 0 »,
-                  // une ligne de bruit qui laisse croire à une donnée perdue.
+                  // LE PRIX N'EST PLUS ICI : il est devenu l'ancre de droite.
+                  // Noyé en tête d'une ligne de méta jointe par des points
+                  // médians, il ne se comparait pas d'une ligne à l'autre —
+                  // et c'est pourtant le chiffre qu'on vient lire.
+                  //
+                  // Unité et quantité restent FACULTATIVES : un ingrédient
+                  // saisi au nom et au prix afficherait sinon « stock 0 », une
+                  // ligne de bruit qui laisse croire à une donnée perdue.
                   [
-                    ing.unit.trim().isEmpty
-                        ? '${ing.costPerUnit} F'
-                        : '${ing.costPerUnit} F/${ing.unit}',
                     if (ing.quantity > 0)
                       'stock $q ${ing.unit}'.trim(),
                     if (ing.alertThreshold > 0)
@@ -537,6 +674,16 @@ class _IngredientRow extends StatelessWidget {
                       'acheté le ${restoDayLabel(ing.purchaseDate!)}',
                   ].join(' · '),
                   style: AppTextStyles.caption),
+              // La mention que la pastille portait. En gris et sur sa propre
+              // ligne : elle nomme la ligne sans réclamer l'attention que le
+              // bandeau a déjà prise une fois pour toutes.
+              if (unlinked)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text('Aucun plat ne l\'utilise',
+                      style: AppTextStyles.caption
+                          .copyWith(color: cs.onSurfaceVariant)),
+                ),
               // Une couleur seule laisse deviner ; on dit ce qui manque et où
               // le corriger. Sans cette ligne, l'orange n'est qu'une énigme.
               if (noCost)
@@ -552,27 +699,50 @@ class _IngredientRow extends StatelessWidget {
             ],
           ),
         ),
-        // Réception · Modifier · Supprimer — dans cet ordre : du geste le plus
-        // fréquent au plus rare, et le destructif en bout de rangée, le plus
-        // loin possible de celui qu'on vise tous les jours.
+        // ── LE PRIX, ANCRE DE LA COLONNE DE DROITE ──────────────────
+        //
+        // Aligné à droite, en accent, l'unité en petit dessous. La liste se
+        // parcourt désormais par cette colonne : vingt prix alignés se
+        // comparent d'un regard, vingt prix noyés en tête de ligne, non.
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(CurrencyFormatter.format(ing.costPerUnit.toDouble()),
+                maxLines: 1,
+                style: AppTextStyles.bodyBold.copyWith(color: cs.primary)),
+            if (ing.unit.trim().isNotEmpty)
+              Text('par ${ing.unit.trim()}',
+                  maxLines: 1,
+                  style: AppTextStyles.micro),
+          ],
+        ),
+        const SizedBox(width: 4),
+        // ── UNE SEULE ACTION VISIBLE ────────────────────────────────
+        //
+        // Réapprovisionner reste : c'est le geste du quotidien, celui pour
+        // lequel on ouvre cet écran. Modifier et supprimer descendent dans le
+        // menu — non parce qu'ils sont rares, mais parce que la corbeille
+        // était COLLÉE au crayon, à deux pixels l'un de l'autre, et qu'on les
+        // vise du pouce sur un téléphone.
         IconButton(
           onPressed: onReceive,
-          tooltip: 'Réception',
+          tooltip: 'Réapprovisionner',
           visualDensity: VisualDensity.compact,
           icon: Icon(Icons.add_box_outlined, size: 20, color: cs.primary),
         ),
-        IconButton(
-          onPressed: onEdit,
-          tooltip: 'Modifier',
-          visualDensity: VisualDensity.compact,
-          icon: Icon(Icons.edit_outlined,
+        PopupMenuButton<String>(
+          tooltip: 'Plus',
+          icon: Icon(Icons.more_vert_rounded,
               size: 19, color: cs.onSurface.withValues(alpha: 0.7)),
-        ),
-        IconButton(
-          onPressed: onDelete,
-          tooltip: 'Supprimer',
-          visualDensity: VisualDensity.compact,
-          icon: Icon(Icons.delete_outline_rounded, size: 19, color: sem.danger),
+          onSelected: (v) => v == 'edit' ? onEdit() : onDelete(),
+          itemBuilder: (_) => [
+            const PopupMenuItem(value: 'edit', child: Text('Modifier')),
+            PopupMenuItem(
+                value: 'delete',
+                child: Text('Supprimer',
+                    style: TextStyle(color: sem.danger))),
+          ],
         ),
       ]),
     );

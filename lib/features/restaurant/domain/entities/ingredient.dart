@@ -82,9 +82,18 @@ class Ingredient {
   /// comportement par défaut.
   bool get usesTechnicalSheet => costMethod == costSheet;
 
-  /// Libellé court pour la pastille de la liste.
+  /// Libellé court de la méthode de chiffrage — CELUI DU SÉLECTEUR.
+  ///
+  /// Il disait « Fiche » et « Répartition » pendant que le sélecteur, lui,
+  /// proposait « Quantité connue » et « Sans peser ». Deux vocabulaires pour
+  /// le MÊME choix, à deux écrans d'intervalle : le restaurateur cochait
+  /// « Quantité connue » et retrouvait « Fiche » dans sa liste.
+  ///
+  /// Les mots du sélecteur l'emportent, et c'est délibéré : ce sont eux qu'on
+  /// lit au moment de DÉCIDER. Une liste peut se relire, une décision se prend
+  /// une fois.
   String get costMethodLabel =>
-      usesTechnicalSheet ? 'Fiche' : 'Répartition';
+      usesTechnicalSheet ? 'Quantité connue' : 'Sans peser';
 
   /// Clé `yyyy-MM-dd` d'une date (stockage DATE sans heure).
   static String dayKey(DateTime d) =>
