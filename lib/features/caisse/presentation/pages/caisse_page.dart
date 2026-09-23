@@ -25,6 +25,7 @@ import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../domain/usecases/order_receipt_usecase.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/providers/cart_pane_provider.dart';
+import '../../../restaurant/domain/order_tile.dart';
 import '../../../restaurant/domain/service_tabs.dart';
 import '../../../restaurant/presentation/widgets/resto_empty_state.dart';
 import '../../../restaurant/presentation/widgets/resto_pill_tabs.dart';
@@ -1961,19 +1962,21 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               // carte dépliée aurait débordé, ou forcé les trois autres à sa
               // taille. `Wrap` laisse chaque tuile mesurer sa propre hauteur.
               //
-              // TROIS COLONNES au-delà de 1200, deux au-delà de 800, une en
-              // dessous : une carte de commande porte un repère, un état, son
-              // contenu et un bouton — sous 320 px de large, le bouton passe à
-              // la ligne et la tuile cesse d'être compacte.
+              // LES COLONNES SE DÉDUISENT D'UN PLANCHER, PAS DE SEUILS.
+              //
+              // La première version fixait 1200 et 800 en dur, et se trompait :
+              // sur un bloc de 1046 px elle rendait DEUX colonnes de 518 px
+              // pour six lignes de contenu. Un seuil en pixels d'écran ne sait
+              // rien de ce que la tuile doit porter.
+              //
+              // `kOrderTileMin` dit la largeur sous laquelle la tuile cesse de
+              // parler, et `orderGridColumns` en déduit le reste — c'est ce qui
+              // garantit que « Envoyer en préparation » passe à toute largeur.
               ? SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
                   child: LayoutBuilder(builder: (ctx, box) {
-                    final cols = box.maxWidth >= 1200
-                        ? 3
-                        : box.maxWidth >= 800
-                            ? 2
-                            : 1;
                     const gap = 10.0;
+                    final cols = orderGridColumns(box.maxWidth, gap: gap);
                     final w = (box.maxWidth - gap * (cols - 1)) / cols;
                     return Wrap(
                       spacing: gap,
@@ -4673,70 +4676,84 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   }
 
   /// Le contenu de la commande sur UNE ligne : « 2× Ndolè, 1× Jus ».
-  String _contenu() {
-    final items = widget.order.items;
-    if (items.isEmpty) return 'Aucun article';
-    return items
-        .map((i) => i.quantity > 1
-            ? '${i.quantity}× ${i.productName}'
-            : i.productName)
-        .join(', ');
-  }
+  ///
+  /// La règle est partie dans `order_tile.dart` le 2026-09-23, telle quelle,
+  /// pour tenir à côté de sa forme courte et passer sous test. Cet écran n'a
+  /// jamais été couvert par un test de widget ; ce qu'on peut en sortir en
+  /// règle pure, on le sort.
+  String _contenu() => orderContentsLine(widget.order.items);
 
-  /// TUILE DE GRILLE — compacte, en colonne, sur un tiers de largeur.
+  /// Le contenu en DEMI-ligne : « 2× Ndolè + 3 autres ».
   ///
-  /// La rangée pleine largeur — avatar de 36 px, nom, quatre pastilles, montant
-  /// et chevron — ne tient pas dans 320 px : elle y déborderait ou
-  /// s'ellipserait jusqu'à ne plus rien dire. La tuile empile ce que la rangée
-  /// alignait.
+  /// La tuile de grille partage cette ligne avec le montant. Tronquer la forme
+  /// longue y dirait le premier plat et rien d'autre ; le compte dit en plus la
+  /// taille de la commande, pour la même largeur.
+  String _contenuCourt() => orderContentsShort(widget.order.items);
+
+  /// TUILE DE GRILLE — TROIS LIGNES, et pas une de plus.
   ///
-  /// L'AVATAR DISPARAÎT. Il portait l'initiale du client, c'est-à-dire, en
-  /// restauration, celle de la TABLE — « T » pour toutes les tables de la
-  /// salle. Trente-six pixels pour une lettre qui ne distingue rien.
+  ///     Table 1  [À envoyer]      10:56  ⌄
+  ///     Poulet DG         2 500 F · non payé
+  ///     [ Envoyer en préparation ]
+  ///
+  /// Elle en portait six : repère et heure, badge, DEUX lignes de contenu,
+  /// montant, bouton. Six niveaux pour identifier un bon et le faire avancer —
+  /// et c'est ce qui donnait des tuiles hautes de 520 px.
+  ///
+  /// L'ÉTAT REMONTE À CÔTÉ DU REPÈRE, et le commentaire qui partait d'ici
+  /// disait l'inverse : « à un tiers de largeur, le poser à côté du repère
+  /// l'aurait fait ellipser l'un ou l'autre ». Il avait été écrit en supposant
+  /// des tuiles de 320 px, qui n'existent plus depuis que les colonnes se
+  /// déduisent du plancher.
+  ///
+  /// LE CHIFFRE, pour que personne ne le redescende sur sa propre ligne en
+  /// croyant bien faire : à 342 px de tuile — trois colonnes sur un bloc de
+  /// 1046 — la ligne dispose de 311 px utiles. Le badge le plus long en coûte
+  /// 105 (« En préparation »), l'heure 32, le chevron 18, les écarts 18. Il
+  /// reste 169 px au repère, soit 23 caractères ; « Table 12 · Compte 2 » en
+  /// fait 19.
+  ///
+  /// ⚠ CE QUI CASSERA EN PREMIER, ET OÙ. Au plancher de `kOrderTileMin`, le
+  /// repère tombe à 96 px et « Table 12 · Compte 2 » s'ellipse en
+  /// « Table 12 · Com… ». La dégradation est propre aujourd'hui, mais elle n'a
+  /// plus de marge : un onglet de service dont le libellé dépasserait
+  /// « En préparation » la mangerait. C'est cette ligne qui le montrera.
+  ///
+  /// LE CHEVRON EST EN COIN et non en fin de ligne 2 : il y concurrençait le
+  /// montant et l'état de paiement, alors que la ligne 1 est la moins chargée
+  /// des trois — et le coin haut-droit est l'endroit convenu du dépliement.
+  ///
+  /// L'AVATAR NE REVIENT PAS. Il portait l'initiale du client, c'est-à-dire,
+  /// en restauration, celle de la TABLE — « T » pour toute la salle.
   List<Widget> _gridSummary(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final paye = widget.order.paymentStatus == PaymentStatus.paid;
     return [
+      // ── LIGNE 1 : qui, dans quel état, depuis quand — et le pli ──────
       Row(children: [
+        // LE REPÈRE ET LE BADGE FORMENT UN SEUL GROUPE, et c'est structurel :
+        // un `Flexible` et un `Spacer` frères se partagent l'espace libre à
+        // parts ÉGALES — un repère long s'ellipserait à mi-course en laissant
+        // un trou au milieu de la ligne. Groupés dans un `Expanded`, ils
+        // prennent tout l'espace restant, le repère l'occupe jusqu'au badge, et
+        // le vide se forme après eux.
         Expanded(
-          child: Text(_repere(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.bodySmBold.copyWith(color: cs.onSurface)),
+          child: Row(children: [
+            Flexible(
+              child: Text(_repere(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style:
+                      AppTextStyles.bodySmBold.copyWith(color: cs.onSurface)),
+            ),
+            const SizedBox(width: 6),
+            _ServiceChip(
+                label: _tab.label, icon: _tab.icon, color: _tab.color(context)),
+          ]),
         ),
         const SizedBox(width: 6),
         Text(_hhmm(), style: AppTextStyles.micro),
-      ]),
-      const SizedBox(height: 6),
-      // L'état sur sa propre ligne : à un tiers de largeur, le poser à côté du
-      // repère l'aurait fait ellipser l'un ou l'autre.
-      Align(
-        alignment: Alignment.centerLeft,
-        child: _ServiceChip(
-            label: _tab.label, icon: _tab.icon, color: _tab.color(context)),
-      ),
-      const SizedBox(height: 6),
-      // DEUX LIGNES pour le contenu : une seule coupe « 2× Ndolè, 1× Jus… »
-      // après le premier plat, et la tuile ne dirait plus ce qu'elle porte.
-      Text(_contenu(),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: AppTextStyles.caption),
-      const SizedBox(height: 8),
-      Row(children: [
-        Expanded(
-          child: Text(CurrencyFormatter.format(widget.order.total),
-              maxLines: 1,
-              style: AppTextStyles.bodyBold.copyWith(color: cs.primary)),
-        ),
-        if (widget.order.status != SaleStatus.cancelled &&
-            widget.order.status != SaleStatus.refused)
-          Text(widget.order.paymentStatus.label,
-              maxLines: 1,
-              style: AppTextStyles.micro.copyWith(
-                  color: widget.order.paymentStatus == PaymentStatus.paid
-                      ? Theme.of(context).semantic.successText
-                      : Theme.of(context).semantic.warningText)),
-        const SizedBox(width: 4),
+        const SizedBox(width: 2),
         AnimatedRotation(
           turns: _expanded ? 0.5 : 0,
           duration: const Duration(milliseconds: 200),
@@ -4744,6 +4761,38 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
               size: 18, color: cs.onSurfaceVariant),
         ),
       ]),
+      const SizedBox(height: 4),
+      // ── LIGNE 2 : ce qu'il y a dedans, et ce que ça vaut ─────────────
+      //
+      // Le contenu passe en forme COURTE : il n'a plus qu'une demi-ligne, et
+      // « 2× Ndolè, 1× Jus, 1× Poul… » coupé en plein mot dirait le premier
+      // plat sans rien dire de la taille de la commande.
+      Row(children: [
+        Expanded(
+          child: Text(_contenuCourt(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.caption),
+        ),
+        const SizedBox(width: 8),
+        Text(CurrencyFormatter.format(widget.order.total),
+            maxLines: 1,
+            style: AppTextStyles.bodyBold.copyWith(color: cs.primary)),
+        // L'ÉTAT DE PAIEMENT QUALIFIE LE MONTANT et ne vit pas sans lui : il
+        // le suit sur la même ligne, en texte et non en pastille.
+        if (widget.order.status != SaleStatus.cancelled &&
+            widget.order.status != SaleStatus.refused) ...[
+          Text(' · ', style: AppTextStyles.micro),
+          Text(widget.order.paymentStatus.label,
+              maxLines: 1,
+              style: AppTextStyles.micro.copyWith(
+                  color: paye
+                      ? Theme.of(context).semantic.successText
+                      : Theme.of(context).semantic.warningText)),
+        ],
+      ]),
+      // ── LIGNE 3 : le bouton d'avancement, posé par la carte repliée ──
+      const SizedBox(height: 8),
     ];
   }
 
