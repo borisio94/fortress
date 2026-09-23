@@ -323,7 +323,14 @@ class _MobileShell extends StatelessWidget {
                          tabQuery: tabQuery);
     final title = explicitTitle
         ?? (onStockTab
-            ? (kShellNavItems[2].labelMobile ?? kShellNavItems[2].label)(l)
+            // `l.navStock` et non `kShellNavItems[2]`. Cet index en dur
+            // designait l'entree « Stock » du RESTAURANT, alors que
+            // `onStockTab` ne vaut que sur les routes d'inventaire
+            // E-COMMERCE : le titre n'etait juste que parce que les deux
+            // libelles valent le meme mot. Le premier reordonnancement de la
+            // liste l'aurait casse en silence — celui de ce lot l'aurait fait
+            // afficher « Menu ».
+            ? l.navStock
             : (breadcrumbChild != null
                 ? breadcrumbChild
                 : (selectedIndex < 0
@@ -650,8 +657,8 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
     final theme   = Theme.of(context);
     final palette = ref.watch(themePaletteProvider);
     final shop    = ref.watch(currentShopProvider);
-    final items   = shellMobileDrawerItems(widget.perms,
-        sector: shopSector(widget.shopId));
+    final sector  = shopSector(widget.shopId);
+    final items   = shellMobileDrawerItems(widget.perms, sector: sector);
     final width   = (MediaQuery.of(context).size.width * 0.8).clamp(240.0, 320.0);
     // Fond adaptatif : clair = surface ; sombre = teinte profonde derivee du
     // primary (coherent avec la sidebar desktop). Dividers teintes en sombre.
@@ -665,7 +672,7 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
         ? palette.primaryLight.withValues(alpha: 0.15)
         : theme.colorScheme.onSurface.withValues(alpha: 0.08);
     // Items en groupes (séparés par dividers) + items de footer (Paramètres).
-    final groups      = navGroups(items);
+    final groups      = navGroups(items, sector: sector);
     final footerItems = navFooterItems(items);
 
     Widget buildNavItem(ShellNavItem item) {
@@ -716,7 +723,18 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Row(children: [
-                  ShopLogoAvatar(logoUrl: shop?.logoUrl, size: 40),
+                  ShopLogoAvatar(
+                      logoUrl: shop?.logoUrl,
+                      // MONOGRAMME EN RESTAURATION SEULEMENT. L'avatar est
+                      // une chrome PARTAGÉE : sans ce garde, la boutique
+                      // e-commerce en production troquerait son bouclier
+                      // contre deux lettres sans l'avoir demandé. Le champ est
+                      // facultatif, et `null` rétablit exactement le rendu
+                      // d'avant.
+                      shopName: kRestaurantSectors.contains(sector)
+                          ? shop?.name
+                          : null,
+                      size: 40),
                   const SizedBox(width: 12),
                   Expanded(child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -757,6 +775,11 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
             padding: const EdgeInsets.symmetric(vertical: 6),
             children: [
               for (var gi = 0; gi < groups.length; gi++) ...[
+                // Le NUMÉRO du groupe se lit sur son premier item : `groups`
+                // est une liste de listes, son index n'est pas le groupe.
+                if (navSectionLabel(groups[gi].first.groupFor(sector), sector)
+                    case final title?)
+                  _NavSectionLabel(text: title),
                 for (final item in groups[gi]) buildNavItem(item),
                 if (gi < groups.length - 1)
                   Padding(
@@ -772,6 +795,11 @@ class _MobileDrawerState extends ConsumerState<_MobileDrawer> {
           for (final item in footerItems) buildNavItem(item),
           if (widget.perms.isOwner)
             const _SubscriptionTile(asListTile: true),
+          // UN FILET AVANT LA DÉCONNEXION. Elle s'alignait avec les entrées de
+          // navigation, alors qu'elle ne navigue pas : elle sort. Une action
+          // qui met fin à la session n'a pas à se viser du même geste que
+          // celle qui ouvre un écran.
+          Divider(height: 1, color: navDivider),
           ListTile(
             leading: Icon(Icons.logout_rounded,
                 color: theme.colorScheme.error, size: 20),
@@ -1337,8 +1365,8 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
     final resto   = isRestaurantShop(widget.shopId);
     final collapsed = navCollapsedFor(ref.watch(navCollapsedProvider),
         isRestaurant: resto);
-    final items   = shellAllItems(widget.perms,
-        sector: shopSector(widget.shopId));
+    final sector  = shopSector(widget.shopId);
+    final items   = shellAllItems(widget.perms, sector: sector);
     final loc     = GoRouterState.of(context).matchedLocation;
     // Fond adaptatif : clair = surface blanc cassé ; sombre = teinte profonde
     // dérivée du primary de la palette active. Dividers teintés primary en
@@ -1359,7 +1387,7 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
         ? palette.primaryLight.withValues(alpha: 0.15)
         : theme.colorScheme.onSurface.withValues(alpha: 0.08);
     // Items en groupes (séparés par dividers) + items de footer (Paramètres).
-    final groups      = navGroups(items);
+    final groups      = navGroups(items, sector: sector);
     final footerItems = navFooterItems(items);
 
     Widget buildNavItem(ShellNavItem item) {
@@ -1435,7 +1463,11 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
                 child: InkWell(
                   borderRadius: BorderRadius.circular(20),
                   onTap: () => context.go(RouteNames.shopSelector),
-                  child: ShopLogoAvatar(logoUrl: shop?.logoUrl, size: 34),
+                  child: ShopLogoAvatar(
+                      logoUrl: shop?.logoUrl,
+                      // Cf. le tiroir mobile : restaurant seulement.
+                      shopName: resto ? shop?.name : null,
+                      size: 34),
                 ),
               ),
               const SizedBox(height: 8),
@@ -1449,7 +1481,10 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Row(children: [
-                  ShopLogoAvatar(logoUrl: shop?.logoUrl, size: 36),
+                  ShopLogoAvatar(
+                      logoUrl: shop?.logoUrl,
+                      shopName: resto ? shop?.name : null,
+                      size: 36),
                   const SizedBox(width: 10),
                   Expanded(child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1482,6 +1517,12 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
           padding: const EdgeInsets.symmetric(vertical: 6),
           children: [
             for (var gi = 0; gi < groups.length; gi++) ...[
+              // MASQUÉ EN RÉTRACTÉ : dans 68 dp, « GESTION » se coupe après
+              // deux lettres. Le filet, lui, reste — il sépare toujours.
+              if (!collapsed)
+                if (navSectionLabel(groups[gi].first.groupFor(sector), sector)
+                    case final title?)
+                  _NavSectionLabel(text: title, indent: 12),
               for (final item in groups[gi]) buildNavItem(item),
               if (gi < groups.length - 1)
                 Padding(
@@ -1499,6 +1540,8 @@ class _DesktopSidebarState extends ConsumerState<_DesktopSidebar> {
         // de texte, illisible dans 68 dp. Elle revient au déploiement, et
         // reste atteignable par Paramètres.
         if (widget.perms.isOwner && !collapsed) const _SubscriptionTile(),
+        // Cf. le tiroir mobile : la déconnexion sort, elle ne navigue pas.
+        Divider(height: 1, color: navDivider),
         _LogoutTile(collapsed: collapsed),
           ]),
         ),
@@ -2418,6 +2461,53 @@ class _NotificationsSheet extends StatelessWidget {
   }
 }
 
+/// Intitulé d'une famille du tiroir — « SERVICE », « GESTION », « ÉQUIPE ».
+///
+/// Onze entrées à plat se parcourent ; quatre blocs nommés se visent. Le filet
+/// existait déjà entre les groupes, il ne disait simplement pas ce qu'il
+/// séparait.
+///
+/// `micro` (10) et NON 9 : l'échelle canonique s'arrête à 10, et le palier 9 a
+/// été retiré délibérément — `AppTextStyles.micro9` subsiste `@Deprecated`,
+/// aliasé sur `micro`. Réintroduire un palier supprimé pour un intitulé de
+/// section aurait défait cette décision en douce.
+///
+/// La couleur vient de `micro` elle-même (`textHint`) : c'est le ton atténué
+/// demandé, et il suit déjà les huit palettes en clair comme en sombre.
+class _NavSectionLabel extends StatelessWidget {
+  final String text;
+  final double indent;
+
+  const _NavSectionLabel({required this.text, this.indent = 16});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        // Plus d'air au-dessus qu'en dessous : l'intitulé appartient à ce qui
+        // le suit, pas au filet qui le précède.
+        padding: EdgeInsets.fromLTRB(indent, 10, indent, 4),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: AppTextStyles.micro.copyWith(
+            letterSpacing: 1.1,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      );
+}
+
+/// « Essai · N jours restants », écrit comme on le lit.
+///
+/// Le dernier jour ne se compte pas : « 0 jour restant » se lit comme une
+/// panne, alors que l'essai fonctionne encore jusqu'à ce soir. Et le singulier
+/// est tenu — un décompte qui écrit « 1 jours » se fait relire deux fois.
+String _trialLabel(int days) {
+  if (days <= 0) return 'Essai · dernier jour';
+  if (days == 1) return 'Essai · 1 jour restant';
+  return 'Essai · $days jours restants';
+}
+
 /// Tuile « Mon abonnement » (footer sidebar desktop / drawer Plus mobile).
 ///
 /// Affiche un badge couleur dynamique selon l'état du plan owner :
@@ -2458,6 +2548,29 @@ class _SubscriptionTile extends ConsumerWidget {
       badgeText  = plan.planLabel;
     }
 
+    // ── L'ESSAI PORTE SON ÉCHÉANCE ──────────────────────────────────────
+    //
+    // La pastille disait « Essai » et rien d'autre : le propriétaire savait
+    // qu'il était en essai, jamais combien de temps il lui restait.
+    //
+    // ⚠ `daysLeft` vaut ZÉRO quand `expiresAt` est nul. Un essai sans date en
+    // base afficherait donc « 0 jour restant » — un mensonge alarmant sur un
+    // compte qui fonctionne. On n'annonce l'échéance QUE si la date existe ;
+    // sinon la pastille muette reste, et le sujet se traite ailleurs.
+    //
+    // La donnée est FIABLE HORS LIGNE : `expiresAt` vient de `get_user_plan`,
+    // est sérialisée dans Hive par `AppDatabase._cachePlanToHive` et relue par
+    // `subscription_provider` sans réseau. `daysLeft` se recalcule contre
+    // `DateTime.now()` à chaque lecture — il décroît donc correctement même
+    // après plusieurs jours de coupure, au lieu de rester figé.
+    final trialLine = (plan.isTrial && plan.expiresAt != null)
+        ? _trialLabel(plan.daysLeft)
+        : null;
+    // Ambre sous la semaine, bleu au-dessus : une alerte affichée dès le
+    // premier jour d'un essai de quatorze n'alerte plus personne au
+    // treizième. Même seuil que `expiresSoon`, qui gouverne déjà la pastille.
+    final trialColor = plan.daysLeft <= 7 ? sem.warningText : sem.info;
+
     void open() => context.push(RouteNames.subscription);
 
     if (asListTile) {
@@ -2465,7 +2578,16 @@ class _SubscriptionTile extends ConsumerWidget {
         leading: Icon(Icons.workspace_premium_rounded,
             color: theme.colorScheme.onSurface.withValues(alpha:0.75)),
         title: Text(l.drawerSubscription),
-        trailing: Container(
+        // La ligne REMPLACE la pastille, elle ne s'y ajoute pas : « Essai » en
+        // pastille et « Essai · 9 jours restants » dessous diraient deux fois
+        // la même chose, et la pastille dirait la moitié.
+        subtitle: trialLine == null
+            ? null
+            : Text(trialLine,
+                style: AppTextStyles.micro.copyWith(color: trialColor)),
+        trailing: trialLine != null
+            ? null
+            : Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
             color: badgeColor.withValues(alpha:0.15),
@@ -2493,23 +2615,39 @@ class _SubscriptionTile extends ConsumerWidget {
               size: 16,
               color: theme.colorScheme.onSurface.withValues(alpha:0.75)),
           const SizedBox(width: 8),
-          Expanded(child: Text(l.drawerSubscription,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.bodySm.copyWith(
-                  fontWeight: FontWeight.w500,
-                  color: theme.colorScheme.onSurface.withValues(alpha:0.85)))),
-          const SizedBox(width: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: badgeColor.withValues(alpha:0.15),
-              borderRadius: BorderRadius.circular(10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(l.drawerSubscription,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.bodySm.copyWith(
+                        fontWeight: FontWeight.w500,
+                        color: theme.colorScheme.onSurface
+                            .withValues(alpha: 0.85))),
+                if (trialLine != null)
+                  Text(trialLine,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.micro.copyWith(color: trialColor)),
+              ],
             ),
-            child: Text(badgeText,
-                style: AppTextStyles.micro.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: badgeColor)),
           ),
+          const SizedBox(width: 6),
+          if (trialLine == null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: badgeColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(badgeText,
+                  style: AppTextStyles.micro.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: badgeColor)),
+            ),
         ]),
       ),
     );

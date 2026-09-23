@@ -73,6 +73,20 @@ class ShellNavItem {
   /// par un divider. 1 = principal · 2 = gestion · 3 = secondaire. Ignoré
   /// quand [footer] est vrai.
   final int                            group;
+
+  /// Groupe d'affichage PROPRE À CERTAINS SECTEURS, quand [group] ne peut pas
+  /// convenir aux deux.
+  ///
+  /// Il existe parce que trois entrées sont partagées — Tableau de bord,
+  /// Paramètres, Hub central — et qu'elles n'ont pas la même place selon le
+  /// métier. Le Tableau de bord ouvre la journée d'une boutique, il est donc
+  /// en tête ; au restaurant il appartient à la GESTION, derrière les trois
+  /// écrans du service.
+  ///
+  /// STRICTEMENT ADDITIF, et c'est tout l'intérêt : un item qui ne porte pas
+  /// ce champ garde [group], donc l'e-commerce ne bouge pas par construction.
+  /// C'est cette propriété que verrouille `shell_nav_group_test`.
+  final Map<String, int>?              sectorGroups;
   /// Si vrai, l'item est rendu dans le FOOTER de la sidebar/drawer
   /// (ex: Paramètres), au-dessus de « Abonnement » + « Déconnexion ».
   final bool                           footer;
@@ -92,8 +106,12 @@ class ShellNavItem {
     this.desktopHidden = false,
     this.mobileHidden  = false,
     this.group         = 1,
+    this.sectorGroups,
     this.footer        = false,
   });
+
+  /// Le groupe d'affichage de cet item DANS CE SECTEUR.
+  int groupFor(String sector) => sectorGroups?[sector] ?? group;
 
   bool get hasChildren => children != null && children!.isNotEmpty;
 
@@ -193,6 +211,39 @@ int _restaurantFinanceBadge(String shopId) {
   return FixedChargeService.dueSoon(shopId).length;
 }
 
+/// Groupe d'affichage propre au restaurant, pour une entrée partagée.
+///
+/// Écrit une fois par secteur de restauration plutôt qu'une clé littérale :
+/// `kRestaurantSectors` en compte trois (`restaurant`, `fastfood`, `mixed`),
+/// et n'en couvrir qu'un rangerait un fast-food comme une boutique.
+Map<String, int> _restoGroup(int g) =>
+    {for (final s in kRestaurantSectors) s: g};
+
+/// Les familles du tiroir, EN RESTAURATION SEULEMENT.
+///
+/// Onze entrées à plat ne se lisent pas : on les parcourt, on ne les vise pas.
+/// Trois familles nommées les rendent visables — et l'ordre à l'intérieur
+/// n'est pas alphabétique, c'est celui de la journée.
+///
+/// Le groupe 4 est ABSENT de cette table, volontairement : il porte le Hub
+/// central, qui n'appartient à aucune des trois familles et n'a pas besoin
+/// d'un intitulé pour une entrée unique.
+const Map<int, String> _kRestaurantSectionLabels = {
+  1: 'SERVICE',
+  2: 'GESTION',
+  3: 'ÉQUIPE',
+};
+
+/// Intitulé de la famille [group] pour ce secteur, ou `null` s'il n'y en a pas.
+///
+/// `null` pour TOUT l'e-commerce : les familles ci-dessus décrivent un
+/// restaurant, et coller « SERVICE » au-dessus de la Caisse d'une boutique
+/// serait un contresens. Le rendu sans intitulé est exactement celui d'avant.
+String? navSectionLabel(int group, String sector) =>
+    kRestaurantSectors.contains(sector)
+        ? _kRestaurantSectionLabels[group]
+        : null;
+
 /// Tous les items de navigation, dans l'ordre d'affichage.
 ///
 /// Les 4 premiers (`primary: true`) alimentent le bottom nav mobile en plus
@@ -210,6 +261,37 @@ final List<ShellNavItem> kShellNavItems = [
     // pour tout membre actif. Un check de permission stricte casserait
     // l'auto-redirection après login pour les rôles minimaux.
     visibleIf:    (p) => true,
+    primary:      true,
+    // EN GESTION AU RESTAURANT, en tête ailleurs. Un tableau de bord ouvre la
+    // journée d'un commerçant ; un serveur, lui, ne le regarde jamais — ses
+    // trois écrans sont la salle, la carte et les commandes.
+    sectorGroups: _restoGroup(2),
+  ),
+  // ── Module restaurant (PR-1) ───────────────────────────────────────────
+  // Visible UNIQUEMENT si la boutique est un établissement de restauration
+  // (`sectorIn`). En mode boutique, cet item n'existe pas — zéro impact.
+  // L'onglet Caisse reste accessible en parallèle pour la vente au comptoir.
+  //
+  // Icône : `table_restaurant` — une table vue du dessus, qui dit « salle »
+  // là où `restaurant` (des couverts) disait « repas ». Ses DEUX variantes sont
+  // déjà utilisées ailleurs dans le repo, donc éprouvées : c'est la précaution
+  // qui compte ici, un glyphe Material absent de la police embarquée
+  // s'affichant en carré vide (cf. `contacts_*`, `send_outlined` plus bas).
+  ShellNavItem(
+    icon:         Icons.table_restaurant_outlined,
+    iconSelected: Icons.table_restaurant_rounded,
+    label:        (_) => 'Plan de salle',
+    labelMobile:  (_) => 'Salle',
+    // LE lieu de création des tables — et le seul. La prise de commande est
+    // passée au Menu (panier → type de service → cuisine), l'écran de service
+    // faisait donc doublon. Ce qui reste ici est le cycle de vie de la TABLE :
+    // créer, supprimer, ouvrir l'addition, ajuster les couverts, libérer.
+    // (Ni renommage ni réservation : aucun des deux n'a d'entrée dans l'app.)
+    route:        (id) => '/shop/$id/restaurant/tables',
+    // Les serveurs (rôle 'user') doivent pouvoir ouvrir le plan de salle :
+    // on s'aligne sur la permission caisse plutôt que sur isShopAdmin.
+    visibleIf:    (p) => p.canAccessCaisse,
+    sectorIn:     kRestaurantSectors,
     primary:      true,
   ),
   // ── Menu restaurant (carte des plats) ──────────────────────────────────
@@ -244,94 +326,6 @@ final List<ShellNavItem> kShellNavItems = [
     sectorIn:     kRestaurantSectors,
     primary:      true,
   ),
-  // ── Stock restaurant — ingrédients et fournitures ───────────────────────
-  //
-  // ENTRE MENU ET FINANCES, et l'ordre est le parcours d'usage : on compose sa
-  // carte, on gère ce qu'elle consomme, puis on regarde ce que ça coûte.
-  //
-  // Gardé par `canManageStock` et non par `isShopAdmin` : compter la réserve
-  // et lire les marges ne demandent pas les mêmes droits. C'est tout l'objet
-  // de la séparation du 21/09/2026.
-  //
-  // La pastille des alertes de stock l'a suivi : elle comptait des ingrédients
-  // et des fournitures sous une entrée « Finances ».
-  ShellNavItem(
-    icon:         Icons.inventory_2_outlined,
-    iconSelected: Icons.inventory_2_rounded,
-    label:        (_) => 'Stock',
-    route:        (id) => '/shop/$id/restaurant/stock',
-    visibleIf:    (p) => p.canManageStock,
-    sectorIn:     kRestaurantSectors,
-    badge:        _restaurantStockBadge,
-  ),
-  // ── Finances restaurant — Dépenses · Charges · Pertes · Activités ───────
-  // Réservé admin/owner. Pastille = charges à échéance.
-  ShellNavItem(
-    icon:         Icons.account_balance_wallet_outlined,
-    iconSelected: Icons.account_balance_wallet_rounded,
-    label:        (_) => 'Finances',
-    route:        (id) => '/shop/$id/restaurant/finances',
-    visibleIf:    (p) => p.isShopAdmin,
-    sectorIn:     kRestaurantSectors,
-    badge:        _restaurantFinanceBadge,
-    primary:      true,
-  ),
-  ShellNavItem(
-    icon:         Icons.shopping_cart_outlined,
-    iconSelected: Icons.shopping_cart_rounded,
-    label:        (l) => l.navCaisse,
-    route:        (id) => '/shop/$id/caisse',
-    visibleIf:    (p) => p.canAccessCaisse,
-    // Restaurant : remplacé par « Commandes » (item dédié) — la vente au
-    // comptoir passe par le plan de salle ou l'écran de commande.
-    sectorNotIn:  kRestaurantSectors,
-    primary:      true,
-    badge:        _webOrdersBadge,
-    children: [
-      ShellNavItem(
-        icon:         Icons.point_of_sale_outlined,
-        iconSelected: Icons.point_of_sale_rounded,
-        label:        (l) => l.navCaisseVente,
-        route:        (id) => '/shop/$id/caisse',
-        visibleIf:    (p) => p.canAccessCaisse,
-      ),
-      ShellNavItem(
-        icon:         Icons.receipt_long_outlined,
-        iconSelected: Icons.receipt_long_rounded,
-        label:        (l) => l.navCaisseCommandes,
-        route:        (id) => '/shop/$id/caisse/orders',
-        visibleIf:    (p) => p.canAccessCaisse,
-        badge:        _webOrdersBadge,
-      ),
-    ],
-  ),
-  // ── Module restaurant (PR-1) ───────────────────────────────────────────
-  // Visible UNIQUEMENT si la boutique est un établissement de restauration
-  // (`sectorIn`). En mode boutique, cet item n'existe pas — zéro impact.
-  // L'onglet Caisse reste accessible en parallèle pour la vente au comptoir.
-  //
-  // Icône : `table_restaurant` — une table vue du dessus, qui dit « salle »
-  // là où `restaurant` (des couverts) disait « repas ». Ses DEUX variantes sont
-  // déjà utilisées ailleurs dans le repo, donc éprouvées : c'est la précaution
-  // qui compte ici, un glyphe Material absent de la police embarquée
-  // s'affichant en carré vide (cf. `contacts_*`, `send_outlined` plus bas).
-  ShellNavItem(
-    icon:         Icons.table_restaurant_outlined,
-    iconSelected: Icons.table_restaurant_rounded,
-    label:        (_) => 'Plan de salle',
-    labelMobile:  (_) => 'Salle',
-    // LE lieu de création des tables — et le seul. La prise de commande est
-    // passée au Menu (panier → type de service → cuisine), l'écran de service
-    // faisait donc doublon. Ce qui reste ici est le cycle de vie de la TABLE :
-    // créer, supprimer, ouvrir l'addition, ajuster les couverts, libérer.
-    // (Ni renommage ni réservation : aucun des deux n'a d'entrée dans l'app.)
-    route:        (id) => '/shop/$id/restaurant/tables',
-    // Les serveurs (rôle 'user') doivent pouvoir ouvrir le plan de salle :
-    // on s'aligne sur la permission caisse plutôt que sur isShopAdmin.
-    visibleIf:    (p) => p.canAccessCaisse,
-    sectorIn:     kRestaurantSectors,
-    primary:      true,
-  ),
   // « Commandes » — équivalent restaurant de l'item Caisse, qui pointe
   // directement sur la liste des commandes plutôt que sur l'écran de vente.
   //
@@ -361,6 +355,69 @@ final List<ShellNavItem> kShellNavItems = [
     sectorIn:     kRestaurantSectors,
     badge:        _restaurantOrdersBadge,
     primary:      true,
+  ),
+  // ── Stock restaurant — ingrédients et fournitures ───────────────────────
+  //
+  // ENTRE MENU ET FINANCES, et l'ordre est le parcours d'usage : on compose sa
+  // carte, on gère ce qu'elle consomme, puis on regarde ce que ça coûte.
+  //
+  // Gardé par `canManageStock` et non par `isShopAdmin` : compter la réserve
+  // et lire les marges ne demandent pas les mêmes droits. C'est tout l'objet
+  // de la séparation du 21/09/2026.
+  //
+  // La pastille des alertes de stock l'a suivi : elle comptait des ingrédients
+  // et des fournitures sous une entrée « Finances ».
+  ShellNavItem(
+    icon:         Icons.inventory_2_outlined,
+    iconSelected: Icons.inventory_2_rounded,
+    label:        (_) => 'Stock',
+    route:        (id) => '/shop/$id/restaurant/stock',
+    visibleIf:    (p) => p.canManageStock,
+    sectorIn:     kRestaurantSectors,
+    badge:        _restaurantStockBadge,
+    group:        2,
+  ),
+  // ── Finances restaurant — Dépenses · Charges · Pertes · Activités ───────
+  // Réservé admin/owner. Pastille = charges à échéance.
+  ShellNavItem(
+    icon:         Icons.account_balance_wallet_outlined,
+    iconSelected: Icons.account_balance_wallet_rounded,
+    label:        (_) => 'Finances',
+    route:        (id) => '/shop/$id/restaurant/finances',
+    visibleIf:    (p) => p.isShopAdmin,
+    sectorIn:     kRestaurantSectors,
+    badge:        _restaurantFinanceBadge,
+    primary:      true,
+    group:        2,
+  ),
+  ShellNavItem(
+    icon:         Icons.shopping_cart_outlined,
+    iconSelected: Icons.shopping_cart_rounded,
+    label:        (l) => l.navCaisse,
+    route:        (id) => '/shop/$id/caisse',
+    visibleIf:    (p) => p.canAccessCaisse,
+    // Restaurant : remplacé par « Commandes » (item dédié) — la vente au
+    // comptoir passe par le plan de salle ou l'écran de commande.
+    sectorNotIn:  kRestaurantSectors,
+    primary:      true,
+    badge:        _webOrdersBadge,
+    children: [
+      ShellNavItem(
+        icon:         Icons.point_of_sale_outlined,
+        iconSelected: Icons.point_of_sale_rounded,
+        label:        (l) => l.navCaisseVente,
+        route:        (id) => '/shop/$id/caisse',
+        visibleIf:    (p) => p.canAccessCaisse,
+      ),
+      ShellNavItem(
+        icon:         Icons.receipt_long_outlined,
+        iconSelected: Icons.receipt_long_rounded,
+        label:        (l) => l.navCaisseCommandes,
+        route:        (id) => '/shop/$id/caisse/orders',
+        visibleIf:    (p) => p.canAccessCaisse,
+        badge:        _webOrdersBadge,
+      ),
+    ],
   ),
   ShellNavItem(
     icon:         Icons.inventory_2_outlined,
@@ -539,14 +596,30 @@ final List<ShellNavItem> kShellNavItems = [
     sectorNotIn:  kRestaurantSectors,
     group:        3,
   ),
-  // Messagerie — visible pour tout membre (vendeurs inclus) afin qu'ils
-  // puissent ouvrir un ticket. La page filtre côté UI selon hiérarchie.
+  // Messagerie — visible pour tout membre d'une BOUTIQUE (vendeurs inclus)
+  // afin qu'ils puissent ouvrir un ticket. La page filtre côté UI selon
+  // hiérarchie.
+  //
+  // ⚠ MASQUÉE EN RESTAURATION, ET LES NOTIFICATIONS CONTINUENT.
+  //
+  // `NotifKind.ticketNew · ticketEscalated · ticketReply` sont émises par
+  // `app_database.dart` depuis le temps réel, SANS condition de secteur. Rien
+  // n'est coupé ici — mais un gérant de restaurant peut donc recevoir la
+  // notification d'une réponse et n'avoir plus aucune entrée de menu pour y
+  // retourner : la notification devient son seul chemin.
+  //
+  // C'EST ASSUMÉ. Ne « répare » pas la notification en croyant corriger un
+  // lien mort : le lien n'est pas mort, c'est l'entrée de menu qui a été
+  // retirée d'un secteur où personne n'ouvre de ticket. Si le besoin
+  // réapparaît, c'est ce `sectorNotIn` qu'il faut lever, pas la notification
+  // qu'il faut taire.
   ShellNavItem(
     icon:         Icons.chat_bubble_outline_rounded,
     iconSelected: Icons.chat_bubble_rounded,
     label:        (_) => 'Messagerie',
     route:        (id) => '/shop/$id/tickets',
     visibleIf:    (p) => p.isMember,
+    sectorNotIn:  kRestaurantSectors,
     group:        3,
   ),
   // ── Deux notions distinctes, deux entrées distinctes ────────────────────
@@ -607,6 +680,11 @@ final List<ShellNavItem> kShellNavItems = [
     route:        (_) => '/hub',
     visibleIf:    (p) => p.isOwner && p.isMultiStore,
     group:        3,
+    // Hors des trois familles : le Hub ne sert ni le service, ni la gestion
+    // d'UNE salle, ni l'équipe — il en change. Il prend donc son propre bloc,
+    // sans intitulé, plutôt que de s'ajouter sous « ÉQUIPE » où il n'aurait
+    // rien à faire.
+    sectorGroups: _restoGroup(4),
   ),
 ];
 
@@ -658,13 +736,22 @@ List<ShellNavItem> shellAllItems(AppPermissions perms, {String sector = ''}) =>
         .toList();
 
 /// Partitionne une liste d'items nav (déjà filtrée par perms/hidden) en
-/// GROUPES non vides triés par `group` — pour insérer un divider entre
-/// chaque groupe dans la sidebar/drawer. Les items `footer` sont exclus.
-List<List<ShellNavItem>> navGroups(List<ShellNavItem> items) {
+/// GROUPES non vides triés par numéro — pour insérer un divider entre chaque
+/// groupe dans la sidebar/drawer. Les items `footer` sont exclus.
+///
+/// [sector] résout les groupes propres à un métier (cf. `groupFor`). Le défaut
+/// `''` rend le comportement d'origine : aucun item ne déclare de groupe pour
+/// le secteur vide, donc tous retombent sur `group`.
+///
+/// ORDRE À L'INTÉRIEUR D'UN GROUPE = ordre de déclaration dans
+/// [kShellNavItems]. C'est pourquoi la liste commence par Plan de salle, Menu
+/// et Commandes : le tri ne porte que sur le NUMÉRO de groupe.
+List<List<ShellNavItem>> navGroups(List<ShellNavItem> items,
+    {String sector = ''}) {
   final byGroup = <int, List<ShellNavItem>>{};
   for (final i in items) {
     if (i.footer) continue;
-    (byGroup[i.group] ??= <ShellNavItem>[]).add(i);
+    (byGroup[i.groupFor(sector)] ??= <ShellNavItem>[]).add(i);
   }
   final keys = byGroup.keys.toList()..sort();
   return [for (final k in keys) byGroup[k]!];

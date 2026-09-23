@@ -67,8 +67,14 @@ void main() {
 
     test('le menu restaurant suit la maquette de référence', () {
       final routes = labelsFor('restaurant');
-      // Plan de salle · Menu · Commandes · Analyses · Équipe · Messagerie
+      // Plan de salle · Menu · Commandes · Analyses · Équipe
       // (+ Paramètres et Abonnement, rendus dans le pied de la sidebar).
+      //
+      // « MESSAGERIE » A ÉTÉ RETIRÉE du menu restaurant : personne n'ouvre de
+      // ticket depuis une salle, et l'entrée encombrait un tiroir que le
+      // service parcourt entre deux tables. Elle reste en e-commerce. Le
+      // détail — et le fait que les notifications de ticket continuent —
+      // est dans `shell_nav_group_test`.
       //
       // « Service » a été RETIRÉ du menu au profit de « Plan de salle » : la
       // prise de commande est passée au Menu (panier → type de service →
@@ -79,7 +85,7 @@ void main() {
       expect(routes, contains('/shop/shop_1/inventaire'));   // « Menu »
       expect(routes, contains('/shop/shop_1/caisse/orders')); // « Commandes »
       expect(routes, contains('/shop/shop_1/employees'));    // « Équipe »
-      expect(routes, contains('/shop/shop_1/tickets'));      // « Messagerie »
+      expect(routes, isNot(contains('/shop/shop_1/tickets')));
       expect(routes, contains('/shop/shop_1/parametres'));
     });
 
