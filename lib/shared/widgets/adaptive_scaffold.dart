@@ -408,6 +408,11 @@ class _MobileShell extends StatelessWidget {
               )
             : null,
         title: Text(title, style: titleStyle),
+        // À GAUCHE EN RESTAURATION. Le tableau de bord, le Stock, Commandes et
+        // le Menu portent leur en-tête dans le corps, à gauche : un titre
+        // centré en barre du haut en était le dernier vestige, et l'isolait du
+        // reste. `null` ailleurs : le thème décide, l'e-commerce ne bouge pas.
+        centerTitle: isResto ? false : null,
         actions: [
           const OfflineChip(),
           _CartBadgeBtn(shopId: shopId),
