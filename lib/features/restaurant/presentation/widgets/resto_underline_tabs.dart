@@ -44,7 +44,7 @@ class RestoUnderlineTab {
 /// sous le seuil du petit texte. Tout le reste de l'atténué est en
 /// `textSecondary`.
 ///
-/// Raisonne PAR INDEX, comme `RestoPillTabs` : chaque écran garde son propre
+/// Raisonne PAR INDEX : chaque écran garde son propre
 /// vocabulaire (rang de service, catégorie) et le traduit à l'appel.
 class RestoUnderlineTabs extends StatelessWidget {
   final List<RestoUnderlineTab> items;

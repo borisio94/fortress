@@ -883,7 +883,7 @@ class _CategoryBar extends StatelessWidget {
   Widget build(BuildContext context) {
     // SOULIGNÉS, plus en pastilles : même grammaire que les onglets de
     // Commandes, et le même widget (`RestoUnderlineTabs`) — deux copies
-    // auraient divergé. `RestoPillTabs` ne sert plus qu'au Stock.
+    // auraient divergé. Le Stock l'emploie aussi.
     //
     // Cette classe garde ce qui lui est propre : le vocabulaire des catégories
     // (`String?`, où `null` vaut « Tout »). Le widget partagé, lui, raisonne

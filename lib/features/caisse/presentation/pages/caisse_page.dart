@@ -1784,7 +1784,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
       // `TabBar` en e-commerce. En restauration, SOULIGNÉS, plus en
       // pastilles : la hiérarchie de l'écran passe par la typographie et
       // l'espace, pas par des contours. Même widget que le Menu
-      // (`RestoUnderlineTabs`) ; `RestoPillTabs` ne sert plus qu'au Stock.
+      // et le Stock (`RestoUnderlineTabs`).
       if (_isResto)
         RestoUnderlineTabs(
           items: [
