@@ -15,13 +15,31 @@ import '../../core/theme/app_text_styles.dart';
 /// `shopId` sert à construire les routes shell (`/shop/:shopId/...`).
 class AppOverflowMenu extends StatelessWidget {
   final String shopId;
-  const AppOverflowMenu({super.key, required this.shopId});
+
+  /// Déclencheur à la place du ⋮. `null` (défaut) : le ⋮, comme partout.
+  ///
+  /// Le restaurant en ordinateur y passe son bloc identité (avatar, nom,
+  /// chevron) : le nom devient le déclencheur, un élément au lieu de deux.
+  final Widget? trigger;
+
+  /// Ligne d'EN-TÊTE du menu, non cliquable, suivie d'un filet. `null`
+  /// (défaut) : pas d'en-tête. Le restaurant y met « Admin · <boutique> ».
+  final Widget? header;
+
+  const AppOverflowMenu({
+    super.key,
+    required this.shopId,
+    this.trigger,
+    this.header,
+  });
 
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
-      tooltip: 'Plus',
-      icon: const Icon(Icons.more_vert_rounded, size: 24),
+      tooltip: trigger == null ? 'Plus' : 'Compte',
+      icon: trigger == null
+          ? const Icon(Icons.more_vert_rounded, size: 24)
+          : null,
       position: PopupMenuPosition.under,
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12)),
@@ -38,23 +56,28 @@ class AppOverflowMenu extends StatelessWidget {
             break;
         }
       },
-      itemBuilder: (_) => const [
-        PopupMenuItem(
+      itemBuilder: (_) => [
+        if (header != null) ...[
+          PopupMenuItem<String>(enabled: false, child: header!),
+          const PopupMenuDivider(),
+        ],
+        const PopupMenuItem(
           value: 'compte',
           child: _MenuRow(
               icon: Icons.person_outline_rounded, label: 'Compte'),
         ),
-        PopupMenuItem(
+        const PopupMenuItem(
           value: 'aide',
           child: _MenuRow(
               icon: Icons.help_outline_rounded, label: 'Aide'),
         ),
-        PopupMenuItem(
+        const PopupMenuItem(
           value: 'apropos',
           child: _MenuRow(
               icon: Icons.info_outline_rounded, label: 'À propos'),
         ),
       ],
+      child: trigger,
     );
   }
 }

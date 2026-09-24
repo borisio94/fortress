@@ -344,17 +344,17 @@ class _MobileShell extends StatelessWidget {
     final cs            = theme.colorScheme;
     // EN RESTAURATION, LA BARRE NE SE REMPLIT PAS DE LA COULEUR DU THÈME.
     //
-    // Elle prend la teinte du chrome — la même que la barre du haut en desktop
-    // et que la barre latérale. Trois raisons :
-    //   * elle est translucide : le décor photographique traverse la bande du
-    //     haut au lieu d'être tranché net par un aplat opaque ;
-    //   * la couleur du thème (ambre, violet…) redevient une couleur d'ACCENT
+    // Elle prend la SURFACE, opaque — comme la barre du haut en desktop :
+    //   * la couleur du thème (ambre, violet…) reste une couleur d'ACCENT
     //     — badges, bouton actif, sélection — au lieu d'être un fond. Étalée
     //     sur toute la largeur, elle ne pouvait plus rien désigner ;
-    //   * mobile et desktop cessaient de se ressembler sur le même écran.
+    //   * OPAQUE et non plus translucide (24/09/2026) : le décor qui
+    //     transparaissait dessinait une bande claire en haut de l'écran, sans
+    //     rien dire ;
+    //   * mobile et desktop se ressemblent sur le même écran.
     final isResto       = isRestaurantShop(shopId);
     final appBarBg      = isResto
-        ? restoChromeFill(context)
+        ? cs.surface
         : (isSubPage ? cs.surface : cs.primary);
     final appBarFg      = (isResto || isSubPage) ? cs.onSurface : cs.onPrimary;
     final titleStyle    = isSubPage
@@ -388,9 +388,9 @@ class _MobileShell extends StatelessWidget {
         automaticallyImplyLeading: false,
         backgroundColor: appBarBg,
         foregroundColor: appBarFg,
-        // Sans ces trois-là, Material repeint la barre d'un aplat opaque dès
-        // que le contenu passe dessous — la translucidité du mode restaurant
-        // ne tiendrait que tant que la page n'est pas défilée.
+        // Sans ces trois-là, Material teinte la barre de la couleur du thème
+        // et lui ajoute une ombre dès que le contenu passe dessous : la
+        // surface du restaurant changerait de teinte au premier défilement.
         elevation: isResto ? 0 : null,
         scrolledUnderElevation: isResto ? 0 : null,
         surfaceTintColor: isResto ? Colors.transparent : null,
@@ -418,7 +418,7 @@ class _MobileShell extends StatelessWidget {
           _CartBadgeBtn(shopId: shopId),
           // Cloche notifications réservée admin + owner (les employés
           // n'ont pas accès aux notifs in-app de la boutique).
-          if (perms.isMember) const _NotifBtnWithAlertHalo(),
+          if (perms.isMember) _NotifBtnWithAlertHalo(dot: isResto),
           if (extraActions != null) ...extraActions!,
           // Menu « 3 points » global (Compte / Aide / À propos) — extrême
           // droite, présent sur toutes les pages shell.
@@ -1925,17 +1925,17 @@ class _DesktopTopbar extends StatelessWidget {
     final activeLabel = isSubPage
         ? l.hubBrand
         : kShellNavItems[selectedIndex].label(l);
+    final resto = isRestaurantShop(shopId);
     return Container(
       decoration: BoxDecoration(
-        // Translucide en restauration : le décor traverse aussi la bande du
-        // haut, comme sur la maquette.
-        color: isRestaurantShop(shopId)
-            ? restoChromeFill(context)
-            : theme.colorScheme.surface,
+        // OPAQUE, restauration comprise (24/09/2026). Translucide, le décor
+        // qui transparaissait dessinait une bande claire sans rien dire. Le
+        // bloc reste DÉTACHÉ du contenu : c'est le vide qui les sépare.
+        color: theme.colorScheme.surface,
         // Le liseré du bas sépare la barre du contenu quand les deux se
         // touchent. En restauration ils sont deux blocs détachés : le liseré
         // y couperait le bord arrondi d'un trait droit.
-        border: isRestaurantShop(shopId)
+        border: resto
             ? null
             : Border(
                 bottom: BorderSide(
@@ -1956,21 +1956,16 @@ class _DesktopTopbar extends StatelessWidget {
           )
         else
           const SizedBox(width: 12),
-        // ── Variante RESTAURANT sur page racine ────────────────────────
-        // Salutation seule. Limitée aux pages racine : sur une sous-page, le
-        // fil d'ariane et le retour priment sur l'accueil. L'e-commerce garde
-        // le fil d'ariane partout.
+        // ── Variante RESTAURANT sur page racine : RIEN à gauche ─────────
+        // La salutation qui vivait ici est partie (24/09/2026, `RestoGreeting`
+        // supprimé) : le tableau de bord porte son en-tête dans le corps, et
+        // les autres écrans leur titre à gauche. Les SOUS-PAGES ne sont pas
+        // concernées : retour et fil d'ariane restent, comme en e-commerce.
         //
         // La RECHERCHE a été retirée de cette barre (2026-08-07) : elle ne
         // cherchait que des PLATS, et s'affichait pourtant sur Commandes, sur
         // le Plan de salle et sur Finances, où elle n'avait rien à trouver.
-        // Sur Commandes, elle surmontait même une seconde barre — celle des
-        // commandes — et c'est la mauvaise qu'on visait. Le Menu a la sienne,
-        // à l'endroit où elle sert.
-        if (isRestaurantShop(shopId) && !isSubPage) ...[
-          const Flexible(child: RestoGreeting()),
-          const SizedBox(width: 12),
-        ] else ...[
+        if (!(resto && !isSubPage)) ...[
           // Breadcrumb FORTRESS › <module>
           Text(l.hubBrand,
               style: AppTextStyles.bodySm.copyWith(
@@ -1995,20 +1990,23 @@ class _DesktopTopbar extends StatelessWidget {
         ShopRefreshButton(shopId: shopId),
         const OfflineChip(),
         _CartBadgeBtn(shopId: shopId),
-        // Cloche notifications réservée admin + owner.
-        if (perms.isShopAdmin) const _NotifBtnWithAlertHalo(),
+        // Cloche notifications réservée admin + owner. En restauration, un
+        // POINT ambre au lieu d'un compteur rouge (cf. `AppIconBadge.dot`).
+        if (perms.isShopAdmin) _NotifBtnWithAlertHalo(dot: resto),
         if (extraActions != null) ...extraActions!,
-        // Bloc identité (avatar + nom + rôle) — restaurant uniquement, comme
-        // dans la maquette. L'e-commerce s'appuie sur le menu 3 points.
-        if (isRestaurantShop(shopId)) ...[
+        // RESTAURANT : le NOM ouvre le menu du compte (chevron), et le rôle y
+        // descend avec la boutique — plus de ⋮ à côté. L'e-commerce garde son
+        // menu 3 points, identique.
+        if (resto) ...[
           const SizedBox(width: 6),
-          RestoUserChip(isAdmin: perms.isShopAdmin),
-          const SizedBox(width: 8),
+          RestoAccountMenu(shopId: shopId, isAdmin: perms.isShopAdmin),
+          const SizedBox(width: 4),
+        ] else ...[
+          // Menu « 3 points » global (Compte / Aide / À propos) — extrême
+          // droite, présent sur toutes les pages shell.
+          AppOverflowMenu(shopId: shopId),
+          const SizedBox(width: 4),
         ],
-        // Menu « 3 points » global (Compte / Aide / À propos) — extrême
-        // droite, présent sur toutes les pages shell.
-        AppOverflowMenu(shopId: shopId),
-        const SizedBox(width: 4),
       ]),
     );
   }
@@ -2151,7 +2149,12 @@ class _CartBadgeBtn extends ConsumerWidget {
 /// du `NotificationService`, halo = alerte commande critique. Signaux
 /// distincts qui peuvent coexister.
 class _NotifBtnWithAlertHalo extends ConsumerStatefulWidget {
-  const _NotifBtnWithAlertHalo();
+  /// Non lues en POINT ambre plutôt qu'en compteur rouge (restauration). Le
+  /// halo rouge des alertes CRITIQUES, lui, reste : une commande programmée en
+  /// retard est une urgence, pas « quelque chose à voir ».
+  final bool dot;
+
+  const _NotifBtnWithAlertHalo({this.dot = false});
   @override
   ConsumerState<_NotifBtnWithAlertHalo> createState() =>
       _NotifBtnWithAlertHaloState();
@@ -2179,7 +2182,7 @@ class _NotifBtnWithAlertHaloState
   @override
   Widget build(BuildContext context) {
     final hasCritical = ref.watch(scheduledAlertsHasCriticalProvider);
-    if (!hasCritical) return const _NotifBtn();
+    if (!hasCritical) return _NotifBtn(dot: widget.dot);
     final danger = Theme.of(context).semantic.danger;
     return Stack(
       alignment: Alignment.center,
@@ -2207,14 +2210,16 @@ class _NotifBtnWithAlertHaloState
             );
           },
         ),
-        const _NotifBtn(),
+        _NotifBtn(dot: widget.dot),
       ],
     );
   }
 }
 
 class _NotifBtn extends StatelessWidget {
-  const _NotifBtn();
+  final bool dot;
+
+  const _NotifBtn({this.dot = false});
 
   @override
   Widget build(BuildContext context) {
@@ -2228,6 +2233,7 @@ class _NotifBtn extends StatelessWidget {
         return AppIconBadge(
           icon:    Icons.notifications_outlined,
           count:   unread,
+          dot:     dot,
           tooltip: l.notificationsTitle,
           onTap: () {
             showModalBottomSheet<void>(

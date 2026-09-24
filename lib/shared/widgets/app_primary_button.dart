@@ -126,12 +126,26 @@ class AppIconBadge extends StatelessWidget {
   final VoidCallback onTap;
   final String? tooltip;
 
+  /// Rendu en POINT plutôt qu'en compteur — `false` par défaut : rien ne
+  /// change pour les appelants existants (e-commerce, panier).
+  ///
+  /// Un « 4 » sur fond rouge annonce une erreur ; un point ambre annonce
+  /// quelque chose à voir, et le compte exact se lit en ouvrant. Utilisé par
+  /// les notifications du restaurant.
+  ///
+  /// Point `warning` CERCLÉ de `warningText` : l'ambre seul ne fait que
+  /// 2,15:1 sur blanc, sous le seuil de 3:1 d'un signal non textuel, et c'est
+  /// ce point qui porte seul l'information. Le cercle (7:1) lui donne un bord
+  /// net sans inventer de couleur. En sombre, l'ambre passe seul (8,8:1).
+  final bool dot;
+
   const AppIconBadge({
     super.key,
     required this.icon,
     this.count = 0,
     required this.onTap,
     this.tooltip,
+    this.dot = false,
   });
 
   @override
@@ -150,7 +164,22 @@ class AppIconBadge extends StatelessWidget {
           clipBehavior: Clip.none,
           children: [
             Icon(icon, size: 22, color: iconColor),
-            if (count > 0)
+            if (count > 0 && dot)
+              Positioned(
+                top: -1, right: -1,
+                child: Container(
+                  width: 9,
+                  height: 9,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).semantic.warning,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                        color: Theme.of(context).semantic.warningText,
+                        width: 1.5),
+                  ),
+                ),
+              )
+            else if (count > 0)
               Positioned(
                 top: -4, right: -4,
                 child: Container(
