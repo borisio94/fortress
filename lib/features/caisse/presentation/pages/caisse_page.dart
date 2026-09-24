@@ -30,7 +30,6 @@ import '../../../restaurant/domain/order_actions.dart';
 import '../../../restaurant/domain/order_tile.dart';
 import '../../../restaurant/domain/service_tabs.dart';
 import '../../../restaurant/presentation/widgets/resto_empty_state.dart';
-import '../../../restaurant/presentation/widgets/resto_pill_tabs.dart';
 import '../../../restaurant/presentation/widgets/order_action_visuals.dart';
 import '../../../restaurant/presentation/widgets/service_tab_visuals.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
@@ -1651,6 +1650,51 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     );
   }
 
+  /// LES DEUX CHIFFRES DE LA SÉLECTION — restauration.
+  ///
+  /// Plus de cartes, plus d'icônes : deux blocs de texte séparés par un filet
+  /// vertical. Le chiffre porte la hiérarchie par sa TAILLE (`title`, 18 — le
+  /// 19 de la maquette n'existe pas dans l'échelle), le libellé l'accompagne en
+  /// atténué.
+  ///
+  /// « Reste à encaisser » garde sa teinte d'attente tant qu'il n'est pas nul :
+  /// c'est l'information, pas une décoration. À zéro, il redevient du texte.
+  Widget _restoSummary(double totalPaid, double totalDue) {
+    final cs = Theme.of(context).colorScheme;
+    final sem = Theme.of(context).semantic;
+
+    Widget block(String label, double value, Color color) => Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.caption
+                      .copyWith(color: AppColors.textSecondary)),
+              const SizedBox(height: 2),
+              _amountText(value,
+                  number: AppTextStyles.title
+                      .copyWith(fontWeight: FontWeight.w600, color: color)),
+            ],
+          ),
+        );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
+      child: IntrinsicHeight(
+        child: Row(children: [
+          block('Encaissé', totalPaid, cs.onSurface),
+          VerticalDivider(
+              width: 24, thickness: 1, color: sem.borderSubtle),
+          block('Reste à encaisser', totalDue,
+              totalDue > 0 ? sem.warningText : cs.onSurface),
+        ]),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Dette partenaire pour TOUTES les commandes visibles, en une seule
@@ -1735,22 +1779,16 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 
       // ── Filtres ─────────────────────────────────────────────
       //
-      // PASTILLES en restauration, `TabBar` ailleurs. Même grammaire que le
-      // Menu et le Stock : `RestoPillTabs` est déjà partagée par les deux, et
-      // en écrire une troisième les aurait fait diverger au premier ajustement.
+      // `TabBar` en e-commerce. En restauration, SOULIGNÉS, plus en
+      // pastilles : la hiérarchie de l'écran passe par la typographie et
+      // l'espace, pas par des contours. `RestoPillTabs` reste
+      // celle du Menu et du Stock — elle n'est pas touchée, ce widget-ci est
+      // propre à cet écran.
       if (_isResto)
-        RestoPillTabs(
-          items: [
-            for (final t in ServiceTab.ordered)
-              RestoPillTab(
-                label: t.label,
-                count: restoCounts[t] ?? 0,
-                color: t == ServiceTab.toutes ? null : t.color(context),
-              ),
-          ],
-          selected: ServiceTab.ordered.indexOf(_serviceTab),
-          onSelect: (i) =>
-              setState(() => _serviceTab = ServiceTab.ordered[i]),
+        _ServiceUnderlineTabs(
+          counts: restoCounts,
+          selected: _serviceTab,
+          onSelect: (t) => setState(() => _serviceTab = t),
         )
       else
       Container(
@@ -1907,7 +1945,12 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
       // ── Synthèse de la sélection (encaissé + reste à encaisser) ──
       if (orders.isNotEmpty) ...[
         const SizedBox(height: 8),
-        _summaryBar(totalPaid, totalDue),
+        // `_summaryBar` est PARTAGÉE avec l'e-commerce : on aiguille ici, au
+        // site d'appel, plutôt que de la plier aux deux secteurs.
+        if (_isResto)
+          _restoSummary(totalPaid, totalDue)
+        else
+          _summaryBar(totalPaid, totalDue),
       ],
 
       // ── Liste commandes ──────────────────────────────────────
@@ -1978,7 +2021,9 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               ? SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
                   child: LayoutBuilder(builder: (ctx, box) {
-                    const gap = 10.0;
+                    // 14 et non 10 : sans contour, c'est l'ESPACE qui sépare
+                    // deux cartes.
+                    const gap = 14.0;
                     final cols = orderGridColumns(box.maxWidth, gap: gap);
                     final w = (box.maxWidth - gap * (cols - 1)) / cols;
                     return Wrap(
@@ -2432,7 +2477,34 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeInOut,
-        decoration: BoxDecoration(
+        // EN GRILLE, NI CONTOUR NI LISERÉ : la hiérarchie passe par le FOND,
+        // l'espace et la typographie.
+        //
+        // DEUX SURFACES, PAS UN VOILE. Soldée → surface de fond, à plat. Active
+        // → surface de carte, ÉLEVÉE. L'ombre n'est pas un ornement : en clair,
+        // les deux fonds ne s'écartent que de 1,07:1, et la carte blanche posée
+        // sur le décor blanc n'a plus AUCUN bord (1,00:1) une fois la bordure
+        // retirée. C'est l'élévation qui les lui rend.
+        //
+        // La LISTE garde son rendu exact : bordure, liseré, ombre d'origine.
+        decoration: widget.grid
+            ? BoxDecoration(
+                color: _tab.isSettled
+                    ? Theme.of(context).scaffoldBackgroundColor
+                    : Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: _tab.isSettled
+                    ? null
+                    : [
+                        BoxShadow(
+                            color: Theme.of(context)
+                                .shadowColor
+                                .withValues(alpha: 0.07),
+                            blurRadius: 12,
+                            offset: const Offset(0, 3)),
+                      ],
+              )
+            : BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
@@ -2465,10 +2537,12 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Container(width: 3, color: _tab.color(context)),
+              // En grille, le point de 6 px devant le repère le remplace.
+              if (!widget.grid)
+                Container(width: 3, color: _tab.color(context)),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.all(14),
+                  padding: EdgeInsets.all(widget.grid ? 16 : 14),
                   child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2633,6 +2707,9 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
             // et un bouton pleine largeur la doublerait — c'est exactement la
             // densité qu'on est venu chercher en basculant.
             if (!widget.dense) ..._buildServiceProgress(context, s),
+            // En grille, une commande encaissée porte « Facture » à la place
+            // du vide laissé par l'avancement, qui n'a plus rien à proposer.
+            ..._gridInvoiceLink(context, s),
 
             // ── Bandeau dette enregistrée envers le partenaire ────
             // Synchronisé : `widget.debt` est calculé groupé par le parent
@@ -4571,74 +4648,102 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   ///
   /// L'AVATAR NE REVIENT PAS. Il portait l'initiale du client, c'est-à-dire,
   /// en restauration, celle de la TABLE — « T » pour toute la salle.
+  ///
+  /// ─── ÉPURATION (2026-09-24) ─────────────────────────────────────────────
+  ///
+  /// Plus de badge : un POINT de 6 px devant le repère, à la couleur de l'état,
+  /// et le libellé d'état en texte simple sous le repère. Le point seul ne
+  /// porte pas l'information — l'ambre y fait 2,15:1 sur blanc, sous le seuil
+  /// d'un élément non textuel — il la DOUBLE : c'est le libellé, en
+  /// `textColor`, qui la dit lisiblement.
+  ///
+  /// LE MONTANT EST LE PLUS GROS de la carte (`title`, 18, semi-gras), l'unité
+  /// en 11 px atténué. En texte primaire et non en couleur de marque : sur
+  /// Midnight en sombre, la primaire ferait 1,93:1 sur la carte. Sur une
+  /// commande soldée il passe en `textSecondary` — la hiérarchie par la
+  /// typographie, pas par un voile.
+  ///
+  /// RIEN N'EST RETIRÉ : repère, état, heure, pli, contenu court, montant et
+  /// état de paiement sont tous là.
   List<Widget> _gridSummary(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final paye = widget.order.paymentStatus == PaymentStatus.paid;
+    final settled = _tab.isSettled;
     return [
-      // ── LIGNE 1 : qui, dans quel état, depuis quand — et le pli ──────
+      // ── LIGNE 1 : le point, qui, depuis quand — et le pli ────────────
       Row(children: [
-        // LE REPÈRE ET LE BADGE FORMENT UN SEUL GROUPE, et c'est structurel :
-        // un `Flexible` et un `Spacer` frères se partagent l'espace libre à
-        // parts ÉGALES — un repère long s'ellipserait à mi-course en laissant
-        // un trou au milieu de la ligne. Groupés dans un `Expanded`, ils
-        // prennent tout l'espace restant, le repère l'occupe jusqu'au badge, et
-        // le vide se forme après eux.
+        Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(
+            color: _tab.color(context),
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 8),
         Expanded(
-          child: Row(children: [
-            Flexible(
-              child: Text(_repere(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style:
-                      AppTextStyles.bodySmBold.copyWith(color: cs.onSurface)),
-            ),
-            const SizedBox(width: 6),
-            _ServiceChip(
-                label: _tab.label, icon: _tab.icon, color: _tab.color(context)),
-          ]),
+          child: Text(_repere(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.bodySmBold.copyWith(color: cs.onSurface)),
         ),
         const SizedBox(width: 6),
-        Text(_hhmm(), style: AppTextStyles.micro),
+        Text(_hhmm(),
+            style: AppTextStyles.micro.copyWith(color: AppColors.textSecondary)),
         const SizedBox(width: 2),
         AnimatedRotation(
           turns: _expanded ? 0.5 : 0,
           duration: const Duration(milliseconds: 200),
           child: Icon(Icons.keyboard_arrow_down_rounded,
-              size: 18, color: cs.onSurfaceVariant),
+              size: 18, color: AppColors.textSecondary),
         ),
       ]),
-      const SizedBox(height: 4),
-      // ── LIGNE 2 : ce qu'il y a dedans, et ce que ça vaut ─────────────
-      //
-      // Le contenu passe en forme COURTE : il n'a plus qu'une demi-ligne, et
-      // « 2× Ndolè, 1× Jus, 1× Poul… » coupé en plein mot dirait le premier
-      // plat sans rien dire de la taille de la commande.
-      Row(children: [
-        Expanded(
-          child: Text(_contenuCourt(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.caption),
-        ),
-        const SizedBox(width: 8),
-        Text(CurrencyFormatter.format(widget.order.total),
+      // ── LIGNE 2 : l'état, en texte, aligné sous le repère ────────────
+      Padding(
+        padding: const EdgeInsets.only(left: 14),
+        child: Text(_tab.label,
             maxLines: 1,
-            style: AppTextStyles.bodyBold.copyWith(color: cs.primary)),
-        // L'ÉTAT DE PAIEMENT QUALIFIE LE MONTANT et ne vit pas sans lui : il
-        // le suit sur la même ligne, en texte et non en pastille.
-        if (widget.order.status != SaleStatus.cancelled &&
-            widget.order.status != SaleStatus.refused) ...[
-          Text(' · ', style: AppTextStyles.micro),
-          Text(widget.order.paymentStatus.label,
-              maxLines: 1,
-              style: AppTextStyles.micro.copyWith(
-                  color: paye
-                      ? Theme.of(context).semantic.successText
-                      : Theme.of(context).semantic.warningText)),
+            style: AppTextStyles.caption.copyWith(color: _tab.textColor(context))),
+      ),
+      const SizedBox(height: 10),
+      // ── LIGNE 3 : ce qu'il y a dedans ────────────────────────────────
+      //
+      // Forme COURTE : « 2× Ndolè + 3 autres » dit la taille de la commande,
+      // là où la forme longue coupée ne dirait que le premier plat.
+      Text(_contenuCourt(),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: AppTextStyles.caption.copyWith(color: AppColors.textSecondary)),
+      const SizedBox(height: 4),
+      // ── LIGNE 4 : ce que ça vaut ─────────────────────────────────────
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          Flexible(
+            child: _amountText(widget.order.total,
+                number: AppTextStyles.title.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: settled ? AppColors.textSecondary : cs.onSurface)),
+          ),
+          // L'ÉTAT DE PAIEMENT QUALIFIE LE MONTANT et ne vit pas sans lui : il
+          // le suit sur la même ligne, en texte et non en pastille.
+          if (widget.order.status != SaleStatus.cancelled &&
+              widget.order.status != SaleStatus.refused) ...[
+            Text(' · ',
+                style: AppTextStyles.caption
+                    .copyWith(color: AppColors.textSecondary)),
+            Text(widget.order.paymentStatus.label,
+                maxLines: 1,
+                style: AppTextStyles.caption.copyWith(
+                    color: paye
+                        ? Theme.of(context).semantic.successText
+                        : Theme.of(context).semantic.warningText)),
+          ],
         ],
-      ]),
-      // ── LIGNE 3 : le bouton d'avancement, posé par la carte repliée ──
-      const SizedBox(height: 8),
+      ),
+      // ── LIGNE 5 : le lien d'action, posé par la carte repliée ────────
+      const SizedBox(height: 4),
     ];
   }
 
@@ -4822,6 +4927,41 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       return const [];
     }
 
+    // EN GRILLE, UN LIEN ET NON UN BOUTON. Même action, même garde, même
+    // retour arrière : seul le RENDU change. La liste garde son bouton.
+    if (widget.grid) {
+      return _gridLink(
+        context,
+        label: label,
+        color: _tab.textColor(context),
+        onTap: () async {
+          try {
+            await action();
+          } catch (e) {
+            if (context.mounted) AppSnack.error(context, e.toString());
+          }
+        },
+        // Le retour arrière perd son fond teinté : une icône grise en bout de
+        // lien, avec la même infobulle et le même geste.
+        trailing: o.kitchenReady
+            ? IconButton(
+                icon: Icon(Icons.undo_rounded,
+                    size: 16, color: AppColors.textSecondary),
+                tooltip: o.finished
+                    ? 'Rouvrir le service'
+                    : 'Renvoyer en préparation',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints(minWidth: 32, minHeight: 32),
+                onPressed: () => o.finished
+                    ? RestaurantOrderService.reopenService(o)
+                    : RestaurantOrderService.reopenKitchen(o),
+              )
+            : null,
+      );
+    }
+
     return [
       Row(children: [
         Expanded(
@@ -4863,6 +5003,90 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       ]),
       const SizedBox(height: 8),
     ];
+  }
+
+  /// LIEN D'ACTION DE LA TUILE DE GRILLE : un filet fin, puis le libellé à la
+  /// couleur de l'état et une flèche à droite.
+  ///
+  /// Un lien et non un bouton plein : sur six cartes, six fonds pleins
+  /// deviennent le seul élément visible de l'écran. La couleur suffit à dire
+  /// qu'on peut agir ; le filet dit où la carte s'arrête et où l'action commence.
+  List<Widget> _gridLink(
+    BuildContext context, {
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+    IconData trailingIcon = Icons.arrow_forward_rounded,
+    IconData? leadingIcon,
+    Widget? trailing,
+  }) =>
+      [
+        const SizedBox(height: 12),
+        Divider(height: 1, thickness: 1,
+            color: Theme.of(context).semantic.borderSubtle),
+        Row(children: [
+          Expanded(
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Row(children: [
+                  if (leadingIcon != null) ...[
+                    Icon(leadingIcon, size: 15, color: color),
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    child: Text(label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.bodySmBold.copyWith(color: color)),
+                  ),
+                  Icon(trailingIcon, size: 16, color: color),
+                ]),
+              ),
+            ),
+          ),
+          if (trailing != null) ...[
+            const SizedBox(width: 4),
+            trailing,
+          ],
+        ]),
+      ];
+
+  /// « Facture » sur une commande ENCAISSÉE, en grille.
+  ///
+  /// Même action, même garde, même fonction que le bouton « Facture » de la
+  /// partie dépliée : la disponibilité vient de `orderActionsFor` (qui ne la
+  /// propose que sur `completed`), l'exécution de `_runAction`. Seul le point
+  /// d'entrée est nouveau, et il remplace un vide.
+  ///
+  /// Jamais sur « Sans suite » : une commande annulée n'a pas de facture — et
+  /// `orderActionsFor` ne la propose pas, ce n'est donc pas une condition de
+  /// plus mais la même.
+  List<Widget> _gridInvoiceLink(BuildContext context, SaleStatus s) {
+    if (!widget.grid) return const [];
+    final o = widget.order;
+    final acts = orderActionsFor(
+      status:           s,
+      isApprovalSale:   o.isApprovalSale,
+      amountDue:        o.amountDue,
+      amountPaid:       o.amountPaid,
+      source:           o.source,
+      canCancel:        widget.canCancel,
+      canEdit:          widget.canEdit,
+      canDelete:        widget.canDelete,
+      isResto:          _isResto,
+      canConfirmClient: _canConfirmClient(),
+    );
+    if (!acts.contains(OrderAction.invoicePdf)) return const [];
+    return _gridLink(
+      context,
+      label: 'Facture',
+      color: AppColors.textSecondary,
+      leadingIcon: Icons.print_outlined,
+      onTap: () => _runAction(context, OrderAction.invoicePdf),
+    );
   }
 
   /// LES ACTIONS DE LA CARTE — trois contrôles au plus, tous nommés.
@@ -5760,6 +5984,111 @@ class _ViewModeToggle extends StatelessWidget {
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         seg(Icons.grid_view_rounded, true, 'Cartes'),
         seg(Icons.view_list_rounded, false, 'Liste dense'),
+      ]),
+    );
+  }
+}
+
+/// UN MONTANT, chiffre et unité séparés : « 2 500 » en [number], « FCFA » en
+/// 11 px atténué à côté.
+///
+/// La chaîne vient TOUJOURS de `CurrencyFormatter.format` — on la coupe sur le
+/// symbole de la devise courante, on ne la recompose pas. Le symbole reste
+/// donc là où la locale le met, avant ou après le nombre. S'il est introuvable
+/// (devise explicite, symbole absent), la chaîne entière part en [number].
+Widget _amountText(double value, {required TextStyle number}) {
+  final s = CurrencyFormatter.format(value);
+  final sym = CurrencyFormatter.currentSymbol;
+  final i = sym.isEmpty ? -1 : s.indexOf(sym);
+  final unit =
+      AppTextStyles.caption.copyWith(color: AppColors.textSecondary);
+  if (i < 0) {
+    return Text(s, maxLines: 1, overflow: TextOverflow.ellipsis, style: number);
+  }
+  return Text.rich(
+    TextSpan(children: [
+      if (i > 0) TextSpan(text: s.substring(0, i), style: number),
+      TextSpan(text: sym, style: unit),
+      if (i + sym.length < s.length)
+        TextSpan(text: s.substring(i + sym.length), style: number),
+    ]),
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+  );
+}
+
+/// ONGLETS DE SERVICE, soulignés — restauration, écran Commandes seulement.
+///
+/// Plus de pastilles, ni fond ni contour : le libellé, son compteur en
+/// atténué, et un trait de 1,5 px à la couleur de marque sous l'onglet actif.
+///
+/// L'ACTIF SE LIT AUSSI SANS LE TRAIT, par sa graisse et sa couleur de texte.
+/// C'est voulu : sur Midnight en sombre, la primaire ne fait que 1,93:1 sur la
+/// carte — le trait y est à peine visible, et ne doit pas être seul à parler.
+///
+/// Un onglet VIDE s'efface davantage (`textHint`) : il reste cliquable, mais
+/// ne doit pas disputer le regard aux onglets qui ont quelque chose.
+class _ServiceUnderlineTabs extends StatelessWidget {
+  final Map<ServiceTab, int> counts;
+  final ServiceTab selected;
+  final ValueChanged<ServiceTab> onSelect;
+
+  const _ServiceUnderlineTabs({
+    required this.counts,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(children: [
+        for (final t in ServiceTab.ordered)
+          Builder(builder: (context) {
+            final active = t == selected;
+            final n = counts[t] ?? 0;
+            final empty = n == 0 && t != ServiceTab.toutes;
+            final labelColor = active
+                ? cs.onSurface
+                : empty
+                    ? AppColors.textHint
+                    : AppColors.textSecondary;
+            return InkWell(
+              onTap: () => onSelect(t),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                      color: active ? cs.primary : Colors.transparent,
+                      width: 1.5,
+                    ),
+                  ),
+                ),
+                child: Text.rich(
+                  TextSpan(children: [
+                    TextSpan(
+                        text: t.label,
+                        style: (active
+                                ? AppTextStyles.bodySmBold
+                                : AppTextStyles.bodySm)
+                            .copyWith(color: labelColor)),
+                    if (n > 0)
+                      TextSpan(
+                          text: '  $n',
+                          style: AppTextStyles.caption.copyWith(
+                              color: empty
+                                  ? AppColors.textHint
+                                  : AppColors.textSecondary)),
+                  ]),
+                  maxLines: 1,
+                ),
+              ),
+            );
+          }),
       ]),
     );
   }

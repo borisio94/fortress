@@ -84,6 +84,19 @@ enum ServiceTab {
   final String label;
   const ServiceTab(this.label);
 
+  /// La commande est-elle SOLDÉE — plus rien à faire, ni en salle ni en
+  /// caisse ?
+  ///
+  /// C'est cette règle qui décide du RENDU de la grille : une commande soldée
+  /// passe sur la surface de fond, à plat, montant atténué ; les autres restent
+  /// sur la surface de carte, élevées. « À encaisser » n'est PAS soldée : de
+  /// l'argent attend, c'est même la carte la plus urgente.
+  ///
+  /// Écrit en liste EXPLICITE et non en « tout sauf » : un rang ajouté demain
+  /// doit tomber du côté ACTIF par défaut — une commande vivante rendue à plat
+  /// passerait inaperçue, l'inverse ne coûte qu'une carte un peu trop visible.
+  bool get isSettled => this == encaissees || this == sansSuite;
+
   /// Les onglets affichés, dans l'ordre. `toutes` en tête.
   static const List<ServiceTab> ordered = [
     toutes,
