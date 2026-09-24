@@ -168,3 +168,17 @@ List<OrderAction> orderActionsFor({
 
   return out;
 }
+
+/// L'ENCAISSEMENT (« Encaisser & finaliser ») est-il proposé sur cette
+/// commande de restaurant ?
+///
+/// C'est EXACTEMENT la condition du bouton de la carte dépliée, lue à la même
+/// source : [orderActionsFor] ne pose [OrderAction.advanceStatus] que là où
+/// `_buildStatusAction` rend un bouton (commande programmée sans confirmation
+/// client en attente, ou en cours), et jamais sur une tournée « à choisir »,
+/// qui a sa propre clôture. En restauration, ce bouton est l'encaissement.
+///
+/// Le lien « Encaisser & finaliser » de la tuile de grille s'y adosse : il ne
+/// peut donc apparaître que là où le bouton déplié existe déjà.
+bool settleOffered(List<OrderAction> actions, {required bool isResto}) =>
+    isResto && actions.contains(OrderAction.advanceStatus);

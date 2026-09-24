@@ -4924,6 +4924,25 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     } else {
       // Terminée : il ne reste que l'encaissement, dont la ligne est juste
       // dessous. Un bouton de plus ne ferait que du bruit.
+      //
+      // SAUF EN GRILLE. L'encaissement y vit dans la partie DÉPLIÉE : la carte
+      // « À encaisser » repliée n'avait aucun lien, et c'était la carte active
+      // la moins visible alors qu'elle porte le geste le plus urgent — de
+      // l'argent qui attend.
+      //
+      // Le lien appelle LE MÊME `onUpdate(completed)` que le bouton déplié :
+      // la page passe par `settleRestaurantOrder`, qui demande d'abord le mode
+      // de règlement — aucun paiement ne part sans ce second geste — et porte
+      // le garde-fou du double encaissement. Il n'apparaît que là où ce
+      // bouton existe (`settleOffered`, même source).
+      if (widget.grid && settleOffered(_cardActions(s), isResto: _isResto)) {
+        return _gridLink(
+          context,
+          label: OrderAction.advanceStatus.label,
+          color: _tab.textColor(context),
+          onTap: () => widget.onUpdate(SaleStatus.completed),
+        );
+      }
       return const [];
     }
 
@@ -5005,6 +5024,27 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     ];
   }
 
+  /// Les actions de CETTE carte, avec ses permissions et son contexte — les
+  /// mêmes arguments que `_buildActionRow` passe à `orderActionsFor`.
+  ///
+  /// Les liens de la tuile de grille s'adossent à cette liste : ils ne peuvent
+  /// proposer que ce que la carte dépliée propose déjà.
+  List<OrderAction> _cardActions(SaleStatus s) {
+    final o = widget.order;
+    return orderActionsFor(
+      status:           s,
+      isApprovalSale:   o.isApprovalSale,
+      amountDue:        o.amountDue,
+      amountPaid:       o.amountPaid,
+      source:           o.source,
+      canCancel:        widget.canCancel,
+      canEdit:          widget.canEdit,
+      canDelete:        widget.canDelete,
+      isResto:          _isResto,
+      canConfirmClient: _canConfirmClient(),
+    );
+  }
+
   /// LIEN D'ACTION DE LA TUILE DE GRILLE : un filet fin, puis le libellé à la
   /// couleur de l'état et une flèche à droite.
   ///
@@ -5066,20 +5106,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   /// plus mais la même.
   List<Widget> _gridInvoiceLink(BuildContext context, SaleStatus s) {
     if (!widget.grid) return const [];
-    final o = widget.order;
-    final acts = orderActionsFor(
-      status:           s,
-      isApprovalSale:   o.isApprovalSale,
-      amountDue:        o.amountDue,
-      amountPaid:       o.amountPaid,
-      source:           o.source,
-      canCancel:        widget.canCancel,
-      canEdit:          widget.canEdit,
-      canDelete:        widget.canDelete,
-      isResto:          _isResto,
-      canConfirmClient: _canConfirmClient(),
-    );
-    if (!acts.contains(OrderAction.invoicePdf)) return const [];
+    if (!_cardActions(s).contains(OrderAction.invoicePdf)) return const [];
     return _gridLink(
       context,
       label: 'Facture',
