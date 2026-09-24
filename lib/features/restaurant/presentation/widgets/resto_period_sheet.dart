@@ -7,6 +7,7 @@ import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
 import '../../domain/margin_window.dart';
 import '../../domain/period_coverage.dart';
+import 'resto_dashed_border.dart';
 import 'resto_kpi_tile.dart';
 
 // Sélecteur de période du tableau de bord restaurant.
@@ -278,9 +279,9 @@ class _CustomRow extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final sem = Theme.of(context).semantic;
     final accent = selected ? cs.primary : cs.onSurface;
-    return CustomPaint(
-      foregroundPainter: _DashedPainter(
-          color: selected ? cs.primary : sem.borderSubtle, radius: 10),
+    return RestoDashedBorder(
+      color: selected ? cs.primary : sem.borderSubtle,
+      radius: 10,
       child: Material(
         color: selected ? cs.primary.withValues(alpha: 0.08) : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
@@ -316,39 +317,6 @@ class _CustomRow extends StatelessWidget {
       ),
     );
   }
-}
-
-class _DashedPainter extends CustomPainter {
-  final Color color;
-  final double radius;
-
-  const _DashedPainter({required this.color, required this.radius});
-
-  static const double _dash = 4;
-  static const double _gap = 3.5;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2;
-    final path = Path()
-      ..addRRect(RRect.fromRectAndRadius(
-          (Offset.zero & size).deflate(0.6), Radius.circular(radius)));
-    for (final metric in path.computeMetrics()) {
-      var dist = 0.0;
-      while (dist < metric.length) {
-        final end = (dist + _dash).clamp(0.0, metric.length);
-        canvas.drawPath(metric.extractPath(dist, end), paint);
-        dist = end + _gap;
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DashedPainter old) =>
-      old.color != color || old.radius != radius;
 }
 
 // ─── Second écran : la période libre ────────────────────────────────────────

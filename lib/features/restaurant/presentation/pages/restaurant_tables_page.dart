@@ -15,7 +15,9 @@ import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_snack.dart';
+import '../widgets/resto_dashed_border.dart';
 import '../widgets/resto_empty_state.dart';
+import '../../domain/room_headline.dart';
 import '../widgets/table_form_sheet.dart';
 import '../widgets/table_reservation_sheet.dart';
 import '../../domain/entities/restaurant_table.dart';
@@ -241,7 +243,7 @@ class _RestaurantTablesPageState
                         // Les tables jointes ne sont supportées nulle part
                         // ailleurs : la prise de commande borne à la place
                         // restante, `computeSeating` plafonne, et
-                        // `_coversLabel` calculerait des places négatives.
+                        // la carte (« 4 sur 6 ») plafonne à la capacité.
                         // C'était une intention isolée, contredite par tout le
                         // reste du module.
                         onTap: covers < table.capacity
@@ -562,18 +564,11 @@ class _RestaurantTablesPageState
     return AppScaffold(
       title: 'Plan de salle',
       shopId: widget.shopId,
-      // Masqué quand il n'y a aucune table : l'état vide porte déjà son
-      // bouton de création, et deux options d'ajout simultanées se
-      // concurrenceraient à l'écran. Masqué aussi sans le droit de composer
-      // la salle — proposer un bouton qui refuserait ensuite serait pire que
-      // ne rien proposer (même parti pris que l'écran Menu).
-      floatingActionButton: (tables.isEmpty || !canManage)
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: _createTable,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Table'),
-            ),
+      // PLUS DE FAB. Il chevauchait le bord de la grille et masquait la
+      // dernière carte. La création passe par le bouton de l'en-tête et par
+      // une case en fin de grille — tous deux absents sans le droit de
+      // composer la salle : proposer un bouton qui refuserait ensuite serait
+      // pire que ne rien proposer (même parti pris que l'écran Menu).
       body: tables.isEmpty
           ? RestoEmptyState(
               icon: Icons.restaurant_rounded,
@@ -588,314 +583,365 @@ class _RestaurantTablesPageState
               actionLabel: canManage ? 'Créer une table' : null,
               onAction: canManage ? _createTable : null,
             )
-          : Column(
-              children: [
-                const _StatusLegend(),
-                Expanded(child: _buildGrid(tables, canManage)),
-              ],
-            ),
+          : _buildRoom(tables, canManage),
     );
   }
 
-  Widget _buildGrid(List<RestaurantTable> tables, bool canManage) {
+  Widget _buildRoom(List<RestaurantTable> tables, bool canManage) {
+    // Les commandes et comptes sont lus UNE fois par table, ici, et servent à
+    // la carte ET à l'en-tête : les deux ne peuvent donc pas se contredire.
+    final views = [
+      for (final t in tables) _TableView.of(widget.shopId, t),
+    ];
+    final headline = roomHeadline([
+      for (final v in views)
+        (
+          capacity: v.table.capacity,
+          covers: v.table.covers,
+          inService: v.inService,
+        ),
+    ]);
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Grille fluide : ~240 dp par carte (contre 150), 2 colonnes minimum
-        // sur mobile. Le plan de salle se lit maintenant à distance — c'est un
-        // tableau d'état posé sur un comptoir, plus une grille à parcourir de
-        // près. Moins de colonnes, des cartes nettement plus grandes.
-        final columns = (constraints.maxWidth / 240).floor().clamp(2, 6);
-        return GridView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 88),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: columns,
-            mainAxisSpacing: 14,
-            crossAxisSpacing: 14,
-            childAspectRatio: 1.05,
+        // ~150 dp par carte : cinq colonnes là où il y en avait trois. La
+        // carte ne porte plus que quatre lignes de texte, qui ne demandent pas
+        // un carré.
+        final columns = (constraints.maxWidth / 150).floor().clamp(2, 8);
+        final count = views.length + (canManage ? 1 : 0);
+        return Column(children: [
+          _RoomHeader(
+            headline: headline,
+            // La légende n'a sa place À CÔTÉ du bouton que si la ligne est
+            // large ; sinon elle passe sous le décompte.
+            wide: constraints.maxWidth >= 640,
+            onCreate: canManage ? _createTable : null,
           ),
-          itemCount: tables.length,
-          itemBuilder: (_, i) => _TableCard(
-            table: tables[i],
-            canManage: canManage,
-            // Actions sur la TABLE elle-même — addition, comptes, couverts,
-            // libérer, supprimer — par un bouton explicite dans le coin. Il n'y
-            // a PAS de renommage : le nom se fixe à la création et ne se
-            // modifie nulle part. La carte, elle, ne réagit plus au tap : elle
-            // ouvrait la prise de commande, et toute commande passe désormais
-            // par le Menu.
-            onActions: () => _showTableActions(tables[i]),
+          Expanded(
+            child: GridView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: columns,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                // HAUTEUR FIXE, pas un ratio : quatre lignes font 82 px quelle
+                // que soit la largeur de colonne. Un ratio redonnait un carré
+                // de 245 px sur tablette.
+                mainAxisExtent: 82,
+              ),
+              itemCount: count,
+              itemBuilder: (_, i) => i == views.length
+                  ? _AddTableCell(onTap: _createTable)
+                  : _TableCard(
+                      view: views[i],
+                      // Actions sur la TABLE elle-même — addition, comptes,
+                      // couverts, réserver, libérer, supprimer. La carte, elle,
+                      // ne réagit pas au tap : toute commande passe par le Menu.
+                      onActions: () => _showTableActions(views[i].table),
+                    ),
+            ),
           ),
-        );
+        ]);
       },
     );
   }
 }
 
-/// Légende des statuts, affichée en tête du plan de salle.
+/// En-tête du plan de salle : le décompte, la légende, le bouton de création.
+class _RoomHeader extends StatelessWidget {
+  final String headline;
+  final bool wide;
+
+  /// `null` sans le droit de composer la salle : pas de bouton du tout.
+  final VoidCallback? onCreate;
+
+  const _RoomHeader({
+    required this.headline,
+    required this.wide,
+    required this.onCreate,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final title = Text(headline,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface));
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: wide
+                ? title
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      title,
+                      const SizedBox(height: 4),
+                      const _StatusLegend(),
+                    ],
+                  ),
+          ),
+          if (wide) ...[
+            const SizedBox(width: 12),
+            const _StatusLegend(),
+          ],
+          if (onCreate != null) ...[
+            const SizedBox(width: 12),
+            FilledButton.icon(
+              onPressed: onCreate,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Table'),
+              // Thème global : minimumSize infini — il écraserait l'Expanded.
+              style: FilledButton.styleFrom(minimumSize: const Size(0, 36)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Légende des statuts — PETITE, à côté du bouton. Elle informe sans
+/// annoncer : c'est le liseré des cartes qui porte la couleur, la légende ne
+/// sert qu'à qui la cherche.
 class _StatusLegend extends StatelessWidget {
   const _StatusLegend();
 
   @override
   Widget build(BuildContext context) {
     final semantic = Theme.of(context).semantic;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Wrap(
-        spacing: 14,
-        runSpacing: 8,
-        children: [
-          for (final status in RestaurantTableStatus.values)
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: status.color(semantic),
-                    shape: BoxShape.circle,
-                  ),
+    return Wrap(
+      spacing: 10,
+      runSpacing: 4,
+      children: [
+        for (final status in RestaurantTableStatus.values)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: status.color(semantic),
+                  shape: BoxShape.circle,
                 ),
-                const SizedBox(width: 6),
-                Text(status.label, style: AppTextStyles.captionHint),
-              ],
-            ),
-        ],
+              ),
+              const SizedBox(width: 4),
+              // `micro` (10) : le plus petit échelon de l'échelle. On
+              // n'invente pas un 9 en dur pour un pixel.
+              Text(status.label, style: AppTextStyles.microSecondary),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+/// Case « + Table » en fin de grille, aux dimensions d'une carte.
+class _AddTableCell extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _AddTableCell({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final sem = Theme.of(context).semantic;
+    return RestoDashedBorder(
+      color: sem.borderSubtle,
+      radius: 10,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Center(
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.add_rounded, size: 18, color: cs.primary),
+              const SizedBox(width: 4),
+              Text('Table',
+                  style: AppTextStyles.bodyBold.copyWith(color: cs.primary)),
+            ]),
+          ),
+        ),
       ),
     );
   }
 }
 
-/// Carte d'une table — couleur et icône dérivées du statut.
-/// Carte d'état d'une table — INFORMATIVE.
+/// Ce que la carte montre d'une table, calculé une seule fois.
 ///
-/// Elle ne réagit plus au tap. Elle ouvrait la prise de commande, ce qui
-/// faisait du plan de salle un second point d'entrée des commandes, alors que
-/// tout passe désormais par le Menu (panier → « Type de commande »). Deux
-/// chemins pour le même acte, c'est deux comportements qui divergent au
-/// premier changement.
-///
-/// Seul le bouton d'actions en coin est cliquable, et il ne touche qu'à la
-/// TABLE : addition, couverts, libération, suppression.
-class _TableCard extends StatelessWidget {
+/// Partagé avec l'en-tête : « 2 occupées » en haut doit correspondre aux deux
+/// cartes marquées « Occupée » en dessous.
+class _TableView {
   final RestaurantTable table;
 
-  /// Droit de composer le plan de salle. Sur une table LIBRE, supprimer est la
-  /// seule action du menu : sans ce droit, le bouton ⋮ n'aurait plus rien à
-  /// proposer et disparaît — comme le fait déjà le menu d'un plat.
-  final bool canManage;
-  final VoidCallback onActions;
+  /// Statut AFFICHÉ — voir [of].
+  final RestaurantTableStatus status;
+  final List<RestaurantTab> tabs;
+  final double total;
 
-  const _TableCard({
+  /// Plats prêts au passe et pas encore apportés.
+  final int waiting;
+
+  const _TableView({
     required this.table,
-    required this.canManage,
-    required this.onActions,
+    required this.status,
+    required this.tabs,
+    required this.total,
+    required this.waiting,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    final semantic = Theme.of(context).semantic;
+  /// Des clients y sont assis : occupée ou en attente d'addition.
+  bool get inService =>
+      status == RestaurantTableStatus.occupee ||
+      status == RestaurantTableStatus.addition;
+
+  factory _TableView.of(String shopId, RestaurantTable table) {
     // Statut DÉDUIT des commandes, pas seulement lu sur la table : une table
     // marquée « libre » alors qu'elle porte des commandes ouvertes (app fermée
     // entre la prise de commande et la mise à jour de la table) affichait un
     // état faux au service. Une réservation, elle, ne se déduit d'aucune
     // commande : ce statut reste celui de la table.
-    final summary = RestaurantOrderService.tableSummary(table);
+    //
     // `displayStatus` et non `status` : une réservation dont la courtoisie est
     // écoulée retombe sur « Libre ». Sans ça, la carte resterait bleue et
     // marquée « Réservée » alors que la table est de nouveau proposée à la
     // prise de commande — l'écran dirait le contraire du comportement.
+    final summary = RestaurantOrderService.tableSummary(table);
     final shown = table.displayStatus;
-    final status = summary.count > 0 &&
-            shown == RestaurantTableStatus.libre
+    final status = summary.count > 0 && shown == RestaurantTableStatus.libre
         ? RestaurantTableStatus.occupee
         : shown;
+    return _TableView(
+      table: table,
+      status: status,
+      tabs: RestaurantTabService.tabsForTable(shopId, table.id),
+      total: summary.total,
+      waiting: RestaurantOrderService.waitingServiceFor(table).length,
+    );
+  }
+}
+
+/// Carte d'état d'une table — INFORMATIVE, 82 px de haut.
+///
+/// Elle ne réagit pas au tap : toute commande passe par le Menu (panier →
+/// « Type de commande »). Seul le ⋮ est cliquable, et il ne touche qu'à la
+/// TABLE : addition, comptes, couverts, réservation, libération, suppression.
+///
+/// ─── QUATRE LIGNES, PAS UN CARRÉ ─────────────────────────────────────────
+///
+///   1. le nom, et le ⋮ ;
+///   2. l'état, et le nombre de COMPTES — « Occupée · 2 comptes » ;
+///   3. ce qu'un serveur cherche en passant : « 4 sur 6 · 12 500 F » (clients,
+///      places, argent), la capacité d'une table libre, l'heure et le nom
+///      d'une réservation ;
+///   4. ce qui demande un regard : « À servir », la durée d'ouverture, « client
+///      attendu ».
+///
+/// La carte faisait 245 px de haut autour d'une icône de 38 px — une coche,
+/// des personnes — qui occupait un tiers de la surface pour dire ce que la
+/// couleur disait déjà. Le LISERÉ GAUCHE la remplace : la grille se scanne par
+/// la colonne des liserés.
+class _TableCard extends StatelessWidget {
+  final _TableView view;
+  final VoidCallback onActions;
+
+  const _TableCard({required this.view, required this.onActions});
+
+  @override
+  Widget build(BuildContext context) {
+    final semantic = Theme.of(context).semantic;
+    final cs = Theme.of(context).colorScheme;
+    final table = view.table;
+    final status = view.status;
     final accent = status.color(semantic);
-    // Plats prêts au passe et pas encore apportés. C'est la SEULE information
-    // du plan de salle qui appelle une action immédiate : elle prend donc la
-    // bordure de la carte, pas une pastille discrète en coin.
-    final waiting = RestaurantOrderService.waitingServiceFor(table).length;
-    final border = waiting > 0 ? semantic.warning : accent;
+    final waiting = view.waiting;
     // DEPUIS QUAND CETTE TABLE EST OUVERTE. `null` sur une table libre, et sur
     // une horloge déréglée — voir `table_service_age.dart`.
     //
     // Calculé au build et non rafraîchi par une horloge : la carte se redessine
     // à chaque changement de commande, ce qui suffit très largement pour une
-    // durée qu'on lit en minutes puis en heures. Un `Timer` par table ferait
-    // battre tout le plan de salle pour une information qui ne bouge pas.
+    // durée qu'on lit en minutes puis en heures.
     final open = tableOpenFor(openedAt: table.openedAt, now: DateTime.now());
     final age = open == null ? null : tableServiceOf(open);
+    final tabCount = view.tabs.length;
+    final line4 = _line4(context, table, waiting, open, age);
 
     return Material(
       color: status.surface(semantic),
-      borderRadius: BorderRadius.circular(14),
-      // `StackFit.expand` : sans lui, le Stack se dimensionne sur son contenu
-      // et le cadre bordé flottait au milieu d'une carte plus grande, le ⋮
-      // tombant hors de la bordure. Le cadre doit occuper TOUTE la cellule.
-      child: Stack(
-        fit: StackFit.expand,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        // Plats prêts au passe : la SEULE information du plan de salle qui
+        // appelle une action dans la minute. Elle prend tout le contour, pas
+        // seulement une pastille.
+        side: waiting > 0
+            ? BorderSide(color: semantic.warning, width: 2)
+            : BorderSide(color: accent.withValues(alpha: 0.30)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-                color: border.withValues(alpha: waiting > 0 ? 1 : 0.45),
-                width: waiting > 0 ? 2 : 1),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(status.icon, color: accent, size: 38),
-              if (waiting > 0) ...[
-                const SizedBox(height: 4),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: semantic.warning,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                      waiting > 1 ? 'À SERVIR ($waiting)' : 'À SERVIR',
-                      maxLines: 1,
-                      style: AppTextStyles.microBold
-                          .copyWith(color: Colors.white)),
-                ),
-              ],
-              const SizedBox(height: 8),
-              Text(
-                table.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.title.copyWith(color: accent),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                status.label,
-                style: AppTextStyles.bodySm.copyWith(color: accent),
-              ),
-              // Comptes ouverts + total en cours : c'est ce qu'un serveur
-              // regarde en passant devant la table.
-              if (summary.count > 0) ...[
-                const SizedBox(height: 5),
-                Text(
-                  '${summary.count} commande'
-                  '${summary.count > 1 ? 's' : ''} · '
-                  '${CurrencyFormatter.format(summary.total)}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.bodySmBold.copyWith(color: accent),
-                ),
-              ],
-              // ── DEPUIS QUAND ────────────────────────────────────────
-              //
-              // Le plan de salle n'a jamais rien dit du temps : une table
-              // ouverte depuis dix minutes et une table oubliée depuis
-              // vendredi s'y affichaient de façon strictement identique. La
-              // durée existait pourtant, mais dans l'addition seule — donc
-              // jamais pour la table que personne ne rouvre.
-              //
-              // UNE LIGNE, TROIS TONS, et rien d'autre. Ni bordure ni pastille :
-              // les deux sont déjà prises par « À SERVIR », qui appelle une
-              // action DANS LA MINUTE. Une table qui dort n'est pas urgente,
-              // elle est anormale — elle doit se remarquer sans couvrir ce qui
-              // presse.
-              if (open != null && age != null) ...[
-                const SizedBox(height: 5),
-                Builder(builder: (context) {
-                  final caption = AppTextStyles.caption;
-                  final color = switch (age) {
-                    TableService.courte => caption.color,
-                    TableService.longue => semantic.warningText,
-                    TableService.dormante => semantic.dangerText,
-                  };
-                  return Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                          // L'icône change AUSSI, pas seulement la couleur :
-                          // une alerte qui ne tient qu'à une teinte n'existe
-                          // pas pour qui ne distingue pas le rouge.
-                          age == TableService.dormante
-                              ? Icons.error_outline_rounded
-                              : Icons.schedule_rounded,
-                          size: 12,
-                          color: color),
-                      const SizedBox(width: 3),
-                      Flexible(
-                        child: Text(
-                          // « oubliée ? » et non « dormante » : le libellé dit
-                          // au serveur ce qu'il a à VÉRIFIER, pas le nom que
-                          // le code donne à l'état.
-                          age == TableService.dormante
-                              ? '${tableServiceLabel(open)} · oubliée ?'
-                              : tableServiceLabel(open),
+          Container(width: 4, color: accent),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(9, 6, 2, 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // ── 1. Nom + ⋮ ─────────────────────────────────────────
+                  Row(children: [
+                    Expanded(
+                      child: Text(table.name,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: (age == TableService.courte
-                                  ? caption
-                                  : AppTextStyles.microBold)
-                              .copyWith(color: color),
-                        ),
+                          style: AppTextStyles.bodyBold
+                              .copyWith(color: cs.onSurface)),
+                    ),
+                    // Discret mais toujours visible : enfoui derrière un appui
+                    // long, il serait introuvable sur le web. Jamais vide : le
+                    // menu d'une table libre porte « Réserver ».
+                    SizedBox(
+                      width: 26,
+                      height: 22,
+                      child: IconButton(
+                        onPressed: onActions,
+                        icon: Icon(Icons.more_vert_rounded,
+                            size: 17, color: cs.onSurface.withValues(alpha: 0.6)),
+                        tooltip: 'Actions sur la table',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
                       ),
+                    ),
+                  ]),
+                  // ── 2. État + comptes ──────────────────────────────────
+                  Row(children: [
+                    Flexible(
+                      child: Text(status.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              AppTextStyles.captionBold.copyWith(color: accent)),
+                    ),
+                    if (tabCount > 0) ...[
+                      const SizedBox(width: 5),
+                      _TabPill(count: tabCount, color: accent),
                     ],
-                  );
-                }),
-              ],
-              const SizedBox(height: 6),
-              Text(
-                // Table libre → on affiche la capacité (information utile pour
-                // placer un groupe) ; en service → les couverts réels.
-                table.isFree
-                    ? '${table.capacity} places'
-                    // En service, on annonce les places ENCORE LIBRES quand il
-                    // y en a : c'est l'information qu'on cherche en plaçant un
-                    // client, et une table de six occupée par deux personnes
-                    // n'est pas une table pleine.
-                    : _coversLabel(table),
-                style: AppTextStyles.caption,
+                  ]),
+                  // ── 3. Clients, places, argent ─────────────────────────
+                  Text(_line3(table, view),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.caption),
+                  // ── 4. Ce qui demande un regard ────────────────────────
+                  if (line4 != null) line4,
+                ],
               ),
-              // HEURE SAISIE, jamais la fin de courtoisie : le gérant a noté
-              // 20:00, c'est 20:00 qui doit s'afficher — sinon le serveur
-              // annonce au client une heure que personne n'a dite.
-              if (table.hasLiveReservation) ...[
-                Text(
-                  '${_hhmm(table.reservationTime!)}'
-                  '${(table.reservationName ?? '').trim().isEmpty ? '' : ' · '
-                      '${table.reservationName!.trim()}'}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.bodySmBold.copyWith(color: accent),
-                ),
-                // L'heure est passée mais la table est ENCORE tenue. C'est le
-                // seul des trois états qui ne se lit pas sur le chiffre : sans
-                // cette mention, la courtoisie serait invisible.
-                if (table.isReservationOverdue)
-                  Text('client attendu',
-                      style: AppTextStyles.micro.copyWith(color: accent)),
-              ],
-            ],
-          ),
-        ),
-          // Seul élément cliquable de la carte, DANS le cadre bordé. Discret
-          // mais toujours visible : enfoui derrière un appui long, il serait
-          // introuvable sur le web.
-          //
-          // Plus de condition : le menu d'une table LIBRE porte désormais
-          // « Réserver », ouvert à tout membre — un client appelle, le serveur
-          // qui décroche note. Le ⋮ n'est donc jamais vide.
-          Positioned(
-            top: 4,
-            right: 4,
-            child: IconButton(
-              onPressed: onActions,
-              icon: Icon(Icons.more_vert_rounded, size: 18, color: accent),
-              tooltip: 'Actions sur la table',
-              visualDensity: VisualDensity.compact,
-              constraints: const BoxConstraints(
-                  minWidth: 30, minHeight: 30),
-              padding: EdgeInsets.zero,
             ),
           ),
         ],
@@ -903,21 +949,122 @@ class _TableCard extends StatelessWidget {
     );
   }
 
+  /// « 4 sur 6 · 12 500 F » en service, « 6 places » libre, « 20:00 · Dupont »
+  /// réservée.
+  ///
+  /// « 4 sur 6 » plutôt que « 4 couverts · 2 libres » : clients ET places en
+  /// trois caractères. Une table de six occupée par quatre n'est pas pleine,
+  /// et c'est ce qu'on cherche du regard en plaçant des clients qui entrent.
+  static String _line3(RestaurantTable table, _TableView view) {
+    // HEURE SAISIE, jamais la fin de courtoisie : le gérant a noté 20:00,
+    // c'est 20:00 qui doit s'afficher — sinon le serveur annonce au client une
+    // heure que personne n'a dite.
+    if (view.status == RestaurantTableStatus.reservee &&
+        table.hasLiveReservation) {
+      final name = (table.reservationName ?? '').trim();
+      return '${_hhmm(table.reservationTime!)}'
+          '${name.isEmpty ? '' : ' · $name'}';
+    }
+    if (!view.inService) return '${table.capacity} places';
+    final covers = table.covers ?? table.capacity;
+    final seated = covers > table.capacity ? table.capacity : covers;
+    final money =
+        view.total > 0 ? ' · ${CurrencyFormatter.format(view.total)}' : '';
+    return '$seated sur ${table.capacity}$money';
+  }
+
+  /// Quatrième ligne, par ordre d'urgence : un plat attend au passe, puis
+  /// l'âge de la table, puis un client en retard sur sa réservation. `null` :
+  /// rien à signaler, la carte s'arrête à trois lignes.
+  static Widget? _line4(BuildContext context, RestaurantTable table,
+      int waiting, Duration? open, TableService? age) {
+    final semantic = Theme.of(context).semantic;
+    if (waiting > 0) {
+      return Text(waiting > 1 ? 'À SERVIR ($waiting)' : 'À SERVIR',
+          maxLines: 1,
+          style: AppTextStyles.microBold.copyWith(color: semantic.warningText));
+    }
+    // ── DEPUIS QUAND ──────────────────────────────────────────────────────
+    //
+    // Une table ouverte depuis dix minutes et une table oubliée depuis
+    // vendredi s'affichaient de façon strictement identique. UNE LIGNE, TROIS
+    // TONS : une table qui dort n'est pas urgente, elle est anormale — elle
+    // doit se remarquer sans couvrir ce qui presse.
+    if (open != null && age != null) {
+      final caption = AppTextStyles.caption;
+      final color = switch (age) {
+        TableService.courte => caption.color,
+        TableService.longue => semantic.warningText,
+        TableService.dormante => semantic.dangerText,
+      };
+      return Row(children: [
+        Icon(
+            // L'icône change AUSSI, pas seulement la couleur : une alerte qui
+            // ne tient qu'à une teinte n'existe pas pour qui ne distingue pas
+            // le rouge.
+            age == TableService.dormante
+                ? Icons.error_outline_rounded
+                : Icons.schedule_rounded,
+            size: 11,
+            color: color),
+        const SizedBox(width: 3),
+        Flexible(
+          child: Text(
+            // « oubliée ? » et non « dormante » : le libellé dit au serveur ce
+            // qu'il a à VÉRIFIER, pas le nom que le code donne à l'état.
+            age == TableService.dormante
+                ? '${tableServiceLabel(open)} · oubliée ?'
+                : tableServiceLabel(open),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: (age == TableService.courte
+                    ? AppTextStyles.micro
+                    : AppTextStyles.microBold)
+                .copyWith(color: color),
+          ),
+        ),
+      ]);
+    }
+    // L'heure est passée mais la table est ENCORE tenue. C'est le seul état
+    // qui ne se lit pas sur le chiffre : sans cette mention, la courtoisie
+    // serait invisible.
+    if (table.isReservationOverdue) {
+      return Text('client attendu',
+          style: AppTextStyles.micro.copyWith(color: semantic.info));
+    }
+    return null;
+  }
+
   static String _hhmm(DateTime d) =>
       '${d.hour.toString().padLeft(2, '0')}:'
       '${d.minute.toString().padLeft(2, '0')}';
+}
 
-  /// Couverts d'une table en service, avec les places restantes.
-  ///
-  /// « 2 couverts · 4 libres » plutôt que « 2 couverts » : en salle, ce qu'on
-  /// cherche du regard c'est où placer les clients qui entrent, pas combien
-  /// sont déjà assis.
-  static String _coversLabel(RestaurantTable table) {
-    final covers = table.covers ?? table.capacity;
-    final free = table.capacity - covers;
-    if (free <= 0) return '$covers couverts';
-    return '$covers couverts · $free libre${free > 1 ? 's' : ''}';
-  }
+/// Pastille du nombre de comptes : « 2 comptes ».
+///
+/// Des COMPTES et non des commandes : deux bons envoyés en cuisine pour la
+/// même addition ne font qu'un compte, et c'est le compte qu'on encaisse.
+class _TabPill extends StatelessWidget {
+  final int count;
+  final Color color;
+
+  const _TabPill({required this.count, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.receipt_long_rounded, size: 10, color: color),
+          const SizedBox(width: 3),
+          Text('$count compte${count > 1 ? 's' : ''}',
+              maxLines: 1,
+              style: AppTextStyles.microBold.copyWith(color: color)),
+        ]),
+      );
 }
 
 /// Bouton rond +/− du sélecteur de couverts. `onTap: null` → désactivé.
