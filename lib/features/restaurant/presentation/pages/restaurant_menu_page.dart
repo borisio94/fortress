@@ -26,6 +26,8 @@ import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/product_image_card.dart';
 import '../../../caisse/presentation/widgets/cart_widget.dart';
 import '../widgets/dish_details_sheet.dart';
+import '../../../../core/utils/name_key.dart';
+import '../../domain/category_labels.dart';
 import '../widgets/dish_form_sheet.dart';
 import '../widgets/resto_dish_visuals.dart';
 import '../widgets/resto_empty_state.dart';
@@ -182,16 +184,18 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   /// Ce que la grille affiche en ce moment — la carte, ou les plats retirés.
   List<Product> get _source => _showRetired ? _retired : _products;
 
+  /// Libellé de chaque catégorie, par clé `nameKey`.
+  ///
+  /// « Plats » et « plats » faisaient deux onglets : la catégorie est une
+  /// chaîne libre, et rien ne les rapprochait. Elles n'en font plus qu'un,
+  /// sous l'orthographe la plus portée (cf. `categoryLabels`). Rien n'est
+  /// réécrit : chaque plat garde son texte.
+  Map<String, String> get _labels =>
+      categoryLabels(_source.map((p) => p.categoryId));
+
   /// Catégories réellement portées par au moins un plat — une catégorie
   /// vide n'aurait aucun contenu à filtrer.
-  List<String> get _categories {
-    final used = <String>{};
-    for (final p in _source) {
-      final c = p.categoryId;
-      if (c != null && c.isNotEmpty) used.add(c);
-    }
-    return used.toList()..sort();
-  }
+  List<String> get _categories => _labels.values.toList()..sort();
 
   /// Nombre de plats par catégorie, plus le total sous la clé `null`.
   ///
@@ -202,11 +206,15 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   /// Compté sur `_source` et non sur la carte entière : en mode « plats
   /// retirés », les nombres doivent décrire ce qui est à l'écran.
   Map<String?, int> get _categoryCounts {
+    final labels = _labels;
     final counts = <String?, int>{null: _source.length};
     for (final p in _source) {
-      final c = p.categoryId;
-      if (c == null || c.isEmpty) continue;
-      counts[c] = (counts[c] ?? 0) + 1;
+      final c = p.categoryId?.trim() ?? '';
+      if (c.isEmpty) continue;
+      // Compté sous le LIBELLÉ retenu, celui de l'onglet : « plats » ajoute
+      // au compteur de « Plats ».
+      final label = labels[nameKey(c)] ?? c;
+      counts[label] = (counts[label] ?? 0) + 1;
     }
     return counts;
   }
@@ -214,7 +222,7 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   List<Product> get _visible {
     var all = _source;
     if (_category != null) {
-      all = all.where((p) => p.categoryId == _category).toList();
+      all = all.where((p) => sameCategory(p.categoryId, _category)).toList();
     }
     final q = _query.trim().toLowerCase();
     if (q.isEmpty) return all;

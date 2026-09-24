@@ -27,6 +27,7 @@ import 'ingredient_quick_sheet.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/product_image_card.dart';
+import '../../domain/category_labels.dart';
 import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/recipe_ingredient.dart';
 import '../../domain/entities/restaurant_activity.dart';
@@ -280,8 +281,17 @@ class _DishFormSheetState extends State<DishFormSheet> {
     super.dispose();
   }
 
-  List<String> get _categories =>
-      LocalStorageService.getCategories(widget.shopId)..sort();
+  /// Une puce par catégorie, à la casse et aux accents près (`categoryLabels`).
+  ///
+  /// Les catégories DÉCLARÉES et celles que PORTENT les plats sont comptées
+  /// ensemble : le libellé retenu est ainsi le même que l'onglet du Menu, qui
+  /// choisit l'orthographe la plus portée par les plats.
+  List<String> get _categories => categoryLabels([
+        for (final p in LocalStorageService.getProductsForShop(widget.shopId))
+          p.categoryId,
+        ...LocalStorageService.getCategories(widget.shopId),
+      ]).values.toList()
+        ..sort();
 
   Future<void> _pickImage() async {
     final xFile = await ImagePicker().pickImage(source: ImageSource.gallery);
@@ -343,6 +353,15 @@ class _DishFormSheetState extends State<DishFormSheet> {
     );
     ctrl.dispose();
     if (name == null || name.isEmpty || !mounted) return;
+    // « plats » alors que « Plats » existe : on REPREND l'existante au lieu
+    // d'en créer une seconde, qui ferait un deuxième onglet au Menu. Même
+    // règle que les noms de plats (`nameKey`).
+    for (final c in _categories) {
+      if (sameCategory(c, name)) {
+        setState(() => _category = c);
+        return;
+      }
+    }
     await AppDatabase.saveCategory(widget.shopId, name);
     if (mounted) setState(() => _category = name);
   }
@@ -806,7 +825,9 @@ class _DishFormSheetState extends State<DishFormSheet> {
             for (final c in _categories)
               _Chip(
                 label: c,
-                selected: _category == c,
+                // À la casse près : un plat rangé sous « plats » allume la
+                // puce « Plats ». Sans y toucher, il garde son texte.
+                selected: sameCategory(_category, c),
                 onTap: () => setState(() => _category = c),
               ),
             // Pointillée : elle n'est pas une catégorie de plus, elle en
