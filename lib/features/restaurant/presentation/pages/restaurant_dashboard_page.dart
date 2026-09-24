@@ -17,7 +17,6 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
-import '../../../../shared/widgets/period_selector.dart';
 import '../../../../shared/widgets/product_image_card.dart';
 import '../../../caisse/presentation/bloc/caisse_bloc.dart';
 import '../../../dashboard/data/dashboard_providers.dart';
@@ -27,6 +26,7 @@ import '../../domain/margin_window.dart';
 import '../../domain/entities/staff_rating.dart';
 import '../widgets/resto_dish_visuals.dart';
 import '../widgets/resto_kpi_tile.dart';
+import '../widgets/resto_period_sheet.dart';
 import '../widgets/resto_surfaces.dart';
 import '../widgets/resto_table_listener.dart';
 import '../widgets/staff_score_gauge.dart';
@@ -99,8 +99,17 @@ class _RestaurantDashboardPageState
     final resto = ref.watch(restaurantDashProvider(shopId));
     final finance = ref.watch(restaurantFinanceProvider(shopId));
     // La période choisie décide si une marge a un sens — cf. `margin_window`.
+    //
+    // LA PÉRIODE LIBRE SE JUGE SUR SES VRAIES DATES. `rangeFor(custom)` sans
+    // bornes rend « aujourd'hui » : une période libre de trois mois était donc
+    // jugée à un jour, et ses marges ne s'affichaient jamais.
     final period = ref.watch(dashPeriodProvider);
-    final showsMargins = marginsMakeSenseOn(period, rangeFor(period));
+    final custom = ref.watch(dashCustomRangeProvider);
+    final showsMargins = marginsMakeSenseOn(
+        period,
+        period == DashPeriod.custom && custom != null
+            ? rangeFor(period, customFrom: custom.from, customTo: custom.to)
+            : rangeFor(period));
 
     return AppScaffold(
       shopId: shopId,
@@ -113,7 +122,18 @@ class _RestaurantDashboardPageState
           // ── Contexte : boutique et service ────────────────────────────
           // En TÊTE DU CORPS et non dans la barre du haut : le titre vient du
           // châssis partagé avec l'e-commerce, et il ne prend qu'une chaîne.
+          //
+          // LE SÉLECTEUR DE PÉRIODE VIT ICI, SEUL. Il y en avait un par carte
+          // (Finances, Répartition) alors qu'ils pilotaient tous le même
+          // provider : changer l'un changeait les autres sans le dire. Un seul
+          // bouton, en tête, dit que le choix vaut pour toute la page.
           _Greeting(shopId: shopId),
+          // L'explication suit le sélecteur qui la provoque, au lieu d'arriver
+          // au milieu de la page, loin des chiffres qu'elle explique.
+          if (!showsMargins) ...[
+            const SizedBox(height: 10),
+            const _MarginsUnavailableCard(),
+          ],
           const SizedBox(height: 16),
           // ── Configuration incomplète ──────────────────────────────────
           // CETTE BANNIÈRE EST LE CHEMIN, pas un filet de sécurité. Elle a
@@ -157,12 +177,12 @@ class _RestaurantDashboardPageState
           //
           // LES VOLUMES RESTENT, eux, sur toutes les périodes — ventes,
           // commandes, pertes. « Hier » sert tous les matins.
-          if (showsMargins)
-            _FinanceKpiRow(report: finance)
-          else
-            const _MarginsUnavailableCard(),
-          const SizedBox(height: 16),
+          //
+          // Sans marge, rien ne s'affiche ici : l'explication est montée dans
+          // l'en-tête, sous le sélecteur.
           if (showsMargins) ...[
+            _FinanceKpiRow(report: finance),
+            const SizedBox(height: 16),
             _FoodCostCard(report: finance),
             const SizedBox(height: 16),
           ],
@@ -458,6 +478,8 @@ class _Greeting extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
         ),
+        const SizedBox(width: 12),
+        const RestoPeriodButton(),
       ],
     );
   }
@@ -1440,7 +1462,6 @@ class _FinanceChartCardState extends ConsumerState<_FinanceChartCard> {
       subtitle: sector == null
           ? _periodLabel(period)
           : '${sector.name} · ${_periodLabel(period)}',
-      trailing: const PeriodSelector(mode: PeriodSelectorMode.inline),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1855,10 +1876,8 @@ class _ChannelCard extends ConsumerWidget {
     return _Card(
       title: 'Répartition des commandes',
       subtitle: _periodLabel(period),
-      // Sélecteur de période CANONIQUE de l'app (mode pastille) : il pilote
-      // `dashPeriodProvider`, donc les tuiles du haut suivent le même choix
-      // sans qu'on ait à recâbler quoi que ce soit.
-      trailing: const PeriodSelector(mode: PeriodSelectorMode.inline),
+      // Plus de sélecteur ici : la période se choisit une fois, en tête
+      // d'écran (`RestoPeriodButton`), et vaut pour toute la page.
       child: resto.totalOrders == 0
           ? const _EmptyBlock(
               icon: Icons.donut_large_rounded,
@@ -1965,10 +1984,11 @@ class _WeekChart extends StatelessWidget {
 
     return _Card(
       title: 'Activité de la semaine',
-      // Pastille SANS chevron : la fenêtre est fixe à 7 jours (un histogramme
-      // par jour de semaine n'a pas de sens au-delà), donc pas de faux
-      // contrôle qui laisserait croire à un choix.
-      trailing: const RestoPeriodPill(label: '7 jours'),
+      // La fenêtre est FIXE à 7 jours (un histogramme par jour de semaine n'a
+      // pas de sens au-delà). Elle ne suit donc pas la période de la page, et
+      // le sous-titre le dit — une pastille « 7 jours » à la place d'un
+      // sélecteur ressemblait à un contrôle.
+      subtitle: '7 derniers jours, quelle que soit la période',
       child: maxVal == 0
           ? const _EmptyBlock(
               icon: Icons.bar_chart_rounded,
@@ -2424,13 +2444,16 @@ class _TwoCol extends StatelessWidget {
 }
 
 /// Libellé long de la période, affiché en sous-titre.
+///
+/// Il dit la fenêtre RÉELLE (`rangeFor`) : « Cette semaine » et « Cette
+/// année » annonçaient des fenêtres calendaires qui sont en fait glissantes.
 String _periodLabel(DashPeriod p) => switch (p) {
       DashPeriod.today     => 'Aujourd\'hui',
       DashPeriod.yesterday => 'Hier',
-      DashPeriod.week      => 'Cette semaine',
+      DashPeriod.week      => '7 derniers jours',
       DashPeriod.month     => 'Ce mois-ci',
-      DashPeriod.quarter   => 'Ce trimestre',
-      DashPeriod.year      => 'Cette année',
+      DashPeriod.quarter   => '90 derniers jours',
+      DashPeriod.year      => '12 derniers mois',
       DashPeriod.custom    => 'Période personnalisée',
     };
 
