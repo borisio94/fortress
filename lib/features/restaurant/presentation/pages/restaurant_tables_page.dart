@@ -565,10 +565,9 @@ class _RestaurantTablesPageState
       title: 'Plan de salle',
       shopId: widget.shopId,
       // PLUS DE FAB. Il chevauchait le bord de la grille et masquait la
-      // dernière carte. La création passe par le bouton de l'en-tête et par
-      // une case en fin de grille — tous deux absents sans le droit de
-      // composer la salle : proposer un bouton qui refuserait ensuite serait
-      // pire que ne rien proposer (même parti pris que l'écran Menu).
+      // dernière carte. La création passe par UNE case en fin de grille —
+      // absente sans le droit de composer la salle : proposer un bouton qui
+      // refuserait ensuite serait pire que ne rien proposer.
       body: tables.isEmpty
           ? RestoEmptyState(
               icon: Icons.restaurant_rounded,
@@ -611,10 +610,9 @@ class _RestaurantTablesPageState
         return Column(children: [
           _RoomHeader(
             headline: headline,
-            // La légende n'a sa place À CÔTÉ du bouton que si la ligne est
-            // large ; sinon elle passe sous le décompte.
+            // La légende n'a sa place À DROITE que si la ligne est large ;
+            // sinon elle passe sous le décompte.
             wide: constraints.maxWidth >= 640,
-            onCreate: canManage ? _createTable : null,
           ),
           Expanded(
             child: GridView.builder(
@@ -630,7 +628,7 @@ class _RestaurantTablesPageState
               ),
               itemCount: count,
               itemBuilder: (_, i) => i == views.length
-                  ? _AddTableCell(onTap: _createTable)
+                  ? RestoAddCell(label: 'Table', onTap: _createTable)
                   : _TableCard(
                       view: views[i],
                       // Actions sur la TABLE elle-même — addition, comptes,
@@ -646,18 +644,19 @@ class _RestaurantTablesPageState
   }
 }
 
-/// En-tête du plan de salle : le décompte, la légende, le bouton de création.
+/// En-tête du plan de salle : le décompte et la légende.
+///
+/// PLUS DE BOUTON « + TABLE » ICI (24/09/2026). La création passe par UNE
+/// seule porte, la case pointillée en fin de grille — même règle sur les quatre
+/// écrans (Commandes, Plan de salle, Menu, Stock) : jamais deux appels à la
+/// même action à quinze centimètres. L'état vide garde son propre bouton.
 class _RoomHeader extends StatelessWidget {
   final String headline;
   final bool wide;
 
-  /// `null` sans le droit de composer la salle : pas de bouton du tout.
-  final VoidCallback? onCreate;
-
   const _RoomHeader({
     required this.headline,
     required this.wide,
-    required this.onCreate,
   });
 
   @override
@@ -687,23 +686,13 @@ class _RoomHeader extends StatelessWidget {
             const SizedBox(width: 12),
             const _StatusLegend(),
           ],
-          if (onCreate != null) ...[
-            const SizedBox(width: 12),
-            FilledButton.icon(
-              onPressed: onCreate,
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Table'),
-              // Thème global : minimumSize infini — il écraserait l'Expanded.
-              style: FilledButton.styleFrom(minimumSize: const Size(0, 36)),
-            ),
-          ],
         ],
       ),
     );
   }
 }
 
-/// Légende des statuts — PETITE, à côté du bouton. Elle informe sans
+/// Légende des statuts — PETITE, à droite du décompte. Elle informe sans
 /// annoncer : c'est le liseré des cartes qui porte la couleur, la légende ne
 /// sert qu'à qui la cherche.
 class _StatusLegend extends StatelessWidget {
@@ -735,39 +724,6 @@ class _StatusLegend extends StatelessWidget {
             ],
           ),
       ],
-    );
-  }
-}
-
-/// Case « + Table » en fin de grille, aux dimensions d'une carte.
-class _AddTableCell extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _AddTableCell({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final sem = Theme.of(context).semantic;
-    return RestoDashedBorder(
-      color: sem.borderSubtle,
-      radius: 10,
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
-          child: Center(
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.add_rounded, size: 18, color: cs.primary),
-              const SizedBox(width: 4),
-              Text('Table',
-                  style: AppTextStyles.bodyBold.copyWith(color: cs.primary)),
-            ]),
-          ),
-        ),
-      ),
     );
   }
 }

@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
+
 /// Contour POINTILLÉ du mode restaurant.
 ///
 /// Il marque ce qui ne se CHOISIT pas mais s'OUVRE ou se CRÉE : « Personnalisé »
-/// dans la feuille de période, la case « + Table » en fin de plan de salle. La
-/// forme le dit avant qu'on touche.
+/// dans la feuille de période, les cases de création en fin de liste ou de
+/// grille ([RestoAddCell]). La forme le dit avant qu'on touche.
 class RestoDashedBorder extends StatelessWidget {
   final Widget child;
   final Color color;
@@ -59,4 +62,58 @@ class _DashedPainter extends CustomPainter {
   @override
   bool shouldRepaint(_DashedPainter old) =>
       old.color != color || old.radius != radius;
+}
+
+/// LA CASE DE CRÉATION, en fin de liste ou de grille.
+///
+/// ─── RÈGLE DES QUATRE ÉCRANS (24/09/2026) ─────────────────────────────────
+///
+/// Commandes, Plan de salle, Menu et Stock : UNE SEULE porte de création, cette
+/// case pointillée en fin de liste ou de grille. PAS de bouton d'en-tête en
+/// plus — jamais deux appels à la même action à quinze centimètres. L'ÉTAT
+/// VIDE garde son propre bouton : sans rien à lister, il n'y a pas de « fin de
+/// liste » où poser la case.
+///
+/// Toutes les largeurs, sans branche mobile : la grammaire est la même.
+///
+/// Pointillée parce qu'elle n'est pas un élément de plus : elle en fabrique un.
+/// Elle prend la taille que son parent lui donne — une cellule de grille, ou
+/// une ligne de liste.
+class RestoAddCell extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  final double radius;
+
+  const RestoAddCell({
+    super.key,
+    required this.label,
+    required this.onTap,
+    this.radius = 10,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final sem = Theme.of(context).semantic;
+    return RestoDashedBorder(
+      color: sem.borderSubtle,
+      radius: radius,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(radius),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(radius),
+          child: Center(
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.add_rounded, size: 18, color: cs.primary),
+              const SizedBox(width: 4),
+              Text(label,
+                  style: AppTextStyles.bodyBold.copyWith(color: cs.primary)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
 }

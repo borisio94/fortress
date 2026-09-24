@@ -24,6 +24,7 @@ import '../widgets/cost_method_picker.dart';
 import '../widgets/ingredient_quick_sheet.dart';
 import '../widgets/resto_empty_state.dart' show RestoEmptyState;
 import '../widgets/resto_amount_text.dart';
+import '../widgets/resto_dashed_border.dart';
 import '../widgets/resto_surfaces.dart' show RestoGlassPanel;
 import '../widgets/resto_underline_tabs.dart';
 import '../widgets/resto_section_header.dart';
@@ -114,29 +115,10 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
             subtitle: '${_count(nIng, zero: 'aucun ingrédient', one: 'ingrédient')}'
                 ' · '
                 '${_count(nSup, zero: 'aucune fourniture', one: 'fourniture')}',
-            // LE BOUTON DE CRÉATION MONTE ICI.
-            //
-            // Il occupait une ligne à lui seul entre les onglets et la liste :
-            // sur un écran large, cent soixante pixels de bouton et huit cents
-            // de vide, qui repoussaient la première ligne d'autant.
-            //
-            // L'ACTION SUIT L'ONGLET ACTIF, et les deux feuilles remontent ici
-            // pour ça — l'une comme l'autre ne demandait que le `shopId` et un
-            // contexte. Les laisser dans leur onglet aurait obligé à les
-            // atteindre par une clé globale, c'est-à-dire à rendre la page
-            // dépendante de l'état interne de ses enfants.
-            //
-            // MASQUÉ SUR UNE LISTE VIDE : l'état vide porte déjà son propre
-            // bouton, sous la phrase qui le promet. Deux appels à la même
-            // action, à quinze centimètres, se concurrenceraient.
-            trailing: (_tab == 0 ? nIng : nSup) == 0
-                ? null
-                : _HeaderAddButton(
-                    label: _tab == 0 ? 'Ingrédient' : 'Fourniture',
-                    onTap: _tab == 0
-                        ? () => _createIngredient(context, shopId)
-                        : () => _createStockItem(context, shopId),
-                  ),
+            // PLUS DE BOUTON DE CRÉATION ICI (24/09/2026). La création passe
+            // par UNE case pointillée en pied de chaque liste (`RestoAddCell`)
+            // — même règle sur les quatre écrans : jamais deux appels à la même
+            // action à quinze centimètres. L'état vide garde son bouton.
           ),
           // DEUX NATURES, DEUX SIGNAUX : une icône et une couleur.
           //
@@ -185,30 +167,6 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
       ),
     );
   }
-
-  /// Crée un ingrédient — MÊME feuille que la fiche d'un plat.
-  ///
-  /// `IngredientQuickSheet` écrit l'ingrédient et, si un montant est saisi, la
-  /// dépense d'achat qui va avec. La liste se rafraîchit par l'écoute de
-  /// `ingredients`, comme toujours — aucun `setState` n'est nécessaire ici.
-  ///
-  /// `warnsAboutUnlinked` : créé depuis STOCK, rien n'oblige à le rattacher à
-  /// une recette ensuite, et la feuille le dit.
-  static Future<void> _createIngredient(BuildContext context, String shopId) =>
-      showAdaptiveFormSheet<Ingredient>(
-        context: context,
-        builder: (_) => IngredientQuickSheet(
-          shopId: shopId,
-          warnsAboutUnlinked: true,
-        ),
-      );
-
-  /// Crée une fourniture. Même remontée, même raison.
-  static Future<void> _createStockItem(BuildContext context, String shopId) =>
-      showAdaptiveFormSheet<bool>(
-        context: context,
-        builder: (_) => _StockItemEditor(shopId: shopId),
-      );
 
   /// « aucun ingrédient », « 1 ingrédient », « 4 ingrédients ».
   ///
@@ -353,13 +311,12 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
           busy: _backfilling,
           onRun: _backfill,
         ),
-        // LE BOUTON DE CRÉATION EST REMONTÉ DANS L'EN-TÊTE DE L'ÉCRAN.
+        // LA CRÉATION EST UNE CASE EN PIED DE LISTE (24/09/2026).
         //
-        // Il est resté une ligne entière ici jusqu'au 2026-09-23, entre les
-        // onglets et la liste. Sur un écran large, cette ligne ne portait
-        // qu'un bouton et du vide — cf. `RestoSectionHeader.trailing`.
-        //
-        // Il reste dans l'état vide, où il est le seul chemin annoncé.
+        // Elle a été une ligne entière ici jusqu'au 2026-09-23, entre les
+        // onglets et la liste, puis un bouton d'en-tête. C'est désormais la
+        // case pointillée sous la liste (`RestoAddCell`), seule porte — et le
+        // bouton de l'état vide quand il n'y a rien à lister.
         Expanded(
           child: items.isEmpty
               // COMPACT : la barre d'onglets juste au-dessus porte déjà
@@ -421,6 +378,13 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
                           onDelete: () => _delete(ing),
                         ),
                     ]),
+                    const SizedBox(height: 10),
+                    // LA SEULE PORTE DE CRÉATION de l'onglet, en pied de liste.
+                    SizedBox(
+                      height: 48,
+                      child: RestoAddCell(
+                          label: 'Ingrédient', onTap: _createIngredient),
+                    ),
                   ],
                 ),
         ),
@@ -490,33 +454,6 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
     );
     if (mounted) setState(() {});
   }
-}
-
-/// BOUTON DE CRÉATION, dans l'en-tête de l'écran.
-///
-/// Compact et sans fond plein : il partage sa ligne avec le titre, qui doit
-/// rester ce qu'on lit en premier. `FilledButton.tonal` plutôt que `Filled` —
-/// un aplat d'accent à côté d'un titre en attirerait tout le regard.
-///
-/// Le libellé perd son « Nouvel » : « Ingrédient » précédé d'un plus se lit
-/// sans ambiguïté, et deux mots de moins tiennent sur un téléphone.
-class _HeaderAddButton extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-
-  const _HeaderAddButton({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) => FilledButton.tonalIcon(
-        onPressed: onTap,
-        icon: const Icon(Icons.add_rounded, size: 17),
-        label: Text(label),
-        style: FilledButton.styleFrom(
-          minimumSize: const Size(0, 36),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          textStyle: AppTextStyles.bodySm,
-        ),
-      );
 }
 
 /// BANDEAU « AUCUN PLAT » — dit une fois ce que seize pastilles répétaient.
@@ -1221,8 +1158,8 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
         // (`_SuppliesEmptyState`) ; le cas des boissons, en note — dans l'état
         // vide ET en pied de liste (`_DrinksNote`), pour qu'il ne disparaisse
         // pas au premier article saisi.
-        if (items.isNotEmpty)
-          headerButton('Nouvelle fourniture', () => _edit(null)),
+        // Le « Nouvelle fourniture » qui doublait ici le bouton d'en-tête a
+        // disparu avec lui : la case en pied de liste est la seule porte.
         Expanded(
           child: items.isEmpty
               ? _SuppliesEmptyState(
@@ -1300,6 +1237,12 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
                       ]),
                     ),
                     ]),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      height: 48,
+                      child: RestoAddCell(
+                          label: 'Fourniture', onTap: () => _edit(null)),
+                    ),
                     const SizedBox(height: 16),
                     const _DrinksNote(),
                   ],

@@ -31,6 +31,7 @@ import '../../../restaurant/domain/order_tile.dart';
 import '../../../restaurant/domain/service_tabs.dart';
 import '../../../restaurant/presentation/widgets/resto_empty_state.dart';
 import '../../../restaurant/presentation/widgets/resto_amount_text.dart';
+import '../../../restaurant/presentation/widgets/resto_dashed_border.dart';
 import '../../../restaurant/presentation/widgets/resto_underline_tabs.dart';
 import '../../../restaurant/presentation/widgets/order_action_visuals.dart';
 import '../../../restaurant/presentation/widgets/service_tab_visuals.dart';
@@ -4772,9 +4773,12 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: AppTextStyles.caption);
-    final montant = Text(CurrencyFormatter.format(widget.order.total),
-        maxLines: 1,
-        style: AppTextStyles.bodySmBold.copyWith(color: cs.primary));
+    // EN TEXTE PRIMAIRE, comme la grille : deux couleurs de montant selon la
+    // vue seraient pires que le désordre corrigé. L'échelon reste celui de la
+    // ligne dense (13 semi-gras) — « en gros » à l'échelle d'une ligne.
+    final montant = RestoAmountText(widget.order.total,
+        style: AppTextStyles.bodyBold
+            .copyWith(fontWeight: FontWeight.w600, color: cs.onSurface));
     final chevron = AnimatedRotation(
       turns: _expanded ? 0.5 : 0,
       duration: const Duration(milliseconds: 200),
@@ -6041,7 +6045,14 @@ class _NewOrderTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return InkWell(
+    // EN POINTILLÉ, comme les trois autres écrans (Plan de salle, Menu, Stock)
+    // — le commentaire le disait déjà, la bordure était pleine. Une bordure
+    // pleine et trois pointillées pour la même intention, c'est l'écart qui
+    // se voit sans qu'on sache pourquoi.
+    return RestoDashedBorder(
+      color: Theme.of(context).semantic.borderSubtle,
+      radius: 14,
+      child: InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
       child: Container(
@@ -6049,12 +6060,6 @@ class _NewOrderTile extends StatelessWidget {
         // carte de sa rangée sans jamais forcer les autres.
         constraints: const BoxConstraints(minHeight: 96),
         alignment: Alignment.center,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-              color: cs.primary.withValues(alpha: 0.35),
-              width: 1),
-        ),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.add_circle_outline_rounded, size: 26, color: cs.primary),
           const SizedBox(height: 6),
@@ -6063,6 +6068,7 @@ class _NewOrderTile extends StatelessWidget {
           const SizedBox(height: 2),
           Text('Ouvre la carte', style: AppTextStyles.micro),
         ]),
+      ),
       ),
     );
   }
