@@ -1215,43 +1215,29 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
             onRun: _backfill,
             label: 'fourniture',
           ),
-        // Orientation explicite : c'est LA confusion du module. Une boisson
-        // saisie ici ne se décrémenterait jamais à la vente, et son stock
-        // divergerait dès le premier service.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: Text(
-              'Ce que vous consommez sans le revendre : emballages, gaz, '
-              'entretien, charbon. Pour une boisson revendue telle quelle, '
-              'créez plutôt un plat avec « Suivi du stock » — il se décrémente '
-              'tout seul à chaque vente.',
-              style: AppTextStyles.captionHint),
-        ),
+        // LE PARAGRAPHE D'ORIENTATION QUI ÉTAIT ICI A DISPARU. Il répétait
+        // l'état vide en dessous, avec une autre liste d'exemples. Son contenu
+        // survit en deux morceaux : ce qu'est une fourniture, dans l'état vide
+        // (`_SuppliesEmptyState`) ; le cas des boissons, en note — dans l'état
+        // vide ET en pied de liste (`_DrinksNote`), pour qu'il ne disparaisse
+        // pas au premier article saisi.
         if (items.isNotEmpty)
           headerButton('Nouvelle fourniture', () => _edit(null)),
         Expanded(
           child: items.isEmpty
-              ? RestoEmptyState(
-                  compact: true,
-                  icon: Icons.inventory_2_outlined,
-                  title: 'Aucune fourniture',
-                  // Le pendant exact de l'autre onglet : ce qui se consomme
-                  // SANS ÊTRE SERVI. C'est la frontière qui décide où ranger
-                  // une barquette, et elle n'est évidente pour personne.
-                  subtitle: 'Ce que vous consommez sans le servir — '
-                      'barquettes, gaz, produits d\'entretien.',
-                  actionLabel: 'Nouvelle fourniture',
-                  onAction: () => _edit(null),
-                  // OÙ SE FAIT L'ACHAT, hors de la carte : on crée une
-                  // fourniture ici, on l'achète là-bas. Depuis que Stock et
-                  // Finances sont deux écrans, rien ne disait plus le chemin.
-                  footer: _PurchasesLink(shopId: widget.shopId),
+              ? _SuppliesEmptyState(
+                  onCreate: () => _edit(null),
+                  // OÙ SE FAIT L'ACHAT : on crée une fourniture ici, on
+                  // l'achète au hub Finances. « Dépenses » est l'onglet
+                  // d'index 0 du hub : la route seule y atterrit.
+                  onOpenPurchases: () =>
+                      context.push('/shop/${widget.shopId}/restaurant/finances'),
                 )
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
                   children: [
                     // Même panneau et mêmes lignes que les ingrédients — voir
-                    // `_StockLines`.
+                    // `_StockLines`. La note sur les boissons suit la liste.
                     _StockLines(children: [
                   for (final s in items)
                     // Ligne INERTE : elle ouvrait l'éditeur, ce qui faisait
@@ -1314,6 +1300,8 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
                       ]),
                     ),
                     ]),
+                    const SizedBox(height: 16),
+                    const _DrinksNote(),
                   ],
                 ),
         ),
@@ -1373,59 +1361,155 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
   }
 }
 
-/// OÙ SE FAIT L'ACHAT D'UNE FOURNITURE.
+/// ÉTAT VIDE DE L'ONGLET FOURNITURES — sans carte, borné à 440 px à gauche.
 ///
-/// On crée une fourniture ici, on l'achète au hub Finances. Depuis que les
-/// deux écrans sont séparés — 21/09/2026 —, plus rien ne disait le chemin, et
-/// une fourniture créée sans dépense ne pèse sur aucun bilan.
+/// ─── SECONDE EXCEPTION À LA RÈGLE DU 16/09 — CET ONGLET SEULEMENT ─────────
 ///
-/// HORS de la carte d'état vide, séparé par un filet : celle-ci dit ce qu'il
-/// n'y a pas ici, ce renvoi parle d'un autre écran.
+/// La règle : « un état vide est une CARTE, pas un texte flottant »
+/// (`RestoEmptyState`, qui sert seize états vides du module et n'est PAS
+/// modifié). Elle a deux raisons, et elles ne tombent pas ensemble :
 ///
-/// « Dépenses » est l'onglet d'index 0 du hub depuis la scission : pousser la
-/// route y atterrit sans qu'aucun paramètre d'onglet soit nécessaire.
-class _PurchasesLink extends StatelessWidget {
-  final String shopId;
-  const _PurchasesLink({required this.shopId});
+///   • la LISIBILITÉ du texte sur le décor — levée par la première exception
+///     (24/09, `restoGlassFill`) : le décor géométrique est mesuré, primaire
+///     ≥ 12,2:1, secondaire ≥ 5,2:1 ;
+///   • la FORME : une icône seule devant un paragraphe se lit comme une PUCE
+///     DE LISTE, et un texte seul au milieu du vide comme un écran qui n'a pas
+///     fini de charger. Celle-ci demeure.
+///
+/// D'où ce qui reste ici : pas de carte, mais le CARRÉ D'ICÔNE de 34 px, qui
+/// dit « état vide » avant que le texte soit lu. Et une largeur de lecture
+/// (440 px, à gauche) plutôt qu'un paragraphe qui traverse 1 030 px.
+///
+/// Cette exception ne vaut QUE pour cet onglet (24/09/2026). Ne pas l'étendre
+/// sans la même instruction : ailleurs, `RestoEmptyState` reste la règle.
+///
+/// Une seule explication : la phrase dit CE QUI DISTINGUE une fourniture d'un
+/// ingrédient (section 1 de la définition financière) — une charge, jamais une
+/// matière. Le bouton fait sa taille, et le renvoi vers les achats est un lien
+/// à côté de lui, plus une ligne encadrée à part.
+class _SuppliesEmptyState extends StatelessWidget {
+  final VoidCallback onCreate;
+  final VoidCallback onOpenPurchases;
+
+  const _SuppliesEmptyState({
+    required this.onCreate,
+    required this.onOpenPurchases,
+  });
+
+  /// Largeur de LECTURE, pas une taille typographique.
+  static const double _kMaxWidth = 440;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final sem = Theme.of(context).semantic;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Divider(height: 1, color: sem.borderSubtle),
-        Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () => context.push('/shop/$shopId/restaurant/finances'),
-            borderRadius: BorderRadius.circular(10),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 11),
-              child: Row(children: [
-                Icon(Icons.receipt_long_outlined, size: 18, color: cs.primary),
+    return Align(
+      alignment: Alignment.topLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: _kMaxWidth),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // LE CARRÉ RESTE : c'est lui qui évite la lecture « puce ».
+                // Même carré que `RestoEmptyState` compact.
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: cs.primary.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.inventory_2_outlined,
+                      size: 17, color: cs.primary),
+                ),
                 const SizedBox(width: 11),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Voir vos achats',
-                          style: AppTextStyles.bodySm
+                      Text('Aucune fourniture',
+                          style: AppTextStyles.bodyBold
                               .copyWith(color: cs.onSurface)),
-                      const SizedBox(height: 1),
-                      Text('Finances · Dépenses',
-                          style: AppTextStyles.micro
-                              .copyWith(color: AppColors.textHint)),
+                      const SizedBox(height: 3),
+                      Text(
+                          'Ce que vous consommez sans le servir — barquettes, '
+                          'gaz, charbon, produits d\'entretien. Chaque achat '
+                          'compte comme une charge, jamais comme une matière.',
+                          style: AppTextStyles.caption
+                              .copyWith(color: AppColors.textSecondary)),
                     ],
                   ),
                 ),
-                Icon(Icons.chevron_right_rounded,
-                    size: 18, color: AppColors.textHint),
-              ]),
+              ],
             ),
-          ),
+            const SizedBox(height: 14),
+            // Aligné sous le TEXTE, pas sous le carré d'icône.
+            Padding(
+              padding: const EdgeInsets.only(left: 45),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  // SA TAILLE, plus la pleine largeur : un bouton de 1 030 px
+                  // pour un libellé de deux mots.
+                  FilledButton.icon(
+                    onPressed: onCreate,
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('Nouvelle fourniture'),
+                    // Thème global : minimumSize infini.
+                    style: FilledButton.styleFrom(
+                        minimumSize: const Size(0, 40)),
+                  ),
+                  TextButton(
+                    onPressed: onOpenPurchases,
+                    child: const Text('Voir vos achats'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Padding(
+              padding: EdgeInsets.only(left: 45),
+              child: _DrinksNote(),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+}
+
+/// LE CAS DES BOISSONS, en note — c'est LA confusion du module.
+///
+/// Une boisson saisie en fourniture ne se décrémenterait jamais à la vente, et
+/// son stock divergerait dès le premier service. Une précision, pas
+/// l'explication principale : 11 px, sous un filet, après l'action.
+///
+/// DANS L'ÉTAT VIDE ET EN PIED DE LISTE : une note qui répond à la confusion
+/// la plus fréquente ne peut pas disparaître au premier article saisi.
+///
+/// `textSecondary` et non `textHint` : ce dernier ne fait que 3,07:1 en sombre
+/// (dette de palette, `docs/backlog.md`).
+class _DrinksNote extends StatelessWidget {
+  const _DrinksNote();
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Divider(height: 1, thickness: 1, color: sem.borderSubtle),
+        const SizedBox(height: 8),
+        Text(
+            'Pour une boisson revendue telle quelle, créez plutôt un plat avec '
+            '« Suivi du stock » — il se décrémente tout seul à chaque vente.',
+            style:
+                AppTextStyles.caption.copyWith(color: AppColors.textSecondary)),
       ],
     );
   }
