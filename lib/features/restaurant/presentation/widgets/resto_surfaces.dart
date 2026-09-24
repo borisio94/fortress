@@ -338,9 +338,29 @@ class RestoGlassPanel extends StatelessWidget {
 /// donc la surface POSÉE SOUS LE TEXTE qui porte la lisibilité.
 ///
 /// Concrètement, pour tout nouvel écran du module : le texte va dans un
-/// [RestoGlassPanel], ou dans un conteneur peint avec cette teinte. Un `Text`
-/// posé directement sur [RestoBackdrop] est un défaut, même s'il se lit sur la
-/// photo du moment.
+/// [RestoGlassPanel], ou dans un conteneur peint avec cette teinte.
+///
+/// ─── EXCEPTION (24/09/2026) : LE DÉCOR GÉOMÉTRIQUE ─────────────────────────
+///
+/// **Le texte peut vivre sur le décor géométrique ; jamais sur une photo. Les
+/// pastilles posées sur une photo gardent leur voile à 85 %.**
+///
+/// La règle ci-dessus a été écrite contre une PHOTO de salle, imprévisible.
+/// [RestoBackdrop] n'en est plus une : c'est un dégradé et un motif
+/// géométrique à faible opacité (6 à 14 %, cf. [RestoBackdropTokens]), donc
+/// CALCULABLE — et il a été calculé. Pire cas sur les huit palettes (motif le
+/// plus opaque sur la zone la plus claire ou la plus sombre du dégradé) :
+///
+///   • texte primaire  : ≥ 13,1:1 en clair, ≥ 12,2:1 en sombre ;
+///   • texte secondaire : ≥ 5,6:1 en clair,  ≥ 5,2:1 en sombre.
+///
+/// Tout est au-dessus du seuil AA de 4,5:1. ⚠ NE PAS RÉTABLIR la contrainte
+/// sur le décor en croyant bien faire : ces chiffres sont la raison de
+/// l'exception. Elle tombe si le décor redevient une photo, ou si le motif
+/// dépasse ~15 % d'opacité — il faut alors REMESURER, pas supposer.
+///
+/// Premier usage : la grille du Menu, dont le nom et le prix vivent sous la
+/// photo sans carte autour.
 ///
 /// En sombre, le panneau est TEINTÉ SOMBRE (et non blanc translucide) : un
 /// voile blanc par-dessus une photo de salle éclairée délaverait le texte clair

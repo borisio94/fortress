@@ -30,6 +30,8 @@ import '../../../restaurant/domain/order_actions.dart';
 import '../../../restaurant/domain/order_tile.dart';
 import '../../../restaurant/domain/service_tabs.dart';
 import '../../../restaurant/presentation/widgets/resto_empty_state.dart';
+import '../../../restaurant/presentation/widgets/resto_amount_text.dart';
+import '../../../restaurant/presentation/widgets/resto_underline_tabs.dart';
 import '../../../restaurant/presentation/widgets/order_action_visuals.dart';
 import '../../../restaurant/presentation/widgets/service_tab_visuals.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
@@ -1674,8 +1676,8 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                   style: AppTextStyles.caption
                       .copyWith(color: AppColors.textSecondary)),
               const SizedBox(height: 2),
-              _amountText(value,
-                  number: AppTextStyles.title
+              RestoAmountText(value,
+                  style: AppTextStyles.title
                       .copyWith(fontWeight: FontWeight.w600, color: color)),
             ],
           ),
@@ -1781,14 +1783,21 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
       //
       // `TabBar` en e-commerce. En restauration, SOULIGNÉS, plus en
       // pastilles : la hiérarchie de l'écran passe par la typographie et
-      // l'espace, pas par des contours. `RestoPillTabs` reste
-      // celle du Menu et du Stock — elle n'est pas touchée, ce widget-ci est
-      // propre à cet écran.
+      // l'espace, pas par des contours. Même widget que le Menu
+      // (`RestoUnderlineTabs`) ; `RestoPillTabs` ne sert plus qu'au Stock.
       if (_isResto)
-        _ServiceUnderlineTabs(
-          counts: restoCounts,
-          selected: _serviceTab,
-          onSelect: (t) => setState(() => _serviceTab = t),
+        RestoUnderlineTabs(
+          items: [
+            for (final t in ServiceTab.ordered)
+              RestoUnderlineTab(
+                label: t.label,
+                count: restoCounts[t] ?? 0,
+                mutedWhenEmpty: t != ServiceTab.toutes,
+              ),
+          ],
+          selected: ServiceTab.ordered.indexOf(_serviceTab),
+          onSelect: (i) =>
+              setState(() => _serviceTab = ServiceTab.ordered[i]),
         )
       else
       Container(
@@ -4721,8 +4730,8 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         textBaseline: TextBaseline.alphabetic,
         children: [
           Flexible(
-            child: _amountText(widget.order.total,
-                number: AppTextStyles.title.copyWith(
+            child: RestoAmountText(widget.order.total,
+                style: AppTextStyles.title.copyWith(
                     fontWeight: FontWeight.w600,
                     color: settled ? AppColors.textSecondary : cs.onSurface)),
           ),
@@ -6011,111 +6020,6 @@ class _ViewModeToggle extends StatelessWidget {
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         seg(Icons.grid_view_rounded, true, 'Cartes'),
         seg(Icons.view_list_rounded, false, 'Liste dense'),
-      ]),
-    );
-  }
-}
-
-/// UN MONTANT, chiffre et unité séparés : « 2 500 » en [number], « FCFA » en
-/// 11 px atténué à côté.
-///
-/// La chaîne vient TOUJOURS de `CurrencyFormatter.format` — on la coupe sur le
-/// symbole de la devise courante, on ne la recompose pas. Le symbole reste
-/// donc là où la locale le met, avant ou après le nombre. S'il est introuvable
-/// (devise explicite, symbole absent), la chaîne entière part en [number].
-Widget _amountText(double value, {required TextStyle number}) {
-  final s = CurrencyFormatter.format(value);
-  final sym = CurrencyFormatter.currentSymbol;
-  final i = sym.isEmpty ? -1 : s.indexOf(sym);
-  final unit =
-      AppTextStyles.caption.copyWith(color: AppColors.textSecondary);
-  if (i < 0) {
-    return Text(s, maxLines: 1, overflow: TextOverflow.ellipsis, style: number);
-  }
-  return Text.rich(
-    TextSpan(children: [
-      if (i > 0) TextSpan(text: s.substring(0, i), style: number),
-      TextSpan(text: sym, style: unit),
-      if (i + sym.length < s.length)
-        TextSpan(text: s.substring(i + sym.length), style: number),
-    ]),
-    maxLines: 1,
-    overflow: TextOverflow.ellipsis,
-  );
-}
-
-/// ONGLETS DE SERVICE, soulignés — restauration, écran Commandes seulement.
-///
-/// Plus de pastilles, ni fond ni contour : le libellé, son compteur en
-/// atténué, et un trait de 1,5 px à la couleur de marque sous l'onglet actif.
-///
-/// L'ACTIF SE LIT AUSSI SANS LE TRAIT, par sa graisse et sa couleur de texte.
-/// C'est voulu : sur Midnight en sombre, la primaire ne fait que 1,93:1 sur la
-/// carte — le trait y est à peine visible, et ne doit pas être seul à parler.
-///
-/// Un onglet VIDE s'efface davantage (`textHint`) : il reste cliquable, mais
-/// ne doit pas disputer le regard aux onglets qui ont quelque chose.
-class _ServiceUnderlineTabs extends StatelessWidget {
-  final Map<ServiceTab, int> counts;
-  final ServiceTab selected;
-  final ValueChanged<ServiceTab> onSelect;
-
-  const _ServiceUnderlineTabs({
-    required this.counts,
-    required this.selected,
-    required this.onSelect,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Row(children: [
-        for (final t in ServiceTab.ordered)
-          Builder(builder: (context) {
-            final active = t == selected;
-            final n = counts[t] ?? 0;
-            final empty = n == 0 && t != ServiceTab.toutes;
-            final labelColor = active
-                ? cs.onSurface
-                : empty
-                    ? AppColors.textHint
-                    : AppColors.textSecondary;
-            return InkWell(
-              onTap: () => onSelect(t),
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-                decoration: BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(
-                      color: active ? cs.primary : Colors.transparent,
-                      width: 1.5,
-                    ),
-                  ),
-                ),
-                child: Text.rich(
-                  TextSpan(children: [
-                    TextSpan(
-                        text: t.label,
-                        style: (active
-                                ? AppTextStyles.bodySmBold
-                                : AppTextStyles.bodySm)
-                            .copyWith(color: labelColor)),
-                    if (n > 0)
-                      TextSpan(
-                          text: '  $n',
-                          style: AppTextStyles.caption.copyWith(
-                              color: empty
-                                  ? AppColors.textHint
-                                  : AppColors.textSecondary)),
-                  ]),
-                  maxLines: 1,
-                ),
-              ),
-            );
-          }),
       ]),
     );
   }

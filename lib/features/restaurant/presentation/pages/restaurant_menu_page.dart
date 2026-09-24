@@ -10,9 +10,9 @@ import '../../../../core/services/daily_menu_service.dart';
 import '../../../../core/services/restaurant_order_service.dart';
 import '../../../../core/services/restaurant_setup_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
+import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
-import '../../../../core/utils/currency_formatter.dart';
 import '../../../caisse/domain/entities/sale_item.dart';
 import '../../../caisse/presentation/bloc/caisse_bloc.dart';
 import '../../../../features/inventaire/domain/entities/product.dart';
@@ -28,10 +28,12 @@ import '../../../caisse/presentation/widgets/cart_widget.dart';
 import '../widgets/dish_details_sheet.dart';
 import '../../../../core/utils/name_key.dart';
 import '../../domain/category_labels.dart';
+import '../../domain/menu_grid_geometry.dart';
 import '../widgets/dish_form_sheet.dart';
 import '../widgets/resto_dish_visuals.dart';
 import '../widgets/resto_empty_state.dart';
-import '../widgets/resto_pill_tabs.dart';
+import '../widgets/resto_amount_text.dart';
+import '../widgets/resto_underline_tabs.dart';
 import '../widgets/resto_surfaces.dart';
 
 /// Tables dont un changement doit redessiner cet écran.
@@ -88,6 +90,11 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   /// qu'un serveur connaît le nom de ce qu'on lui commande.
   final _searchCtrl = TextEditingController();
   String _query = '';
+
+  /// Champ de recherche DÉPLOYÉ. Replié, il n'est qu'une loupe dans l'en-tête :
+  /// un champ vide pleine largeur au-dessus d'une carte de quelques plats ne
+  /// sert à rien. Il reste ouvert tant qu'une recherche est saisie.
+  bool _searchOpen = false;
 
   /// La grille montre-t-elle les plats RETIRÉS au lieu de la carte ?
   ///
@@ -464,18 +471,16 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     return AppScaffold(
       shopId: widget.shopId,
       title: 'Menu',
-      // Masqué quand la grille est vide : l'état vide porte déjà son propre
-      // bouton d'ajout, et deux options d'ajout simultanées se
-      // concurrenceraient à l'écran.
+      // PLUS DE BOUTON FLOTTANT. Il chevauchait le bord de la grille, et sur
+      // le Menu, ajouter un plat n'est pas assez fréquent pour mériter un
+      // flottant : il est devenu un bouton de l'en-tête (`_MenuHeader`).
       //
-      // Masqué AUSSI quand le panier est ouvert. Sur mobile le volet occupe
-      // toute la largeur (cf. `_cartPaneWidth`) : le bouton flottait alors
-      // par-dessus et recouvrait « Commander », le geste même que l'on
-      // cherche à provoquer. Ajouter un plat n'a de toute façon aucun sens
-      // pendant qu'on encaisse — la carte n'est plus à l'écran.
-      floatingActionButton: (products.isEmpty || !canAdd || _cartOpen(context))
-          ? null
-          : _addDishButton(context),
+      // La condition « panier ouvert » ne l'a pas suivi : elle existait parce
+      // que le flottant recouvrait « Commander » du volet, ce qu'un bouton
+      // d'en-tête ne fait pas. Et sous `kCartPaneFullWidthBelow`, le volet
+      // prend TOUTE la largeur de la `Row` ci-dessous — `Expanded` laisse alors
+      // 0 dp à la carte, en-tête compris : le bouton n'est plus à l'écran.
+      //
       // VOLET PANIER À DROITE — ouvert dès le premier article, refermé dès le
       // dernier retiré. Il remplace la feuille modale : celle-ci recouvrait la
       // carte, obligeant à la fermer pour ajouter le plat suivant et à la
@@ -549,60 +554,6 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   /// distincts, pas deux moitiés d'une même surface.
   static const double _kCartGap = 10;
 
-  /// Le volet panier est-il déployé ?
-  ///
-  /// `select` et non `watch` : seule la bascule vide/non-vide nous intéresse.
-  /// Observer l'état entier ferait reconstruire toute la carte à chaque
-  /// changement de quantité, pour un bouton qui, lui, ne change pas.
-  bool _cartOpen(BuildContext context) {
-    final hasItems =
-        context.select<CaisseBloc, bool>((b) => b.state.items.isNotEmpty);
-    return hasItems && ref.watch(cartPaneVisibleProvider);
-  }
-
-  /// Bouton d'ajout d'un plat — UN SEUL rendu, quelle que soit la largeur.
-  ///
-  /// Il changeait de forme à 600 px : pastille de 40 px en dessous, bouton
-  /// allongé « + Plat » au-dessus. Le libellé n'apprenait rien que l'icône ne
-  /// dise déjà, et la version allongée passait par-dessus le bouton
-  /// « Commander » du volet panier — le correctif de `7a6a417` n'a traité que
-  /// le recouvrement, pas le fait qu'un même bouton ait deux silhouettes.
-  ///
-  /// Ni `FloatingActionButton` ni sa variante `.small` : le premier impose
-  /// 56 px, la seconde 40, et aucun des deux n'expose la couleur de son ombre.
-  /// Un `Material` en cercle donne les 48 px demandés et une ombre teintée à
-  /// l'accent de la boutique, qui pose le bouton sur le fond à motifs au lieu
-  /// de l'en détacher par un gris.
-  Widget _addDishButton(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: 'Ajouter un plat',
-      child: Container(
-        width: _kFabSize,
-        height: _kFabSize,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: cs.primary.withValues(alpha: 0.35),
-              blurRadius: 14,
-              offset: const Offset(0, 5),
-            ),
-          ],
-        ),
-        child: Material(
-          color: cs.primary,
-          shape: const CircleBorder(),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: _openDishForm,
-            child: Icon(Icons.add_rounded, size: 22, color: cs.onPrimary),
-          ),
-        ),
-      ),
-    );
-  }
-
   /// Largeur du volet : assez pour lire une ligne d'article, jamais plus du
   /// tiers de l'écran — la carte doit rester l'écran principal.
   double _cartPaneWidth(BuildContext context) {
@@ -652,6 +603,16 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
               dishCount: _source.length,
               categoryCount: _categories.length,
               retired: _showRetired,
+              // La loupe s'efface quand le champ est déployé : il porte déjà sa
+              // propre croix de fermeture.
+              onSearch: _searchOpen || _query.isNotEmpty
+                  ? null
+                  : () => setState(() => _searchOpen = true),
+              // Mêmes conditions que l'ancien bouton flottant, sauf « panier
+              // ouvert » (voir `build`) : droit d'ajout, et une grille non
+              // vide — l'état vide porte son propre bouton d'ajout, deux à la
+              // fois se concurrenceraient.
+              onAdd: canAdd && products.isNotEmpty ? _openDishForm : null,
             ),
           // Porte de retour vers les plats retirés — et retour à la carte.
           // Affiché même quand la grille est vide : c'est précisément le cas où
@@ -668,10 +629,18 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
               }),
             ),
           if (!emptyMenu) ...[
-            _SearchField(
-              controller: _searchCtrl,
-              onChanged: (v) => setState(() => _query = v),
-            ),
+            if (_searchOpen || _query.isNotEmpty)
+              _SearchField(
+                controller: _searchCtrl,
+                onChanged: (v) => setState(() => _query = v),
+                // La croix EFFACE et REPLIE : une recherche finie n'a plus de
+                // raison d'occuper une ligne.
+                onClose: () => setState(() {
+                  _searchCtrl.clear();
+                  _query = '';
+                  _searchOpen = false;
+                }),
+              ),
             _CategoryBar(
               categories: _categories,
               counts: _categoryCounts,
@@ -820,7 +789,14 @@ class _SearchField extends StatelessWidget {
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
 
-  const _SearchField({required this.controller, required this.onChanged});
+  /// Efface ET replie le champ — la loupe de l'en-tête revient.
+  final VoidCallback onClose;
+
+  const _SearchField({
+    required this.controller,
+    required this.onChanged,
+    required this.onClose,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -832,6 +808,8 @@ class _SearchField extends StatelessWidget {
       child: TextField(
         controller: controller,
         onChanged: onChanged,
+        // Déployé au tap sur la loupe : on vient pour taper.
+        autofocus: true,
         textInputAction: TextInputAction.search,
         style: AppTextStyles.input,
         decoration: InputDecoration(
@@ -844,18 +822,12 @@ class _SearchField extends StatelessWidget {
               size: 20, color: theme.colorScheme.onSurfaceVariant),
           prefixIconConstraints:
               const BoxConstraints(minWidth: 42, minHeight: 42),
-          suffixIcon: ValueListenableBuilder<TextEditingValue>(
-            valueListenable: controller,
-            builder: (_, v, __) => v.text.isEmpty
-                ? const SizedBox.shrink()
-                : IconButton(
-                    icon: const Icon(Icons.close_rounded, size: 18),
-                    tooltip: 'Effacer',
-                    onPressed: () {
-                      controller.clear();
-                      onChanged('');
-                    },
-                  ),
+          // TOUJOURS PRÉSENTE, même champ vide : c'est aussi le seul moyen de
+          // replier un champ ouvert par erreur.
+          suffixIcon: IconButton(
+            icon: const Icon(Icons.close_rounded, size: 18),
+            tooltip: 'Fermer la recherche',
+            onPressed: onClose,
           ),
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -878,7 +850,7 @@ class _SearchField extends StatelessWidget {
     );
   }
 }
-/// Barre de filtres par catégorie — pastilles de MÊME HAUTEUR, avec compteur.
+/// Barre de filtres par catégorie — onglets soulignés, avec compteur.
 ///
 /// La vignette ronde a disparu. C'était elle qui dimensionnait la pastille
 /// (`dot = height - 12`), et sa hauteur suivait le `textScaler` : de 64 à 96 px
@@ -909,19 +881,23 @@ class _CategoryBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // LE RENDU EST DANS `RestoPillTabs`, partagé avec l'écran Stock depuis le
-    // 21/09/2026. Il vivait ici ; deux copies de la même pastille auraient
-    // divergé au premier ajustement, et c'est exactement la cohérence que le
-    // module tient depuis le tableau de bord.
+    // SOULIGNÉS, plus en pastilles : même grammaire que les onglets de
+    // Commandes, et le même widget (`RestoUnderlineTabs`) — deux copies
+    // auraient divergé. `RestoPillTabs` ne sert plus qu'au Stock.
     //
     // Cette classe garde ce qui lui est propre : le vocabulaire des catégories
-    // (`String?`, où `null` vaut « Tout »), qu'un onglet de stock n'a pas à
-    // connaître. Le widget partagé, lui, raisonne par index.
+    // (`String?`, où `null` vaut « Tout »). Le widget partagé, lui, raisonne
+    // par index.
     final values = _values;
-    return RestoPillTabs(
+    return RestoUnderlineTabs(
       items: [
         for (final v in values)
-          RestoPillTab(label: v ?? 'Tout', count: counts[v] ?? 0),
+          RestoUnderlineTab(
+            label: v ?? 'Tout',
+            count: counts[v] ?? 0,
+            // « Tout » n'est pas un filtre : vide, il dit que la carte l'est.
+            mutedWhenEmpty: v != null,
+          ),
       ],
       selected: values.indexOf(selected).clamp(0, values.length - 1),
       onSelect: (i) => onSelect(values[i]),
@@ -938,10 +914,19 @@ class _MenuHeader extends StatelessWidget {
   /// « Notre carte · 3 plats » contredirait ce qu'on a sous les yeux.
   final bool retired;
 
+  /// Déploie la recherche. `null` : champ déjà ouvert, pas de loupe.
+  final VoidCallback? onSearch;
+
+  /// Ajoute un plat. `null` : pas le droit, ou grille vide (l'état vide porte
+  /// son propre bouton).
+  final VoidCallback? onAdd;
+
   const _MenuHeader({
     required this.dishCount,
     required this.categoryCount,
     required this.retired,
+    required this.onSearch,
+    required this.onAdd,
   });
 
   @override
@@ -951,23 +936,51 @@ class _MenuHeader extends StatelessWidget {
     final cats = '$categoryCount catégorie${categoryCount > 1 ? 's' : ''}';
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Échelon `label` (14) : l'échelle typographique de l'app ne compte
-          // pas de 15, et inventer une taille en dur pour un pixel d'écart
-          // casserait la règle qui tient tout le reste.
-          Text(retired ? 'Plats retirés' : 'Notre carte',
-              style: AppTextStyles.label.copyWith(color: cs.onSurface)),
-          const SizedBox(height: 2),
-          Text(
-              // Les catégories n'ont de sens que sur la carte : sur la liste
-              // des plats retirés, elles ne filtrent rien d'utile.
-              retired ? plats : '$plats · $cats',
-              style: AppTextStyles.caption),
+      padding: const EdgeInsets.fromLTRB(16, 14, 12, 0),
+      child: Row(children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Échelon `label` (14) : l'échelle typographique de l'app ne
+              // compte pas de 15, et inventer une taille en dur pour un pixel
+              // d'écart casserait la règle qui tient tout le reste.
+              Text(retired ? 'Plats retirés' : 'Notre carte',
+                  style: AppTextStyles.label.copyWith(color: cs.onSurface)),
+              const SizedBox(height: 2),
+              Text(
+                  // Les catégories n'ont de sens que sur la carte : sur la
+                  // liste des plats retirés, elles ne filtrent rien d'utile.
+                  retired ? plats : '$plats · $cats',
+                  style: AppTextStyles.caption
+                      .copyWith(color: AppColors.textSecondary)),
+            ],
+          ),
+        ),
+        // LA RECHERCHE EST UNE ICÔNE. Un champ vide pleine largeur au-dessus
+        // d'une carte de quelques plats ne servait à rien ; il se déploie au
+        // tap, sous l'en-tête.
+        if (onSearch != null)
+          IconButton(
+            onPressed: onSearch,
+            tooltip: 'Rechercher un plat',
+            icon: Icon(Icons.search_rounded,
+                size: 20, color: AppColors.textSecondary),
+          ),
+        // L'AJOUT EST UN BOUTON D'EN-TÊTE, plus un flottant : il chevauchait le
+        // bord de la grille, et ce geste n'est pas assez fréquent sur le Menu
+        // pour mériter d'y flotter en permanence.
+        if (onAdd != null) ...[
+          const SizedBox(width: 4),
+          FilledButton.icon(
+            onPressed: onAdd,
+            icon: const Icon(Icons.add_rounded, size: 18),
+            label: const Text('Plat'),
+            // Thème global : minimumSize infini — il écraserait l'Expanded.
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 36)),
+          ),
         ],
-      ),
+      ]),
     );
   }
 }
@@ -1005,54 +1018,26 @@ class _MenuGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (_, c) {
-      const hPad = 16.0, gap = 14.0;
-      final inner = c.maxWidth - hPad * 2;
-      // ~231 dp par carte : 2 colonnes minimum sur téléphone.
-      //
-      // Plafond à HUIT et non six : au-delà de ~1 400 dp, une grille qui cesse
-      // d'ajouter des colonnes élargit ses cartes à la place. À 1 920, six
-      // colonnes donnaient des cartes de 303 dp pour une photo bornée à 168 —
-      // du 1,80:1, une bannière et non plus une photo de plat. À huit, la carte
-      // retombe à 224 dp et la photo à 1,33:1. Le bloc texte y tient large :
-      // 202 dp utiles pour un nom d'une ligne, et 168 dp pour le prix une fois
-      // le bouton d'ajout retiré, quand un prix formaté en occupe ~70.
-      final cols = (inner / 231).floor().clamp(2, 8);
-      final cardW = (inner - gap * (cols - 1)) / cols;
-
-      // Hauteur de photo : RATIO de la largeur, borné aux deux bouts.
-      //
-      // Le ratio seul avait produit les 300 dp de haut du premier jet ; une
-      // hauteur figée, elle, donnerait une photo carrée sur téléphone et une
-      // timbre-poste sur tablette. Les bornes tiennent le format d'image entre
-      // 1,29:1 et 1,41:1 sur toute la plage d'écrans réels, soit ~60 % de la
-      // carte sur téléphone et ~67 % sur tablette.
-      final photoH =
-          (cardW * _kPhotoRatio).clamp(_kPhotoMinH, _kPhotoMaxH);
-
-      // Le bloc texte suit le textScaler : un `childAspectRatio` figé ferait
-      // déborder le texte dès que l'utilisateur agrandit la police dans les
-      // préférences.
-      //
-      // La ligne d'état est RÉSERVÉE même quand le plat est disponible et
-      // qu'elle ne s'affiche pas : c'est ce qui garde une hauteur de carte
-      // identique d'une carte à l'autre. Le `Spacer` du bloc texte absorbe la
-      // place inutilisée, donc elle ne creuse pas de trou.
+      const hPad = 16.0;
+      // TOUTE LA GÉOMÉTRIE VIENT DE `menu_grid_geometry.dart`, sous test :
+      // colonnes (plancher de 200 dp — 4 dès ~860 dp de contenu), hauteur de
+      // photo (ratio 0,78 borné entre 104 et 150) et hauteur de tuile. La
+      // tuile rend exactement les lignes que ce calcul compte.
+      final layout = menuGridLayout(c.maxWidth - hPad * 2);
       final ts = MediaQuery.textScalerOf(context);
-      final cardH = photoH
-          + 9 // padding haut du bloc texte
-          + ts.scale(12) * 1.45 // nom (1 ligne)
-          + 4
-          + ts.scale(10) * 1.3 // ligne d'état, réservée
-          + ts.scale(13) * 1.5 // prix, seul sur sa ligne
-          + 11; // padding bas
+      final tileH = menuTileHeight(layout.photoHeight, ts.scale);
 
       return GridView.builder(
-        padding: const EdgeInsets.fromLTRB(hPad, 4, hPad, 96),
+        // 24 et non plus 96 en bas : la réserve servait au bouton flottant,
+        // qui est devenu un bouton d'en-tête.
+        padding: const EdgeInsets.fromLTRB(hPad, 8, hPad, 24),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: cols,
-          mainAxisSpacing: gap,
-          crossAxisSpacing: gap,
-          childAspectRatio: cardW / cardH,
+          crossAxisCount: layout.cols,
+          mainAxisSpacing: kMenuGap,
+          crossAxisSpacing: kMenuGap,
+          // Hauteur FIXE issue du calcul, et non un ratio : c'est elle que le
+          // test verrouille.
+          mainAxisExtent: tileH,
         ),
         itemCount: products.length,
         itemBuilder: (_, i) => _DishCard(
@@ -1062,7 +1047,7 @@ class _MenuGrid extends StatelessWidget {
           isAdmin: isAdmin,
           canDelete: canDelete,
           canEdit: canEdit,
-          photoHeight: photoH,
+          photoHeight: layout.photoHeight,
           onTap: () => onTap(products[i]),
           onAdd: () => onAdd(products[i]),
           onToggleDispo: (v) => onToggleDispo(products[i], v),
@@ -1074,17 +1059,11 @@ class _MenuGrid extends StatelessWidget {
   }
 }
 
-/// Géométrie de la carte de plat. Partagée entre le calcul de hauteur de la
-/// grille et le rendu de la carte — les deux DOIVENT rester d'accord, sans
-/// quoi le bloc texte déborde.
+/// Rayon de la PHOTO — qui est désormais le bloc entier de la tuile.
 ///
-/// La zone photo se déduit de la largeur de carte, entre deux bornes : voir le
-/// calcul de `photoH` dans la grille, qui explique pourquoi ni le ratio seul ni
-/// la hauteur fixe seule ne conviennent.
-const double _kPhotoRatio = 0.78;
-const double _kPhotoMinH = 104;
-const double _kPhotoMaxH = 168;
-const double _kCardRadius = 19;
+/// La géométrie (colonnes, hauteur de photo, hauteur de tuile) vit dans
+/// `menu_grid_geometry.dart`, sous test.
+const double _kPhotoRadius = 16;
 
 /// Pastilles posées SUR la photo : stock à gauche, menu ⋮ à droite.
 ///
@@ -1108,9 +1087,6 @@ const double _kBadgeTap = 36;
 /// pour qu'on voie l'aplat tout autour et qu'on reconnaisse la carte à sa
 /// couleur avant de la lire.
 const double _kInitialDisc = 54;
-
-/// Diamètre du bouton flottant « ajouter un plat ».
-const double _kFabSize = 48;
 
 /// Matrice de désaturation — la vignette d'un plat indisponible passe en gris.
 ///
@@ -1260,20 +1236,23 @@ class _DishCard extends StatelessWidget {
     // passent pas par cet écran.
     final tapAdds = available;
 
+    // ── PLUS DE CARTE AUTOUR DE LA PHOTO ──────────────────────────────────
+    //
+    // Ni fond ni bordure : la photo EST le bloc, arrondie seule, et le texte
+    // vit dessous, à nu sur le décor géométrique du module. C'est l'exception
+    // écrite à la règle du 16/09 (cf. `restoGlassFill`) : le décor est
+    // calculable — texte primaire ≥ 12,2:1, secondaire ≥ 5,2:1 sur le pire
+    // cas des huit palettes — là où la règle visait une PHOTO de salle.
+    // Rien de textuel ne se pose sur la photo sans son voile à 85 %.
     return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(_kCardRadius),
-      child: Container(
-        decoration: restoCardSurface(context, radius: _kCardRadius),
-        // Le clip de la CARTE arrondit les coins hauts de la photo — la photo
-        // n'a donc pas à porter son propre rayon — et garde les coins bas
-        // arrondis sur la surface.
-        clipBehavior: Clip.antiAlias,
-        child: Column(
+      type: MaterialType.transparency,
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ── PHOTO EN PLEIN CADRE ───────────────────────────────
-            SizedBox(
+            // ── PHOTO, LE BLOC ─────────────────────────────────────
+            ClipRRect(
+              borderRadius: BorderRadius.circular(_kPhotoRadius),
+              child: SizedBox(
               height: photoHeight,
               child: Stack(
                 fit: StackFit.expand,
@@ -1345,6 +1324,7 @@ class _DishCard extends StatelessWidget {
                 ],
               ),
             ),
+            ),
 
             // ── BLOC TEXTE ─────────────────────────────────────────
             //
@@ -1356,8 +1336,13 @@ class _DishCard extends StatelessWidget {
             Expanded(
               child: InkWell(
                 onTap: onTap,
+                borderRadius: BorderRadius.circular(8),
+                // Marges = celles que compte `menuTileHeight` : 8 en haut, 4
+                // en bas. Les changer ici sans les changer là-bas fait
+                // déborder le bloc.
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(11, 9, 11, 11),
+                  padding: const EdgeInsets.fromLTRB(
+                      2, kMenuTextTop, 2, kMenuTextBottom),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -1378,7 +1363,7 @@ class _DishCard extends StatelessWidget {
                       // inutilisée. Les cartes gardent donc la même
                       // hauteur sans qu'un trou se creuse sous le nom.
                       if (!available) ...[
-                        const SizedBox(height: 4),
+                        const SizedBox(height: kMenuNameToState),
                         if (retired)
                           Text('Retiré de la vente',
                               maxLines: 1,
@@ -1439,25 +1424,24 @@ class _DishCard extends StatelessWidget {
                       ],
                       const Spacer(),
 
-                      // ── PRIX ET AJOUT ────────────────────────────
-                      Row(
-                        children: [
-                          Expanded(
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                CurrencyFormatter.format(
-                                    product.priceSellPos),
-                                maxLines: 1,
-                                style: AppTextStyles.bodyBold.copyWith(
-                                    color: available
-                                        ? cs.primary
-                                        : cs.onSurfaceVariant),
-                              ),
-                            ),
-                          ),
-                        ],
+                      // ── LE PRIX, L'ANCRE ─────────────────────────
+                      //
+                      // Le plus gros texte de la tuile — `subtitle` (16)
+                      // semi-gras, unité en petit gris — parce que c'est ce
+                      // qu'on lit en premier. En texte primaire et non en
+                      // couleur de marque : sur Midnight en sombre, la
+                      // primaire ne fait que 1,93:1 (cf. `docs/backlog.md`).
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: RestoAmountText(
+                          product.priceSellPos,
+                          style: AppTextStyles.subtitle.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: available
+                                  ? cs.onSurface
+                                  : AppColors.textSecondary),
+                        ),
                       ),
                     ],
                   ),
@@ -1465,7 +1449,6 @@ class _DishCard extends StatelessWidget {
               ),
             ),
           ],
-        ),
       ),
     );
   }
