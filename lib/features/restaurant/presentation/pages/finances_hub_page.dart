@@ -277,11 +277,23 @@ class _ActivityEditorState extends State<_ActivityEditor> {
   }
 
   Future<void> _delete() async {
+    final a = widget.existing!;
+    // LA CONFIRMATION DIT CE QUE LA SUPPRESSION EMPORTE. Elle n'avait pas de
+    // texte : on supprimait « Bar » sans savoir que douze plats y étaient
+    // rattachés, ni que leurs ventes passées changeraient de ligne — le
+    // secteur d'une vente n'est pas figé, il se relit sur le plat.
+    final n = ActivityService.attachedTo(widget.shopId, a.id);
+    final attached = ActivityService.attachedLabel(n.dishes, n.stockItems);
     final ok = await AppConfirmDialog.show(
       context: context,
       icon: Icons.delete_outline_rounded,
       iconColor: Theme.of(context).semantic.danger,
-      title: 'Supprimer cette activité ?',
+      title: 'Supprimer « ${a.name} » ?',
+      body: Text(attached == null
+          ? 'Aucun plat ni article de stock n\'y est rattaché.'
+          : '$attached '
+              '${n.dishes + n.stockItems > 1 ? 'seront détachés et passeront' : 'sera détaché et passera'} '
+              'sous « Sans secteur », ventes passées comprises.'),
       cancelLabel: 'Annuler',
       confirmLabel: 'Supprimer',
       onConfirm: () {},

@@ -408,6 +408,17 @@ class RestaurantReportingService {
   /// Libellé des ventes hors activité.
   static const String noSectorLabel = 'Sans secteur';
 
+  /// Clé d'agrégation du secteur d'un plat : son activité si elle EXISTE,
+  /// `''` (« Sans secteur ») sinon.
+  ///
+  /// UNE SEULE LIGNE « Sans secteur », jamais deux. Un identifiant d'activité
+  /// supprimée — plat resté sur un appareil hors ligne, ligne poussée avant le
+  /// détachement — formait sa propre ligne, nommée elle aussi « Sans
+  /// secteur », et comptait comme une activité réelle : la carte « Par
+  /// secteur » pouvait réapparaître alors qu'il n'en restait aucune.
+  static String sectorKeyOf(String? activityId, Iterable<String> known) =>
+      activityId != null && known.contains(activityId) ? activityId : '';
+
   /// Construit le bilan de [shopId] sur [range]. Ne lève jamais : un bilan
   /// partiel vaut mieux qu'un tableau de bord en erreur.
   static RestaurantFinanceReport build(String shopId, DashRange range) {
@@ -419,15 +430,24 @@ class RestaurantReportingService {
     final chargeSeries = List<double>.filled(n, 0);
     final lossSeries = List<double>.filled(n, 0);
 
+    final names = <String, String>{};
+    try {
+      for (final a in ActivityService.forShop(shopId)) {
+        names[a.id] = a.name;
+      }
+    } catch (e) {
+      debugPrint('[RestoReport] activités err: $e');
+    }
+
     // Secteur par produit — lu UNE fois : le chercher dans la boucle des
     // commandes rescannerait le catalogue à chaque ligne vendue.
-    final sectorOf = <String, String?>{};
+    final sectorOf = <String, String>{};
     final catalogCost = <String, double>{};
     try {
       for (final p in LocalStorageService.getProductsForShop(shopId)) {
         final id = p.id;
         if (id == null) continue;
-        sectorOf[id] = p.activityId;
+        sectorOf[id] = sectorKeyOf(p.activityId, names.keys);
         catalogCost[id] = p.priceBuy;
       }
     } catch (e) {
@@ -852,21 +872,14 @@ class RestaurantReportingService {
     }
 
     // ── Secteurs ───────────────────────────────────────────────────────
-    final names = <String, String>{};
-    try {
-      for (final a in ActivityService.forShop(shopId)) {
-        names[a.id] = a.name;
-      }
-    } catch (e) {
-      debugPrint('[RestoReport] activités err: $e');
-    }
-
+    // `names` est lu en tête de `build` : il sert aussi à ramener les
+    // identifiants orphelins sur « Sans secteur » (cf. `sectorKeyOf`).
     final sectors = <SectorLine>[
       for (final key in sectorRevenue.keys)
         SectorLine(
           activityId: key.isEmpty ? null : key,
-          // Une activité supprimée laisse un id orphelin sur ses plats : ses
-          // ventes retombent sur « Sans secteur » plutôt que d'afficher un id.
+          // Toute clé non vide est une activité existante (`sectorKeyOf`) :
+          // le repli sur « Sans secteur » n'est qu'un filet.
           name: key.isEmpty ? noSectorLabel : (names[key] ?? noSectorLabel),
           revenue: sectorRevenue[key] ?? 0,
           materialCost: sectorCost[key] ?? 0,

@@ -1995,6 +1995,22 @@ class AppDatabase {
               'data': const {}});
   }
 
+  /// UPDATE ciblé par filtres d'égalité, via la file offline.
+  ///
+  /// UN SEUL ORDRE SERVEUR pour toutes les lignes qui correspondent — y
+  /// compris celles que cet appareil ne connaît pas encore (créées ailleurs,
+  /// pas encore synchronisées). C'est ce qui le distingue d'une boucle
+  /// d'upserts, qui ne toucherait que les lignes présentes dans Hive.
+  ///
+  /// [match] vide est REFUSÉ : un UPDATE sans filtre réécrirait toute la
+  /// table, pour toutes les boutiques que la RLS laisse voir.
+  static void bgUpdateWhere(String table,
+      {required Map<String, dynamic> match,
+      required Map<String, dynamic> data}) {
+    if (match.isEmpty || data.isEmpty) return;
+    _bgWrite({'table': table, 'op': 'update', 'match': match, 'data': data});
+  }
+
 
   // ══ DÉFINITIONS SQL DES TABLES ════════════════════════════════════════════════
   // Exécuter dans Supabase → SQL Editor si la table n'existe pas encore

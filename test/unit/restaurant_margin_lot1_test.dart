@@ -86,6 +86,17 @@ Future<void> _product(String shop, String id,
   });
 }
 
+/// Une activité EXISTANTE. Depuis `sectorKeyOf`, un plat rattaché à un
+/// identifiant qu'aucune activité ne porte est rangé sous « Sans secteur » :
+/// un test qui veut des secteurs doit donc les créer.
+Future<void> _activity(String shop, String id) async {
+  await HiveBoxes.restaurantActivitiesBox.put(id, {
+    'id': id,
+    'shop_id': shop,
+    'name': id,
+  });
+}
+
 Future<void> _completedOrder(
   String shop,
   String id, {
@@ -231,6 +242,8 @@ void main() {
     const shop = 'shop_n4_discount';
 
     setUpAll(() async {
+      await _activity(shop, 'ra_cuisine');
+      await _activity(shop, 'ra_bar');
       await _product(shop, 'p_plat', activityId: 'ra_cuisine');
       await _product(shop, 'p_biere', activityId: 'ra_bar');
       // 2 × 5 000 (cuisine) + 1 × 10 000 (bar) = 20 000 d'articles,
