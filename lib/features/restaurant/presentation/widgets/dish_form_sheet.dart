@@ -106,7 +106,9 @@ class _DishFormSheetState extends State<DishFormSheet> {
   String? _existingImageUrl;
 
   /// Activités connexes de la boutique — le « secteur » du plat (hotfix_141).
-  /// Liste vide (aucune activité créée) → la section n'apparaît pas.
+  /// Liste vide (aucune activité créée) → le champ Secteur dit où les créer
+  /// (`_activityField`) ; non vide → il les propose, et le titre du bloc
+  /// replié signale un plat sans secteur.
   late final List<RestaurantActivity> _activities =
       ActivityService.forShop(widget.shopId);
 
@@ -1022,9 +1024,36 @@ class _DishFormSheetState extends State<DishFormSheet> {
                     const SizedBox(width: 6),
                     // Le titre DIT CE QU'IL CACHE. « Plus de réglages »
                     // n'annonçait rien : on l'ouvrait pour voir, ou jamais.
-                    Text('Coût, stock et visibilité',
-                        style: AppTextStyles.bodySmBold
-                            .copyWith(color: cs.onSurface)),
+                    // Le secteur y manquait : on créait un plat sans jamais
+                    // croiser le champ.
+                    Flexible(
+                      child: Text('Coût, secteur, stock et visibilité',
+                          style: AppTextStyles.bodySmBold
+                              .copyWith(color: cs.onSurface)),
+                    ),
+                    // CE QUI RESTE À REMPLIR, vu bloc fermé. Seulement si la
+                    // boutique a des secteurs — sans eux il n'y a rien à
+                    // choisir, et la plupart des restaurants n'en ont pas — et
+                    // seulement replié : ouvert, le champ se voit lui-même.
+                    // Ton neutre : « Aucun » reste un choix valide, le plat
+                    // ira simplement sous « Sans secteur ».
+                    if (!_advanced &&
+                        _activities.isNotEmpty &&
+                        _activityId == null) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: sem.info.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text('Secteur à choisir',
+                            maxLines: 1,
+                            style: AppTextStyles.microBold
+                                .copyWith(color: sem.info)),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1771,7 +1800,7 @@ class _InfoBanner extends StatelessWidget {
   }
 }
 
-/// Une ligne de la liste « Coût, stock et visibilité ».
+/// Une ligne de la liste « Coût, secteur, stock et visibilité ».
 ///
 /// Titre en gras, explication dessous, contrôle à droite — ou sous le texte
 /// quand le contrôle est large (`below`). Un filet fin sépare les lignes : il
