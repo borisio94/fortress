@@ -1033,7 +1033,7 @@ class _MenuGrid extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(hPad, 8, hPad, 24),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: layout.cols,
-          mainAxisSpacing: kMenuGap,
+          mainAxisSpacing: kMenuRowGap,
           crossAxisSpacing: kMenuGap,
           // Hauteur FIXE issue du calcul, et non un ratio : c'est elle que le
           // test verrouille.
@@ -1063,7 +1063,7 @@ class _MenuGrid extends StatelessWidget {
 ///
 /// La géométrie (colonnes, hauteur de photo, hauteur de tuile) vit dans
 /// `menu_grid_geometry.dart`, sous test.
-const double _kPhotoRadius = 16;
+const double _kPhotoRadius = 14;
 
 /// Pastilles posées SUR la photo : stock à gauche, menu ⋮ à droite.
 ///

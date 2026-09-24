@@ -23,7 +23,9 @@ import '../../domain/entities/stock_item.dart';
 import '../widgets/cost_method_picker.dart';
 import '../widgets/ingredient_quick_sheet.dart';
 import '../widgets/resto_empty_state.dart' show RestoEmptyState;
-import '../widgets/resto_pill_tabs.dart';
+import '../widgets/resto_amount_text.dart';
+import '../widgets/resto_surfaces.dart' show RestoGlassPanel;
+import '../widgets/resto_underline_tabs.dart';
 import '../widgets/resto_section_header.dart';
 import '../widgets/resto_tab_kit.dart';
 
@@ -78,7 +80,6 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
   @override
   Widget build(BuildContext context) {
     final shopId = widget.shopId;
-    final sem = Theme.of(context).semantic;
     final nIng = IngredientService.forShop(shopId).length;
     final nSup = StockItemService.forShop(shopId).length;
 
@@ -152,17 +153,18 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
           // écran qui change de pictogramme entre sa liste vide et ses onglets
           // ferait douter qu'il parle de la même chose.
           //
-          // LA COULEUR RESTE, en renfort. Aucune teinte en dur : `warning` et
-          // `primary` suivent les huit palettes, en clair comme en sombre. Sur
-          // la palette par défaut — Violet Fortress — l'accent EST le violet.
-          RestoPillTabs(
+          // SOULIGNÉS, plus en pastilles — même widget que Commandes et le Menu
+          // (`RestoUnderlineTabs`). La couleur par onglet disparaît avec la
+          // pastille qui la portait : l'ICÔNE, qui était déjà le signal fiable,
+          // reste seule — c'est précisément ce que le ΔE de 17,7 sur Amber
+          // exigeait.
+          RestoUnderlineTabs(
             items: [
-              RestoPillTab(
+              RestoUnderlineTab(
                   label: 'Ingrédients',
                   count: nIng,
-                  color: sem.warning,
                   icon: Icons.eco_outlined),
-              RestoPillTab(
+              RestoUnderlineTab(
                   label: 'Fournitures',
                   count: nSup,
                   icon: Icons.inventory_2_outlined),
@@ -385,12 +387,9 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
                   // bouton qui porte le premier.
                   footnote: 'ou en composant la recette d\'un plat',
                 )
-              : ListView.separated(
+              : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                  // +1 pour le bandeau, quand il y a quelque chose à dire.
-                  itemCount: items.length + (unlinkedCount > 0 ? 1 : 0),
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, raw) {
+                  children: [
                     // ── « AUCUN PLAT » EN BANDEAU, PAS EN PASTILLE ──────
                     //
                     // La pastille était juste, et répétée seize fois elle ne
@@ -403,24 +402,26 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
                     // La ligne, elle, garde une mention en texte gris : sans
                     // quoi le bandeau annoncerait un nombre sans dire
                     // LESQUELS.
-                    if (unlinkedCount > 0 && raw == 0) {
-                      return _UnlinkedBanner(
+                    if (unlinkedCount > 0) ...[
+                      _UnlinkedBanner(
                         count: unlinkedCount,
                         onOpenMenu: () =>
                             context.go('/shop/${widget.shopId}/inventaire'),
-                      );
-                    }
-                    final i = raw - (unlinkedCount > 0 ? 1 : 0);
-                    return _IngredientRow(
-                    ing: items[i],
-                    noCost: noCost.contains(items[i].id),
-                    unlinked:
-                        linked != null && !linked.contains(items[i].id),
-                    onReceive: () => _receive(items[i]),
-                    onEdit: () => _edit(items[i]),
-                    onDelete: () => _delete(items[i]),
-                  );
-                  },
+                      ),
+                      const SizedBox(height: 4),
+                    ],
+                    _StockLines(children: [
+                      for (final ing in items)
+                        _IngredientRow(
+                          ing: ing,
+                          noCost: noCost.contains(ing.id),
+                          unlinked: linked != null && !linked.contains(ing.id),
+                          onReceive: () => _receive(ing),
+                          onEdit: () => _edit(ing),
+                          onDelete: () => _delete(ing),
+                        ),
+                    ]),
+                  ],
                 ),
         ),
       ],
@@ -539,13 +540,11 @@ class _UnlinkedBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sem = Theme.of(context).semantic;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-      decoration: BoxDecoration(
-        color: sem.warning.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: sem.warning.withValues(alpha: 0.35)),
-      ),
+    // SANS CADRE : icône, texte, lien. Le fond teinté et la bordure ambre en
+    // faisaient un rectangle de plus au-dessus d'une liste qui n'en a plus ;
+    // la couleur du texte suffit à dire que c'est une alerte.
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 0, 4),
       child: Row(children: [
         Icon(Icons.link_off_rounded, size: 18, color: sem.warningText),
         const SizedBox(width: 10),
@@ -569,7 +568,46 @@ class _UnlinkedBanner extends StatelessWidget {
   }
 }
 
-/// Une ligne d'ingrédient : trois boutons explicites, et une carte INERTE.
+/// LA LISTE DU STOCK : UN SEUL PANNEAU, des lignes dedans.
+///
+/// Seize cartes empilées, chacune avec son fond et sa bordure, faisaient un mur
+/// de rectangles. Les lignes perdent fond et bordure ; elles sont séparées par
+/// un filet `borderSubtle`, et portées TOUTES ensemble par une seule surface.
+///
+/// POURQUOI UN PANNEAU ET PAS LE DÉCOR NU : mesuré, le filet `#E5E7EB` posé à
+/// nu sur le décor clair tombe à 1,09:1 en bas d'écran, là où le dégradé
+/// descend vers `#EFF1F5` — les lignes s'y fondent (même ordre que le 1,07 des
+/// deux fonds du lot Commandes). Sur le panneau de verre, il reste à 1,23:1
+/// sur toute la hauteur, et 1,84:1 en sombre. Aucun token de filet n'est plus
+/// marqué : `divider` et `inputBorder` valent le même `#E5E7EB`.
+///
+/// Pas de fond alterné : il ferait revenir le mur de rectangles.
+class _StockLines extends StatelessWidget {
+  final List<Widget> children;
+
+  const _StockLines({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return RestoGlassPanel(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      radius: 14,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0)
+              Divider(height: 1, thickness: 1, color: sem.borderSubtle),
+            children[i],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Une ligne d'ingrédient : trois boutons explicites, et une ligne INERTE.
 ///
 /// La carte ne réagit plus au toucher. Elle ouvrait l'éditeur, ce qui faisait
 /// basculer vers un formulaire de modification chaque fois qu'on visait le
@@ -606,12 +644,19 @@ class _IngredientRow extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final sem = Theme.of(context).semantic;
     final q = restoQty(ing.quantity);
-    return RestoCard(
-      // Signalement ORANGE, pas rouge : rien n'est cassé, il manque une
-      // information. Le rouge est déjà pris par le stock bas, qui appelle une
-      // action immédiate — mélanger les deux les banaliserait tous les deux.
-      borderColor: noCost ? sem.warning : null,
-      background: noCost ? sem.warning.withValues(alpha: 0.07) : null,
+    // UNE LIGNE, PLUS UNE CARTE : ni fond ni bordure, le panneau commun
+    // (`_StockLines`) et son filet font la séparation.
+    //
+    // Le « coût manquant » perd son cadre ambre et son fond teinté : il reste
+    // dit par son libellé et sa phrase d'explication, en `warningText`. Un
+    // signal plus faible, mais honnête — accepté le 24/09/2026.
+    //
+    // 8 px de marge verticale : ce sont les boutons (40 px en densité
+    // compacte) qui fixent la hauteur de la ligne, et 8 + 40 + 8 donne les
+    // ~56 px visés. À 14, la ligne en ferait 68 — plus haute que la carte
+    // qu'elle remplace.
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(children: [
         Expanded(
           child: Column(
@@ -636,21 +681,26 @@ class _IngredientRow extends StatelessWidget {
                 // Le défaut se tait, l'exception parle. C'est la règle du
                 // module — le plat retiré, le stock bas et le coût manquant
                 // fonctionnent déjà ainsi.
+                //
+                // EN TEXTE, plus en pastilles — voir `RestoInlineTag` : les
+                // informations (« Quantité connue », « partagé ») passent en
+                // gris, seules les alertes gardent leur couleur, dans sa
+                // variante texte.
                 if (ing.usesTechnicalSheet) ...[
-                  const SizedBox(width: 6),
-                  RestoPill(ing.costMethodLabel, cs.primary),
+                  const SizedBox(width: 8),
+                  RestoInlineTag.info(ing.costMethodLabel),
                 ],
                 if (ing.isShared) ...[
-                  const SizedBox(width: 6),
-                  RestoPill('partagé', cs.primary),
+                  const SizedBox(width: 8),
+                  const RestoInlineTag.info('partagé'),
                 ],
                 if (ing.isLowStock) ...[
-                  const SizedBox(width: 6),
-                  RestoPill('stock bas', sem.danger),
+                  const SizedBox(width: 8),
+                  RestoInlineTag.alert('stock bas', sem.dangerText),
                 ],
                 if (noCost) ...[
-                  const SizedBox(width: 6),
-                  RestoPill('coût manquant', sem.warning),
+                  const SizedBox(width: 8),
+                  RestoInlineTag.alert('coût manquant', sem.warningText),
                 ],
                 // « AUCUN PLAT » N'EST PLUS UNE PASTILLE — voir le bandeau en
                 // tête de liste. Il reste en texte gris sous la ligne, pour
@@ -693,28 +743,38 @@ class _IngredientRow extends StatelessWidget {
                       'Aucun achat enregistré — les plats qui le contiennent '
                       'paraissent plus rentables qu\'ils ne le sont. '
                       'Utilisez Réception pour saisir quantité et montant.',
+                      // `warningText` et non `warning` : la phrase a perdu le
+                      // fond teinté qui la portait (`warning` : 2,15:1 sur
+                      // blanc).
                       style: AppTextStyles.caption
-                          .copyWith(color: sem.warning)),
+                          .copyWith(color: sem.warningText)),
                 ),
             ],
           ),
         ),
         // ── LE PRIX, ANCRE DE LA COLONNE DE DROITE ──────────────────
         //
-        // Aligné à droite, en accent, l'unité en petit dessous. La liste se
-        // parcourt désormais par cette colonne : vingt prix alignés se
-        // comparent d'un regard, vingt prix noyés en tête de ligne, non.
+        // Aligné à droite, l'unité en petit dessous. La liste se parcourt par
+        // cette colonne : vingt prix alignés se comparent d'un regard.
+        //
+        // EN TEXTE PRIMAIRE, plus en accent : seize prix ambre faisaient de
+        // l'écran un mur orange, et l'ambre redevient disponible pour ce qui
+        // compte (les alertes). `subtitle` (16) semi-gras, « FCFA » à 11 par
+        // `RestoAmountText` — la même taille d'unité que Commandes et le Menu.
         Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(CurrencyFormatter.format(ing.costPerUnit.toDouble()),
-                maxLines: 1,
-                style: AppTextStyles.bodyBold.copyWith(color: cs.primary)),
+            RestoAmountText(ing.costPerUnit.toDouble(),
+                style: AppTextStyles.subtitle.copyWith(
+                    fontWeight: FontWeight.w600, color: cs.onSurface)),
+            // `textSecondary` et non `textHint` : ce dernier ne fait que
+            // 3,07:1 en sombre (dette de palette, `docs/backlog.md`).
             if (ing.unit.trim().isNotEmpty)
               Text('par ${ing.unit.trim()}',
                   maxLines: 1,
-                  style: AppTextStyles.micro),
+                  style: AppTextStyles.micro
+                      .copyWith(color: AppColors.textSecondary)),
           ],
         ),
         const SizedBox(width: 4),
@@ -1187,16 +1247,18 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
                   // Finances sont deux écrans, rien ne disait plus le chemin.
                   footer: _PurchasesLink(shopId: widget.shopId),
                 )
-              : ListView.separated(
+              : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-                  itemCount: items.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) {
-                    final s = items[i];
-                    // Carte INERTE : elle ouvrait l'éditeur, ce qui faisait
+                  children: [
+                    // Même panneau et mêmes lignes que les ingrédients — voir
+                    // `_StockLines`.
+                    _StockLines(children: [
+                  for (final s in items)
+                    // Ligne INERTE : elle ouvrait l'éditeur, ce qui faisait
                     // basculer vers un formulaire chaque fois qu'on visait la
                     // réception et qu'on la manquait de quelques pixels.
-                    return RestoCard(
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
                       child: Row(children: [
                         Expanded(
                           child: Column(
@@ -1211,8 +1273,9 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
                                           .copyWith(color: cs.onSurface)),
                                 ),
                                 if (s.isLowStock) ...[
-                                  const SizedBox(width: 6),
-                                  RestoPill('stock bas', sem.danger),
+                                  const SizedBox(width: 8),
+                                  RestoInlineTag.alert(
+                                      'stock bas', sem.dangerText),
                                 ],
                               ]),
                               Text(
@@ -1249,8 +1312,9 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
                               size: 19, color: sem.danger),
                         ),
                       ]),
-                    );
-                  },
+                    ),
+                    ]),
+                  ],
                 ),
         ),
       ],

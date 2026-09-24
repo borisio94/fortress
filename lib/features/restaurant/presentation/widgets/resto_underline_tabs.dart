@@ -13,10 +13,19 @@ class RestoUnderlineTab {
   /// n'a rien de secondaire.
   final bool mutedWhenEmpty;
 
+  /// Pictogramme FACULTATIF, devant le libellé, à sa couleur.
+  ///
+  /// Pour les écrans où le mot seul ne suffit pas à distinguer deux onglets
+  /// d'un coup d'œil — le Stock, dont les deux natures (ingrédients,
+  /// fournitures) reprennent les pictogrammes de leurs états vides. Commandes
+  /// et le Menu ne le passent pas.
+  final IconData? icon;
+
   const RestoUnderlineTab({
     required this.label,
     required this.count,
     this.mutedWhenEmpty = true,
+    this.icon,
   });
 }
 
@@ -80,6 +89,13 @@ class RestoUnderlineTabs extends StatelessWidget {
                 ),
                 child: Text.rich(
                   TextSpan(children: [
+                    if (t.icon != null) ...[
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Icon(t.icon, size: 15, color: labelColor),
+                      ),
+                      const TextSpan(text: ' '),
+                    ],
                     TextSpan(
                         text: t.label,
                         style: (active

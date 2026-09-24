@@ -20,8 +20,16 @@ const double kMenuColMin = 200;
 const int kMenuColsMin = 2;
 const int kMenuColsMax = 8;
 
-/// Écart entre tuiles, dans les deux sens.
+/// Écart HORIZONTAL entre tuiles — il entre dans le calcul des colonnes.
 const double kMenuGap = 14;
+
+/// Écart VERTICAL entre deux rangées de tuiles.
+///
+/// Plus grand que l'horizontal, et c'est la seule chose qui tient la grille
+/// depuis qu'aucune carte n'entoure plus le plat : le nom est à 8 px SOUS sa
+/// photo, et à 14 px la photo du dessous l'aurait rattaché à elle — sur vingt
+/// plats, l'appartenance basculait. À 20, le texte colle nettement à la sienne.
+const double kMenuRowGap = 20;
 
 /// Hauteur de photo : un RATIO de la largeur, borné aux deux bouts.
 ///

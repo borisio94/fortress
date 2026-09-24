@@ -13,6 +13,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../../../core/database/app_database.dart';
+import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -138,6 +139,52 @@ class RestoPill extends StatelessWidget {
             style: AppTextStyles.micro
                 .copyWith(color: color, fontWeight: FontWeight.w700)),
       );
+}
+
+/// Mention d'EXCEPTION posée à côté d'un nom, en TEXTE — sans fond ni bordure.
+///
+/// Remplace [RestoPill] là où l'écran a été épuré (le Stock, 24/09/2026) : une
+/// pastille teintée répétée sur une liste devient un mur de couleur, et la
+/// couleur ne distingue plus rien.
+///
+/// ─── RÈGLE : SEULES LES ALERTES GARDENT LEUR COULEUR ───────────────────────
+///
+/// C'est la généralisation de « le token suit son fond » (cf. le Menu,
+/// `warningText` sur surface claire, `warning` sur voile sombre). Sans pastille
+/// pour la porter, une couleur doit tenir SEULE en texte de 10 px — et la
+/// plupart n'y tiennent pas :
+///
+///   • ALERTE (quelque chose appelle une action) → la variante TEXTE du token
+///     sémantique : `dangerText` (stock bas), `warningText` (coût manquant).
+///     `danger` ne fait que 3,76:1 sur blanc et `warning` 2,15:1.
+///   • INFORMATION (une propriété, pas un problème) → `textSecondary`. La
+///     primaire n'est PAS une couleur de texte fiable : en clair elle passe
+///     sous 4,5:1 sur cinq palettes sur huit (Ocean 2,77, Emerald 2,54, Sunset
+///     2,80, Amber 3,19, Rose 3,53), et Midnight en sombre ne fait que 1,93:1.
+///     Il n'existe pas de token « primaire lisible en texte » : `brandText`
+///     vaut la primaire en clair.
+///
+/// Les deux constructeurs rendent la règle impossible à contourner à l'appel :
+/// une information ne peut pas recevoir de couleur.
+class RestoInlineTag extends StatelessWidget {
+  final String label;
+
+  /// Couleur d'ALERTE — toujours une variante `*Text`. `null` : information.
+  final Color? alertColor;
+
+  /// Une propriété, pas un problème (« Quantité connue », « partagé »).
+  const RestoInlineTag.info(this.label, {super.key}) : alertColor = null;
+
+  /// Quelque chose appelle une action. Passer la variante TEXTE du token :
+  /// `sem.dangerText`, `sem.warningText`.
+  const RestoInlineTag.alert(this.label, Color textColor, {super.key})
+      : alertColor = textColor;
+
+  @override
+  Widget build(BuildContext context) => Text(label,
+      maxLines: 1,
+      style: AppTextStyles.microBold
+          .copyWith(color: alertColor ?? AppColors.textSecondary));
 }
 
 /// Ce qu'une réception d'ingrédient produit.
