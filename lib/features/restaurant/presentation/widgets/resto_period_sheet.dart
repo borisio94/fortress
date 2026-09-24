@@ -51,7 +51,15 @@ String _short(DateTime d) =>
 
 /// Le bouton, posé en haut à droite de l'écran.
 class RestoPeriodButton extends ConsumerWidget {
-  const RestoPeriodButton({super.key});
+  /// Portée du choix, en sous-titre de la feuille. La période est UNE pour
+  /// tout le module (`dashPeriodProvider`) : chaque écran dit jusqu'où elle
+  /// porte depuis l'endroit où on la change.
+  final String scope;
+
+  const RestoPeriodButton({
+    super.key,
+    this.scope = 'S\'applique à tout le tableau de bord',
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -62,14 +70,16 @@ class RestoPeriodButton extends ConsumerWidget {
         : restoPeriodName(period);
     return RestoPeriodPill(
       label: label,
-      onTap: () => _open(context, ref),
+      onTap: () => _open(context, ref, scope),
     );
   }
 
-  static Future<void> _open(BuildContext context, WidgetRef ref) async {
+  static Future<void> _open(
+      BuildContext context, WidgetRef ref, String scope) async {
     final choice = await showAdaptiveFormSheet<_Choice>(
       context: context,
       builder: (_) => _PeriodSheet(
+        scope: scope,
         current: ref.read(dashPeriodProvider),
         custom: ref.read(dashCustomRangeProvider),
       ),
@@ -83,10 +93,15 @@ class RestoPeriodButton extends ConsumerWidget {
 // ─── Feuille : deux familles, une option par ligne ──────────────────────────
 
 class _PeriodSheet extends StatelessWidget {
+  final String scope;
   final DashPeriod current;
   final DashRange? custom;
 
-  const _PeriodSheet({required this.current, required this.custom});
+  const _PeriodSheet({
+    required this.scope,
+    required this.current,
+    required this.custom,
+  });
 
   Future<void> _openCustom(BuildContext context) async {
     final range = await showAdaptiveFormSheet<DashRange>(
@@ -121,7 +136,7 @@ class _PeriodSheet extends StatelessWidget {
 
     return AdaptiveFormFrame(
       title: 'Période',
-      subtitle: 'S\'applique à tout le tableau de bord',
+      subtitle: scope,
       icon: Icons.calendar_month_outlined,
       body: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),

@@ -22,7 +22,6 @@ import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
-import '../../../../shared/widgets/period_selector.dart';
 import '../../data/restaurant_dashboard_providers.dart'
     show restaurantFinanceProvider;
 import '../widgets/resto_empty_state.dart' show RestoEmptyState;
@@ -33,6 +32,7 @@ import '../../domain/entities/fixed_charge.dart';
 import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/loss.dart';
 import '../../domain/entities/restaurant_activity.dart';
+import '../widgets/resto_period_sheet.dart';
 import '../widgets/resto_surfaces.dart';
 import '../widgets/resto_tab_kit.dart';
 
@@ -1121,10 +1121,14 @@ class _LossesTabState extends ConsumerState<_LossesTab> {
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
         child: Row(children: [
+          // Le même sélecteur que le tableau de bord, et la MÊME période : les
+          // deux pilotent `dashPeriodProvider`. La feuille le dit, pour qu'un
+          // choix fait ici ne surprenne pas au retour sur le tableau de bord.
           const Expanded(
             child: Align(
               alignment: Alignment.centerLeft,
-              child: PeriodSelector(mode: PeriodSelectorMode.inline),
+              child: RestoPeriodButton(
+                  scope: 'Partagée avec le tableau de bord'),
             ),
           ),
           FilledButton.icon(
