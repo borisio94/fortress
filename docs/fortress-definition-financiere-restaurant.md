@@ -338,12 +338,35 @@ du comptage réel.
 
 ## 8. Écarts connus, non corrigés
 
-**Aucun au 21/09/2026.** Le dernier — « la livraison est encaissée sans charge
-de livreur » — est passé en section 9 ce jour-là.
+Tout écart constaté se pose ICI, par ordre de gravité, et n'en sort qu'avec
+le titre du commit qui l'a refermé. (La section était vide au 21/09/2026 : le
+dernier écart — « la livraison est encaissée sans charge de livreur » — était
+passé en section 9 ce jour-là.)
 
-Une section vide n'est pas une fin : c'est l'état à un instant. Tout écart
-constaté se pose ICI, par ordre de gravité, et n'en sort qu'avec le titre du
-commit qui l'a refermé.
+### La somme des secteurs ne se réconcilie pas avec le total — en silence
+
+*Constaté le 24/09/2026.*
+
+Deux écarts, **chacun volontaire, leur silence ne l'est pas** : rien à l'écran
+ne permet de passer de la carte « Par secteur » aux chiffres du bandeau.
+
+1. **La livraison est hors secteurs.** Une course n'appartient à aucune
+   activité : la somme des secteurs vaut `foodRevenue`, pas `revenue`
+   (`restaurant_reporting_service.dart`, commentaire de la passe des ventes).
+   Le choix est juste — la ranger dans « Sans secteur » y ferait apparaître
+   un montant qu'aucun plat n'explique. Mais `deliveryRevenue` n'est affiché
+   nulle part, et la carte « Par secteur » n'a pas de ligne de total : avec des
+   livraisons, les secteurs somment MOINS que le chiffre d'affaires, sans
+   explication.
+
+2. **Le coût par secteur est toujours théorique.** Il se calcule au coût
+   unitaire des plats vendus. Le coût matières global, lui, bascule sur les
+   achats RÉELS quand ils sont saisis (`usesRealFoodCostFor`, section 3). Dans
+   ce cas, la somme des coûts par secteur ne vaut pas le coût matières du
+   bilan — et la marge par secteur ne se recoupe pas avec la marge globale.
+
+Ce qui manque n'est pas un calcul, c'est une LIGNE : ce que la carte ne
+couvre pas, dit en clair sous les secteurs.
 
 ---
 
