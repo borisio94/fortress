@@ -263,11 +263,21 @@ class RestaurantOrderService {
     );
     await _ds.saveOrder(order);
     // Lien retour table → commande, pour rouvrir la bonne commande au tap.
+    //
+    // Une réservation PÉRIMÉE est effacée au passage : elle a fait son temps,
+    // et la laisser traîner ferait ressortir un nom et une heure d'hier si la
+    // table repassait un jour par `reservee`. Une réservation VIVANTE, elle,
+    // survit — ce cas n'est atteignable que par une course entre deux appareils
+    // (la prise de commande écarte les tables retenues), et effacer ce que
+    // quelqu'un attend serait pire que le résidu. `release` nettoiera.
+    final keepReservation = table.hasLiveReservation;
     await RestaurantTableService.save(table.copyWith(
       status: RestaurantTableStatus.occupee,
       covers: tableCovers ?? covers,
       currentOrderId: order.id,
       openedAt: table.openedAt ?? now,
+      reservationTime: keepReservation ? table.reservationTime : null,
+      reservationName: keepReservation ? table.reservationName : null,
     ));
     return order;
   }

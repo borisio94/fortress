@@ -17,6 +17,7 @@ import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../widgets/resto_empty_state.dart';
 import '../widgets/table_form_sheet.dart';
+import '../widgets/table_reservation_sheet.dart';
 import '../../domain/entities/restaurant_table.dart';
 import '../../domain/table_service_age.dart';
 import '../../../../shared/providers/order_attach_provider.dart';
@@ -276,7 +277,13 @@ class _RestaurantTablesPageState
   /// service ne peut pas (on effacerait des additions ouvertes).
   Future<void> _showTableActions(RestaurantTable table) async {
     final theme = Theme.of(context);
-    final free  = table.isFree;
+    // TROIS états, pas deux. `isFree` inclut désormais les réservations
+    // périmées : s'en tenir à `free` / `!free` proposerait une addition et un
+    // ajustement de couverts sur une table simplement RETENUE, où personne
+    // n'est encore assis.
+    final free = table.isFree;
+    final reserved = table.hasLiveReservation;
+    final inService = !free && !reserved;
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: theme.colorScheme.surface,
@@ -288,11 +295,13 @@ class _RestaurantTablesPageState
           children: [
             const SizedBox(height: 12),
             Text(table.name, style: AppTextStyles.subtitleBold),
-            Text(table.status.label,
+            // `displayStatus` : une réservation périmée s'annonce « Libre »,
+            // comme partout ailleurs.
+            Text(table.displayStatus.label,
                 style: AppTextStyles.captionHint),
             const SizedBox(height: 8),
             const Divider(height: 1),
-            if (!free) ...[
+            if (inService) ...[
               ListTile(
                 leading: Icon(Icons.receipt_long_rounded,
                     color: theme.semantic.danger),
@@ -350,7 +359,38 @@ class _RestaurantTablesPageState
                   _releaseTable(table);
                 },
               ),
-            ] else if (_canManageRoom)
+            ],
+            // RETENUE : rien à encaisser, rien à ajuster — seulement rendre
+            // la table si le client ne vient pas.
+            if (reserved)
+              ListTile(
+                leading: Icon(Icons.event_busy_outlined,
+                    color: theme.semantic.warning),
+                title: const Text('Annuler la réservation'),
+                subtitle: Text('Retenue pour '
+                    '${_hhmmOf(table.reservationTime)}'
+                    '${(table.reservationName ?? '').trim().isEmpty
+                        ? ''
+                        : ' — ${table.reservationName!.trim()}'}'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _cancelReservation(table);
+                },
+              ),
+            // LIBRE : réserver, ouvert à tout membre — un client appelle, le
+            // serveur qui décroche note.
+            if (free)
+              ListTile(
+                leading: Icon(Icons.access_time_rounded,
+                    color: theme.colorScheme.primary),
+                title: const Text('Réserver la table'),
+                subtitle: const Text('Retenue jusqu\'à l\'arrivée du client'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _reserveTable(table);
+                },
+              ),
+            if (free && _canManageRoom)
               ListTile(
                 leading: Icon(Icons.delete_outline_rounded,
                     color: theme.semantic.danger),
@@ -393,6 +433,67 @@ class _RestaurantTablesPageState
           'Elle apparaîtra après synchronisation.');
     }
   }
+
+  /// Pose une réservation sur une table libre.
+  ///
+  /// GESTE DE SERVICE, ouvert à tout membre — pas de `canEditShopInfo` : un
+  /// client appelle, le serveur qui décroche note. Exiger le droit de composer
+  /// la salle obligerait à déranger le gérant pour un coup de fil.
+  Future<void> _reserveTable(RestaurantTable table) async {
+    final outcome =
+        await showTableReservationSheet(context: context, table: table);
+    if (outcome == null || !mounted) return;
+    setState(() {});
+    if (outcome == TableWriteOutcome.ok) {
+      AppSnack.success(context, '${table.name} réservée');
+    } else {
+      AppSnack.warning(
+          context,
+          'Réservation enregistrée, mais pas sur cet appareil. '
+          'Elle apparaîtra après synchronisation.');
+    }
+  }
+
+  /// Annule une réservation VIVANTE — la table redevient libre tout de suite.
+  ///
+  /// Une réservation périmée n'a pas besoin de ce geste : la table est déjà
+  /// libre aux yeux de l'app, la courtoisie ayant fait son office.
+  Future<void> _cancelReservation(RestaurantTable table) async {
+    final ok = await AppConfirmDialog.show(
+      context: context,
+      icon: Icons.event_busy_outlined,
+      iconColor: Theme.of(context).semantic.warning,
+      title: 'Annuler la réservation ?',
+      body: Text(
+        '${table.name} était retenue pour '
+        '${_hhmmOf(table.reservationTime)}'
+        '${(table.reservationName ?? '').trim().isEmpty ? '' : ' au nom de '
+            '${table.reservationName!.trim()}'}.\n\n'
+        'La table redevient libre immédiatement.',
+      ),
+      cancelLabel: 'Garder',
+      confirmLabel: 'Annuler la réservation',
+      confirmColor: Theme.of(context).semantic.warning,
+      onConfirm: () {},
+    );
+    if (ok != true) return;
+    final result = await RestaurantTableService.release(table);
+    if (!mounted) return;
+    setState(() {});
+    if (result.outcome == TableWriteOutcome.ok) {
+      AppSnack.success(context, 'Réservation annulée — ${table.name} est libre');
+    } else {
+      AppSnack.warning(
+          context,
+          'Réservation annulée, mais cet appareil n\'a pas pu enregistrer le '
+          'changement. Il s\'appliquera après synchronisation.');
+    }
+  }
+
+  static String _hhmmOf(DateTime? d) => d == null
+      ? 'une heure non précisée'
+      : '${d.hour.toString().padLeft(2, '0')}:'
+          '${d.minute.toString().padLeft(2, '0')}';
 
   Future<void> _deleteTable(RestaurantTable table) async {
     // Même filet. La suppression est DURE : elle ne doit pas dépendre du seul
@@ -600,10 +701,15 @@ class _TableCard extends StatelessWidget {
     // état faux au service. Une réservation, elle, ne se déduit d'aucune
     // commande : ce statut reste celui de la table.
     final summary = RestaurantOrderService.tableSummary(table);
+    // `displayStatus` et non `status` : une réservation dont la courtoisie est
+    // écoulée retombe sur « Libre ». Sans ça, la carte resterait bleue et
+    // marquée « Réservée » alors que la table est de nouveau proposée à la
+    // prise de commande — l'écran dirait le contraire du comportement.
+    final shown = table.displayStatus;
     final status = summary.count > 0 &&
-            table.status == RestaurantTableStatus.libre
+            shown == RestaurantTableStatus.libre
         ? RestaurantTableStatus.occupee
-        : table.status;
+        : shown;
     final accent = status.color(semantic);
     // Plats prêts au passe et pas encore apportés. C'est la SEULE information
     // du plan de salle qui appelle une action immédiate : elle prend donc la
@@ -750,12 +856,25 @@ class _TableCard extends StatelessWidget {
                     : _coversLabel(table),
                 style: AppTextStyles.caption,
               ),
-              if (status == RestaurantTableStatus.reservee &&
-                  table.reservationTime != null)
+              // HEURE SAISIE, jamais la fin de courtoisie : le gérant a noté
+              // 20:00, c'est 20:00 qui doit s'afficher — sinon le serveur
+              // annonce au client une heure que personne n'a dite.
+              if (table.hasLiveReservation) ...[
                 Text(
-                  _hhmm(table.reservationTime!),
+                  '${_hhmm(table.reservationTime!)}'
+                  '${(table.reservationName ?? '').trim().isEmpty ? '' : ' · '
+                      '${table.reservationName!.trim()}'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.bodySmBold.copyWith(color: accent),
                 ),
+                // L'heure est passée mais la table est ENCORE tenue. C'est le
+                // seul des trois états qui ne se lit pas sur le chiffre : sans
+                // cette mention, la courtoisie serait invisible.
+                if (table.isReservationOverdue)
+                  Text('client attendu',
+                      style: AppTextStyles.micro.copyWith(color: accent)),
+              ],
             ],
           ),
         ),
@@ -763,9 +882,9 @@ class _TableCard extends StatelessWidget {
           // mais toujours visible : enfoui derrière un appui long, il serait
           // introuvable sur le web.
           //
-          // Une table en service garde toujours son menu — addition, comptes,
-          // couverts, libération sont des gestes de SERVICE, ouverts à tous.
-          if (!table.isFree || canManage)
+          // Plus de condition : le menu d'une table LIBRE porte désormais
+          // « Réserver », ouvert à tout membre — un client appelle, le serveur
+          // qui décroche note. Le ⋮ n'est donc jamais vide.
           Positioned(
             top: 4,
             right: 4,

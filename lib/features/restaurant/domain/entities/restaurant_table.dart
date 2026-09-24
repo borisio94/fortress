@@ -118,7 +118,67 @@ class RestaurantTable {
     this.deletedAt,
   });
 
-  bool get isFree => status == RestaurantTableStatus.libre;
+  /// DÉLAI DE COURTOISIE d'une réservation.
+  ///
+  /// Passé l'heure, la table reste tenue pendant ce délai : dix minutes de
+  /// retard sont ordinaires, un quart d'heure est la marge habituelle en
+  /// salle. Au-delà d'une demi-heure, la table est perdue pour le service —
+  /// on ne garde pas six places vides une heure durant.
+  ///
+  /// CONSTANTE, et pas un réglage : le jour où un restaurateur la conteste,
+  /// elle devra devenir une colonne `shops` synchronisée. Surtout pas un
+  /// `ShopSettingsStore`, qui est du Hive local jamais synchronisé — deux
+  /// appareils de la même salle y liraient deux valeurs différentes.
+  static const Duration reservationGrace = Duration(minutes: 30);
+
+  /// La table est-elle RÉELLEMENT retenue en ce moment ?
+  ///
+  /// Une réservation dépassée n'est pas annulée en base : elle est ignorée à la
+  /// lecture. C'est un choix, pas un raccourci — l'app n'a aucun planificateur,
+  /// donc une annulation ÉCRITE exigerait qu'un appareil allumé la déclenche,
+  /// et deux appareils produiraient deux écritures pour le même fait. Le calcul
+  /// donne le même résultat à l'écran, à coût nul, et ne dépend de personne.
+  ///
+  /// `reservationTime == null` compte comme périmée, délibérément : une ligne
+  /// `reservee` sans heure — donnée incohérente, saisie directe en base —
+  /// bloquerait la table POUR TOUJOURS, puisque aucune heure ne peut être
+  /// dépassée. En cas de doute, on libère.
+  bool get hasLiveReservation {
+    if (status != RestaurantTableStatus.reservee) return false;
+    final at = reservationTime;
+    if (at == null) return false;
+    return DateTime.now().isBefore(at.add(reservationGrace));
+  }
+
+  /// L'heure de la réservation est-elle atteinte, sans que la courtoisie soit
+  /// écoulée ? C'est l'état « client attendu » : la table est encore tenue.
+  bool get isReservationOverdue =>
+      hasLiveReservation && DateTime.now().isAfter(reservationTime!);
+
+  /// Table disponible pour y asseoir des clients.
+  ///
+  /// Inclut les tables dont la RÉSERVATION EST PÉRIMÉE : la courtoisie écoulée,
+  /// la table redevient libre sans que rien n'ait été écrit. Tous les lecteurs
+  /// de ce getter en profitent d'un coup — la capacité de salle, la prise de
+  /// commande, le menu d'actions, la suppression.
+  ///
+  /// ⚠ `status` n'est PAS une source fiable à lui seul : une table peut porter
+  /// `reservee` avec une heure d'hier. Les écrans qui comparent directement le
+  /// statut doivent passer par [displayStatus].
+  bool get isFree =>
+      status == RestaurantTableStatus.libre ||
+      (status == RestaurantTableStatus.reservee && !hasLiveReservation);
+
+  /// Statut TEL QU'IL DOIT S'AFFICHER — une réservation périmée retombe sur
+  /// « Libre ».
+  ///
+  /// Sans lui, une table dont la courtoisie est écoulée resterait bleue et
+  /// marquée « Réservée » alors que tout le reste de l'app la traite comme
+  /// libre : l'écran dirait le contraire du comportement.
+  RestaurantTableStatus get displayStatus =>
+      (status == RestaurantTableStatus.reservee && !hasLiveReservation)
+          ? RestaurantTableStatus.libre
+          : status;
 
   /// Table retirée du plan de salle. Filtrée par `tablesForShop`.
   bool get isDeleted => deletedAt != null;

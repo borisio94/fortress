@@ -176,6 +176,13 @@ class RestaurantTableService {
     return stored ? TableWriteOutcome.ok : TableWriteOutcome.notStoredLocally;
   }
 
+  /// ⚠ PLUS AUCUN APPELANT, VOLONTAIREMENT. La prise de commande passe par
+  /// `RestaurantOrderService.saveTableOrder`, qui occupe la table, pose les
+  /// couverts et l'heure d'ouverture en une seule écriture — cf. le commentaire
+  /// de `order_type_sheet.dart:363-366`. Garder cette méthode séparée ferait
+  /// deux écritures pour le même fait. Elle reste ici pour le jour où une
+  /// ouverture de table SANS commande redeviendrait nécessaire.
+  ///
   /// Ouvre le service sur une table libre : statut `occupee`, couverts posés
   /// et horodatage d'ouverture (base du calcul de durée de repas en PR-3).
   static Future<RestaurantTable> openService({
@@ -205,10 +212,15 @@ class RestaurantTableService {
   /// les fesses des clients.
   ///
   /// Retourne la table libérée, ou `null` si elle avait encore un compte.
+  ///
+  /// L'issue de l'écriture n'est PAS remontée ici : les quatre appelants sont
+  /// des nettoyages automatiques (après paiement, transfert, incident), sans
+  /// message à l'écran. Ceux qui annoncent quelque chose appellent `release`
+  /// directement.
   static Future<RestaurantTable?> releaseIfEmpty(RestaurantTable table) async {
     if (table.isFree) return null;
     if (RestaurantOrderService.openOrdersFor(table).isNotEmpty) return null;
-    return release(table);
+    return (await release(table)).table;
   }
 
   /// Ajuste le nombre de couverts d'un service en cours — des convives sont
@@ -242,7 +254,9 @@ class RestaurantTableService {
   /// encore un compte non soldé repassait aussitôt en « occupée » et devenait
   /// impossible à libérer. Les commandes ne sont pas supprimées — elles
   /// deviennent des comptes sans table, toujours encaissables.
-  static Future<RestaurantTable> release(RestaurantTable table) async {
+  /// Renvoie la table libérée et l'issue de l'écriture locale.
+  static Future<({RestaurantTable table, TableWriteOutcome outcome})> release(
+      RestaurantTable table) async {
     for (final order in RestaurantOrderService.openOrdersFor(table)) {
       await RestaurantTabService.detachFromTable(order);
     }
@@ -254,8 +268,8 @@ class RestaurantTableService {
       reservationTime: null,
       reservationName: null,
     );
-    await _persist(freed);
-    return freed;
+    final outcome = await _persist(freed);
+    return (table: freed, outcome: outcome);
   }
 
   /// Bascule la table en statut `addition` (le client demande l'addition).
@@ -266,21 +280,27 @@ class RestaurantTableService {
   }
 
   /// Pose une réservation sur une table (statut `reservee`).
-  static Future<RestaurantTable> reserve({
+  ///
+  /// Aucune annulation n'est programmée : la péremption est CALCULÉE à la
+  /// lecture (cf. `RestaurantTable.hasLiveReservation`). L'app n'a pas de
+  /// planificateur, et une annulation écrite dépendrait d'un appareil allumé
+  /// pour la déclencher.
+  ///
+  /// Renvoie l'issue de l'écriture locale, comme toutes les mutations de ce
+  /// service : l'appelant ne doit pas annoncer une réservation qui n'est pas
+  /// à l'écran.
+  static Future<TableWriteOutcome> reserve({
     required RestaurantTable table,
     required DateTime at,
     required String name,
     int? covers,
-  }) async {
-    final reserved = table.copyWith(
-      status: RestaurantTableStatus.reservee,
-      reservationTime: at,
-      reservationName: name.trim(),
-      covers: covers,
-    );
-    await _persist(reserved);
-    return reserved;
-  }
+  }) =>
+      _persist(table.copyWith(
+        status: RestaurantTableStatus.reservee,
+        reservationTime: at,
+        reservationName: name.trim(),
+        covers: covers,
+      ));
 
   /// Retire une table du plan de salle — SUPPRESSION DOUCE.
   ///

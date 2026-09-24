@@ -206,6 +206,18 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
     return left < 0 ? 0 : left;
   }
 
+  /// Tables RETENUES par une réservation vivante — hors des choix.
+  ///
+  /// Elles ne sont pas « à moitié occupées » : elles sont tenues pour
+  /// quelqu'un, et y asseoir d'autres clients reviendrait à donner deux fois la
+  /// même table. Elles restent AFFICHÉES, en lecture seule : sans elles, le
+  /// serveur lirait « aucune table ne peut recevoir six couverts » alors qu'il
+  /// en voit une vide devant lui, et irait chercher pourquoi au plan de salle.
+  List<RestaurantTable> get _reservedTables => RestaurantTableService
+      .tablesForShop(widget.shopId)
+      .where((t) => t.hasLiveReservation)
+      .toList();
+
   /// Tables pouvant accueillir la tablée en cours.
   ///
   /// Ce n'est PLUS « les tables libres » : une table de huit dont cinq places
@@ -717,6 +729,7 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
       ];
     }
     final tables = _availableTables;
+    final reserved = _reservedTables;
     if (tables.isEmpty) {
       return [
         Text(
@@ -727,6 +740,12 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
                 : 'Aucune place libre. Libérez une table occupée, ou '
                     'ajoutez-en une depuis le plan de salle.',
             style: AppTextStyles.captionHint),
+        // Sans cette précision, le message ci-dessus ment par omission : il
+        // existe bien une table, elle est retenue.
+        if (reserved.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          for (final t in reserved) _ReservedLine(table: t),
+        ],
         const SizedBox(height: 12),
         AppPrimaryButton(
           label: 'Ouvrir le plan de salle',
@@ -760,6 +779,12 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
             ),
         ],
       ),
+      // Les tables retenues, en lecture seule, sous les choix : le serveur voit
+      // pourquoi il lui manque une table, à quelle heure et pour qui.
+      if (reserved.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        for (final t in reserved) _ReservedLine(table: t),
+      ],
       const SizedBox(height: 18),
       const AppFieldLabel('Nombre de couverts'),
       const SizedBox(height: 4),
@@ -1255,6 +1280,49 @@ class _TableChip extends StatelessWidget {
                       ? Colors.white.withValues(alpha: 0.85)
                       : null)),
         ]),
+      ),
+    );
+  }
+}
+
+/// Une table RETENUE, en lecture seule, sous les tables disponibles.
+///
+/// Elle n'est pas proposée — une réservation tient la table entière, pas ses
+/// places restantes — mais elle est montrée, avec l'heure SAISIE et le nom.
+/// Le serveur comprend ainsi pourquoi il lui manque une table, et peut décider
+/// lui-même : placer ailleurs, attendre, ou faire annuler la réservation.
+class _ReservedLine extends StatelessWidget {
+  final RestaurantTable table;
+
+  const _ReservedLine({required this.table});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sem = theme.semantic;
+    final at = table.reservationTime;
+    final who = (table.reservationName ?? '').trim();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.access_time_rounded, size: 15, color: sem.info),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${table.name} · ${table.capacity} places — réservée '
+              '${at == null ? '' : '${at.hour.toString().padLeft(2, '0')}:'
+                  '${at.minute.toString().padLeft(2, '0')} '}'
+              '${who.isEmpty ? '' : 'pour $who'}'
+              // L'heure est passée, la table est encore tenue : c'est le seul
+              // des trois états qui ne se lit pas sur le chiffre.
+              '${table.isReservationOverdue ? ' · client attendu' : ''}',
+              style: AppTextStyles.caption,
+            ),
+          ),
+        ],
       ),
     );
   }
