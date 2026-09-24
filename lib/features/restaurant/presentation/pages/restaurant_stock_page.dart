@@ -24,7 +24,7 @@ import '../widgets/cost_method_picker.dart';
 import '../widgets/ingredient_quick_sheet.dart';
 import '../widgets/resto_empty_state.dart' show RestoEmptyState;
 import '../widgets/resto_amount_text.dart';
-import '../widgets/resto_dashed_border.dart';
+import '../widgets/resto_fab.dart';
 import '../widgets/resto_surfaces.dart' show RestoGlassPanel;
 import '../widgets/resto_underline_tabs.dart';
 import '../widgets/resto_section_header.dart';
@@ -94,6 +94,20 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
       // « Bonjour… », pas « Tableau de bord ». Le doublon est propre à Stock.
       title: '',
       isRootPage: false,
+      // LE BOUTON FLOTTANT, seul appel de création (cf. `RestoFab`). Il SUIT
+      // L'ONGLET ACTIF — d'où sa place ici, au niveau de la page : ingrédient
+      // ou fourniture. Masqué sur une liste vide, dont l'état vide porte son
+      // propre bouton. Aucune permission, comme l'ancien bouton d'en-tête.
+      floatingActionButton: (_tab == 0 ? nIng : nSup) == 0
+          ? null
+          : RestoFab(
+              tooltip: _tab == 0
+                  ? 'Ajouter un ingrédient'
+                  : 'Ajouter une fourniture',
+              onPressed: _tab == 0
+                  ? () => _createIngredient(context, shopId)
+                  : () => _createStockItem(context, shopId),
+            ),
       actions: [
         IconButton(
           tooltip: 'Inventaire',
@@ -115,10 +129,8 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
             subtitle: '${_count(nIng, zero: 'aucun ingrédient', one: 'ingrédient')}'
                 ' · '
                 '${_count(nSup, zero: 'aucune fourniture', one: 'fourniture')}',
-            // PLUS DE BOUTON DE CRÉATION ICI (24/09/2026). La création passe
-            // par UNE case pointillée en pied de chaque liste (`RestoAddCell`)
-            // — même règle sur les quatre écrans : jamais deux appels à la même
-            // action à quinze centimètres. L'état vide garde son bouton.
+            // PAS DE BOUTON DE CRÉATION ICI : le bouton flottant est le seul
+            // appel de l'écran (cf. `floatingActionButton` plus haut).
           ),
           // DEUX NATURES, DEUX SIGNAUX : une icône et une couleur.
           //
@@ -167,6 +179,30 @@ class _RestaurantStockPageState extends State<RestaurantStockPage> {
       ),
     );
   }
+
+  /// Crée un ingrédient — MÊME feuille que la fiche d'un plat.
+  ///
+  /// `IngredientQuickSheet` écrit l'ingrédient et, si un montant est saisi, la
+  /// dépense d'achat qui va avec. La liste se rafraîchit par l'écoute de
+  /// `ingredients`, comme toujours — aucun `setState` n'est nécessaire ici.
+  ///
+  /// `warnsAboutUnlinked` : créé depuis STOCK, rien n'oblige à le rattacher à
+  /// une recette ensuite, et la feuille le dit.
+  static Future<void> _createIngredient(BuildContext context, String shopId) =>
+      showAdaptiveFormSheet<Ingredient>(
+        context: context,
+        builder: (_) => IngredientQuickSheet(
+          shopId: shopId,
+          warnsAboutUnlinked: true,
+        ),
+      );
+
+  /// Crée une fourniture. Même remontée, même raison.
+  static Future<void> _createStockItem(BuildContext context, String shopId) =>
+      showAdaptiveFormSheet<bool>(
+        context: context,
+        builder: (_) => _StockItemEditor(shopId: shopId),
+      );
 
   /// « aucun ingrédient », « 1 ingrédient », « 4 ingrédients ».
   ///
@@ -311,12 +347,13 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
           busy: _backfilling,
           onRun: _backfill,
         ),
-        // LA CRÉATION EST UNE CASE EN PIED DE LISTE (24/09/2026).
+        // LA CRÉATION EST LE BOUTON FLOTTANT (24/09/2026).
         //
         // Elle a été une ligne entière ici jusqu'au 2026-09-23, entre les
-        // onglets et la liste, puis un bouton d'en-tête. C'est désormais la
-        // case pointillée sous la liste (`RestoAddCell`), seule porte — et le
-        // bouton de l'état vide quand il n'y a rien à lister.
+        // onglets et la liste, puis un bouton d'en-tête, puis une case en pied
+        // de liste — introuvable sur une longue liste. C'est désormais le
+        // bouton flottant de la page (`RestoFab`), et le bouton de l'état vide
+        // quand il n'y a rien à lister.
         Expanded(
           child: items.isEmpty
               // COMPACT : la barre d'onglets juste au-dessus porte déjà
@@ -345,7 +382,10 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
                   footnote: 'ou en composant la recette d\'un plat',
                 )
               : ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                  // En bas : la place du bouton flottant, toujours affiché sur
+                  // une liste non vide (80 = 48 + 16 + 16).
+                  padding: const EdgeInsets.fromLTRB(
+                      16, 4, 16, kRestoFabClearance),
                   children: [
                     // ── « AUCUN PLAT » EN BANDEAU, PAS EN PASTILLE ──────
                     //
@@ -378,13 +418,6 @@ class _IngredientsTabState extends RestoTabState<_IngredientsTab> {
                           onDelete: () => _delete(ing),
                         ),
                     ]),
-                    const SizedBox(height: 10),
-                    // LA SEULE PORTE DE CRÉATION de l'onglet, en pied de liste.
-                    SizedBox(
-                      height: 48,
-                      child: RestoAddCell(
-                          label: 'Ingrédient', onTap: _createIngredient),
-                    ),
                   ],
                 ),
         ),
@@ -1159,7 +1192,7 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
         // vide ET en pied de liste (`_DrinksNote`), pour qu'il ne disparaisse
         // pas au premier article saisi.
         // Le « Nouvelle fourniture » qui doublait ici le bouton d'en-tête a
-        // disparu avec lui : la case en pied de liste est la seule porte.
+        // disparu avec lui : le bouton flottant est la seule porte.
         Expanded(
           child: items.isEmpty
               ? _SuppliesEmptyState(
@@ -1171,7 +1204,10 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
                       context.push('/shop/${widget.shopId}/restaurant/finances'),
                 )
               : ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                  // En bas : la place du bouton flottant, toujours affiché sur
+                  // une liste non vide (80 = 48 + 16 + 16).
+                  padding: const EdgeInsets.fromLTRB(
+                      16, 4, 16, kRestoFabClearance),
                   children: [
                     // Même panneau et mêmes lignes que les ingrédients — voir
                     // `_StockLines`. La note sur les boissons suit la liste.
@@ -1237,12 +1273,6 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
                       ]),
                     ),
                     ]),
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      height: 48,
-                      child: RestoAddCell(
-                          label: 'Fourniture', onTap: () => _edit(null)),
-                    ),
                     const SizedBox(height: 16),
                     const _DrinksNote(),
                   ],

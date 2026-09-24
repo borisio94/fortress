@@ -31,7 +31,7 @@ import '../../../restaurant/domain/order_tile.dart';
 import '../../../restaurant/domain/service_tabs.dart';
 import '../../../restaurant/presentation/widgets/resto_empty_state.dart';
 import '../../../restaurant/presentation/widgets/resto_amount_text.dart';
-import '../../../restaurant/presentation/widgets/resto_dashed_border.dart';
+import '../../../restaurant/presentation/widgets/resto_fab.dart';
 import '../../../restaurant/presentation/widgets/resto_underline_tabs.dart';
 import '../../../restaurant/presentation/widgets/order_action_visuals.dart';
 import '../../../restaurant/presentation/widgets/service_tab_visuals.dart';
@@ -1764,7 +1764,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     // (`amountPaid` reste au total) : le client, lui, a soldé.
     final totalPaid = orders.fold<double>(0, (s, o) => s + o.amountPaid);
     final totalDue  = orders.fold<double>(0, (s, o) => s + o.amountDue);
-    return Column(children: [
+    final content = Column(children: [
       // ── Emplacements : Globale / Boutique / Partenaires ─────────────
       // Le filtre s'applique aux lignes via `orderToPartnerLocId` plus haut
       // dans `_orders` (cf. ref.watch(dashViewFilterProvider)).
@@ -2029,7 +2029,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               // parler, et `orderGridColumns` en déduit le reste — c'est ce qui
               // garantit que « Envoyer en préparation » passe à toute largeur.
               ? SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+                  // En bas : la place du bouton flottant (80 = 48 + 16 + 16,
+                  // cf. `kRestoFabClearance`). Cette grille est propre à la
+                  // restauration.
+                  padding: const EdgeInsets.fromLTRB(
+                      12, 4, 12, kRestoFabClearance),
                   child: LayoutBuilder(builder: (ctx, box) {
                     // 14 et non 10 : sans contour, c'est l'ESPACE qui sépare
                     // deux cartes.
@@ -2048,27 +2052,22 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                                   orderDebts: orderDebts,
                                   pendingRemit: pendingRemit,
                                   grid: true)),
-                        // ── LA CASE « NOUVELLE COMMANDE », EN FIN DE GRILLE ──
-                        //
-                        // Le geste le plus fréquent du service n'avait AUCUN
-                        // point d'entrée depuis cet écran : il fallait revenir
-                        // à la carte par le tiroir. En fin de grille et non en
-                        // tête — on vient d'abord voir ce qui est en cours, et
-                        // une case de création au premier rang repousserait la
-                        // commande la plus ancienne hors de vue.
-                        SizedBox(
-                          width: w,
-                          child: _NewOrderTile(
-                            onTap: () => context
-                                .go('/shop/${widget.shopId}/inventaire'),
-                          ),
-                        ),
+                        // La case « Nouvelle commande » qui fermait la grille
+                        // est remplacée par le bouton flottant (voir la fin de
+                        // `build`) : atteignable dans les deux vues, et sans
+                        // défiler jusqu'au bout d'une longue liste.
                       ],
                     );
                   }),
                 )
             : ListView.separated(
-          padding: EdgeInsets.all(_isResto && !_gridView ? 8 : 12),
+          // Restauration : la marge basse dégage le bouton flottant (80 = 48 +
+          // 16 + 16). E-commerce : inchangé.
+          // (En restauration, cette branche est toujours la vue LISTE : la
+          // grille a la sienne, plus haut.)
+          padding: _isResto
+              ? const EdgeInsets.fromLTRB(8, 8, 8, kRestoFabClearance)
+              : const EdgeInsets.all(12),
           itemCount: orders.length,
           // EN LISTE, les lignes se touchent : un filet les separe, sans
           // espace. C'est ce qui fait la densite — huit pixels entre vingt
@@ -2081,6 +2080,29 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
               orderDebts: orderDebts,
               pendingRemit: pendingRemit),
         ),
+        ),
+      ),
+    ]);
+
+    // LE BOUTON FLOTTANT — restauration seulement, seul appel de création de
+    // l'écran (cf. `RestoFab`). MÊME DESTINATION que l'ancienne case
+    // « Nouvelle commande » : la carte, où la commande se prend. Dans les DEUX
+    // vues — la case n'existait qu'en grille. Masqué sur une liste vide, dont
+    // l'état vide porte son propre bouton.
+    //
+    // En `Stack` et non en `floatingActionButton` : cet écran n'a pas
+    // d'`AppScaffold` (`orders_page.dart` rend `OrdersTab` directement). Même
+    // marge de 16 px, dans le corps du shell — donc au-dessus de la barre du
+    // bas sur téléphone.
+    if (!_isResto || orders.isEmpty) return content;
+    return Stack(children: [
+      content,
+      Positioned(
+        right: kRestoFabMargin,
+        bottom: kRestoFabMargin,
+        child: RestoFab(
+          tooltip: 'Nouvelle commande',
+          onPressed: () => context.go('/shop/${widget.shopId}/inventaire'),
         ),
       ),
     ]);
@@ -6025,51 +6047,6 @@ class _ViewModeToggle extends StatelessWidget {
         seg(Icons.grid_view_rounded, true, 'Cartes'),
         seg(Icons.view_list_rounded, false, 'Liste dense'),
       ]),
-    );
-  }
-}
-
-/// CASE « NOUVELLE COMMANDE », en fin de grille.
-///
-/// Le geste le plus fréquent du service n'avait AUCUN point d'entrée depuis cet
-/// écran : pour prendre une commande, il fallait ressortir par le tiroir et
-/// rouvrir la carte. Trois taps pour le geste qu'on répète trente fois.
-///
-/// EN POINTILLÉ ET SANS FOND : c'est une place vide qui attend, pas une
-/// commande de plus. Un aplat plein l'aurait comptée parmi les autres.
-class _NewOrderTile extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _NewOrderTile({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    // EN POINTILLÉ, comme les trois autres écrans (Plan de salle, Menu, Stock)
-    // — le commentaire le disait déjà, la bordure était pleine. Une bordure
-    // pleine et trois pointillées pour la même intention, c'est l'écart qui
-    // se voit sans qu'on sache pourquoi.
-    return RestoDashedBorder(
-      color: Theme.of(context).semantic.borderSubtle,
-      radius: 14,
-      child: InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        // Hauteur MINIMALE et non fixe : la case s'aligne sur la plus petite
-        // carte de sa rangée sans jamais forcer les autres.
-        constraints: const BoxConstraints(minHeight: 96),
-        alignment: Alignment.center,
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.add_circle_outline_rounded, size: 26, color: cs.primary),
-          const SizedBox(height: 6),
-          Text('Nouvelle commande',
-              style: AppTextStyles.bodySmBold.copyWith(color: cs.primary)),
-          const SizedBox(height: 2),
-          Text('Ouvre la carte', style: AppTextStyles.micro),
-        ]),
-      ),
-      ),
     );
   }
 }

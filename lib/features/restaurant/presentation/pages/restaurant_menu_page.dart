@@ -33,7 +33,7 @@ import '../widgets/dish_form_sheet.dart';
 import '../widgets/resto_dish_visuals.dart';
 import '../widgets/resto_empty_state.dart';
 import '../widgets/resto_amount_text.dart';
-import '../widgets/resto_dashed_border.dart';
+import '../widgets/resto_fab.dart';
 import '../widgets/resto_underline_tabs.dart';
 import '../widgets/resto_surfaces.dart';
 
@@ -472,16 +472,19 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     return AppScaffold(
       shopId: widget.shopId,
       title: 'Menu',
-      // PLUS DE BOUTON FLOTTANT. Il chevauchait le bord de la grille, et sur
-      // le Menu, ajouter un plat n'est pas assez fréquent pour mériter un
-      // flottant. La création passe par UNE case pointillée en fin de grille
-      // (`RestoAddCell`) — plus de bouton d'en-tête non plus.
-      //
-      // La condition « panier ouvert » ne l'a pas suivi : elle existait parce
-      // que le flottant recouvrait « Commander » du volet, ce qu'une case de
-      // grille ne fait pas. Et sous `kCartPaneFullWidthBelow`, le volet prend
-      // TOUTE la largeur de la `Row` ci-dessous — `Expanded` laisse alors 0 dp
-      // à la carte : la case n'est plus à l'écran.
+      // LE BOUTON FLOTTANT, seul appel de création (cf. `RestoFab`). Masqué :
+      //   • sans le droit d'ajouter ;
+      //   • sur une grille vide — l'état vide porte son propre bouton ;
+      //   • sur la liste des plats RETIRÉS, où l'on n'ajoute rien ;
+      //   • PANIER OUVERT : sur mobile le volet occupe toute la largeur (cf.
+      //     `_cartPaneWidth`) et le bouton recouvrait « Commander », le geste
+      //     même que l'on cherche à provoquer (`7a6a417`).
+      floatingActionButton: (products.isEmpty ||
+              !canAdd ||
+              _showRetired ||
+              _cartOpen(context))
+          ? null
+          : RestoFab(tooltip: 'Ajouter un plat', onPressed: _openDishForm),
       //
       // VOLET PANIER À DROITE — ouvert dès le premier article, refermé dès le
       // dernier retiré. Il remplace la feuille modale : celle-ci recouvrait la
@@ -555,6 +558,17 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
   /// Écart entre la carte et le volet panier — les deux sont des blocs
   /// distincts, pas deux moitiés d'une même surface.
   static const double _kCartGap = 10;
+
+  /// Le volet panier est-il déployé ?
+  ///
+  /// `select` et non `watch` : seule la bascule vide/non-vide nous intéresse.
+  /// Observer l'état entier ferait reconstruire toute la carte à chaque
+  /// changement de quantité, pour un bouton qui, lui, ne change pas.
+  bool _cartOpen(BuildContext context) {
+    final hasItems =
+        context.select<CaisseBloc, bool>((b) => b.state.items.isNotEmpty);
+    return hasItems && ref.watch(cartPaneVisibleProvider);
+  }
 
   /// Largeur du volet : assez pour lire une ligne d'article, jamais plus du
   /// tiers de l'écran — la carte doit rester l'écran principal.
@@ -697,13 +711,9 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
                     canEdit: canEdit,
                     onTap: (p) => _onDishTap(p, canEdit),
                     onAdd: _addToCart,
-                    // LA SEULE PORTE DE CRÉATION, en fin de grille — plus de
-                    // bouton d'en-tête (règle des quatre écrans, cf.
-                    // `RestoAddCell`). Droit d'ajout requis ; jamais sur la
-                    // liste des plats RETIRÉS, où l'on n'ajoute rien. L'état
-                    // vide, lui, garde son propre bouton.
-                    onCreateDish:
-                        canAdd && !_showRetired ? _openDishForm : null,
+                    // Marge basse qui dégage le bouton flottant, quand il est
+                    // affiché — mêmes conditions que lui (voir `build`).
+                    fabShown: canAdd && !_showRetired,
                     onToggleDispo: _toggleDispo,
                     onEditCount: _editCount,
                     onDelete: _deleteDish,
@@ -966,8 +976,8 @@ class _MenuHeader extends StatelessWidget {
             icon: Icon(Icons.search_rounded,
                 size: 20, color: AppColors.textSecondary),
           ),
-        // L'AJOUT N'EST PLUS ICI : la case pointillée en fin de grille est la
-        // seule porte (règle des quatre écrans, cf. `RestoAddCell`).
+        // L'AJOUT N'EST PLUS ICI : le bouton flottant est la seule porte
+        // (cf. `RestoFab`).
       ]),
     );
   }
@@ -986,8 +996,9 @@ class _MenuGrid extends StatelessWidget {
   final ValueChanged<Product> onTap;
   final ValueChanged<Product> onAdd;
 
-  /// Crée un plat — la case pointillée en fin de grille. `null` : pas de case.
-  final VoidCallback? onCreateDish;
+  /// Le bouton flottant est-il affiché ? Décide de la marge basse
+  /// ([kRestoFabClearance]) : sans elle, la dernière rangée passe sous lui.
+  final bool fabShown;
   final void Function(Product, bool) onToggleDispo;
   final ValueChanged<Product> onEditCount;
   final ValueChanged<Product> onDelete;
@@ -1001,7 +1012,7 @@ class _MenuGrid extends StatelessWidget {
     required this.canEdit,
     required this.onTap,
     required this.onAdd,
-    this.onCreateDish,
+    this.fabShown = false,
     required this.onToggleDispo,
     required this.onEditCount,
     required this.onDelete,
@@ -1020,9 +1031,10 @@ class _MenuGrid extends StatelessWidget {
       final tileH = menuTileHeight(layout.photoHeight, ts.scale);
 
       return GridView.builder(
-        // 24 et non plus 96 en bas : la réserve servait au bouton flottant,
-        // remplacé par la case de création en fin de grille.
-        padding: const EdgeInsets.fromLTRB(hPad, 8, hPad, 24),
+        // En bas : la place du bouton flottant quand il est là (80 = 48 + 16
+        // + 16, cf. `kRestoFabClearance`), 24 sinon.
+        padding: EdgeInsets.fromLTRB(
+            hPad, 8, hPad, fabShown ? kRestoFabClearance : 24),
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: layout.cols,
           mainAxisSpacing: kMenuRowGap,
@@ -1031,12 +1043,8 @@ class _MenuGrid extends StatelessWidget {
           // test verrouille.
           mainAxisExtent: tileH,
         ),
-        itemCount: products.length + (onCreateDish != null ? 1 : 0),
-        // La case prend la cellule entière — même hauteur que les tuiles.
-        itemBuilder: (_, i) => i == products.length
-            ? RestoAddCell(
-                label: 'Plat', onTap: onCreateDish!, radius: _kPhotoRadius)
-            : _DishCard(
+        itemCount: products.length,
+        itemBuilder: (_, i) => _DishCard(
           product: products[i],
           shopId: shopId,
           retired: retired,

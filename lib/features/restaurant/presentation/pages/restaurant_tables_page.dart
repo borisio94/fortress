@@ -15,7 +15,7 @@ import '../../../../shared/widgets/app_confirm_dialog.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_snack.dart';
-import '../widgets/resto_dashed_border.dart';
+import '../widgets/resto_fab.dart';
 import '../widgets/resto_empty_state.dart';
 import '../../domain/room_headline.dart';
 import '../widgets/table_form_sheet.dart';
@@ -564,10 +564,13 @@ class _RestaurantTablesPageState
     return AppScaffold(
       title: 'Plan de salle',
       shopId: widget.shopId,
-      // PLUS DE FAB. Il chevauchait le bord de la grille et masquait la
-      // dernière carte. La création passe par UNE case en fin de grille —
-      // absente sans le droit de composer la salle : proposer un bouton qui
-      // refuserait ensuite serait pire que ne rien proposer.
+      // LE BOUTON FLOTTANT, seul appel de création (cf. `RestoFab`). Absent
+      // sans le droit de composer la salle — proposer un bouton qui refuserait
+      // ensuite serait pire que ne rien proposer — et sur une salle vide, dont
+      // l'état vide porte son propre bouton.
+      floatingActionButton: (tables.isEmpty || !canManage)
+          ? null
+          : RestoFab(tooltip: 'Ajouter une table', onPressed: _createTable),
       body: tables.isEmpty
           ? RestoEmptyState(
               icon: Icons.restaurant_rounded,
@@ -606,7 +609,6 @@ class _RestaurantTablesPageState
         // carte ne porte plus que quatre lignes de texte, qui ne demandent pas
         // un carré.
         final columns = (constraints.maxWidth / 150).floor().clamp(2, 8);
-        final count = views.length + (canManage ? 1 : 0);
         return Column(children: [
           _RoomHeader(
             headline: headline,
@@ -616,7 +618,10 @@ class _RestaurantTablesPageState
           ),
           Expanded(
             child: GridView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+              // En bas : la place du bouton flottant quand il est là (80 = 48
+              // + 16 + 16, cf. `kRestoFabClearance`), 16 sinon.
+              padding: EdgeInsets.fromLTRB(
+                  16, 4, 16, canManage ? kRestoFabClearance : 16),
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: columns,
                 mainAxisSpacing: 10,
@@ -626,10 +631,8 @@ class _RestaurantTablesPageState
                 // de 245 px sur tablette.
                 mainAxisExtent: 82,
               ),
-              itemCount: count,
-              itemBuilder: (_, i) => i == views.length
-                  ? RestoAddCell(label: 'Table', onTap: _createTable)
-                  : _TableCard(
+              itemCount: views.length,
+              itemBuilder: (_, i) => _TableCard(
                       view: views[i],
                       // Actions sur la TABLE elle-même — addition, comptes,
                       // couverts, réserver, libérer, supprimer. La carte, elle,
@@ -646,10 +649,8 @@ class _RestaurantTablesPageState
 
 /// En-tête du plan de salle : le décompte et la légende.
 ///
-/// PLUS DE BOUTON « + TABLE » ICI (24/09/2026). La création passe par UNE
-/// seule porte, la case pointillée en fin de grille — même règle sur les quatre
-/// écrans (Commandes, Plan de salle, Menu, Stock) : jamais deux appels à la
-/// même action à quinze centimètres. L'état vide garde son propre bouton.
+/// PAS DE BOUTON « + TABLE » ICI : la création passe par le bouton flottant
+/// (cf. `RestoFab`), seul appel de l'écran. L'état vide garde son propre bouton.
 class _RoomHeader extends StatelessWidget {
   final String headline;
   final bool wide;
