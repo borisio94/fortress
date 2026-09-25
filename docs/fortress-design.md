@@ -388,12 +388,22 @@ problème ; une notification qui n'arrive jamais à son destinataire en est un.
 C'était `isShopAdmin` sur ordinateur et `isMember` sur mobile depuis mai, sous
 un commentaire qui disait « réservée admin + owner ».
 
-### Ce qui vit hors du shell — NON TRANCHÉ
+### Ce qui vit hors du shell — TRANCHÉ (25/09/2026)
 
-Le code dit l'Addition et la Badgeuse « hors shell » (la badgeuse, posée en
-libre-service, ne doit donner accès à aucune autre page). **Elles sont
-pourtant déclarées dans le `ShellRoute`.** À vérifier à l'écran, puis à
-trancher.
+**Seule la BADGEUSE vit hors du shell** : posée en libre-service sur le
+compte connecté du gérant, elle ne donne accès à aucune autre page. Route de
+premier niveau, fond uni, et une seule sortie — la croix, sous PIN gérant
+(`ManagerGate`, action `exitTimeclock` : le PIN s'il existe, sinon le passage
+libre et journalisé). Une route qui sort du shell **garde les deux gardes
+d'accès** (boutique suspendue, membre suspendu) : `ShopAccessGuard`, partagé
+avec `ShopShell`.
+
+**L'ADDITION reste dans le shell** : c'est un écran de service, elle a besoin
+de la navigation et des gardes. Elle ne remonte plus de second décor.
+
+Limite : sur le web, la barre d'adresse et le bouton Précédent du navigateur
+restent disponibles — on retire la navigation de l'app, pas celle du
+navigateur.
 
 ### Divergences mobile / ordinateur
 
@@ -710,9 +720,8 @@ Le détail vit dans `docs/backlog.md` ; ici, l'index.
 - Cibles tactiles : ≈ 154 sites hors lot, comptés par feature.
 - Code mort : `KitchenTicketCard` (écran Préparation supprimé),
   `ExpenseFormSheet`, `PartnerLedgerDetailPage`, `DottedBorderBox`.
-- Shell : Addition et Badgeuse dans le shell ; titres de page de
-  l'e-commerce (backlog) ; édition d'une commande selon la largeur
-  (section 19).
+- Shell : titres de page de l'e-commerce (backlog) ; édition d'une commande
+  selon la largeur (section 19).
 - Doublons de mécanisme (section 10) : onglets, périodes, étiquettes d'état,
   montants compacts, avatars.
 

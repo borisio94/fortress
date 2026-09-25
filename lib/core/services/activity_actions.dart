@@ -120,6 +120,9 @@ class ActivityActions {
     // Vente encaissée défaite (retour en « programmée ») : restitue stock,
     // paiement et écritures partenaire. La porte la plus large des trois.
     'paid_sale_reopened':         ActivityCategory.alert,
+    // Sortie de la badgeuse en libre-service (sous PIN gérant s'il existe) :
+    // elle rend l'application à qui se trouve devant le poste.
+    'timeclock_exited':           ActivityCategory.alert,
 
     // ── Clients ──────────────────────────────────────────────────────
     'client_created':             ActivityCategory.shop,

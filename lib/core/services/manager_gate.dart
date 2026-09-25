@@ -31,6 +31,16 @@ enum ManagerAction {
   /// exactement le scénario qu'on cherche à couvrir : la commande a été payée
   /// en espèces, puis la ligne disparaît.
   reopenPaidSale,
+
+  /// Quitter la BADGEUSE (lot « hors shell », 25/09/2026).
+  ///
+  /// Pas une sortie d'argent : une sortie de POSTE. La badgeuse tourne en
+  /// libre-service, sur le compte connecté du gérant ; la quitter rend toute
+  /// l'application à qui se trouve devant. Même règle que les trois autres :
+  /// le PIN s'il existe, le passage libre (et journalisé) sinon — un gérant
+  /// sans code ne doit jamais rester enfermé dans la badgeuse. Mais PAS de
+  /// proposition de poser le code ici (cf. [offersPinSetup]).
+  exitTimeclock,
 }
 
 extension ManagerActionX on ManagerAction {
@@ -41,18 +51,35 @@ extension ManagerActionX on ManagerAction {
         ManagerAction.cancelSentRound => 'round_cancelled',
         ManagerAction.discountBill => 'bill_discounted',
         ManagerAction.reopenPaidSale => 'paid_sale_reopened',
+        ManagerAction.exitTimeclock => 'timeclock_exited',
       };
+
+  /// Type de cible journalisé : une commande pour les trois gestes d'argent,
+  /// la boutique pour la sortie de badgeuse.
+  String get targetType => switch (this) {
+        ManagerAction.exitTimeclock => 'shop',
+        _ => 'order',
+      };
+
+  /// Propose-t-on de poser le code quand il manque ? NON pour la badgeuse :
+  /// le texte de la proposition parle des gestes qui font sortir de l'argent,
+  /// et il deviendrait faux.
+  bool get offersPinSetup => this != ManagerAction.exitTimeclock;
 
   String get title => switch (this) {
         ManagerAction.cancelSentRound => 'Annuler une tournée envoyée',
         ManagerAction.discountBill => 'Remise sur l\'addition',
         ManagerAction.reopenPaidSale => 'Défaire une vente encaissée',
+        ManagerAction.exitTimeclock => 'Quitter la badgeuse',
       };
 
   bool canExecute(AppPermissions perms) => switch (this) {
         ManagerAction.cancelSentRound => perms.canCancelSale,
         ManagerAction.discountBill => perms.canApplyDiscount,
         ManagerAction.reopenPaidSale => perms.canCancelSale,
+        // Tout membre : c'est le PIN qui garde la sortie, pas un droit —
+        // sinon un compte sans ce droit resterait enfermé dans la badgeuse.
+        ManagerAction.exitTimeclock => perms.isMember,
       };
 }
 
@@ -128,7 +155,8 @@ class ManagerGate {
         }
         return false;
       }
-    } else if (missingPinResponse(isShopOwner: perms.isShopOwner) ==
+    } else if (action.offersPinSetup &&
+        missingPinResponse(isShopOwner: perms.isShopOwner) ==
             MissingPinResponse.offerSetup &&
         context.mounted) {
       await _offerPinSetup(context, action);
@@ -140,7 +168,7 @@ class ManagerGate {
     // pas la trace, seulement l'autorisation.
     await ActivityLogService.log(
       action: action.logAction,
-      targetType: 'order',
+      targetType: action.targetType,
       targetId: targetId,
       targetLabel: targetLabel,
       shopId: shopId,

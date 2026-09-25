@@ -35,6 +35,7 @@ void main() {
     'approval_closed', 'approval_cancelled',
     // ── Service restaurant sous PIN gérant (Lot A) ──
     'round_cancelled', 'bill_discounted', 'cash_closure_x', 'cash_closure_z',
+    'timeclock_exited',
     // ── Clients / dépenses ──
     'client_created', 'client_updated', 'client_deleted',
     'expense_created', 'expense_updated', 'expense_deleted',

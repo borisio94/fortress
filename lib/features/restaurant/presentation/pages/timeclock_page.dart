@@ -1,7 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../core/permisions/subscription_provider.dart';
+import '../../../../core/services/manager_gate.dart';
 import '../../../../core/services/staff_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -228,6 +232,37 @@ class _TimeclockPageState extends State<TimeclockPage> {
         '${t.minute.toString().padLeft(2, '0')}';
   }
 
+  /// QUITTER LA BADGEUSE — sous PIN gérant (25/09/2026).
+  ///
+  /// La badgeuse tourne en libre-service sur le compte connecté : la quitter
+  /// rend toute l'application à qui se trouve devant. C'était un simple
+  /// `maybePop`, ouvert à n'importe qui. Désormais `ManagerGate` : le PIN s'il
+  /// existe ; sinon le passage libre, journalisé — un gérant sans code ne doit
+  /// jamais rester enfermé ici.
+  ///
+  /// Ouverte directement par son adresse, la page n'a rien sous elle : on
+  /// ramène alors au Personnel, d'où elle s'ouvre (sinon la croix ne faisait
+  /// rien et l'on restait bloqué).
+  Future<void> _exit() async {
+    final perms = ProviderScope.containerOf(context, listen: false)
+        .read(permissionsProvider(widget.shopId));
+    final ok = await ManagerGate.require(
+      context: context,
+      perms: perms,
+      action: ManagerAction.exitTimeclock,
+      shopId: widget.shopId,
+      targetId: widget.shopId,
+      targetLabel: 'Badgeuse',
+    );
+    if (!ok || !mounted) return;
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+    } else {
+      context.go('/shop/${widget.shopId}/restaurant/personnel');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -249,7 +284,7 @@ class _TimeclockPageState extends State<TimeclockPage> {
                   Row(
                     children: [
                       IconButton(
-                        onPressed: () => Navigator.of(context).maybePop(),
+                        onPressed: _exit,
                         icon: const Icon(Icons.close_rounded),
                         tooltip: 'Quitter la badgeuse',
                       ),

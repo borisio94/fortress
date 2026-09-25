@@ -47,7 +47,6 @@ import '../../features/restaurant/presentation/pages/finances_hub_page.dart';
 import '../../features/restaurant/presentation/pages/restaurant_stock_page.dart';
 import '../../features/restaurant/presentation/pages/inventory_reconcile_page.dart';
 import '../../features/restaurant/presentation/pages/cash_closure_page.dart';
-import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
 import '../../features/restaurant/presentation/pages/restaurant_staff_page.dart';
 import '../../features/restaurant/presentation/pages/timeclock_page.dart';
 import '../../features/inventaire/presentation/pages/product_form_page.dart';
@@ -744,6 +743,29 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: RouteNames.hub,             builder: (c, s) => const HubDashboardPage()),
       GoRoute(path: RouteNames.shopComparison,  builder: (c, s) => const ShopComparisonPage()),
 
+      // ── BADGEUSE — HORS DU SHELL, pour de vrai (25/09/2026) ───────────────
+      //
+      // Posée en libre-service à l'entrée du personnel, sur le compte connecté
+      // du gérant : elle ne doit donner accès à AUCUNE autre page. Déclarée
+      // dans le `ShellRoute` depuis sa création (`45e517a`), sous un
+      // commentaire qui affirmait le contraire, elle portait la barre latérale
+      // (ordinateur) ou l'AppBar avec le menu du compte (mobile).
+      //
+      // Hors du shell, elle perdrait les deux gardes de `ShopShell` (boutique
+      // suspendue, membre suspendu) : `ShopAccessGuard` les lui rend. Sa seule
+      // sortie est la croix, sous PIN gérant (cf. `TimeclockPage._exit`).
+      //
+      // LIMITE : sur le web, la barre d'adresse et le bouton Précédent du
+      // navigateur restent disponibles. On retire la navigation de l'app, pas
+      // celle du navigateur.
+      GoRoute(path: '/shop/:shopId/restaurant/pointage',
+          redirect: (c, st) => _restaurantGuard(ref, st),
+          builder: (c, s) {
+            final id = s.pathParameters['shopId']!;
+            return ShopAccessGuard(
+                shopId: id, child: TimeclockPage(shopId: id));
+          }),
+
       ShellRoute(
         // navigatorKey unique — isole le ShellRoute du navigator racine
         navigatorKey: _shellNavigatorKey,
@@ -850,24 +872,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           // — chaque combinaison est un plat entier de la carte — et toute
           // commande passe par le Menu.
           //
-          // `RestoBackdrop` : l'addition vit HORS du shell, elle ne reçoit
-          // donc pas le décor restaurant par héritage. On le remonte ici pour
-          // que le service garde le même fond d'un bout à l'autre.
+          // L'ADDITION VIT DANS LE SHELL (décision du 25/09/2026) : c'est un
+          // écran de service, elle a besoin de la navigation et des deux
+          // gardes de `ShopShell`. Le commentaire qui la disait « hors du
+          // shell » mentait depuis sa création (`90a46db`), et la route lui
+          // remontait un `RestoBackdrop` — un SECOND décor, opaque, dessiné à
+          // l'intérieur du bloc de contenu. Le shell pose déjà le sien.
           GoRoute(path: '/shop/:shopId/restaurant/addition/:tableId',
               redirect: (c, st) => _restaurantGuard(ref, st),
-              builder: (c, s) => RestoBackdrop(
-                    child: BillPage(
-                      shopId:  s.pathParameters['shopId']!,
-                      tableId: s.pathParameters['tableId']!,
-                    ),
+              builder: (c, s) => BillPage(
+                    shopId:  s.pathParameters['shopId']!,
+                    tableId: s.pathParameters['tableId']!,
                   )),
-          // Badgeuse (Lot D) — HORS shell à dessein : posée en libre-service à
-          // l'entrée du personnel, elle ne doit donner accès à aucune autre
-          // page de l'application. Une seule sortie, par le bouton fermer.
-          GoRoute(path: '/shop/:shopId/restaurant/pointage',
-              redirect: (c, st) => _restaurantGuard(ref, st),
-              builder: (c, s) =>
-                  TimeclockPage(shopId: s.pathParameters['shopId']!)),
+          // La BADGEUSE n'est plus ici : elle vit hors du shell, voir la route
+          // `/shop/:shopId/restaurant/pointage` au-dessus du `ShellRoute`.
           // Carte / inventaire : deux écrans selon le secteur. En
           // restauration c'est « Menu » — grille de plats avec photo, note
           // et ajout au panier à emporter. Route unique pour que les liens
@@ -1128,6 +1146,42 @@ final membershipSuspendedProvider =
   return AppDatabase.getMembershipStatus(uid, shopId) == 'suspended';
 });
 
+/// LES DEUX GARDES D'ACCÈS À UNE BOUTIQUE — extraites de `ShopShell`
+/// (25/09/2026), à l'identique, pour les routes qui vivent HORS du shell
+/// (la badgeuse). Une route qui sort du shell sans elle perdrait :
+///
+///   • BOUTIQUE SUSPENDUE (SA-1) : si le super-admin a suspendu la boutique,
+///     tout le contenu est bloqué derrière « Compte suspendu ». Réactif :
+///     rebuild dès que le statut change (sync / realtime), refresh serveur à
+///     l'entrée.
+///   • MEMBRE SUSPENDU : l'employé suspendu de cette boutique n'y entre plus.
+///
+/// Les super-admins passent (ils doivent pouvoir gérer la suspension).
+class ShopAccessGuard extends ConsumerWidget {
+  final String shopId;
+  final Widget child;
+
+  const ShopAccessGuard({super.key, required this.shopId, required this.child});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(shopSuspendedProvider(shopId));
+    final shop    = LocalStorageService.getShop(shopId);
+    final isSuper = LocalStorageService.getCurrentUser()?.isSuperAdmin ?? false;
+    if (shop != null && shop.isSuspended && !isSuper) {
+      return SuspendedShopScreen(reason: shop.suspendedReason);
+    }
+    final memberSuspended =
+        ref.watch(membershipSuspendedProvider(shopId)).valueOrNull ?? false;
+    if (memberSuspended && !isSuper) {
+      return const SuspendedShopScreen(
+          reason:
+              'Votre accès à cette boutique a été suspendu par un administrateur.');
+    }
+    return child;
+  }
+}
+
 class ShopShell extends ConsumerWidget {
   final Widget child;
   final String shopId;
@@ -1150,35 +1204,20 @@ class ShopShell extends ConsumerWidget {
     // CTAs topbar : calculés en fonction de la route active (spec round 9).
     // Stock/Clients exposent un bouton « + » dans la topbar shell, déplaçant
     // les CTAs précédemment inline dans le body.
-    // ── Guard suspension (SA-1) ───────────────────────────────────────
-    // Si la boutique courante a été suspendue par le super-admin, on
-    // bloque TOUT le contenu derrière un écran « Compte suspendu ». Les
-    // super-admins passent (ils doivent pouvoir gérer la suspension).
-    // Réactif : rebuild dès que le statut de la boutique change (suspension SA
-    // poussée par sync/realtime), et force un refresh serveur à l'entrée.
-    ref.watch(shopSuspendedProvider(shopId));
-    final shop    = LocalStorageService.getShop(shopId);
-    final isSuper = LocalStorageService.getCurrentUser()?.isSuperAdmin ?? false;
-    if (shop != null && shop.isSuspended && !isSuper) {
-      return SuspendedShopScreen(reason: shop.suspendedReason);
-    }
-    // Membre (employé) suspendu de cette boutique → accès bloqué.
-    final memberSuspended =
-        ref.watch(membershipSuspendedProvider(shopId)).valueOrNull ?? false;
-    if (memberSuspended && !isSuper) {
-      return const SuspendedShopScreen(
-          reason:
-              'Votre accès à cette boutique a été suspendu par un administrateur.');
-    }
-
+    // ── Gardes (boutique suspendue, membre suspendu) ──────────────────
+    // Extraites dans `ShopAccessGuard` (25/09/2026), à l'identique : la
+    // badgeuse, qui vit hors du shell, en a besoin aussi.
     final goState = GoRouterState.of(context);
     final loc      = goState.matchedLocation;
     final tabQuery = goState.uri.queryParameters['tab'];
     final extraActions = _topbarActionsFor(context, loc, shopId, tabQuery);
-    return AdaptiveScaffold(
+    return ShopAccessGuard(
       shopId: shopId,
-      body: child,
-      extraActions: extraActions,
+      child: AdaptiveScaffold(
+        shopId: shopId,
+        body: child,
+        extraActions: extraActions,
+      ),
     );
   }
 
