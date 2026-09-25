@@ -268,10 +268,12 @@ extension EmployeeStatusX on EmployeeStatus {
 /// Aligné sur les UPDATEs du hotfix_024 qui backfill les memberships
 /// existantes lors de la migration de rôles.
 ///
-/// - `owner` : toutes les 22 permissions (bypass total dans `_grain`).
+/// - `owner` : toutes les permissions — `EmployeePermission.values`, 29 au
+///   25/09/2026 (bypass total dans `_grain`).
 ///   Cette liste est gardée pour cohérence mais n'est jamais consultée
 ///   en pratique pour un owner.
-/// - `admin` : tout sauf `shop.delete` et `admin.remove` (réservées owner).
+/// - `admin` : tout sauf les permissions réservées owner (`isOwnerOnly` :
+///   `shopDelete`, `adminRemove`, `shopCreate`, `shopFullEdit`).
 /// - `user`  : 4 permissions de base (consulter inventaire + encaisser
 ///   + voir clients).
 Set<EmployeePermission> defaultPermissionsForRole(MemberRole role) {
