@@ -219,3 +219,17 @@ page se donne elle-même, et le même modèle que le restaurant (titre dans le
 corps pour une page racine, dans la barre pour une sous-page) — à décider
 pour l'e-commerce, dont le shell historique garde son fil d'ariane.
 
+## Code mort
+
+### `EmptyCartDashboard` — un réglage qui ne commandait rien
+
+*Inscrit le 25/09/2026 avec la refonte de la page Apparence.*
+
+`caisse/presentation/widgets/empty_cart_dashboard.dart` (mini-tableau de bord
+à la place du panier vide) n'est monté par AUCUN écran, et ne l'a jamais été
+depuis sa création (`25a2334`, 20/05/2026 — vérifié dans l'historique git).
+Son interrupteur « Tableau de bord dans le panier vide » vivait sur la page
+Thème : il écrivait un booléen (`settings_box`) que personne ne lisait. La
+carte a été retirée de la page ; le widget et ses deux fonctions
+(`isEmptyCartDashboardEnabled`, `setEmptyCartDashboardEnabled`) restent en
+place. À trancher : le monter enfin dans le panier, ou le supprimer.

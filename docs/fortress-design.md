@@ -678,6 +678,8 @@ commentaire ET ce registre**, sinon l'un des deux ment.
 | La disposition lit le conteneur | `caisse_page.dart` | 8 |
 | L'actif d'un onglet se lit sans le trait | `resto_underline_tabs.dart` | 15 |
 | L'icône d'abord, la couleur ensuite | `restaurant_stock_page.dart` | 15 |
+| L'aperçu d'une palette se LIT dans le thème réel, jamais dans une table | `theme_page.dart` (`themeSwatches`) | 3 |
+| Segmenté : l'actif plus CLAIR que la piste en clair, plus FONCÉ en sombre | `theme_page.dart` (`_ModeSegmented`) | 15 |
 
 **Pour créer une règle** : l'écrire au plus près du code qu'elle gouverne,
 AVEC sa raison mesurée (un contraste, un débordement, un cas), puis
