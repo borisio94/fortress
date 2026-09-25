@@ -4,6 +4,8 @@ import '../../../../core/services/stock_item_service.dart';
 import '../../../restaurant/presentation/widgets/courier_sheet.dart';
 import '../../../restaurant/presentation/widgets/packaging_sheet.dart';
 import '../../../restaurant/presentation/widgets/restaurant_checkout.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
@@ -24,7 +26,6 @@ import '../../../onboarding/presentation/widgets/first_sale_tooltip.dart';
 import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../domain/usecases/order_receipt_usecase.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
-import '../../../../shared/providers/cart_pane_provider.dart';
 import '../../../../core/services/pin_service.dart';
 import '../../../restaurant/domain/order_actions.dart';
 import '../../../restaurant/domain/order_tile.dart';
@@ -83,6 +84,8 @@ import '../../../crm/data/models/client_model.dart';
 import '../../../restaurant/presentation/widgets/resto_surfaces.dart';
 import '../../../../core/widgets/touch_target.dart';
 import '../../../restaurant/presentation/widgets/service_settings_sheet.dart';
+import '../../../restaurant/domain/service_wait.dart';
+import '../../../shop_selector/domain/entities/shop_summary.dart';
 
 class CaissePage extends ConsumerStatefulWidget {
   final String shopId;
@@ -563,7 +566,18 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     // pull-to-refresh manuellement pour voir sa commande tout juste
     // enregistrée.
     AppDatabase.addListener(_onDataChanged);
+    // LE CHRONOMÈTRE AVANCE TOUT SEUL (restauration). Sans ce battement, il
+    // ne bougerait qu'à la prochaine modification d'une commande : « 3 min »
+    // resterait affiché vingt minutes. Trente secondes suffisent à un
+    // affichage à la minute.
+    if (_isResto) {
+      _chronoTick = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (mounted) setState(() {});
+      });
+    }
   }
+
+  Timer? _chronoTick;
 
   void _onDataChanged(String table, String shopId) {
     if (!mounted) return;
@@ -578,6 +592,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
 
   @override
   void dispose() {
+    _chronoTick?.cancel();
     AppDatabase.removeListener(_onDataChanged);
     _filter.dispose();
     _searchCtrl.dispose();
@@ -2060,29 +2075,94 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                     const gap = 14.0;
                     final cols = orderGridColumns(box.maxWidth, gap: gap);
                     final w = (box.maxWidth - gap * (cols - 1)) / cols;
-                    return Wrap(
-                      spacing: gap,
-                      runSpacing: gap,
+                    // DEUX SECTIONS : les terminées (encaissées, sans suite)
+                    // ne se mêlent plus aux actives. « TERMINÉES » et non
+                    // « encaissées aujourd'hui » : le titre doit rester vrai
+                    // quel que soit le filtre de date.
+                    //
+                    // La case « Nouvelle commande » qui fermait la grille est
+                    // remplacée par le bouton flottant (voir la fin de
+                    // `build`).
+                    final active = [
+                      for (var i = 0; i < orders.length; i++)
+                        if (!serviceTabOf(orders[i]).isSettled) i,
+                    ];
+                    final done = [
+                      for (var i = 0; i < orders.length; i++)
+                        if (serviceTabOf(orders[i]).isSettled) i,
+                    ];
+                    Widget tiles(List<int> ids) => Wrap(
+                          spacing: gap,
+                          runSpacing: gap,
+                          children: [
+                            for (final i in ids)
+                              SizedBox(
+                                  width: w,
+                                  child: _cardFor(i,
+                                      orders: orders,
+                                      orderDebts: orderDebts,
+                                      pendingRemit: pendingRemit,
+                                      grid: true)),
+                          ],
+                        );
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        for (var i = 0; i < orders.length; i++)
-                          SizedBox(
-                              width: w,
-                              child: _cardFor(i,
-                                  orders: orders,
-                                  orderDebts: orderDebts,
-                                  pendingRemit: pendingRemit,
-                                  grid: true)),
-                        // La case « Nouvelle commande » qui fermait la grille
-                        // est remplacée par le bouton flottant (voir la fin de
-                        // `build`) : atteignable dans les deux vues, et sans
-                        // défiler jusqu'au bout d'une longue liste.
+                        if (active.isNotEmpty) ...[
+                          const _OrdersSectionTitle('En cours'),
+                          tiles(active),
+                        ],
+                        if (done.isNotEmpty) ...[
+                          if (active.isNotEmpty) const SizedBox(height: 22),
+                          const _OrdersSectionTitle('Terminées'),
+                          tiles(done),
+                        ],
                       ],
                     );
                   }),
                 )
+            : _isResto
+              // ── LISTE DU RESTAURANT : colonnes ALIGNÉES (25/09/2026) ────
+              //
+              // Les lignes vivent dans UN panneau, séparées par un filet —
+              // comme le Stock —, sous un en-tête de colonnes. Chaque ligne
+              // garde son liseré d'état. Pas de sections : les actives passent
+              // devant, les terminées reculent par leur fond.
+              ? Builder(builder: (_) {
+                  final sorted = [
+                    ...orders.where((o) => !serviceTabOf(o).isSettled),
+                    ...orders.where((o) => serviceTabOf(o).isSettled),
+                  ];
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                    child: RestoGlassPanel(
+                      padding: EdgeInsets.zero,
+                      radius: 14,
+                      child: Column(children: [
+                        const _OrdersListHeader(),
+                        Expanded(
+                          child: ListView.separated(
+                            // En bas : la place du bouton flottant.
+                            padding: const EdgeInsets.only(
+                                bottom: kRestoFabClearance),
+                            itemCount: sorted.length,
+                            separatorBuilder: (_, __) => Divider(
+                                height: 1,
+                                thickness: 1,
+                                color:
+                                    Theme.of(context).semantic.borderSubtle),
+                            itemBuilder: (_, i) => _cardFor(i,
+                                orders: sorted,
+                                orderDebts: orderDebts,
+                                pendingRemit: pendingRemit),
+                          ),
+                        ),
+                      ]),
+                    ),
+                  );
+                })
             : ListView.separated(
-          // Restauration : la marge basse dégage le bouton flottant (80 = 48 +
-          // 16 + 16). E-commerce : inchangé.
+          // E-commerce : inchangé. (La restauration a sa liste, plus haut.)
           // (En restauration, cette branche est toujours la vue LISTE : la
           // grille a la sienne, plus haut.)
           padding: _isResto
@@ -2556,7 +2636,16 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                             offset: const Offset(0, 3)),
                       ],
               )
-            : BoxDecoration(
+            : widget.dense
+                // LIGNE DE LISTE : elle vit dans le panneau de la liste, entre
+                // deux filets — ni bordure, ni rayon, ni ombre. Une commande
+                // terminée recule par son FOND, jamais par un voile.
+                ? BoxDecoration(
+                    color: _tab.isSettled
+                        ? Theme.of(context).scaffoldBackgroundColor
+                        : Colors.transparent,
+                  )
+                : BoxDecoration(
           color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
@@ -2594,7 +2683,13 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                 Container(width: 3, color: _tab.color(context)),
               Expanded(
                 child: Padding(
-                  padding: EdgeInsets.all(widget.grid ? 16 : 14),
+                  // Tuile de ~92 px en grille ; ligne de ~48 px en liste.
+                  padding: widget.grid
+                      ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
+                      : widget.dense
+                          ? const EdgeInsets.symmetric(
+                              horizontal: _kListPadH, vertical: 8)
+                          : const EdgeInsets.all(14),
                   child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2758,10 +2853,9 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
             // PAS EN MODE DENSE : la ligne y tient sur une hauteur de ligne,
             // et un bouton pleine largeur la doublerait — c'est exactement la
             // densité qu'on est venu chercher en basculant.
-            if (!widget.dense) ..._buildServiceProgress(context, s),
-            // En grille, une commande encaissée porte « Facture » à la place
-            // du vide laissé par l'avancement, qui n'a plus rien à proposer.
-            ..._gridInvoiceLink(context, s),
+            // L'ACTION DU SERVICE est désormais DANS la carte repliée, en
+            // ligne 3 (grille) ou dans la colonne ACTION (liste) — cf.
+            // `_inlineAction`. Même cascade (`_nextStep`), mêmes gardes.
 
             // ── Bandeau dette enregistrée envers le partenaire ────
             // Synchronisé : `widget.debt` est calculé groupé par le parent
@@ -2889,7 +2983,9 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                   // Il n'est plus ici : l'ouvrir pour avancer un bon coûtait un
                   // tap par commande. Il reste rendu en mode DENSE, où la ligne
                   // n'a pas la place de le porter.
-                  if (widget.dense) ..._buildServiceProgress(context, s),
+                  // En liste, l'action vit dans la colonne ACTION : seul le
+                  // retour arrière reste ici, sous le pli.
+                  if (widget.dense) ..._undoRow(),
                   // EMBALLAGE — bouton direct, au moment où il sert.
                   ..._buildPackagingAction(context, s),
                   // LIVREUR — commandes à livrer uniquement.
@@ -4665,83 +4761,59 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   /// taille de la commande, pour la même largeur.
   String _contenuCourt() => orderContentsShort(widget.order.items);
 
-  /// TUILE DE GRILLE — TROIS LIGNES, et pas une de plus.
+  /// TUILE DE GRILLE — TROIS LIGNES, ~92 px (refonte du 25/09/2026).
   ///
-  ///     Table 1  [À envoyer]      10:56  ⌄
-  ///     Poulet DG         2 500 F · non payé
-  ///     [ Envoyer en préparation ]
+  ///     Table 2  [En préparation]                    24 min  ⌄
+  ///     4 couverts · 19:36 · en retard
+  ///     2× Ndolè + 3 autres     12 500 F  non payée   [Prête]
   ///
-  /// Elle en portait six : repère et heure, badge, DEUX lignes de contenu,
-  /// montant, bouton. Six niveaux pour identifier un bon et le faire avancer —
-  /// et c'est ce qui donnait des tuiles hautes de 520 px.
+  /// LIGNE 1 — le repère, l'état (badge écrit en variante TEXTE sur son fond
+  /// teinté : le token suit son fond), le chronomètre à la couleur de l'état,
+  /// le pli. LIGNE 2 — couverts, heure de prise, mention de retard, en `micro`
+  /// atténué. LIGNE 3 — le contenu, le MONTANT (l'élément le plus lourd de la
+  /// carte) et son état de paiement, puis le bouton d'action — petit, en fond
+  /// teinté (`_StateButton`).
   ///
-  /// L'ÉTAT REMONTE À CÔTÉ DU REPÈRE, et le commentaire qui partait d'ici
-  /// disait l'inverse : « à un tiers de largeur, le poser à côté du repère
-  /// l'aurait fait ellipser l'un ou l'autre ». Il avait été écrit en supposant
-  /// des tuiles de 320 px, qui n'existent plus depuis que les colonnes se
-  /// déduisent du plancher.
+  /// PAS DE LISERÉ EN GRILLE — décision confirmée le 25/09/2026 : la hiérarchie
+  /// passe par le FOND, l'espace et la typographie (cf. la décoration, plus
+  /// haut). Le badge écrit l'état en toutes lettres : la couleur ne le porte
+  /// jamais seule.
   ///
-  /// LE CHIFFRE, pour que personne ne le redescende sur sa propre ligne en
-  /// croyant bien faire : à 342 px de tuile — trois colonnes sur un bloc de
-  /// 1046 — la ligne dispose de 311 px utiles. Le badge le plus long en coûte
-  /// 105 (« En préparation »), l'heure 32, le chevron 18, les écarts 18. Il
-  /// reste 169 px au repère, soit 23 caractères ; « Table 12 · Compte 2 » en
-  /// fait 19.
+  /// LE CHRONOMÈTRE mesure l'attente DANS L'ÉTAT (`service_state_at`), pas
+  /// l'âge de la commande. Sans date — commande antérieure à la colonne —, il
+  /// ne s'affiche pas : mieux vaut rien qu'un faux.
   ///
-  /// ⚠ CE QUI CASSERA EN PREMIER, ET OÙ. Au plancher de `kOrderTileMin`, le
-  /// repère tombe à 96 px et « Table 12 · Compte 2 » s'ellipse en
-  /// « Table 12 · Com… ». La dégradation est propre aujourd'hui, mais elle n'a
-  /// plus de marge : un onglet de service dont le libellé dépasserait
-  /// « En préparation » la mangerait. C'est cette ligne qui le montrera.
-  ///
-  /// LE CHEVRON EST EN COIN et non en fin de ligne 2 : il y concurrençait le
-  /// montant et l'état de paiement, alors que la ligne 1 est la moins chargée
-  /// des trois — et le coin haut-droit est l'endroit convenu du dépliement.
-  ///
-  /// L'AVATAR NE REVIENT PAS. Il portait l'initiale du client, c'est-à-dire,
-  /// en restauration, celle de la TABLE — « T » pour toute la salle.
-  ///
-  /// ─── ÉPURATION (2026-09-24) ─────────────────────────────────────────────
-  ///
-  /// Plus de badge : un POINT de 6 px devant le repère, à la couleur de l'état,
-  /// et le libellé d'état en texte simple sous le repère. Le point seul ne
-  /// porte pas l'information — l'ambre y fait 2,15:1 sur blanc, sous le seuil
-  /// d'un élément non textuel — il la DOUBLE : c'est le libellé, en
-  /// `textColor`, qui la dit lisiblement.
-  ///
-  /// LE MONTANT EST LE PLUS GROS de la carte (`title`, 18, semi-gras), l'unité
-  /// en 11 px atténué. En texte primaire et non en couleur de marque : sur
-  /// Midnight en sombre, la primaire ferait 1,93:1 sur la carte. Sur une
-  /// commande soldée il passe en `textSecondary` — la hiérarchie par la
-  /// typographie, pas par un voile.
-  ///
-  /// RIEN N'EST RETIRÉ : repère, état, heure, pli, contenu court, montant et
-  /// état de paiement sont tous là.
+  /// LA LIGNE 3 TIENT, mesurée (métrique d'Inter) : le fixe fait ~250 px avec
+  /// les libellés COURTS du bouton — d'où les libellés courts, le complet en
+  /// infobulle. Au plancher de 480 px de tuile, le contenu garde ~200 px.
   List<Widget> _gridSummary(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final paye = widget.order.paymentStatus == PaymentStatus.paid;
+    final sem = Theme.of(context).semantic;
+    final s = widget.order.status;
     final settled = _tab.isSettled;
+    final paye = widget.order.paymentStatus == PaymentStatus.paid;
+    final chrono = _chronoText();
+    final action = _inlineAction(context, s, withIcon: true);
+    final undo = _undoButton();
     return [
-      // ── LIGNE 1 : le point, qui, depuis quand — et le pli ────────────
+      // ── LIGNE 1 : qui, dans quel état, depuis combien de temps ───────
       Row(children: [
-        Container(
-          width: 6,
-          height: 6,
-          decoration: BoxDecoration(
-            color: _tab.color(context),
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
+        Flexible(
           child: Text(_repere(),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.bodySmBold.copyWith(color: cs.onSurface)),
+              style: AppTextStyles.bodySmBold.copyWith(
+                  color: settled ? AppColors.textSecondary : cs.onSurface)),
         ),
-        const SizedBox(width: 6),
-        Text(_hhmm(),
-            style: AppTextStyles.micro.copyWith(color: AppColors.textSecondary)),
+        const SizedBox(width: 8),
+        _StateBadge(tab: _tab),
+        const Spacer(),
+        if (chrono != null) ...[
+          const SizedBox(width: 8),
+          Text(chrono,
+              style: AppTextStyles.captionBold
+                  .copyWith(color: _tab.textColor(context))),
+        ],
         const SizedBox(width: 2),
         AnimatedRotation(
           turns: _expanded ? 0.5 : 0,
@@ -4750,77 +4822,71 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
               size: 18, color: AppColors.textSecondary),
         ),
       ]),
-      // ── LIGNE 2 : l'état, en texte, aligné sous le repère ────────────
-      Padding(
-        padding: const EdgeInsets.only(left: 14),
-        child: Text(_tab.label,
-            maxLines: 1,
-            style: AppTextStyles.caption.copyWith(color: _tab.textColor(context))),
-      ),
-      const SizedBox(height: 10),
-      // ── LIGNE 3 : ce qu'il y a dedans ────────────────────────────────
-      //
-      // Forme COURTE : « 2× Ndolè + 3 autres » dit la taille de la commande,
-      // là où la forme longue coupée ne dirait que le premier plat.
-      Text(_contenuCourt(),
+      const SizedBox(height: 3),
+      // ── LIGNE 2 : couverts · heure · retard ──────────────────────────
+      Text(_metaLine(),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: AppTextStyles.caption.copyWith(color: AppColors.textSecondary)),
-      const SizedBox(height: 4),
-      // ── LIGNE 4 : ce que ça vaut ─────────────────────────────────────
-      Row(
-        crossAxisAlignment: CrossAxisAlignment.baseline,
-        textBaseline: TextBaseline.alphabetic,
-        children: [
-          Flexible(
-            child: RestoAmountText(widget.order.total,
-                style: AppTextStyles.title.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: settled ? AppColors.textSecondary : cs.onSurface)),
-          ),
-          // L'ÉTAT DE PAIEMENT QUALIFIE LE MONTANT et ne vit pas sans lui : il
-          // le suit sur la même ligne, en texte et non en pastille.
-          if (widget.order.status != SaleStatus.cancelled &&
-              widget.order.status != SaleStatus.refused) ...[
-            Text(' · ',
-                style: AppTextStyles.caption
-                    .copyWith(color: AppColors.textSecondary)),
-            Text(widget.order.paymentStatus.label,
-                maxLines: 1,
-                style: AppTextStyles.caption.copyWith(
-                    color: paye
-                        ? Theme.of(context).semantic.successText
-                        : Theme.of(context).semantic.warningText)),
-          ],
+          style: AppTextStyles.microSecondary),
+      const SizedBox(height: 8),
+      // ── LIGNE 3 : contenu · montant + paiement · action ──────────────
+      Row(children: [
+        Expanded(
+          child: Text(_contenuCourt(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.caption
+                  .copyWith(color: AppColors.textSecondary)),
+        ),
+        const SizedBox(width: 8),
+        RestoAmountText(widget.order.total,
+            style: AppTextStyles.subtitle.copyWith(
+                fontWeight: FontWeight.w600,
+                color: settled ? AppColors.textSecondary : cs.onSurface)),
+        // L'état de paiement QUALIFIE le montant : il le suit, en texte.
+        if (s != SaleStatus.cancelled && s != SaleStatus.refused) ...[
+          const SizedBox(width: 6),
+          Text(widget.order.paymentStatus.label,
+              maxLines: 1,
+              style: AppTextStyles.caption.copyWith(
+                  color: paye ? sem.successText : sem.warningText)),
         ],
-      ),
-      // ── LIGNE 5 : le lien d'action, posé par la carte repliée ────────
-      const SizedBox(height: 4),
+        if (action != null) ...[const SizedBox(width: 10), action],
+        if (undo != null) undo,
+      ]),
     ];
   }
 
-  /// LIGNE DENSE — une commande par ligne, deux sous le seuil.
+  /// LIGNE DE LISTE — colonnes ALIGNÉES (refonte du 25/09/2026).
+  ///
+  ///     TEMPS │ TABLE │ ÉTAT │ CONTENU │ MONTANT │ ACTION │ ⌄
+  ///
+  /// Largeurs FIXES (`_ListCols`) : chaque colonne s'aligne d'une commande à
+  /// l'autre, et l'en-tête (`_OrdersListHeader`) les reprend des mêmes
+  /// constantes. Sous `kOrderListRowMin` de CONTENEUR — et non d'écran : la
+  /// version précédente lisait `MediaQuery`, contre la règle du document de
+  /// design (§ 8) —, la ligne se replie sur deux.
   List<Widget> _denseSummary(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final large = MediaQuery.of(context).size.width >= kCartPaneFullWidthBelow;
-
+    final settled = _tab.isSettled;
+    final chrono = _chronoText();
     final repere = Text(_repere(),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: AppTextStyles.bodySmBold.copyWith(color: cs.onSurface));
-    final heure = Text(_hhmm(), style: AppTextStyles.micro);
-    final badge = _ServiceChip(
-        label: _tab.label, icon: _tab.icon, color: _tab.color(context));
+        style: AppTextStyles.bodySmBold.copyWith(
+            color: settled ? AppColors.textSecondary : cs.onSurface));
+    final temps = Text(chrono ?? '',
+        maxLines: 1,
+        style: AppTextStyles.captionBold
+            .copyWith(color: _tab.textColor(context)));
     final contenu = Text(_contenu(),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: AppTextStyles.caption);
-    // EN TEXTE PRIMAIRE, comme la grille : deux couleurs de montant selon la
-    // vue seraient pires que le désordre corrigé. L'échelon reste celui de la
-    // ligne dense (13 semi-gras) — « en gros » à l'échelle d'une ligne.
     final montant = RestoAmountText(widget.order.total,
-        style: AppTextStyles.bodyBold
-            .copyWith(fontWeight: FontWeight.w600, color: cs.onSurface));
+        style: AppTextStyles.bodyBold.copyWith(
+            fontWeight: FontWeight.w600,
+            color: settled ? AppColors.textSecondary : cs.onSurface));
     final chevron = AnimatedRotation(
       turns: _expanded ? 0.5 : 0,
       duration: const Duration(milliseconds: 200),
@@ -4828,52 +4894,103 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
           size: 18, color: cs.onSurfaceVariant),
     );
 
-    if (large) {
-      // UNE ligne. La colonne de repère est bornée pour que les contenus
-      // s'alignent verticalement d'une commande à l'autre — sans quoi l'œil
-      // ne peut pas balayer la colonne du milieu.
-      return [
-        Row(children: [
-          SizedBox(
-            width: 56,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [repere, heure],
-            ),
-          ),
-          const SizedBox(width: 10),
-          badge,
-          const SizedBox(width: 10),
-          Expanded(child: contenu),
-          const SizedBox(width: 10),
-          montant,
-          const SizedBox(width: 6),
-          chevron,
-        ]),
-      ];
-    }
-
-    // DEUX lignes. Le repère et l'état en haut, le contenu et le montant en
-    // bas : les deux informations qu'on cherche d'abord ne se disputent plus
-    // la largeur avec celles qu'on lit ensuite.
     return [
-      Row(children: [
-        Expanded(child: repere),
-        const SizedBox(width: 8),
-        heure,
-        const SizedBox(width: 8),
-        badge,
-      ]),
-      const SizedBox(height: 4),
-      Row(children: [
-        Expanded(child: contenu),
-        const SizedBox(width: 8),
-        montant,
-        const SizedBox(width: 4),
-        chevron,
-      ]),
+      LayoutBuilder(builder: (context, box) {
+        // La largeur de la LIGNE (conteneur), liseré et marges déjà retirés :
+        // on la ramène à celle de la liste pour comparer au même seuil que
+        // l'en-tête.
+        final wide =
+            box.maxWidth + _ListCols.inset >= kOrderListRowMin;
+        final action =
+            _inlineAction(context, widget.order.status, withIcon: !wide);
+        if (wide) {
+          return Row(children: [
+            SizedBox(width: _ListCols.temps, child: temps),
+            const SizedBox(width: _ListCols.gap),
+            SizedBox(width: _ListCols.table, child: repere),
+            const SizedBox(width: _ListCols.gap),
+            SizedBox(
+              width: _ListCols.etat,
+              child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: _StateBadge(tab: _tab)),
+            ),
+            const SizedBox(width: _ListCols.gap),
+            Expanded(child: contenu),
+            const SizedBox(width: _ListCols.gap),
+            SizedBox(
+              width: _ListCols.montant,
+              child: Align(alignment: Alignment.centerRight, child: montant),
+            ),
+            const SizedBox(width: _ListCols.gap),
+            SizedBox(
+              width: _ListCols.action,
+              child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: action ?? const SizedBox.shrink()),
+            ),
+            const SizedBox(width: _ListCols.gap),
+            SizedBox(width: _ListCols.chevron, child: chevron),
+          ]);
+        }
+        // DEUX lignes : qui et dans quel état en haut, ce que ça vaut et ce
+        // qu'on en fait en bas.
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(children: [
+              Expanded(child: repere),
+              if (chrono != null) ...[const SizedBox(width: 8), temps],
+              const SizedBox(width: 8),
+              _StateBadge(tab: _tab),
+            ]),
+            const SizedBox(height: 6),
+            Row(children: [
+              Expanded(child: contenu),
+              const SizedBox(width: 8),
+              montant,
+              if (action != null) ...[const SizedBox(width: 8), action],
+              const SizedBox(width: 4),
+              chevron,
+            ]),
+          ],
+        );
+      }),
     ];
+  }
+
+  // ─── Chronomètre et ligne d'information ─────────────────────────────────
+
+  /// « 24 min » — l'attente DANS L'ÉTAT, ou `null` : commande terminée (plus
+  /// rien n'attend) ou sans date d'état (antérieure au 25/09/2026).
+  String? _chronoText() {
+    if (_tab.isSettled) return null;
+    final wait = serviceWait(widget.order, DateTime.now());
+    return wait == null ? null : formatServiceWait(wait);
+  }
+
+  /// En retard au regard des seuils de LA BOUTIQUE (`shops`, réglables dans
+  /// « Réglages du service ») — défauts 5 / 20 / 5 si elle n'est pas en cache.
+  bool _isLate() {
+    if (_tab.isSettled) return false;
+    final shop = LocalStorageService.getShop(widget.order.shopId);
+    return isServiceLate(
+      widget.order,
+      DateTime.now(),
+      sendMin: shop?.serviceLateSendMin ?? kServiceLateSendDefault,
+      kitchenMin: shop?.serviceLateKitchenMin ?? kServiceLateKitchenDefault,
+      passMin: shop?.serviceLatePassMin ?? kServiceLatePassDefault,
+    );
+  }
+
+  /// « 4 couverts · 19:36 · en retard » — la ligne 2 de la tuile.
+  String _metaLine() {
+    final covers = widget.order.covers ?? 0;
+    return [
+      if (covers > 0) '$covers couvert${covers > 1 ? 's' : ''}',
+      _hhmm(),
+      if (_isLate()) 'en retard',
+    ].join(' · ');
   }
 
   /// ÉTAT DE SERVICE — le même rang, le même mot et la même couleur que
@@ -4927,153 +5044,175 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   ///
   /// Rendu seulement sur les commandes VIVANTES : une commande encaissée ou
   /// annulée n'a plus de service à faire avancer.
-  List<Widget> _buildServiceProgress(BuildContext context, SaleStatus s) {
-    if (!_isResto) return const [];
-    if (s != SaleStatus.scheduled && s != SaleStatus.processing) {
-      return const [];
-    }
+  ///
+  /// UNE CASCADE, LUE PAR LA TUILE ET PAR LA LIGNE (25/09/2026). Elle vivait
+  /// dans `_buildServiceProgress`, qui rendait tantôt un bouton large, tantôt
+  /// un lien de grille. Elle est désormais ICI, une fois ; seul le RENDU vit
+  /// ailleurs (`_inlineAction`). Mêmes actions, mêmes gardes, même ordre.
+  ///
+  /// `null` : rien à faire avancer — commande terminée (il ne reste que
+  /// l'encaissement), encaissée, annulée, ou e-commerce.
+  ({
+    IconData icon,
+    String label,
+    String short,
+    Future<void> Function() action,
+  })? _nextStep(SaleStatus s) {
+    if (!_isResto) return null;
+    if (s != SaleStatus.scheduled && s != SaleStatus.processing) return null;
     final o = widget.order;
-
-    final IconData icon;
-    final String label;
-    final Future<void> Function() action;
     if (!o.sentToKitchen) {
-      icon   = Icons.local_fire_department_rounded;
-      label  = 'Envoyer en préparation';
-      action = () => RestaurantOrderService.sendToKitchen(o);
-    } else if (o.isInKitchen) {
-      icon   = Icons.room_service_outlined;
-      label  = 'Commande prête';
-      action = () => RestaurantOrderService.markKitchenReady(o);
-    } else if (o.isWaitingService && o.orderType == 'dine_in') {
+      return (
+        icon: Icons.local_fire_department_rounded,
+        label: 'Envoyer en préparation',
+        short: 'Envoyer',
+        action: () => RestaurantOrderService.sendToKitchen(o),
+      );
+    }
+    if (o.isInKitchen) {
+      return (
+        icon: Icons.room_service_outlined,
+        label: 'Commande prête',
+        short: 'Prête',
+        action: () => RestaurantOrderService.markKitchenReady(o),
+      );
+    }
+    if (o.isWaitingService && o.orderType == 'dine_in') {
       // « Servie » n'a de sens qu'en salle : au comptoir comme en livraison,
       // remettre la commande et clore le service sont le MÊME geste — on passe
       // donc directement à « Terminée » plutôt que d'imposer deux taps pour un
       // seul évènement réel.
-      icon   = Icons.restaurant_rounded;
-      label  = 'Marquer servie';
-      action = () => RestaurantOrderService.markServed(o);
-    } else if (!o.finished) {
+      return (
+        icon: Icons.restaurant_rounded,
+        label: 'Marquer servie',
+        short: 'Servie',
+        action: () => RestaurantOrderService.markServed(o),
+      );
+    }
+    if (!o.finished) {
       // Fin du service, argent non encaissé. Le libellé nomme la réalité du
       // canal : un client attablé finit de manger, un client au comptoir
       // récupère, un client livré est livré.
-      (icon, label) = switch (o.orderType) {
+      final (icon, label) = switch (o.orderType) {
         'takeaway' => (Icons.shopping_bag_outlined, 'Commande récupérée'),
         'delivery' => (Icons.local_shipping_outlined, 'Livrée au client'),
         _          => (Icons.done_all_rounded, 'Repas terminé'),
       };
-      action = () async {
-        // GARDE LIVRAISON : une commande qui voyage doit être emballée. La
-        // refuser ICI, au moment de la remise, plutôt qu'à l'encaissement :
-        // c'est le dernier instant où le contenant est encore entre les mains
-        // du restaurant.
-        if (o.orderType == 'delivery' && !_hasPackaging) {
-          if (context.mounted) {
-            AppSnack.error(context,
-                'Emballez la commande avant de la remettre au livreur.');
-          }
-          return;
-        }
-        await RestaurantOrderService.markFinished(o);
-      };
-    } else {
-      // Terminée : il ne reste que l'encaissement, dont la ligne est juste
-      // dessous. Un bouton de plus ne ferait que du bruit.
-      //
-      // SAUF EN GRILLE. L'encaissement y vit dans la partie DÉPLIÉE : la carte
-      // « À encaisser » repliée n'avait aucun lien, et c'était la carte active
-      // la moins visible alors qu'elle porte le geste le plus urgent — de
-      // l'argent qui attend.
-      //
-      // Le lien appelle LE MÊME `onUpdate(completed)` que le bouton déplié :
-      // la page passe par `settleRestaurantOrder`, qui demande d'abord le mode
-      // de règlement — aucun paiement ne part sans ce second geste — et porte
-      // le garde-fou du double encaissement. Il n'apparaît que là où ce
-      // bouton existe (`settleOffered`, même source).
-      if (widget.grid && settleOffered(_cardActions(s), isResto: _isResto)) {
-        return _gridLink(
-          context,
-          label: OrderAction.advanceStatus.label,
-          color: _tab.textColor(context),
-          onTap: () => widget.onUpdate(SaleStatus.completed),
-        );
-      }
-      return const [];
-    }
-
-    // EN GRILLE, UN LIEN ET NON UN BOUTON. Même action, même garde, même
-    // retour arrière : seul le RENDU change. La liste garde son bouton.
-    if (widget.grid) {
-      return _gridLink(
-        context,
+      return (
+        icon: icon,
         label: label,
-        color: _tab.textColor(context),
-        onTap: () async {
-          try {
-            await action();
-          } catch (e) {
-            if (context.mounted) AppSnack.error(context, e.toString());
+        short: 'Terminer',
+        action: () async {
+          // GARDE LIVRAISON : une commande qui voyage doit être emballée. La
+          // refuser ICI, au moment de la remise, plutôt qu'à l'encaissement :
+          // c'est le dernier instant où le contenant est encore entre les
+          // mains du restaurant.
+          if (o.orderType == 'delivery' && !_hasPackaging) {
+            if (mounted) {
+              AppSnack.error(context,
+                  'Emballez la commande avant de la remettre au livreur.');
+            }
+            return;
           }
+          await RestaurantOrderService.markFinished(o);
         },
-        // Le retour arrière perd son fond teinté : une icône grise en bout de
-        // lien, avec la même infobulle et le même geste.
-        trailing: o.kitchenReady
-            ? IconButton(
-                icon: Icon(Icons.undo_rounded,
-                    size: 16, color: AppColors.textSecondary),
-                tooltip: o.finished
-                    ? 'Rouvrir le service'
-                    : 'Renvoyer en préparation',
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints:
-                    const BoxConstraints(minWidth: 32, minHeight: 32),
-                onPressed: () => o.finished
-                    ? RestaurantOrderService.reopenService(o)
-                    : RestaurantOrderService.reopenKitchen(o),
-              )
-            : null,
       );
     }
+    return null;
+  }
 
+  /// LE BOUTON D'ACTION DE LA CARTE REPLIÉE — tuile (ligne 3) et ligne de
+  /// liste (colonne ACTION).
+  ///
+  /// PETIT ET EN FOND TEINTÉ, pas en fond plein : trois boutons pleins sur un
+  /// écran attirent tout le regard, alors que le MONTANT doit rester
+  /// l'élément le plus lourd. Libellé COURT (« Envoyer », « Prête »…), le
+  /// libellé complet en infobulle : c'est ce qui laisse ~200 px au contenu.
+  ///
+  /// Trois cas, dans cet ordre :
+  ///   1. une étape de service à faire avancer — `_nextStep` ;
+  ///   2. la commande est terminée : « Encaisser », LE MÊME
+  ///      `onUpdate(completed)` que le bouton déplié — la page demande
+  ///      d'abord le mode de règlement et porte le garde-fou du double
+  ///      encaissement. Seulement là où ce bouton existe (`settleOffered`,
+  ///      même source) ;
+  ///   3. la commande est encaissée : « Facture », en NEUTRE — disponibilité
+  ///      par `orderActionsFor`, exécution par `_runAction`.
+  Widget? _inlineAction(BuildContext context, SaleStatus s,
+      {required bool withIcon}) {
+    if (!_isResto) return null;
+    final step = _nextStep(s);
+    if (step != null) {
+      return _StateButton(
+        icon: withIcon ? step.icon : null,
+        label: step.short,
+        tooltip: step.label,
+        base: _tab.color(context),
+        text: _tab.textColor(context),
+        onPressed: () => _runStep(step.action),
+      );
+    }
+    if ((s == SaleStatus.scheduled || s == SaleStatus.processing) &&
+        settleOffered(_cardActions(s), isResto: _isResto)) {
+      return _StateButton(
+        icon: withIcon ? Icons.payments_outlined : null,
+        label: 'Encaisser',
+        tooltip: OrderAction.advanceStatus.label,
+        base: _tab.color(context),
+        text: _tab.textColor(context),
+        onPressed: () => widget.onUpdate(SaleStatus.completed),
+      );
+    }
+    if (_cardActions(s).contains(OrderAction.invoicePdf)) {
+      return _StateButton(
+        icon: withIcon ? Icons.print_outlined : null,
+        label: 'Facture',
+        tooltip: 'Facture',
+        base: Theme.of(context).colorScheme.onSurfaceVariant,
+        text: AppColors.textSecondary,
+        onPressed: () => _runAction(context, OrderAction.invoicePdf),
+      );
+    }
+    return null;
+  }
+
+  /// Exécute une étape de service ; une erreur s'affiche au lieu de se perdre.
+  Future<void> _runStep(Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (e) {
+      if (mounted) AppSnack.error(context, e.toString());
+    }
+  }
+
+  /// RETOUR EN ARRIÈRE d'un cran — « Prête » cliqué par erreur renvoie le bon
+  /// en préparation. Sans lui, la seule issue serait d'encaisser un plat
+  /// jamais parti. Mêmes conditions et mêmes appels qu'avant la refonte.
+  Widget? _undoButton() {
+    final o = widget.order;
+    if (_nextStep(o.status) == null || !o.kitchenReady) return null;
+    return IconButton(
+      icon: Icon(Icons.undo_rounded, size: 16, color: AppColors.textSecondary),
+      tooltip: o.finished ? 'Rouvrir le service' : 'Renvoyer en préparation',
+      visualDensity: compactUnlessTouch,
+      onPressed: () => o.finished
+          ? RestaurantOrderService.reopenService(o)
+          : RestaurantOrderService.reopenKitchen(o),
+    );
+  }
+
+  /// En liste, le retour arrière vit sous le pli — la colonne ACTION ne porte
+  /// que l'étape suivante.
+  List<Widget> _undoRow() {
+    final undo = _undoButton();
+    if (undo == null) return const [];
     return [
       Row(children: [
-        Expanded(
-          child: _WideActionButton(
-            // EN CONTOUR TEINTÉ À LA COULEUR DE L'ÉTAT, pas en accent fixe.
-            // Le contour, il l'était déjà (`filled` vaut faux) ; ce qui change
-            // est la teinte, désormais celle de l'onglet et du liseré. Sur
-            // deux cartes un fond plein passe ; sur six, les boutons
-            // deviennent le seul élément visible et le liseré ne se lit plus.
-            icon: icon,
-            label: label,
-            color: _tab.color(context),
-            onPressed: () async {
-              try {
-                await action();
-              } catch (e) {
-                if (context.mounted) AppSnack.error(context, e.toString());
-              }
-            },
-          ),
-        ),
-        // Retour en arrière d'UN cran. « Prête » cliqué par erreur renvoie le
-        // bon en préparation ; « terminée » de trop rouvre le service. Sans
-        // ça, la seule issue serait d'encaisser un plat jamais parti.
-        if (o.kitchenReady) ...[
-          const SizedBox(width: 6),
-          _ActionBtn(
-            icon: Icons.undo_rounded,
-            color: AppColors.warning,
-            bgColor: AppColors.warning.withValues(alpha: 0.12),
-            tooltip: o.finished
+        undo,
+        Text(widget.order.finished
                 ? 'Rouvrir le service'
                 : 'Renvoyer en préparation',
-            onTap: () => o.finished
-                ? RestaurantOrderService.reopenService(o)
-                : RestaurantOrderService.reopenKitchen(o),
-          ),
-        ],
+            style: AppTextStyles.caption),
       ]),
       const SizedBox(height: 8),
     ];
@@ -5097,77 +5236,6 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       canDelete:        widget.canDelete,
       isResto:          _isResto,
       canConfirmClient: _canConfirmClient(),
-    );
-  }
-
-  /// LIEN D'ACTION DE LA TUILE DE GRILLE : un filet fin, puis le libellé à la
-  /// couleur de l'état et une flèche à droite.
-  ///
-  /// Un lien et non un bouton plein : sur six cartes, six fonds pleins
-  /// deviennent le seul élément visible de l'écran. La couleur suffit à dire
-  /// qu'on peut agir ; le filet dit où la carte s'arrête et où l'action commence.
-  List<Widget> _gridLink(
-    BuildContext context, {
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-    IconData trailingIcon = Icons.arrow_forward_rounded,
-    IconData? leadingIcon,
-    Widget? trailing,
-  }) =>
-      [
-        const SizedBox(height: 12),
-        Divider(height: 1, thickness: 1,
-            color: Theme.of(context).semantic.borderSubtle),
-        Row(children: [
-          Expanded(
-            child: InkWell(
-              onTap: onTap,
-              borderRadius: BorderRadius.circular(6),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                child: Row(children: [
-                  if (leadingIcon != null) ...[
-                    Icon(leadingIcon, size: 15, color: color),
-                    const SizedBox(width: 6),
-                  ],
-                  Expanded(
-                    child: Text(label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.bodySmBold.copyWith(color: color)),
-                  ),
-                  Icon(trailingIcon, size: 16, color: color),
-                ]),
-              ),
-            ),
-          ),
-          if (trailing != null) ...[
-            const SizedBox(width: 4),
-            trailing,
-          ],
-        ]),
-      ];
-
-  /// « Facture » sur une commande ENCAISSÉE, en grille.
-  ///
-  /// Même action, même garde, même fonction que le bouton « Facture » de la
-  /// partie dépliée : la disponibilité vient de `orderActionsFor` (qui ne la
-  /// propose que sur `completed`), l'exécution de `_runAction`. Seul le point
-  /// d'entrée est nouveau, et il remplace un vide.
-  ///
-  /// Jamais sur « Sans suite » : une commande annulée n'a pas de facture — et
-  /// `orderActionsFor` ne la propose pas, ce n'est donc pas une condition de
-  /// plus mais la même.
-  List<Widget> _gridInvoiceLink(BuildContext context, SaleStatus s) {
-    if (!widget.grid) return const [];
-    if (!_cardActions(s).contains(OrderAction.invoicePdf)) return const [];
-    return _gridLink(
-      context,
-      label: 'Facture',
-      color: AppColors.textSecondary,
-      leadingIcon: Icons.print_outlined,
-      onTap: () => _runAction(context, OrderAction.invoicePdf),
     );
   }
 
@@ -6498,6 +6566,183 @@ class _WideActionButton extends StatelessWidget {
 /// Pastille d'état de SERVICE (restauration) — « En préparation », « Prête »,
 /// « Servie », « Terminée ». Distincte de [_StatusChip], qui porte le statut
 /// commercial : une commande peut être « Programmée » et déjà « Prête ».
+// ═════════════════════════════════════════════════════════════════════════════
+// CARTE DE COMMANDE — composants de la refonte du 25/09/2026 (restauration)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Marge horizontale d'une LIGNE de liste, dans son panneau.
+const double _kListPadH = 10;
+
+/// LES COLONNES DE LA LISTE — une seule source pour les lignes ET l'en-tête,
+/// sinon ils se décaleraient au premier réglage.
+///
+/// ⚠ Largeurs fixes, qui ne tiennent qu'au-dessus de `kOrderListRowMin` de
+/// conteneur ; en dessous, la ligne se replie sur deux et l'en-tête se tait.
+abstract final class _ListCols {
+  static const double temps = 42;
+  static const double table = 68;
+  static const double etat = 112;
+  static const double montant = 96;
+  static const double action = 78;
+  static const double chevron = 18;
+  static const double gap = 8;
+
+  /// Ce qui sépare la ligne du bord de la liste : le liseré (3) et la marge
+  /// de chaque côté.
+  static const double inset = 3 + 2 * _kListPadH;
+}
+
+/// BADGE D'ÉTAT — l'état en toutes lettres, sur un fond teinté.
+///
+/// LE TOKEN SUIT SON FOND : le fond est la couleur de BASE de l'état à faible
+/// opacité, le libellé sa variante TEXTE (`textColor`). `warning` en texte
+/// sur une teinte claire ne ferait que ~2:1 — c'est l'erreur que porte encore
+/// `_ServiceChip`, gardé pour la carte e-commerce.
+///
+/// Réserve connue, inscrite : « À encaisser » écrit en `colorScheme.primary`,
+/// sous le seuil EN CLAIR sur Ocean, Emerald, Sunset, Rose et Amber tant que
+/// le lot 1 côté clair n'existe pas. L'information passe : le badge écrit
+/// l'état en toutes lettres.
+class _StateBadge extends StatelessWidget {
+  final ServiceTab tab;
+  const _StateBadge({required this.tab});
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = tab.textColor(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: tab.color(context).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(tab.icon, size: 11, color: fg),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(tab.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyles.microBold.copyWith(color: fg)),
+        ),
+      ]),
+    );
+  }
+}
+
+/// BOUTON D'ACTION DE LA CARTE — petit, en fond teinté.
+///
+/// 28 px DE DESSIN, pas de cible : `tapTargetSize` adaptatif (lot 2, cf.
+/// `touch_target.dart`) — 28 px à la souris, une zone de 48 px au doigt, et la
+/// carte grandit d'autant sur un téléphone. Fond de l'état à faible opacité,
+/// bordure du même état, libellé en variante texte.
+class _StateButton extends StatelessWidget {
+  final IconData? icon;
+  final String label;
+  final String tooltip;
+  final Color base;
+  final Color text;
+  final VoidCallback onPressed;
+
+  const _StateButton({
+    required this.icon,
+    required this.label,
+    required this.tooltip,
+    required this.base,
+    required this.text,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextButton.styleFrom(
+      minimumSize: const Size(0, 28),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      tapTargetSize: adaptiveTapTargetSize,
+      visualDensity: VisualDensity.standard,
+      backgroundColor: base.withValues(alpha: 0.10),
+      foregroundColor: text,
+      side: BorderSide(color: base.withValues(alpha: 0.35)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      textStyle: AppTextStyles.bodySmBold,
+    );
+    final labelText = Text(label, maxLines: 1, overflow: TextOverflow.ellipsis);
+    return Tooltip(
+      message: tooltip,
+      child: icon == null
+          ? TextButton(onPressed: onPressed, style: style, child: labelText)
+          : TextButton.icon(
+              onPressed: onPressed,
+              style: style,
+              icon: Icon(icon, size: 15),
+              label: labelText,
+            ),
+    );
+  }
+}
+
+/// Titre de section de la grille — « EN COURS », « TERMINÉES » : `micro` en
+/// capitales espacées (l'échelle n'a pas de 9 px ; cf. document de design,
+/// § 5).
+class _OrdersSectionTitle extends StatelessWidget {
+  final String text;
+  const _OrdersSectionTitle(this.text);
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(left: 2, bottom: 8),
+        child: Text(text.toUpperCase(),
+            style: AppTextStyles.microBold.copyWith(letterSpacing: 0.8)),
+      );
+}
+
+/// EN-TÊTE DE COLONNES de la liste — `micro` espacé (on demandait 8 px :
+/// l'échelle commence à 10). Mêmes largeurs que les lignes (`_ListCols`) ;
+/// il se tait quand la ligne passe sur deux.
+class _OrdersListHeader extends StatelessWidget {
+  const _OrdersListHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    final style = AppTextStyles.microBold.copyWith(letterSpacing: 0.8);
+    Widget col(double w, String t, {bool right = false}) => SizedBox(
+          width: w,
+          child: Text(t,
+              maxLines: 1,
+              textAlign: right ? TextAlign.right : TextAlign.left,
+              style: style),
+        );
+    return LayoutBuilder(builder: (context, box) {
+      if (box.maxWidth < kOrderListRowMin) return const SizedBox.shrink();
+      return Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+              3 + _kListPadH, 10, _kListPadH, 8),
+          child: Row(children: [
+            col(_ListCols.temps, 'TEMPS'),
+            const SizedBox(width: _ListCols.gap),
+            col(_ListCols.table, 'TABLE'),
+            const SizedBox(width: _ListCols.gap),
+            col(_ListCols.etat, 'ÉTAT'),
+            const SizedBox(width: _ListCols.gap),
+            Expanded(child: Text('CONTENU', maxLines: 1, style: style)),
+            const SizedBox(width: _ListCols.gap),
+            col(_ListCols.montant, 'MONTANT', right: true),
+            const SizedBox(width: _ListCols.gap),
+            col(_ListCols.action, 'ACTION'),
+            const SizedBox(width: _ListCols.gap),
+            const SizedBox(width: _ListCols.chevron),
+          ]),
+        ),
+        Divider(
+            height: 1,
+            thickness: 1,
+            color: Theme.of(context).semantic.borderSubtle),
+      ]);
+    });
+  }
+}
+
 class _ServiceChip extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -6545,45 +6790,6 @@ class _StatusChip extends StatelessWidget {
                   .copyWith(color: status.color)),
         ]),
       );
-}
-
-// ─── Bouton action icône ─────────────────────────────────────────────────────
-class _ActionBtn extends StatelessWidget {
-  final IconData icon;
-  final Color    color;
-  final Color?   bgColor;
-  final String   tooltip;
-  /// `null` désactive visuellement le bouton (icône grisée + tap inopérant).
-  final VoidCallback? onTap;
-  const _ActionBtn({required this.icon, required this.color,
-    this.bgColor, required this.tooltip, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final disabled = onTap == null;
-    return Tooltip(
-      message: tooltip,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 30, height: 30,
-          decoration: BoxDecoration(
-            color: disabled
-                ? Theme.of(context).semantic.borderSubtle
-                : (bgColor ?? color.withValues(alpha:0.1)),
-            borderRadius: BorderRadius.circular(7),
-            border: Border.all(
-                color: disabled
-                    ? Theme.of(context).semantic.borderSubtle
-                    : color.withValues(alpha:0.25)),
-          ),
-          child: Icon(icon,
-              size: 15,
-              color: disabled ? AppColors.textHint : color),
-        ),
-      ),
-    );
-  }
 }
 
 // ─── Détails complets d'une commande (paiement, livraison, finance) ─────────

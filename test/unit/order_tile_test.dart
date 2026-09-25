@@ -80,10 +80,9 @@ void main() {
   });
 
   group('orderGridColumns — les colonnes se déduisent du plancher', () {
-    test('le cas qui a motivé le lot : 1046 px donnent TROIS colonnes', () {
-      expect(orderGridColumns(1046), 3);
-      // Et la tuile repasse largement au-dessus du plancher.
-      expect((1046 - 10 * 2) / 3, greaterThan(kOrderTileMin));
+    test('1046 px donnent DEUX colonnes larges (plancher 480)', () {
+      expect(orderGridColumns(1046), 2);
+      expect((1046 - 10) / 2, greaterThan(kOrderTileMin));
     });
 
     test('la tuile ne descend JAMAIS sous le plancher', () {
@@ -98,18 +97,18 @@ void main() {
 
     test('la progression suit le plancher, pas des seuils d\'écran', () {
       expect(orderGridColumns(400), 1);
-      expect(orderGridColumns(620), 2);
-      expect(orderGridColumns(800), 2);
-      expect(orderGridColumns(930), 3);
-      expect(orderGridColumns(1270), 4);
+      expect(orderGridColumns(800), 1);
+      expect(orderGridColumns(970), 2);
+      expect(orderGridColumns(1270), 2);
     });
 
-    test('QUATRE COLONNES AU PLUS — la borne arbitraire est tenue', () {
-      // C'est le seul obstacle à cinq colonnes : la formule les calculerait.
-      expect(orderGridColumns(1600), kOrderGridMaxColumns);
-      expect(orderGridColumns(3000), kOrderGridMaxColumns);
-      // Preuve que la borne MORD : sans elle, 1600 px donneraient cinq.
-      expect((1600 + 10) ~/ (kOrderTileMin + 10), 5);
+    test('DEUX COLONNES AU PLUS — trois ramèneraient la troncature', () {
+      expect(kOrderGridMaxColumns, 2);
+      expect(orderGridColumns(1600), 2);
+      expect(orderGridColumns(3000), 2);
+      // Preuve que la borne MORD : sans elle, 1600 px donneraient trois
+      // tuiles de ~530 px.
+      expect((1600 + 10) ~/ (kOrderTileMin + 10), 3);
     });
 
     test('une largeur nulle ou négative ne casse pas', () {

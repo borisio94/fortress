@@ -91,3 +91,14 @@ bool isServiceLate(
   if (wait == null || limit == null) return false;
   return wait >= Duration(minutes: limit);
 }
+
+/// Le chronomètre, en mots courts : « 3 min », « 24 min », « 1 h 05 ».
+///
+/// Sous une minute : « < 1 min » — « 0 min » se lirait comme une panne.
+String formatServiceWait(Duration d) {
+  if (d.inMinutes < 1) return '< 1 min';
+  if (d.inMinutes < 60) return '${d.inMinutes} min';
+  final h = d.inHours;
+  final m = d.inMinutes % 60;
+  return '$h h ${m.toString().padLeft(2, '0')}';
+}

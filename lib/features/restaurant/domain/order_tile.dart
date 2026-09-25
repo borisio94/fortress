@@ -46,37 +46,43 @@ String orderContentsShort(List<SaleItem> items) {
 
 /// LARGEUR PLANCHER D'UNE TUILE DE COMMANDE.
 ///
-/// Mesurée sur les styles réels, pas choisie : la ligne « plat · montant · état
-/// de paiement » porte 147 px de contenu FIXE — montant `bodyBold` 14 (~62 px),
-/// « · non payé » `micro` (~55 px), chevron (18), écarts (12). Sous 300 px de
-/// tuile — soit 269 px utiles une fois retirés le liseré de 3 et le padding de
-/// 14×2 — le nom du plat descend sous 110 px et cesse de dire quoi que ce soit.
-const double kOrderTileMin = 300;
+/// 480 depuis la refonte de la carte (25/09/2026) — elle valait 300. La tuile
+/// porte désormais sa ligne 3 ENTIÈRE sur une seule rangée : contenu · montant
+/// + état de paiement · bouton d'action. Mesuré sur la métrique d'Inter : le
+/// FIXE de cette rangée fait ~250 px avec les libellés COURTS du bouton
+/// (« Envoyer », « Prête »… — ~370 px avec « Envoyer en préparation », d'où
+/// les libellés courts). À 480 px de tuile, il reste ~200 px au contenu,
+/// soit ~25 caractères : le nom d'un plat se lit.
+const double kOrderTileMin = 480;
 
-/// PLAFOND DE COLONNES — valeur ARBITRAIRE, et c'est dit.
+/// PLAFOND DE COLONNES : DEUX (décision du 25/09/2026).
 ///
-/// Rien n'empêche techniquement d'en mettre cinq : la formule ci-dessous les
-/// calculerait, et les tuiles resteraient au-dessus du plancher dès 1590 px.
-/// La borne tient à un seul argument, faible : un `Wrap` à hauteurs variables
-/// — imposé par le dépliement des cartes — donne des bas de rangée d'autant
-/// plus dentelés qu'il y a de colonnes, et au-delà de quatre la grille cesse de
-/// se lire comme des rangées.
-///
-/// Si quelqu'un veut cinq colonnes un jour, ce nombre est le seul obstacle.
-const int kOrderGridMaxColumns = 4;
+/// Trois colonnes apparaîtraient vers 1920 px d'écran et ramèneraient la tuile
+/// à ~530 px — le même problème de troncature que la refonte vient de régler.
+/// Deux colonnes larges valent mieux que trois serrées.
+const int kOrderGridMaxColumns = 2;
 
 /// COMBIEN DE TUILES TIENNENT DANS [available], par déduction.
 ///
 /// Le seuil ne se fixe PAS en pixels d'écran. On fixe la largeur plancher d'une
-/// tuile et on en déduit les colonnes — c'est ce qui garantit que le libellé le
-/// plus long du module, « Envoyer en préparation » (202 px avec son icône et son
-/// padding), passe à TOUTES les largeurs : quatre colonnes n'apparaissent qu'à
-/// partir de 1270 px de bloc, donc avec des tuiles de 310 px, soit 279 utiles.
+/// tuile et on en déduit les colonnes — c'est ce qui garantit que la ligne 3
+/// de la tuile (contenu · montant · bouton) passe à TOUTES les largeurs : deux
+/// colonnes n'apparaissent qu'à partir de ~970 px de bloc, donc avec des
+/// tuiles d'au moins 480 px.
 ///
-/// Des seuils en pixels laissaient cela au hasard, et le hasard a donné deux
-/// colonnes de 518 px sur un écran de 1070.
+/// Des seuils en pixels laissaient cela au hasard, et le hasard avait donné
+/// deux colonnes de 518 px sur un écran de 1070.
 int orderGridColumns(double available, {double gap = 10}) {
   if (available <= 0) return 1;
   final n = (available + gap) ~/ (kOrderTileMin + gap);
   return n.clamp(1, kOrderGridMaxColumns);
 }
+
+/// LARGEUR SOUS LAQUELLE LA LISTE DENSE PASSE SUR DEUX LIGNES.
+///
+/// Déduite de ses colonnes, pas d'une largeur d'écran (cf. le document de
+/// design, § 8 : une décision de disposition lit le CONTENEUR) : temps 42,
+/// table 68, état 112, montant 96, action 78, chevron 18, six écarts de 8 —
+/// 462 px de FIXE — plus 160 px de contenu, sous lesquels la colonne du milieu
+/// ne dit plus rien.
+const double kOrderListRowMin = 42 + 68 + 112 + 96 + 78 + 18 + 6 * 8 + 160;

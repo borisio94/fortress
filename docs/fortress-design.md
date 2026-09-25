@@ -690,6 +690,8 @@ commentaire ET ce registre**, sinon l'un des deux ment.
 | L'icône d'abord, la couleur ensuite | `restaurant_stock_page.dart` | 15 |
 | L'aperçu d'une palette se LIT dans le thème réel, jamais dans une table | `theme_page.dart` (`themeSwatches`) | 3 |
 | Segmenté : l'actif plus CLAIR que la piste en clair, plus FONCÉ en sombre | `theme_page.dart` (`_ModeSegmented`) | 15 |
+| Un chronomètre mesure l'attente DANS L'ÉTAT (`service_state_at`), jamais l'âge ; sans date, rien | `restaurant/domain/service_wait.dart` | 14 |
+| Le bouton d'action d'une carte est petit et en fond teinté ; le montant reste l'élément le plus lourd | `caisse_page.dart` (`_StateButton`) | 12 |
 
 **Pour créer une règle** : l'écrire au plus près du code qu'elle gouverne,
 AVEC sa raison mesurée (un contraste, un débordement, un cas), puis
