@@ -30,12 +30,15 @@ class RestoSectionHeader extends StatelessWidget {
   /// · 2 fournitures ». Écrit là-bas et non ici : chaque écran compte des
   /// choses différentes, et les accorder au pluriel depuis un widget générique
   /// demanderait de lui apprendre la grammaire française.
-  final String subtitle;
+  ///
+  /// `null` : titre seul (Finances, 25/09/2026 — sa période vit dans un
+  /// onglet, pas au niveau de la page : rien ne cadre l'écran entier).
+  final String? subtitle;
 
   const RestoSectionHeader({
     super.key,
     required this.title,
-    required this.subtitle,
+    this.subtitle,
     this.trailing,
   });
 
@@ -55,11 +58,13 @@ class RestoSectionHeader extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: AppTextStyles.label.copyWith(color: cs.onSurface)),
-                const SizedBox(height: 2),
-                Text(subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppTextStyles.caption),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(subtitle!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.caption),
+                ],
               ],
             ),
           ),

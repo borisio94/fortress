@@ -35,6 +35,7 @@ import '../../domain/entities/restaurant_activity.dart';
 import '../widgets/resto_period_sheet.dart';
 import '../widgets/resto_surfaces.dart';
 import '../widgets/resto_tab_kit.dart';
+import '../widgets/resto_section_header.dart';
 
 /// HUB FINANCES DU RESTAURANT — ce que l'établissement dépense et perd.
 ///
@@ -96,6 +97,13 @@ class FinancesHubPage extends StatelessWidget {
         length: 4,
         child: Column(
           children: [
+            // LE TITRE DE LA PAGE, DANS LE CORPS (lot Shell, 25/09/2026) : une page
+            // racine du restaurant porte son nom ici, la barre du haut se tait. Il
+            // manquait : sur ordinateur, l'écran n'affichait aucun nom.
+            // Titre SEUL : la période ne cadre pas toute la page, elle vit dans
+            // l'onglet Pertes.
+            const RestoSectionHeader(title: 'Finances'),
+            const SizedBox(height: 8),
             Material(
               // Même opacité que les cartes : la barre d'onglets était le
               // dernier aplat plein de la page.

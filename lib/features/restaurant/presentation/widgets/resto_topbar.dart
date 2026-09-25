@@ -33,10 +33,16 @@ class RestoAccountMenu extends StatelessWidget {
   final String shopId;
   final bool isAdmin;
 
+  /// Barre MOBILE (lot Shell, 25/09/2026) : l'avatar seul pour déclencheur —
+  /// le nom ne tient pas dans une AppBar de téléphone. Le menu, lui, est le
+  /// même : « Admin · <boutique> » en tête.
+  final bool compact;
+
   const RestoAccountMenu({
     super.key,
     required this.shopId,
     required this.isAdmin,
+    this.compact = false,
   });
 
   @override
@@ -57,7 +63,11 @@ class RestoAccountMenu extends StatelessWidget {
         style: AppTextStyles.caption.copyWith(color: AppColors.textSecondary),
       ),
       trigger: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        // Compact (barre mobile) : 8 de marge autour de l'avatar de 32 — une
+        // cible de 48 px au doigt (lot 2, `touch_target.dart`).
+        padding: compact
+            ? const EdgeInsets.all(8)
+            : const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -67,18 +77,20 @@ class RestoAccountMenu extends StatelessWidget {
               child: Text(initial,
                   style: AppTextStyles.bodySmBold.copyWith(color: cs.primary)),
             ),
-            const SizedBox(width: 9),
-            Flexible(
-              child: Text(
-                name.isEmpty ? 'Utilisateur' : name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.bodySmBold.copyWith(color: cs.onSurface),
+            if (!compact) ...[
+              const SizedBox(width: 9),
+              Flexible(
+                child: Text(
+                  name.isEmpty ? 'Utilisateur' : name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyles.bodySmBold.copyWith(color: cs.onSurface),
+                ),
               ),
-            ),
-            const SizedBox(width: 2),
-            Icon(Icons.keyboard_arrow_down_rounded,
-                size: 18, color: AppColors.textSecondary),
+              const SizedBox(width: 2),
+              Icon(Icons.keyboard_arrow_down_rounded,
+                  size: 18, color: AppColors.textSecondary),
+            ],
           ],
         ),
       ),

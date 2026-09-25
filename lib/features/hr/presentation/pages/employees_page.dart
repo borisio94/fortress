@@ -240,8 +240,10 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Les trois cartes de chiffres deviennent le sous-titre.
+        // Le NOM DU MENU (« Accès à l'app »), pas « Membres » : la barre et le
+        // corps ne doivent pas nommer la même page de deux façons.
         RestoSectionHeader(
-          title:    l.hrMembersTitle,
+          title:    'Accès à l\'app',
           subtitle: _restoSubtitle(all, compact: compact),
           trailing: _AddMemberButton(onTap: _openCreateSheet),
         ),

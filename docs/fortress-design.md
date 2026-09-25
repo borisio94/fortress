@@ -353,18 +353,40 @@ changerait toutes ses pages.
 - **Barre du haut** : opaque (`restoChromeOpaque` — de la même famille que le
   contenu ; `colorScheme.surface` valait en sombre le slate des cartes, un bloc
   bleuté au-dessus d'un contenu quasi noir, corrigé le 25/09/2026). Sur une
-  page racine, RIEN à gauche ; retour et fil d'ariane sur les sous-pages.
-  À droite : la cloche (point ambre, pas de compteur rouge) et le menu du
-  compte « Admin · <boutique> ».
+  page racine, RIEN à gauche ; sur une sous-page, le retour et le NOM de la
+  page. À droite : la cloche (point ambre, pas de compteur rouge) et le menu
+  du compte « Admin · <boutique> » — sur mobile aussi, avatar seul pour
+  déclencheur.
 - **Barre latérale** : `restoChromeFill`, translucide.
 
-### Le titre de page — NON TRANCHÉ
+### Le titre de page — EN VIGUEUR AU RESTAURANT (lot Shell, 25/09/2026)
 
-Sur ordinateur, la barre du haut se tait au restaurant : le titre est censé
-vivre dans le corps (`RestoSectionHeader`). Or six écrans n'en ont pas —
-Finances, Personnel, Clôture, Inventaire, Mise en route, Plan de salle — et
-n'affichent aucun nom sur ordinateur. Sur mobile, l'AppBar garde le titre et
-le corps le répète (« Stock » deux fois). Deux décisions à prendre, ensemble.
+**Le titre d'une PAGE RACINE vit dans le corps ; celui d'une SOUS-PAGE dans
+la barre**, sur ordinateur comme sur mobile.
+
+- Page racine : `RestoSectionHeader` (titre + sous-titre qui cadre l'écran —
+  décompte, effectif, rien si rien ne cadre la page entière, comme Finances
+  dont la période vit dans un onglet). La barre du haut ET l'AppBar mobile se
+  taisent.
+- Sous-page : le retour et le nom, dans la barre. Le nom vient de
+  `page_titles.dart` ; toute sous-page y a son `case`, avec le titre que la
+  page se donne elle-même — sans lui, le repli dérive l'URL (« Cloture »,
+  « Reconcile », « Setup »).
+- Le corps et la barre nomment la page du même mot que le MENU
+  (« Accès à l'app », pas « Membres »).
+
+L'e-commerce n'applique pas encore ce modèle (backlog : 3 sous-pages en
+« FORTRESS » seul, 2 titres dérivés fautifs, 17 sous-pages nommées par leur
+section).
+
+### La cloche — TRANCHÉ (25/09/2026)
+
+**Pour tout membre, partout** : le service de notifications est activé pour
+tout membre, et les notifications de tickets vont à leur destinataire,
+employés compris. Une cloche presque vide pour un serveur n'est pas un
+problème ; une notification qui n'arrive jamais à son destinataire en est un.
+C'était `isShopAdmin` sur ordinateur et `isMember` sur mobile depuis mai, sous
+un commentaire qui disait « réservée admin + owner ».
 
 ### Ce qui vit hors du shell — NON TRANCHÉ
 
@@ -373,10 +395,12 @@ libre-service, ne doit donner accès à aucune autre page). **Elles sont
 pourtant déclarées dans le `ShellRoute`.** À vérifier à l'écran, puis à
 trancher.
 
-### Divergences mobile / ordinateur connues
+### Divergences mobile / ordinateur
 
-Menu du compte épuré sur ordinateur seulement ; cloche réservée à l'admin sur
-ordinateur mais visible par tout membre sur mobile. Voir la section 19.
+Menu du compte, cloche, titre : alignés par le lot Shell (25/09/2026). Le
+tiroir filtre désormais ses sous-items par secteur, comme la barre latérale.
+Reste : l'édition d'une commande qui n'ouvre pas le même écran selon la
+largeur (section 19).
 
 ---
 
@@ -624,10 +648,11 @@ de l'autre.
 **Comment documenter une différence voulue** : un commentaire à la branche,
 qui dit POURQUOI. Une branche sans commentaire est présumée être un oubli.
 
-**Oublis connus (audit du 24/09/2026)** : titre absent sur ordinateur (six
-écrans), titre répété sur mobile, menu du compte non épuré sur mobile, cloche
-réservée à des publics différents, édition d'une commande dans deux écrans
-selon la largeur. Voir la section 21.
+**Oublis connus (audit du 24/09/2026)** : titre absent sur ordinateur, titre
+répété sur mobile, menu du compte non épuré sur mobile, cloche réservée à des
+publics différents — **corrigés par le lot Shell (25/09/2026)**. Reste :
+l'édition d'une commande dans deux écrans selon la largeur. Voir la
+section 21.
 
 ---
 
@@ -683,8 +708,9 @@ Le détail vit dans `docs/backlog.md` ; ici, l'index.
 - Cibles tactiles : ≈ 154 sites hors lot, comptés par feature.
 - Code mort : `KitchenTicketCard` (écran Préparation supprimé),
   `ExpenseFormSheet`, `PartnerLedgerDetailPage`, `DottedBorderBox`.
-- Shell : titre de page sur ordinateur et sur mobile ; Addition et Badgeuse
-  dans le shell ; divergences mobile / ordinateur (section 19).
+- Shell : Addition et Badgeuse dans le shell ; titres de page de
+  l'e-commerce (backlog) ; édition d'une commande selon la largeur
+  (section 19).
 - Doublons de mécanisme (section 10) : onglets, périodes, étiquettes d'état,
   montants compacts, avatars.
 

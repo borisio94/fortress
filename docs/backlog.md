@@ -180,3 +180,42 @@ n'a plus aucun appelant depuis la suppression de l'écran Préparation
 (`66c6c2f`, 07/08/2026). L'audit UI du 24/09 l'avait compté comme geste
 fréquent (§4b) et comme couleur seule (§4c-1) : ces deux constats portent sur
 du code mort.
+
+## Shell
+
+### Titres de page de l'e-commerce — « FORTRESS » seul, titres dérivés de l'URL
+
+*Inscrit le 25/09/2026 avec le lot Shell (restaurant) : même défaut, sur un
+secteur en production et hors du lot.*
+
+Le titre d'une page du shell se résout ainsi (`adaptive_scaffold.dart`,
+`_MobileShell`) : `titleForLocation` (`page_titles.dart`), sinon l'enfant de
+navigation actif, sinon l'item de navigation dont la route est un PRÉFIXE,
+sinon un repli qui dérive le dernier segment de l'URL. Le lot Shell a donné
+leurs titres aux sous-pages du restaurant ; côté e-commerce (compté sur HEAD
+`2e8bdb0`, à partir des routes du routeur) :
+
+- **3 sous-pages n'affichent que « FORTRESS » sur ordinateur** (aucun item de
+  navigation ne les couvre) : `/aide`, `/apropos`, `/employees` (en
+  e-commerce, cette route n'est pas dans le menu).
+- **2 titres dérivés de l'URL, fautifs, sur mobile** : « Apropos » (sans
+  espace ni accent) et « Employees » (en anglais). `/aide` donne « Aide »,
+  juste par chance.
+- **17 sous-pages portent le nom de leur SECTION, pas le leur** (mobile ;
+  « FORTRESS › <section> » sur ordinateur) : `/caisse/payment`,
+  `/campaigns/:id/send`, `/crm/notify`, `/inventaire/purchase-orders`,
+  `/inventaire/quick-add`, `/inventaire/receptions`, `/inventaire/returns`,
+  `/inventaire/stock-movements`, `/parametres/caisse`, `/parametres/exports`,
+  `/parametres/livraison`, `/parametres/marketing`,
+  `/parametres/partner-accounts`, `/parametres/partner/:id`,
+  `/parametres/section/:key`, `/parametres/text-size`, `/tickets/:id`.
+- **2 clés périmées dans `page_titles.dart`** : `/inventaire/movements` alors
+  que la route est `/inventaire/stock-movements`, `/inventaire/arrivals` alors
+  qu'elle est `/inventaire/receptions` — deux titres écrits qui ne
+  s'affichent jamais.
+
+À faire : un `case` par route dans `page_titles.dart`, avec le titre que la
+page se donne elle-même, et le même modèle que le restaurant (titre dans le
+corps pour une page racine, dans la barre pour une sous-page) — à décider
+pour l'e-commerce, dont le shell historique garde son fil d'ariane.
+

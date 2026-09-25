@@ -409,7 +409,11 @@ class _MobileShell extends StatelessWidget {
                 onPressed: () => _smartBack(context),
               )
             : null,
-        title: Text(title, style: titleStyle),
+        // PAGE RACINE DU RESTAURANT : PAS DE TITRE ICI (lot Shell, 25/09/2026).
+        // Le titre vit dans le corps (`RestoSectionHeader`) : le garder ici
+        // l'affichait deux fois — « Stock » puis « Stock ». Même règle que la
+        // barre d'ordinateur. Les SOUS-PAGES gardent le leur, avec le retour.
+        title: (isResto && !isSubPage) ? null : Text(title, style: titleStyle),
         // À GAUCHE EN RESTAURATION. Le tableau de bord, le Stock, Commandes et
         // le Menu portent leur en-tête dans le corps, à gauche : un titre
         // centré en barre du haut en était le dernier vestige, et l'isolait du
@@ -418,13 +422,22 @@ class _MobileShell extends StatelessWidget {
         actions: [
           const OfflineChip(),
           _CartBadgeBtn(shopId: shopId),
-          // Cloche notifications réservée admin + owner (les employés
-          // n'ont pas accès aux notifs in-app de la boutique).
+          // Cloche pour TOUT MEMBRE, comme le service qu'elle affiche : les
+          // notifications sont activées pour tout membre (`notifEnabled`,
+          // plus haut) et celles des tickets vont à leur destinataire,
+          // employés compris. (Le commentaire disait « réservée admin +
+          // owner » depuis mai, contre ce code même — corrigé le 25/09/2026.)
           if (perms.isMember) _NotifBtnWithAlertHalo(dot: isResto),
           if (extraActions != null) ...extraActions!,
           // Menu « 3 points » global (Compte / Aide / À propos) — extrême
-          // droite, présent sur toutes les pages shell.
-          AppOverflowMenu(shopId: shopId),
+          // droite, présent sur toutes les pages shell. RESTAURANT : le menu
+          // du compte, comme sur ordinateur (« Admin · <boutique> » en tête),
+          // l'avatar seul pour déclencheur — le nom n'y tient pas.
+          if (isResto)
+            RestoAccountMenu(
+                shopId: shopId, isAdmin: perms.isShopAdmin, compact: true)
+          else
+            AppOverflowMenu(shopId: shopId),
           const SizedBox(width: 4),
         ],
       ),
@@ -974,9 +987,15 @@ class _MobileDrawerGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
-    final activeChild = activeChildIndex(parent, currentLocation, shopId,
+    // Filtrés par SECTEUR, comme la barre latérale (lot Shell, 25/09/2026) :
+    // le tiroir montrait `parent.children!` en entier. L'index actif est
+    // rapporté à la liste VISIBLE — `activeChildIndex` indexe la liste
+    // complète.
+    final children = parent.childrenFor(shopSector(shopId));
+    final activeFull = activeChildIndex(parent, currentLocation, shopId,
         tabQuery: GoRouterState.of(context).uri.queryParameters['tab']);
-    final children = parent.children!;
+    final activeChild =
+        activeFull < 0 ? -1 : children.indexOf(parent.children![activeFull]);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       _MobileDrawerRow(
         icon:     active ? parent.iconSelected : parent.icon,
@@ -1652,10 +1671,15 @@ class _SidebarGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
-    final activeChild = activeChildIndex(parent, currentLocation, shopId,
-        tabQuery: GoRouterState.of(context).uri.queryParameters['tab']);
     // Filtrés par secteur : « Menu » n'a pas de sous-items en restauration.
     final visibleChildren = parent.childrenFor(shopSector(shopId));
+    // Index rapporté à la liste VISIBLE (`activeChildIndex` indexe la liste
+    // complète : un enfant masqué décalait la surbrillance — 25/09/2026).
+    final activeFull = activeChildIndex(parent, currentLocation, shopId,
+        tabQuery: GoRouterState.of(context).uri.queryParameters['tab']);
+    final activeChild = activeFull < 0
+        ? -1
+        : visibleChildren.indexOf(parent.children![activeFull]);
 
     // RÉTRACTÉ — les enfants ne peuvent pas se déplier sous l'icône : dans
     // 68 dp ils seraient une colonne d'icônes anonymes, impossible de savoir
@@ -1970,7 +1994,27 @@ class _DesktopTopbar extends StatelessWidget {
         // La RECHERCHE a été retirée de cette barre (2026-08-07) : elle ne
         // cherchait que des PLATS, et s'affichait pourtant sur Commandes, sur
         // le Plan de salle et sur Finances, où elle n'avait rien à trouver.
-        if (!(resto && !isSubPage)) ...[
+        // SOUS-PAGE DU RESTAURANT : son NOM, à côté du retour (lot Shell,
+        // 25/09/2026). La barre n'affichait que « FORTRESS » : la page n'était
+        // nommée nulle part. Même source que le titre mobile.
+        if (resto && isSubPage)
+          Flexible(
+            child: Text(
+                titleForLocation(
+                      location: GoRouterState.of(context).matchedLocation,
+                      shopId: shopId,
+                      l: l,
+                      tabQuery:
+                          GoRouterState.of(context).uri.queryParameters['tab'],
+                    ) ??
+                    l.hubBrand,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.body.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.onSurface)),
+          )
+        else if (!(resto && !isSubPage)) ...[
           // Breadcrumb FORTRESS › <module>
           Text(l.hubBrand,
               style: AppTextStyles.bodySm.copyWith(
@@ -1995,9 +2039,11 @@ class _DesktopTopbar extends StatelessWidget {
         ShopRefreshButton(shopId: shopId),
         const OfflineChip(),
         _CartBadgeBtn(shopId: shopId),
-        // Cloche notifications réservée admin + owner. En restauration, un
-        // POINT ambre au lieu d'un compteur rouge (cf. `AppIconBadge.dot`).
-        if (perms.isShopAdmin) _NotifBtnWithAlertHalo(dot: resto),
+        // Cloche pour TOUT MEMBRE, comme sur mobile et comme le service
+        // qu'elle affiche (cf. `notifEnabled`) — c'était `isShopAdmin` ici,
+        // `isMember` sur mobile, depuis mai (corrigé le 25/09/2026). En
+        // restauration, un POINT ambre au lieu d'un compteur rouge.
+        if (perms.isMember) _NotifBtnWithAlertHalo(dot: resto),
         if (extraActions != null) ...extraActions!,
         // RESTAURANT : le NOM ouvre le menu du compte (chevron), et le rôle y
         // descend avec la boutique — plus de ⋮ à côté. L'e-commerce garde son

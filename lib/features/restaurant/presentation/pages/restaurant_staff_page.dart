@@ -33,6 +33,7 @@ import '../widgets/resto_table_listener.dart';
 import '../widgets/staff_contest_tab.dart';
 import '../widgets/staff_rating_tab.dart';
 import '../widgets/staff_settings_sheet.dart';
+import '../widgets/resto_section_header.dart';
 
 /// Personnel du restaurant (Lot D) : fiches, heures pointées et paie.
 ///
@@ -63,6 +64,11 @@ class RestaurantStaffPage extends StatelessWidget {
         length: 5,
         child: Column(
           children: [
+            // LE TITRE DE LA PAGE, DANS LE CORPS (lot Shell, 25/09/2026) : une page
+            // racine du restaurant porte son nom ici, la barre du haut se tait. Il
+            // manquait : sur ordinateur, l'écran n'affichait aucun nom.
+            _StaffHeader(shopId: shopId),
+            const SizedBox(height: 8),
             Material(
               color: restoGlassFill(context),
               child: TabBar(
@@ -115,6 +121,41 @@ class RestaurantStaffPage extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// En-tête de la page : « 4 employés · masse salariale 450 000 F ».
+///
+/// Le chiffre n'est PAS recalculé autrement : c'est EXACTEMENT celui de
+/// l'onglet Équipe (employés actifs, somme des salaires de base), lu à la même
+/// source et rafraîchi sur la même table.
+class _StaffHeader extends StatefulWidget {
+  final String shopId;
+  const _StaffHeader({required this.shopId});
+  @override
+  State<_StaffHeader> createState() => _StaffHeaderState();
+}
+
+class _StaffHeaderState extends RestoTableListenerState<_StaffHeader> {
+  @override
+  List<String> get tables => const ['employees'];
+  @override
+  String get shopId => widget.shopId;
+
+  @override
+  Widget build(BuildContext context) {
+    final active =
+        StaffService.forShop(widget.shopId).where((m) => m.isActive).toList();
+    final payroll = active.fold<int>(0, (s, m) => s + m.baseSalary);
+    final n = active.length;
+    final count = n == 0 ? 'aucun employé' : '$n employé${n > 1 ? 's' : ''}';
+    return RestoSectionHeader(
+      title: 'Personnel',
+      subtitle: payroll > 0
+          ? '$count · masse salariale '
+              '${CurrencyFormatter.format(payroll.toDouble())}'
+          : count,
     );
   }
 }

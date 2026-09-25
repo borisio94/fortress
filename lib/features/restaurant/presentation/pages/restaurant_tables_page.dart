@@ -29,6 +29,7 @@ import '../../../../core/services/restaurant_tab_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/services/service_incident_service.dart';
 import '../../../../core/widgets/touch_target.dart';
+import '../widgets/resto_section_header.dart';
 
 /// Plan de salle — grille des tables colorées par statut (PR-1).
 ///
@@ -572,20 +573,28 @@ class _RestaurantTablesPageState
       floatingActionButton: (tables.isEmpty || !canManage)
           ? null
           : RestoFab(tooltip: 'Ajouter une table', onPressed: _createTable),
+      // Salle vide : l'en-tête reste — le NOM de la page ne dépend pas de
+      // son contenu (lot Shell, 25/09/2026).
       body: tables.isEmpty
-          ? RestoEmptyState(
-              icon: Icons.restaurant_rounded,
-              title: 'Aucune table',
-              subtitle: canManage
-                  ? 'Créez vos tables pour composer le plan de salle '
-                      'de votre établissement.'
-                  // Sans le droit, l'état vide reste informatif : il dit ce
-                  // qui manque et qui peut y remédier, sans bouton mort.
-                  : 'Le plan de salle n\'a pas encore été composé. '
-                      'Demandez au gérant d\'ajouter les tables.',
-              actionLabel: canManage ? 'Créer une table' : null,
-              onAction: canManage ? _createTable : null,
-            )
+          ? Column(children: [
+              const RestoSectionHeader(
+                  title: 'Plan de salle', subtitle: 'aucune table'),
+              Expanded(
+                child: RestoEmptyState(
+                  icon: Icons.restaurant_rounded,
+                  title: 'Aucune table',
+                  subtitle: canManage
+                      ? 'Créez vos tables pour composer le plan de salle '
+                          'de votre établissement.'
+                      // Sans le droit, l'état vide reste informatif : il dit ce
+                      // qui manque et qui peut y remédier, sans bouton mort.
+                      : 'Le plan de salle n\'a pas encore été composé. '
+                          'Demandez au gérant d\'ajouter les tables.',
+                  actionLabel: canManage ? 'Créer une table' : null,
+                  onAction: canManage ? _createTable : null,
+                ),
+              ),
+            ])
           : _buildRoom(tables, canManage),
     );
   }
@@ -648,7 +657,11 @@ class _RestaurantTablesPageState
   }
 }
 
-/// En-tête du plan de salle : le décompte et la légende.
+/// En-tête du plan de salle : son NOM, le décompte en sous-titre, la légende.
+///
+/// Le nom est revenu le 25/09/2026 (lot Shell) : la barre du haut se tait sur
+/// les pages racines du restaurant, et cet écran n'affichait qu'un décompte —
+/// sur ordinateur, aucun nom de page.
 ///
 /// PAS DE BOUTON « + TABLE » ICI : la création passe par le bouton flottant
 /// (cf. `RestoFab`), seul appel de l'écran. L'état vide garde son propre bouton.
@@ -663,31 +676,23 @@ class _RoomHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final title = Text(headline,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface));
+    // Même en-tête que Stock et Accès à l'app ; la légende à droite sur une
+    // ligne large, dessous sinon.
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: Row(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: wide
-                ? title
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      title,
-                      const SizedBox(height: 4),
-                      const _StatusLegend(),
-                    ],
-                  ),
+          RestoSectionHeader(
+            title: 'Plan de salle',
+            subtitle: headline,
+            trailing: wide ? const _StatusLegend() : null,
           ),
-          if (wide) ...[
-            const SizedBox(width: 12),
-            const _StatusLegend(),
-          ],
+          if (!wide)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 6, 16, 0),
+              child: _StatusLegend(),
+            ),
         ],
       ),
     );
