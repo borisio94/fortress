@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'brand_contrast.dart';
 import 'theme_palette.dart';
 
 /// Couleurs globales de l'application.
@@ -17,7 +18,24 @@ class AppColors {
   static Color _primaryDark    = kDefaultPalette.primaryDark;
   static Color _primarySurface = kDefaultPalette.primarySurface;
 
-  static Color get primary        => _primary;
+  /// Variante TEXTE de la primaire en sombre — dérivée, jamais choisie
+  /// (cf. [BrandContrast.darkText]).
+  static Color _primaryOnDark =
+      BrandContrast.darkText(kDefaultPalette.primary);
+
+  /// La primaire de la palette — en SOMBRE, sa variante lisible.
+  ///
+  /// En sombre, ce getter ne rend PAS la valeur de la palette : il rend
+  /// [BrandContrast.darkText], la primaire éclaircie jusqu'à 4,5:1 sur les
+  /// surfaces sombres. Avant le 25/09/2026 il rendait la valeur brute, et sur
+  /// Midnight elle était IDENTIQUE à la carte (1,00:1) : quelque 590 textes,
+  /// icônes et traits invisibles. Ne pas y remettre `_primary`.
+  ///
+  /// Contrepartie connue, inscrite au backlog (lot 1b) : les FONDS peints à la
+  /// main en `AppColors.primary` sous du texte blanc perdent du contraste en
+  /// sombre — un fond et un texte ne peuvent pas partager une valeur (voir
+  /// `brand_contrast.dart`). Les boutons du thème ont leur propre fond.
+  static Color get primary        => _isDark ? _primaryOnDark : _primary;
   static Color get primaryLight   => _primaryLight;
   static Color get primaryDark    => _primaryDark;
   static Color get primarySurface => _primarySurface;
@@ -33,6 +51,7 @@ class AppColors {
     _primary        = p.primary;
     _primaryLight   = p.primaryLight;
     _primaryDark    = p.primaryDark;
+    _primaryOnDark  = BrandContrast.darkText(p.primary);
     _refreshPrimarySurface();
   }
 

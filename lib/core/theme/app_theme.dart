@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'app_colors.dart';
+import 'brand_contrast.dart';
 import 'theme_palette.dart';
 
 /// Couleurs sémantiques exposées via `Theme.of(context).extension<...>()`.
@@ -187,13 +188,19 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
     );
   }
 
-  /// Pendant dark de [lightForBrand]. brandSurface = brand mixé avec slate
-  /// sombre à ~20 % pour rester lisible sur fond dark.
-  factory AppSemanticColors.darkForBrand(Color brand) {
-    final brandSurface = Color.alphaBlend(
-      brand.withValues(alpha: 0.20),
-      const Color(0xFF1E293B),
-    );
+  /// Pendant dark de [lightForBrand]. [primary] = la primaire BRUTE de la
+  /// palette.
+  ///
+  /// `brandSurface` = la primaire brute mélangée à ~20 % sur la carte slate.
+  /// `brand` et `brandText` = sa variante TEXTE, [BrandContrast.darkBrandText] :
+  /// lisible à 4,5:1 sur la carte, le fond ET cette `brandSurface`. Avant le
+  /// 25/09/2026 ils valaient la primaire brute — 1,00:1 sur Midnight, 2,21:1
+  /// sur Violet, et le couple `brandText`/`brandSurface` échouait sur les
+  /// huit palettes.
+  factory AppSemanticColors.darkForBrand(Color primary) {
+    final brandSurface =
+        BrandContrast.darkTint(primary, BrandContrast.kBrandSurfaceAlpha);
+    final brand = BrandContrast.darkBrandText(primary);
     return AppSemanticColors(
       success:         const Color(0xFF34D399),
       warning:         const Color(0xFFFBBF24),
@@ -207,7 +214,7 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
       successText:     const Color(0xFF6EE7B7),
       brand:           brand,
       brandSurface:    brandSurface,
-      brandText:       brand, // primary saturé reste lisible sur dark surface
+      brandText:       brand, // variante texte dérivée (voir ci-dessus)
       elevatedSurface: const Color(0xFF1E293B),
       borderSubtle:    const Color(0xFF334155),
       trackMuted:      const Color(0xFF1F2937),
@@ -603,6 +610,17 @@ class AppTheme {
 
   static ThemeData dark({ThemePalette? palette}) {
     final p = palette ?? kDefaultPalette;
+    // LA PRIMAIRE EN SOMBRE A DEUX VALEURS, DÉRIVÉES (cf. `brand_contrast.dart`) :
+    // une couleur ne peut pas être à la fois lisible SUR la carte sombre et
+    // porter du blanc. `onDark` pour tout ce qui se LIT (texte, icône, trait,
+    // indicateur) ; `fill` pour le fond des boutons pleins, sous du blanc.
+    // Avant le 25/09/2026, les deux valaient `primaryLight` : 1,93:1 sur la
+    // carte pour Midnight, et du blanc à moins de 2,7:1 sur six palettes.
+    final onDark = BrandContrast.darkText(p.primary);
+    final fill   = BrandContrast.fillUnderWhite(p.primaryLight);
+    // L'action d'un snack se lit sur SON fond (`#334155`, plus clair que la
+    // carte) : même règle, autre surface.
+    final snackAction = BrandContrast.readableOn(p.primary, const [_dInputFill]);
     return ThemeData(
       useMaterial3: true,
       fontFamily: 'Inter',
@@ -614,9 +632,13 @@ class AppTheme {
       colorScheme: ColorScheme.fromSeed(
         seedColor: p.primary,
         brightness: Brightness.dark,
-        // primaryLight reste lisible sur fond sombre (le primary brut
-        // peut être trop foncé pour certaines palettes : Midnight, Indigo).
-        primary:   p.primaryLight,
+        // Variante TEXTE dérivée : 4,5:1 sur la carte et le fond pour toute
+        // palette, y compris celles issues d'un logo. `primaryLight` ne
+        // suffisait pas (Midnight 1,93:1, Indigo 3,27:1, Violet 3,45:1).
+        primary:   onDark,
+        // Sur une primaire claire, le contenu est SOMBRE (modèle Material 3
+        // en sombre) : le fond du thème, ≥ 4,5:1 par construction.
+        onPrimary: _dScaffold,
         surface:   _dSurface,
         onSurface: _dTextPrimary,
         // Force les conteneurs M3 sur la surface slate plutôt que les
@@ -689,7 +711,7 @@ class AppTheme {
         contentTextStyle: const TextStyle(
           color: _dTextPrimary, fontSize: 13, fontWeight: FontWeight.w500,
         ),
-        actionTextColor: p.primaryLight,
+        actionTextColor: snackAction,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         elevation: 4,
@@ -717,7 +739,7 @@ class AppTheme {
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: _dBorder)),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: p.primaryLight, width: 2)),
+            borderSide: BorderSide(color: onDark, width: 2)),
         errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: AppColors.error)),
         focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
@@ -730,7 +752,8 @@ class AppTheme {
 
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: p.primaryLight,
+          // Fond dérivé sous le blanc (≥ 4,5:1) — cf. `fill` plus haut.
+          backgroundColor: fill,
           foregroundColor: Colors.white,
           overlayColor: Colors.white,
           surfaceTintColor: Colors.transparent,
@@ -759,7 +782,7 @@ class AppTheme {
 
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: p.primaryLight,
+          foregroundColor: onDark,
           overlayColor: p.primaryLight,
           minimumSize: Size.zero,
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -770,6 +793,10 @@ class AppTheme {
 
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
+          // Même fond que l'ElevatedButton : sans lui, le FilledButton
+          // prendrait la primaire du schéma — désormais CLAIRE en sombre.
+          backgroundColor: fill,
+          foregroundColor: Colors.white,
           overlayColor: Colors.white,
           minimumSize: Size.zero,
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -808,13 +835,13 @@ class AppTheme {
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
             return TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                color: p.primaryLight);
+                color: onDark);
           }
           return const TextStyle(fontSize: 11, color: _dTextSecondary);
         }),
         iconTheme: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return IconThemeData(color: p.primaryLight, size: 22);
+            return IconThemeData(color: onDark, size: 22);
           }
           return const IconThemeData(color: _dTextSecondary, size: 22);
         }),
