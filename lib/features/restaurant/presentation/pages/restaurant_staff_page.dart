@@ -34,6 +34,7 @@ import '../widgets/staff_contest_tab.dart';
 import '../widgets/staff_rating_tab.dart';
 import '../widgets/staff_settings_sheet.dart';
 import '../widgets/resto_section_header.dart';
+import '../widgets/resto_underline_tabs.dart';
 
 /// Personnel du restaurant (Lot D) : fiches, heures pointées et paie.
 ///
@@ -47,8 +48,6 @@ class RestaurantStaffPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final sem = Theme.of(context).semantic;
     return AppScaffold(
       shopId: shopId,
       title: 'Personnel',
@@ -68,28 +67,15 @@ class RestaurantStaffPage extends StatelessWidget {
             // racine du restaurant porte son nom ici, la barre du haut se tait. Il
             // manquait : sur ordinateur, l'écran n'affichait aucun nom.
             _StaffHeader(shopId: shopId),
-            const SizedBox(height: 8),
-            Material(
-              color: restoGlassFill(context),
-              child: TabBar(
-                // Cinq onglets ne tiennent pas sur un téléphone : sans
-                // défilement, les libellés se coupent en deux lignes illisibles.
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                labelColor: cs.primary,
-                unselectedLabelColor: cs.onSurface.withValues(alpha: 0.6),
-                indicatorColor: cs.primary,
-                labelStyle: AppTextStyles.label,
-                tabs: const [
-                  Tab(text: 'Équipe'),
-                  Tab(text: 'Pointage'),
-                  Tab(text: 'Paie'),
-                  Tab(text: 'Notation'),
-                  Tab(text: 'Primes'),
-                ],
-              ),
-            ),
-            Divider(height: 1, color: sem.borderSubtle),
+            // ONGLETS SOULIGNÉS, comme Stock, Menu et Commandes (25/09/2026).
+            // Ils DÉFILENT : cinq onglets ne tiennent pas sur un téléphone.
+            const RestoUnderlineTabBar(labels: [
+              'Équipe',
+              'Pointage',
+              'Paie',
+              'Notation',
+              'Primes',
+            ]),
             // Lever l'ambiguïté avec « Accès à l'app », juste au-dessus dans
             // le menu : ici ce sont les gens qui travaillent en salle et en
             // cuisine, pas les comptes qui se connectent.

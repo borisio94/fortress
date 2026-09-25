@@ -33,9 +33,9 @@ import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/loss.dart';
 import '../../domain/entities/restaurant_activity.dart';
 import '../widgets/resto_period_sheet.dart';
-import '../widgets/resto_surfaces.dart';
 import '../widgets/resto_tab_kit.dart';
 import '../widgets/resto_section_header.dart';
+import '../widgets/resto_underline_tabs.dart';
 
 /// HUB FINANCES DU RESTAURANT — ce que l'établissement dépense et perd.
 ///
@@ -62,8 +62,6 @@ class FinancesHubPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final sem = Theme.of(context).semantic;
     return AppScaffold(
       shopId: shopId,
       title: 'Finances',
@@ -103,27 +101,11 @@ class FinancesHubPage extends StatelessWidget {
             // Titre SEUL : la période ne cadre pas toute la page, elle vit dans
             // l'onglet Pertes.
             const RestoSectionHeader(title: 'Finances'),
-            const SizedBox(height: 8),
-            Material(
-              // Même opacité que les cartes : la barre d'onglets était le
-              // dernier aplat plein de la page.
-              color: restoGlassFill(context),
-              child: TabBar(
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                labelColor: cs.primary,
-                unselectedLabelColor: cs.onSurface.withValues(alpha: 0.6),
-                indicatorColor: cs.primary,
-                labelStyle: AppTextStyles.label,
-                tabs: const [
-                  Tab(text: 'Dépenses'),
-                  Tab(text: 'Charges'),
-                  Tab(text: 'Pertes'),
-                  Tab(text: 'Activités'),
-                ],
-              ),
-            ),
-            Divider(height: 1, color: sem.borderSubtle),
+            // ONGLETS SOULIGNÉS, comme Stock, Menu et Commandes (25/09/2026) :
+            // plus de bande teintée ni de `TabBar` dont libellé et trait
+            // étaient en primaire. Le balayage entre onglets reste.
+            const RestoUnderlineTabBar(
+                labels: ['Dépenses', 'Charges', 'Pertes', 'Activités']),
             Expanded(
               child: TabBarView(
                 children: [

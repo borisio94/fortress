@@ -425,7 +425,7 @@ référence est une divergence en attente.
 | Carte / panneau | `RestoGlassPanel` | `colorScheme.surface` + `borderSubtle` | `_XxxCard` locales (99), `BoxDecoration` faits main |
 | État vide | `RestoEmptyState` | `EmptyStateWidget` | `_EmptyState` locaux (≈ 21) |
 | Étiquette d'état | `RestoInlineTag.info` / `.alert` | **NON TRANCHÉ** | pastilles locales (≈ 30) ; « stock bas » a cinq rendus |
-| Onglets | `RestoUnderlineTabs` | **NON TRANCHÉ** (`TabBar`, pastilles…) | `_TabPill`, `_PillTab` |
+| Onglets | `RestoUnderlineTabs` ; `RestoUnderlineTabBar` avec une `TabBarView` | **NON TRANCHÉ** (`TabBar`, pastilles…) | `_TabPill`, `_PillTab`, `TabBar` au restaurant |
 | Bouton flottant | `RestoFab` | `DraggableFabContainer` | `FloatingActionButton` brut |
 | Feuille à saisie | `showAdaptiveFormSheet` + `AdaptiveFormFrame` | idem | `AlertDialog` avec un champ |
 | Confirmation | `AppConfirmDialog` ; `DangerConfirmDialog` si irréversible | idem | `AlertDialog` nu |
@@ -560,8 +560,11 @@ trait seul ne suffirait pas. Un onglet vide s'efface en `textHint`, sauf
 suffit pas à distinguer (Stock : feuille et carton — la couleur seule ne tient
 pas, ΔE 17,7 sur la palette Amber).
 
-**NON TRANCHÉ** : Finances et Personnel, au restaurant même, utilisent encore
-`TabBar` et `SegmentedButton`.
+Finances et Personnel, qui balaient leurs onglets (`TabBarView`), passent
+par `RestoUnderlineTabBar` : les mêmes onglets soulignés, reliés au
+`TabController` (25/09/2026). Libellés seuls — leurs données se chargent dans
+chaque onglet. Les `SegmentedButton` et `ChoiceChip` de ces écrans ne sont
+PAS des onglets mais des champs de formulaire : ils restent.
 
 ### Recherche
 

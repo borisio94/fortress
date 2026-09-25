@@ -119,3 +119,46 @@ class RestoUnderlineTabs extends StatelessWidget {
     );
   }
 }
+
+/// LES MÊMES ONGLETS, reliés à un `TabController` — pour les écrans qui
+/// balaient leurs onglets avec une `TabBarView` (Finances, Personnel).
+///
+/// Remplace la `TabBar` Material (25/09/2026) : son libellé ET son trait
+/// étaient en primaire, et sur une palette où la primaire est faible en clair
+/// plus rien ne distinguait l'onglet actif. Ici l'actif se lit aussi par la
+/// graisse et la couleur du texte (cf. [RestoUnderlineTabs]).
+///
+/// Le contrôleur reste la source : l'onglet actif le SUIT (tap comme
+/// balayage), un tap l'ANIME. Rien de la navigation ne change.
+///
+/// Libellés SEULS, sans compteur : sur ces écrans les données se chargent
+/// dans chaque onglet, pas au niveau de la page — les remonter toucherait à la
+/// logique.
+class RestoUnderlineTabBar extends StatelessWidget {
+  final List<String> labels;
+
+  const RestoUnderlineTabBar({super.key, required this.labels});
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = DefaultTabController.of(context);
+    // À GAUCHE quel que soit le parent : dans une `Column` qui n'étire pas,
+    // une rangée défilante plus étroite que l'écran se centrerait.
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) => RestoUnderlineTabs(
+        items: [
+          for (final l in labels)
+            // `mutedWhenEmpty: false` : sans compteur, un onglet n'est pas
+            // « vide » — il ne doit pas s'éteindre.
+            RestoUnderlineTab(label: l, count: 0, mutedWhenEmpty: false),
+        ],
+        selected: controller.index,
+        onSelect: controller.animateTo,
+      ),
+      ),
+    );
+  }
+}
