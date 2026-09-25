@@ -26,6 +26,7 @@ import '../../../../shared/providers/order_attach_provider.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/permisions/subscription_provider.dart';
 import '../../../parametres/data/shop_settings_store.dart';
+import '../../../../core/widgets/touch_target.dart';
 import 'order_creation_sheet.dart';
 
 class CartWidget extends ConsumerStatefulWidget {
@@ -762,12 +763,15 @@ class _RestoCartItemRow extends StatelessWidget {
           const SizedBox(width: 6),
           // Corbeille à l'extrême droite, à l'écart du stepper : un doigt qui
           // vise « − » ne doit jamais supprimer la ligne par erreur.
+          // 30 px à la souris, 48 au doigt (lot 2, cf. `touch_target.dart`).
           IconButton(
             onPressed: onRemove,
             tooltip: 'Retirer',
-            visualDensity: VisualDensity.compact,
+            visualDensity: compactUnlessTouch,
             padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+            constraints: BoxConstraints(
+                minWidth: isTouchPlatform ? kMinTouchTarget : 30,
+                minHeight: isTouchPlatform ? kMinTouchTarget : 30),
             icon: Icon(Icons.delete_outline_rounded,
                 size: 19, color: sem.danger),
           ),
@@ -817,7 +821,12 @@ class _RestoCartItemRow extends StatelessWidget {
             onTap: onEditQty,
             borderRadius: BorderRadius.circular(8),
             child: Container(
-              constraints: const BoxConstraints(minWidth: 32),
+              // Au doigt, la hauteur des boutons voisins (48) : une quantité
+              // de 28 px de haut entre deux cibles de 48 serait la seule
+              // qu'on manque.
+              constraints: BoxConstraints(
+                  minWidth: 32,
+                  minHeight: isTouchPlatform ? kMinTouchTarget : 0),
               padding: const EdgeInsets.symmetric(vertical: 4),
               alignment: Alignment.center,
               child: Text('${item.quantity}',
@@ -858,20 +867,25 @@ class _RoundQtyBtn extends StatelessWidget {
     final sem   = theme.semantic;
     const size  = 28.0;
 
-    return Material(
-      color: filled ? cs.primary : sem.trackMuted,
-      shape: filled
-          ? const CircleBorder()
-          : CircleBorder(side: BorderSide(color: sem.borderSubtle)),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: SizedBox(
-          width: size,
-          height: size,
-          child: Icon(icon,
-              size: 16,
-              color: filled ? cs.onPrimary : cs.onSurface),
+    // Le rond garde ses 28 px ; au doigt, la zone de toucher monte à 48
+    // (lot 2) — la rangée du stepper grandit d'autant.
+    return TouchTarget(
+      onTap: onTap,
+      child: Material(
+        color: filled ? cs.primary : sem.trackMuted,
+        shape: filled
+            ? const CircleBorder()
+            : CircleBorder(side: BorderSide(color: sem.borderSubtle)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: Icon(icon,
+                size: 16,
+                color: filled ? cs.onPrimary : cs.onSurface),
+          ),
         ),
       ),
     );
@@ -1075,7 +1089,9 @@ class _FeesSection extends StatelessWidget {
                 style: AppTextStyles.captionBold.copyWith(
                     color: Theme.of(context).colorScheme.onSurface)),
             const SizedBox(width: 4),
-            GestureDetector(
+            // Croix de 14 px : inatteignable au doigt sans sa zone de 48
+            // (lot 2). La ligne du frais grandit d'autant au tactile.
+            TouchTarget(
               onTap: () => context.read<CaisseBloc>()
                   .add(RemoveOrderFee(fee.id)),
               child: Icon(Icons.close_rounded,
@@ -2736,18 +2752,22 @@ class _QtyBtn extends StatelessWidget {
     final isCompact = MediaQuery.of(context).size.width < 900;
     final boxSize  = isCompact ? 34.0 : 38.0;
     final iconSize = isCompact ? 18.0 : 20.0;
-    return InkWell(
+    // Au doigt, la zone monte à 48 px autour du carré de 34/38 (lot 2).
+    return TouchTarget(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        constraints: BoxConstraints(minWidth: boxSize, minHeight: boxSize),
-        decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: BorderRadius.circular(isCompact ? 7 : 8),
-            border: Border.all(
-                color: Theme.of(context).semantic.borderSubtle)),
-        child: Icon(icon, size: iconSize,
-            color: Theme.of(context).colorScheme.onSurface),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          constraints: BoxConstraints(minWidth: boxSize, minHeight: boxSize),
+          decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(isCompact ? 7 : 8),
+              border: Border.all(
+                  color: Theme.of(context).semantic.borderSubtle)),
+          child: Icon(icon, size: iconSize,
+              color: Theme.of(context).colorScheme.onSurface),
+        ),
       ),
     );
   }
@@ -2876,13 +2896,18 @@ class _ScheduledDeliveryField extends StatelessWidget {
                   color: has
                       ? AppColors.primary : AppColors.textSecondary))),
           if (has)
-            InkWell(
+            // Croix de 14 px : zone de 48 au doigt (lot 2).
+            TouchTarget(
               onTap: () =>
                   context.read<CaisseBloc>().add(SetDeliveryDate(null)),
-              child: Padding(
-                padding: const EdgeInsets.all(2),
-                child: Icon(Icons.close_rounded,
-                    size: 14, color: AppColors.textHint),
+              child: InkWell(
+                onTap: () =>
+                    context.read<CaisseBloc>().add(SetDeliveryDate(null)),
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: Icon(Icons.close_rounded,
+                      size: 14, color: AppColors.textHint),
+                ),
               ),
             )
           else

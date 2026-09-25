@@ -125,3 +125,58 @@ main en `AppColors.primary` sous du blanc (lot 1b) tomberaient alors à
 Piste, sans décision : une teinte `primarySurface` plus sombre en mode sombre,
 ou un token texte dédié à cette surface. Ne PAS élargir `BrandContrast.darkText`
 aux teintes — c'est l'option écartée ci-dessus.
+
+## Cibles tactiles
+
+### Lot 2 — les ≈ 154 cibles sous 48 px laissées hors du lot
+
+*Inscrit le 25/09/2026 avec le lot 2 (cibles tactiles), à la demande : compté
+PAR FEATURE, pour savoir où chercher le jour où l'on ouvrira chacune.*
+
+Le lot 2 a rendu le thème adaptatif (tous les Elevated / Outlined / Text /
+FilledButton sans style propre montent à 48 px au doigt) et corrigé les gestes
+du service et de la caisse un par un (cf. `core/widgets/touch_target.dart`).
+Restent les sites qui dimensionnent LEUR cible à la main : `IconButton`
+contraints ou compacts, `shrinkWrap` local, `InkWell` / `GestureDetector`
+autour d'une boîte de moins de 48 px.
+
+Heuristique (regex, arbre de travail du 25/09/2026), sans les 6 faux positifs
+connus déjà couverts par une zone extérieure :
+
+| Feature | Sites |
+|---|---|
+| inventaire | 43 |
+| shared/widgets | 21 |
+| parametres | 16 |
+| caisse | 13 |
+| restaurant | 13 |
+| super_admin | 10 |
+| onboarding | 8 |
+| crm | 6 |
+| auth | 4 |
+| catalogue | 4 |
+| hub_central | 4 |
+| hr | 3 |
+| promo_campaigns, subscription, tickets | 2 chacun |
+| expenses, finances, marketing | 1 chacun |
+| **Total** | **≈ 154** |
+
+Par nature : ≈ 82 `InkWell`/`GestureDetector` sur une boîte < 48, 36
+`IconButton` contraints, 29 compacts, 13 `shrinkWrap` locaux.
+
+Côté restaurant, ce qui reste n'est PAS un geste de service : Finances,
+tableau de bord (flèches du carrousel), fiche plat, réglages du personnel,
+feuille de période, réservation (`_RoundBtn` 44 × 44).
+
+Deux pièges à relire avant d'en corriger un (ils sont dans l'en-tête de
+`touch_target.dart`) : un parent à hauteur FIXE qui laisse sa colonne libre
+fait DÉBORDER (tuile de table, `mainAxisExtent: 82` — d'où la zone superposée
+du ⋮) ; un parent à hauteur fixe qui contraint PLAFONNE la cible sans erreur
+(puce de date de 38 px dans les Commandes e-commerce).
+
+Code mort signalé en passant : `KitchenTicketCard`
+(`restaurant/presentation/widgets/kitchen_ticket_card.dart`, ≈ 230 lignes)
+n'a plus aucun appelant depuis la suppression de l'écran Préparation
+(`66c6c2f`, 07/08/2026). L'audit UI du 24/09 l'avait compté comme geste
+fréquent (§4b) et comme couleur seule (§4c-1) : ces deux constats portent sur
+du code mort.

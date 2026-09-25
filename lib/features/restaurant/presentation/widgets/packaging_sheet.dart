@@ -10,6 +10,7 @@ import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../domain/entities/stock_item.dart';
+import '../../../../core/widgets/touch_target.dart';
 
 /// EMBALLAGES d'une commande — barquettes, sachets, boîtes.
 ///
@@ -281,7 +282,7 @@ class _PackagingRow extends StatelessWidget {
         ),
         IconButton(
           onPressed: quantity > 0 ? onMinus : null,
-          visualDensity: VisualDensity.compact,
+          visualDensity: compactUnlessTouch,
           icon: const Icon(Icons.remove_circle_outline_rounded, size: 20),
         ),
         SizedBox(
@@ -292,7 +293,7 @@ class _PackagingRow extends StatelessWidget {
         ),
         IconButton(
           onPressed: onPlus,
-          visualDensity: VisualDensity.compact,
+          visualDensity: compactUnlessTouch,
           icon: Icon(Icons.add_circle_outline_rounded,
               size: 20, color: cs.primary),
         ),

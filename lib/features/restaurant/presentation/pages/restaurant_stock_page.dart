@@ -29,6 +29,7 @@ import '../widgets/resto_surfaces.dart' show RestoGlassPanel;
 import '../widgets/resto_underline_tabs.dart';
 import '../widgets/resto_section_header.dart';
 import '../widgets/resto_tab_kit.dart';
+import '../../../../core/widgets/touch_target.dart';
 
 /// LE STOCK DU RESTAURANT — ce qu'on achète, ce qu'on consomme.
 ///
@@ -758,7 +759,7 @@ class _IngredientRow extends StatelessWidget {
         IconButton(
           onPressed: onReceive,
           tooltip: 'Réapprovisionner',
-          visualDensity: VisualDensity.compact,
+          visualDensity: compactUnlessTouch,
           icon: Icon(Icons.add_box_outlined, size: 20, color: cs.primary),
         ),
         PopupMenuButton<String>(
@@ -1251,14 +1252,14 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
                         IconButton(
                           onPressed: () => _receive(s),
                           tooltip: 'Réception',
-                          visualDensity: VisualDensity.compact,
+                          visualDensity: compactUnlessTouch,
                           icon: Icon(Icons.add_box_outlined,
                               size: 20, color: cs.primary),
                         ),
                         IconButton(
                           onPressed: () => _edit(s),
                           tooltip: 'Modifier',
-                          visualDensity: VisualDensity.compact,
+                          visualDensity: compactUnlessTouch,
                           icon: Icon(Icons.edit_outlined,
                               size: 19,
                               color: cs.onSurface.withValues(alpha: 0.7)),
@@ -1266,7 +1267,7 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
                         IconButton(
                           onPressed: () => _delete(s),
                           tooltip: 'Supprimer',
-                          visualDensity: VisualDensity.compact,
+                          visualDensity: compactUnlessTouch,
                           icon: Icon(Icons.delete_outline_rounded,
                               size: 19, color: sem.danger),
                         ),

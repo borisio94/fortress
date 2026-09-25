@@ -9,6 +9,7 @@ import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../domain/entities/payment.dart';
 import '../../domain/mixed_payment.dart';
+import '../../../../core/widgets/touch_target.dart';
 
 /// Feuille d'encaissement d'une addition.
 ///
@@ -305,7 +306,7 @@ class _EntryRow extends StatelessWidget {
         ),
         IconButton(
           tooltip: 'Retirer ce règlement',
-          visualDensity: VisualDensity.compact,
+          visualDensity: compactUnlessTouch,
           onPressed: onRemove,
           icon: Icon(Icons.close_rounded, size: 18, color: sem.dangerText),
         ),

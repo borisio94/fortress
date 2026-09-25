@@ -28,6 +28,7 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/services/restaurant_tab_service.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/services/service_incident_service.dart';
+import '../../../../core/widgets/touch_target.dart';
 
 /// Plan de salle — grille des tables colorées par statut (PR-1).
 ///
@@ -840,69 +841,98 @@ class _TableCard extends StatelessWidget {
             ? BorderSide(color: semantic.warning, width: 2)
             : BorderSide(color: accent.withValues(alpha: 0.30)),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(width: 4, color: accent),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(9, 6, 2, 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // ── 1. Nom + ⋮ ─────────────────────────────────────────
-                  Row(children: [
-                    Expanded(
-                      child: Text(table.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppTextStyles.bodyBold
-                              .copyWith(color: cs.onSurface)),
-                    ),
-                    // Discret mais toujours visible : enfoui derrière un appui
-                    // long, il serait introuvable sur le web. Jamais vide : le
-                    // menu d'une table libre porte « Réserver ».
-                    SizedBox(
-                      width: 26,
-                      height: 22,
-                      child: IconButton(
-                        onPressed: onActions,
-                        icon: Icon(Icons.more_vert_rounded,
-                            size: 17, color: cs.onSurface.withValues(alpha: 0.6)),
-                        tooltip: 'Actions sur la table',
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
+      child: Stack(fit: StackFit.expand, children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(width: 4, color: accent),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(9, 6, 2, 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // ── 1. Nom + ⋮ ─────────────────────────────────────────
+                    Row(children: [
+                      Expanded(
+                        child: Text(table.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTextStyles.bodyBold
+                                .copyWith(color: cs.onSurface)),
                       ),
-                    ),
-                  ]),
-                  // ── 2. État + comptes ──────────────────────────────────
-                  Row(children: [
-                    Flexible(
-                      child: Text(status.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style:
-                              AppTextStyles.captionBold.copyWith(color: accent)),
-                    ),
-                    if (tabCount > 0) ...[
-                      const SizedBox(width: 5),
-                      _TabPill(count: tabCount, color: accent),
-                    ],
-                  ]),
-                  // ── 3. Clients, places, argent ─────────────────────────
-                  Text(_line3(table, view),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.caption),
-                  // ── 4. Ce qui demande un regard ────────────────────────
-                  if (line4 != null) line4,
-                ],
+                      // Discret mais toujours visible : enfoui derrière un appui
+                      // long, il serait introuvable sur le web. Jamais vide : le
+                      // menu d'une table libre porte « Réserver ».
+                      //
+                      // AU DOIGT, ce n'est plus que le DESSIN : la cible est la
+                      // zone de 48 px superposée plus bas (lot 2). À la souris,
+                      // le bouton de 26 × 22 reste la cible.
+                      SizedBox(
+                        width: 26,
+                        height: 22,
+                        child: isTouchPlatform
+                            ? Icon(Icons.more_vert_rounded,
+                                size: 17,
+                                color: cs.onSurface.withValues(alpha: 0.6))
+                            : IconButton(
+                                onPressed: onActions,
+                                icon: Icon(Icons.more_vert_rounded,
+                                    size: 17,
+                                    color: cs.onSurface.withValues(alpha: 0.6)),
+                                tooltip: 'Actions sur la table',
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                              ),
+                      ),
+                    ]),
+                    // ── 2. État + comptes ──────────────────────────────────
+                    Row(children: [
+                      Flexible(
+                        child: Text(status.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                AppTextStyles.captionBold.copyWith(color: accent)),
+                      ),
+                      if (tabCount > 0) ...[
+                        const SizedBox(width: 5),
+                        _TabPill(count: tabCount, color: accent),
+                      ],
+                    ]),
+                    // ── 3. Clients, places, argent ─────────────────────────
+                    Text(_line3(table, view),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.caption),
+                    // ── 4. Ce qui demande un regard ────────────────────────
+                    if (line4 != null) line4,
+                  ],
+                ),
               ),
             ),
+          ],
+        ),
+        // ── LA CIBLE DU ⋮ AU DOIGT : 48 × 48, SUPERPOSÉE ──────────────────
+        //
+        // Pas enveloppée : la tuile a une hauteur FIXE (`mainAxisExtent: 82`,
+        // ~70 px de contenu). Porter la rangée du nom à 48 px la ferait monter
+        // à ~96 — débordement (vérifié au lot 2, cf. `touch_target.dart`). Posée
+        // dans le coin, la zone ne prend aucune place ; elle recouvre la fin du
+        // nom, qui ne réagit à rien (la carte n'a pas d'action au tap).
+        if (isTouchPlatform)
+          Positioned(
+            top: 0,
+            right: 0,
+            width: kMinTouchTarget,
+            height: kMinTouchTarget,
+            child: Tooltip(
+              message: 'Actions sur la table',
+              child: InkWell(onTap: onActions),
+            ),
           ),
-        ],
-      ),
+      ]),
     );
   }
 

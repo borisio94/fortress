@@ -10,6 +10,7 @@ import '../../../../core/widgets/back_dated_picker.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../bloc/caisse_bloc.dart' show OrderFee;
+import '../../../../core/widgets/touch_target.dart';
 
 /// Qui a effectivement encaissé le client pour cette commande ?
 /// - `boutique` : flux d'argent normal — la boutique a la cash en main.
@@ -723,25 +724,32 @@ class _RadioRow extends StatelessWidget {
     return InkWell(
       onTap: disabled ? null : onTap,
       borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-        child: Row(children: [
-          SizedBox(
-            width: 18, height: 18,
-            child: Radio<bool>(
-              value: true, groupValue: selected,
-              onChanged: disabled ? null : (_) => onTap?.call(),
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              activeColor: sem.brand,
-              visualDensity: VisualDensity.compact,
+      // La CIBLE est la ligne entière ; le rond de 18 px n'en est que le
+      // dessin. Au doigt, la ligne monte à 48 px de haut (lot 2) — elle n'en
+      // faisait que 30.
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+            minHeight: isTouchPlatform ? kMinTouchTarget : 0),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+          child: Row(children: [
+            SizedBox(
+              width: 18, height: 18,
+              child: Radio<bool>(
+                value: true, groupValue: selected,
+                onChanged: disabled ? null : (_) => onTap?.call(),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                activeColor: sem.brand,
+                visualDensity: VisualDensity.compact,
+              ),
             ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(child: Text(label,
-              style: AppTextStyles.bodySm.copyWith(
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                  color: textColor))),
-        ]),
+            const SizedBox(width: 8),
+            Expanded(child: Text(label,
+                style: AppTextStyles.bodySm.copyWith(
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    color: textColor))),
+          ]),
+        ),
       ),
     );
   }

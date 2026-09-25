@@ -18,6 +18,7 @@ import '../../domain/courier_pay.dart';
 import '../../domain/order_attach.dart';
 import '../../domain/table_drift.dart';
 import 'courier_sheet.dart';
+import '../../../../core/widgets/touch_target.dart';
 
 /// ENREGISTREMENT D'UNE COMMANDE prise depuis le Menu — Module 3 du flux.
 ///
@@ -1088,7 +1089,7 @@ class _CourierTile extends StatelessWidget {
               onPressed: onClear,
               icon: Icon(Icons.close_rounded, size: 16, color: sem.danger),
               tooltip: 'Retirer',
-              visualDensity: VisualDensity.compact,
+              visualDensity: compactUnlessTouch,
             ),
         ]),
       ),
@@ -1140,7 +1141,7 @@ class _PackagingRow extends StatelessWidget {
         ),
         IconButton(
           onPressed: quantity > 0 ? onMinus : null,
-          visualDensity: VisualDensity.compact,
+          visualDensity: compactUnlessTouch,
           icon: const Icon(Icons.remove_circle_outline_rounded, size: 20),
         ),
         SizedBox(
@@ -1151,7 +1152,7 @@ class _PackagingRow extends StatelessWidget {
         ),
         IconButton(
           onPressed: onPlus,
-          visualDensity: VisualDensity.compact,
+          visualDensity: compactUnlessTouch,
           icon: Icon(Icons.add_circle_outline_rounded,
               size: 20, color: cs.primary),
         ),

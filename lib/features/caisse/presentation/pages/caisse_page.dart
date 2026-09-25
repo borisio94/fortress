@@ -81,6 +81,7 @@ import '../../../../core/utils/phone_formatter.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../crm/data/models/client_model.dart';
 import '../../../restaurant/presentation/widgets/resto_surfaces.dart';
+import '../../../../core/widgets/touch_target.dart';
 
 class CaissePage extends ConsumerStatefulWidget {
   final String shopId;
@@ -1912,7 +1913,10 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                         style: AppTextStyles.captionBold
                             .copyWith(color: AppColors.primary)),
                     const SizedBox(width: 3),
-                    InkWell(
+                    // Croix de 14 px : zone de 48 de large au doigt (lot 2).
+                    // La puce fait 38 px de HAUT, et le reste : sa hauteur
+                    // fixe plafonne la cible, sans débordement.
+                    TouchTarget(
                       onTap: () => setState(() => _dateRange = null),
                       child: Icon(Icons.close_rounded,
                           size: 14, color: AppColors.textHint),

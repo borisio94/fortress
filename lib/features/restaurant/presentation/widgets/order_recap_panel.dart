@@ -5,6 +5,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../features/caisse/domain/entities/sale_item.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
+import '../../../../core/widgets/touch_target.dart';
 
 /// Récapitulatif de la commande en cours, épinglé en bas de la prise de
 /// commande.
@@ -201,7 +202,7 @@ class _LineRow extends StatelessWidget {
           ),
           IconButton(
             onPressed: onMinus,
-            visualDensity: VisualDensity.compact,
+            visualDensity: compactUnlessTouch,
             icon: const Icon(Icons.remove_circle_outline_rounded, size: 20),
           ),
           SizedBox(
@@ -212,7 +213,7 @@ class _LineRow extends StatelessWidget {
           ),
           IconButton(
             onPressed: onPlus,
-            visualDensity: VisualDensity.compact,
+            visualDensity: compactUnlessTouch,
             icon: const Icon(Icons.add_circle_outline_rounded, size: 20),
           ),
           SizedBox(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'app_colors.dart';
 import 'brand_contrast.dart';
+import '../widgets/touch_target.dart';
 import 'theme_palette.dart';
 
 /// Couleurs sémantiques exposées via `Theme.of(context).extension<...>()`.
@@ -501,6 +502,10 @@ class AppTheme {
     // pleine-largeur/52px. Les boutons VOULUS pleine largeur (connexion, footers
     // de formulaire…) le restent car ils sont enveloppés dans un SizedBox /
     // fixent leur propre style, qui prime sur le thème.
+    //
+    // `tapTargetSize` ADAPTATIF (lot 2, 25/09/2026) : au DOIGT, `padded` donne
+    // à chaque bouton une zone de 48 px sans changer son dessin ; à la souris,
+    // `shrinkWrap` garde la densité de bureau. Cf. `core/widgets/touch_target.dart`.
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: p.primary,
@@ -510,7 +515,7 @@ class AppTheme {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        tapTargetSize: adaptiveTapTargetSize,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600,
@@ -523,7 +528,7 @@ class AppTheme {
         foregroundColor: AppColors.textPrimary,
         overlayColor: p.primary,
         minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        tapTargetSize: adaptiveTapTargetSize,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
         side: BorderSide(color: AppColors.inputBorder),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -536,7 +541,7 @@ class AppTheme {
         foregroundColor: p.primary,
         overlayColor: p.primary,
         minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        tapTargetSize: adaptiveTapTargetSize,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
         textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
       ),
@@ -547,7 +552,7 @@ class AppTheme {
       style: FilledButton.styleFrom(
         overlayColor: Colors.white,
         minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        tapTargetSize: adaptiveTapTargetSize,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
         // Coins arrondis modérés (cohérent elevated/outlined) au lieu de la
         // forme « pilule » (StadiumBorder) par défaut de M3 pour FilledButton.
@@ -759,7 +764,7 @@ class AppTheme {
           surfaceTintColor: Colors.transparent,
           elevation: 0,
           minimumSize: Size.zero,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          tapTargetSize: adaptiveTapTargetSize,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600,
@@ -772,7 +777,7 @@ class AppTheme {
           foregroundColor: _dTextPrimary,
           overlayColor: p.primaryLight,
           minimumSize: Size.zero,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          tapTargetSize: adaptiveTapTargetSize,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
           side: const BorderSide(color: _dBorder),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -785,7 +790,7 @@ class AppTheme {
           foregroundColor: onDark,
           overlayColor: p.primaryLight,
           minimumSize: Size.zero,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          tapTargetSize: adaptiveTapTargetSize,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
         ),
@@ -799,7 +804,7 @@ class AppTheme {
           foregroundColor: Colors.white,
           overlayColor: Colors.white,
           minimumSize: Size.zero,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          tapTargetSize: adaptiveTapTargetSize,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
           // Coins arrondis modérés au lieu de la « pilule » M3 par défaut.
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
