@@ -353,8 +353,10 @@ class _MobileShell extends StatelessWidget {
     //     rien dire ;
     //   * mobile et desktop se ressemblent sur le même écran.
     final isResto       = isRestaurantShop(shopId);
+    // Restauration : opaque ET de la famille du contenu (cf.
+    // `restoChromeOpaque`) — `cs.surface` était le slate des cartes en sombre.
     final appBarBg      = isResto
-        ? cs.surface
+        ? restoChromeOpaque(context)
         : (isSubPage ? cs.surface : cs.primary);
     final appBarFg      = (isResto || isSubPage) ? cs.onSurface : cs.onPrimary;
     final titleStyle    = isSubPage
@@ -1931,7 +1933,10 @@ class _DesktopTopbar extends StatelessWidget {
         // OPAQUE, restauration comprise (24/09/2026). Translucide, le décor
         // qui transparaissait dessinait une bande claire sans rien dire. Le
         // bloc reste DÉTACHÉ du contenu : c'est le vide qui les sépare.
-        color: theme.colorScheme.surface,
+        // Restauration : `restoChromeOpaque` et non `colorScheme.surface`,
+        // qui valait en sombre le slate des cartes (#1E293B) au-dessus d'un
+        // contenu quasi noir (25/09/2026).
+        color: resto ? restoChromeOpaque(context) : theme.colorScheme.surface,
         // Le liseré du bas sépare la barre du contenu quand les deux se
         // touchent. En restauration ils sont deux blocs détachés : le liseré
         // y couperait le bord arrondi d'un trait droit.

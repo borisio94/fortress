@@ -132,7 +132,7 @@ class RestoBackdrop extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: brightness == Brightness.dark
-                  ? [const Color(0xFF10161D), const Color(0xFF0B0F14)]
+                  ? [kRestoBackdropDarkTop, const Color(0xFF0B0F14)]
                   : [const Color(0xFFFFFFFF), const Color(0xFFEFF1F5)],
             ),
           ),
@@ -421,6 +421,30 @@ Color restoChromeFill(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark
         ? const Color(0xFF0B0F14).withValues(alpha: 0.82)
         : Colors.white.withValues(alpha: 0.90);
+
+/// Départ (coin haut-gauche) du dégradé du décor en SOMBRE — là où vivent la
+/// barre du haut et le haut de la barre latérale.
+const Color kRestoBackdropDarkTop = Color(0xFF10161D);
+
+/// Fond OPAQUE de la barre du haut (ordinateur) et de l'AppBar (mobile) en mode
+/// restaurant — DÉRIVÉ, jamais choisi.
+///
+/// POURQUOI (25/09/2026) : `080bcf1` a rendu la barre OPAQUE — le décor qui la
+/// traversait dessinait une bande claire — en prenant `colorScheme.surface`.
+/// En clair, c'est du blanc et la barre se confond avec le verre du contenu
+/// (1,009:1). En SOMBRE, c'est `#1E293B`, la surface des CARTES : un slate
+/// bleuté, seul bloc hors de la famille quasi-noire du chrome (barre latérale,
+/// [restoChromeFill]) et du contenu ([restoGlassFill]) — 1,30:1 d'écart, et
+/// une autre teinte.
+///
+/// La règle : le verre du CONTENU composé sur le haut du décor — même teinte
+/// que le bloc du dessous, sans transparence. ≈ `#0C1015` en sombre. En clair,
+/// `colorScheme.surface`, inchangé (le composé donnerait le même blanc).
+Color restoChromeOpaque(BuildContext context) {
+  final theme = Theme.of(context);
+  if (theme.brightness != Brightness.dark) return theme.colorScheme.surface;
+  return Color.alphaBlend(restoGlassFill(context), kRestoBackdropDarkTop);
+}
 
 /// Composé PAR-DESSUS un panneau déjà opacifié : un blanc très léger suffit
 /// alors à faire ressortir l'élément, dans les deux modes.
