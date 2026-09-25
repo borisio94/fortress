@@ -148,6 +148,8 @@ class SaleLocalDatasource {
       'kitchen_ready':    order.kitchenReady,
       'served':           order.served,
       'finished':         order.finished,
+      // Instant d'entrée dans l'état de service courant (hotfix_183).
+      'service_state_at': order.serviceStateAt?.toUtc().toIso8601String(),
       'fees':           order.fees,
       // GF-1 : clé d'idempotence du panier — persistée en Hive ET pushée
       // à Supabase pour bénéficier de l'UNIQUE constraint (hotfix_080).
@@ -218,6 +220,8 @@ class SaleLocalDatasource {
       'kitchen_ready':    order.kitchenReady,
       'served':           order.served,
       'finished':         order.finished,
+      // Instant d'entrée dans l'état de service courant (hotfix_183).
+      'service_state_at': order.serviceStateAt?.toUtc().toIso8601String(),
       'fees':           order.fees,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
@@ -385,6 +389,8 @@ class SaleLocalDatasource {
       'kitchen_ready':    order.kitchenReady,
       'served':           order.served,
       'finished':         order.finished,
+      // Instant d'entrée dans l'état de service courant (hotfix_183).
+      'service_state_at': order.serviceStateAt?.toUtc().toIso8601String(),
       'fees':           order.fees,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
@@ -450,6 +456,8 @@ class SaleLocalDatasource {
       'kitchen_ready':    order.kitchenReady,
       'served':           order.served,
       'finished':         order.finished,
+      // Instant d'entrée dans l'état de service courant (hotfix_183).
+      'service_state_at': order.serviceStateAt?.toUtc().toIso8601String(),
       'fees':           order.fees,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
@@ -1864,6 +1872,11 @@ class SaleLocalDatasource {
       kitchenReady:       (m['kitchen_ready'] as bool?) ?? false,
       served:             (m['served'] as bool?) ?? false,
       finished:           (m['finished'] as bool?) ?? false,
+      // hotfix_183 — NULL sur les commandes antérieures : pas de
+      // chronomètre plutôt qu'un faux (aucun repli sur created_at).
+      serviceStateAt:     m['service_state_at'] == null
+          ? null
+          : DateTime.tryParse(m['service_state_at'].toString()),
     );
   }
 

@@ -392,6 +392,9 @@ class LocalStorageService {
     'whatsapp_phone': s.whatsappPhone, 'email': s.email,
     'facebook_pixel_id': s.facebookPixelId,
     'partner_debt_alert_days': s.partnerDebtAlertDays,
+    'service_late_send_min':    s.serviceLateSendMin,
+    'service_late_kitchen_min': s.serviceLateKitchenMin,
+    'service_late_pass_min':    s.serviceLatePassMin,
     'created_at': s.createdAt?.toIso8601String(),
     'kind':           s.kind.key,
     'parent_shop_id': s.parentShopId,
@@ -426,6 +429,13 @@ class LocalStorageService {
     // c'est précisément ce que la lecture défensive permet d'éviter.
     partnerDebtAlertDays:
         (m['partner_debt_alert_days'] as num?)?.toInt() ?? 30,
+    // hotfix_183 — même lecture défensive : absent d'une map antérieure.
+    serviceLateSendMin: (m['service_late_send_min'] as num?)?.toInt() ??
+        kServiceLateSendDefault,
+    serviceLateKitchenMin: (m['service_late_kitchen_min'] as num?)?.toInt() ??
+        kServiceLateKitchenDefault,
+    serviceLatePassMin: (m['service_late_pass_min'] as num?)?.toInt() ??
+        kServiceLatePassDefault,
     createdAt:    m['created_at'] is String
         ? DateTime.tryParse(m['created_at'] as String)
         : (m['created_at'] is DateTime

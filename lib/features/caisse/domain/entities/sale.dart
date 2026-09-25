@@ -453,6 +453,7 @@ class Sale extends Equatable {
     this.kitchenReady   = false,
     this.served         = false,
     this.finished       = false,
+    this.serviceStateAt,
   });
 
   /// True si la commande est soft-deleted (cf. hotfix_084).
@@ -474,6 +475,20 @@ class Sale extends Equatable {
   /// part souvent payée d'avance. Confondre les deux, c'est soit libérer la
   /// table trop tôt, soit la garder occupée après le départ.
   final bool finished;
+
+  /// L'INSTANT D'ENTRÉE DANS L'ÉTAT DE SERVICE COURANT (25/09/2026).
+  ///
+  /// UNE date, pas quatre : réécrite à CHAQUE transition des drapeaux
+  /// ci-dessus — envoi, prête, servie, terminée, retour arrière, encaissement
+  /// (cf. `serviceStateStamp`, seul endroit qui la pose). C'est exactement ce
+  /// dont a besoin le chronomètre : l'attente dans l'état, pas l'âge de la
+  /// commande.
+  ///
+  /// `null` sur toute commande antérieure au 25/09/2026 : PAS de repli sur
+  /// [createdAt] — un chronomètre qui mesurerait l'âge d'une commande créée le
+  /// matin et encaissée le soir mentirait. Mieux vaut pas de chronomètre
+  /// qu'un faux.
+  final DateTime? serviceStateAt;
 
   /// Prête à encaisser : le service est fait, l'argent non.
   bool get isFinished => finished;
@@ -555,6 +570,7 @@ class Sale extends Equatable {
     bool?     kitchenReady,
     bool?     served,
     bool?     finished,
+    DateTime? serviceStateAt,
     /// Détache la commande de sa table (libération après encaissement).
     /// Indispensable : ce `copyWith` résout les nullables par `??`, donc
     /// `copyWith(tableId: null)` serait un no-op silencieux et la commande
@@ -612,6 +628,7 @@ class Sale extends Equatable {
     kitchenReady:   kitchenReady   ?? this.kitchenReady,
     served:         served         ?? this.served,
     finished:       finished       ?? this.finished,
+    serviceStateAt: serviceStateAt ?? this.serviceStateAt,
   );
 
   /// True si la commande est servie en salle (rattachée à une table).
@@ -627,5 +644,6 @@ class Sale extends Equatable {
   // donnée a bougé.
   List<Object?> get props =>
       [id, shopId, items, total, status,
-       tableId, sentToKitchen, kitchenReady, served, finished];
+       tableId, sentToKitchen, kitchenReady, served, finished,
+       serviceStateAt];
 }

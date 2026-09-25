@@ -15,6 +15,7 @@ import 'daily_expense_service.dart';
 import 'daily_menu_service.dart';
 import 'notification_service.dart';
 import 'restaurant_table_service.dart';
+import '../../features/restaurant/domain/service_wait.dart';
 
 /// Opérations de commande propres au service en salle.
 ///
@@ -288,7 +289,14 @@ class RestaurantOrderService {
   /// apéritif pendant que le plat est en préparation, sans réécrire un bon
   /// déjà imprimé.
   static Future<Sale> sendRound(Sale order) async {
-    final sent = order.copyWith(sentToKitchen: true);
+    // LA SEULE TRANSITION QUI NE PASSE PAS PAR `_patchOrder` (réécriture
+    // complète) : elle date donc elle-même, avec LA MÊME RÈGLE — l'instant
+    // vient de `serviceStateStamp`, pas d'un `DateTime.now()` parallèle.
+    final stamp = serviceStateStamp(
+        const {'sent_to_kitchen': true}, DateTime.now())[kServiceStateAtKey];
+    final sent = order.copyWith(
+        sentToKitchen: true,
+        serviceStateAt: DateTime.parse(stamp as String));
     await _ds.updateOrder(sent);
     return sent;
   }
@@ -639,9 +647,18 @@ class RestaurantOrderService {
   }
 
   static Future<void> _patchOrder(
-      Sale order, Map<String, dynamic> fields) async {
+      Sale order, Map<String, dynamic> patch) async {
     final id = order.id;
     if (id == null || id.isEmpty) return;
+    // DATATION DE L'ÉTAT DE SERVICE (hotfix_183) : UNE règle, UN endroit. Tout
+    // patch qui touche un drapeau de service pose `service_state_at` — envoi,
+    // prête, servie, terminée, retours arrière, encaissement. Dans la MÊME
+    // écriture que les drapeaux : Hive et Supabase ne peuvent pas diverger.
+    //
+    // ⚠ La colonne doit exister en base AVANT le déploiement : `orders` est
+    // une table protégée, une mise à jour refusée serait rejouée sans fin, et
+    // les drapeaux partiraient avec elle.
+    final fields = serviceStateStamp(patch, DateTime.now());
     try {
       final raw = HiveBoxes.ordersBox.get(id);
       if (raw != null) {

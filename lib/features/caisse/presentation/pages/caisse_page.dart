@@ -82,6 +82,7 @@ import '../../../../core/storage/hive_boxes.dart';
 import '../../../crm/data/models/client_model.dart';
 import '../../../restaurant/presentation/widgets/resto_surfaces.dart';
 import '../../../../core/widgets/touch_target.dart';
+import '../../../restaurant/presentation/widgets/service_settings_sheet.dart';
 
 class CaissePage extends ConsumerStatefulWidget {
   final String shopId;
@@ -1050,6 +1051,21 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
           grid: _gridView,
           onChanged: _setGridView,
         ),
+        // ── Réglages du service (seuils de retard, hotfix_183) ────────
+        //
+        // À côté de la seule autre commande d'affichage de l'écran : on règle
+        // le retard LÀ OÙ ON LE VOIT. MASQUÉE pour qui n'est pas admin — pas
+        // seulement le contenu : une porte fermée qu'on voit est une
+        // frustration.
+        if (ref.watch(permissionsProvider(widget.shopId)).isShopAdmin) ...[
+          const SizedBox(width: 4),
+          IconButton(
+            tooltip: 'Réglages du service',
+            icon: const Icon(Icons.tune_rounded, size: 20),
+            color: AppColors.textSecondary,
+            onPressed: () => showServiceSettingsSheet(context, widget.shopId),
+          ),
+        ],
       ]),
     );
   }

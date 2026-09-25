@@ -2042,7 +2042,9 @@ create table if not exists public.orders (
   sent_to_kitchen  boolean          not null default false,
   kitchen_ready    boolean          not null default false,
   served           boolean          not null default false,
-  finished         boolean          not null default false
+  finished         boolean          not null default false,
+  -- hotfix_183 : instant d'entrée dans l'état de service courant.
+  service_state_at timestamptz
 );
 create index if not exists orders_shop_id_idx on public.orders(shop_id);
 create index if not exists orders_status_idx  on public.orders(status);
@@ -2297,6 +2299,9 @@ end \$\$;""",
     String? phone, String? whatsappPhone, String? email,
     String? facebookPixelId,
     int? partnerDebtAlertDays,
+    int? serviceLateSendMin,
+    int? serviceLateKitchenMin,
+    int? serviceLatePassMin,
   }) async {
     _assertNotFrozen();
     final userId = _userId;
@@ -2332,6 +2337,18 @@ end \$\$;""",
     if (partnerDebtAlertDays != null) {
       payload['partner_debt_alert_days'] =
           partnerDebtAlertDays.clamp(1, 365);
+    }
+    // Seuils de retard du service (hotfix_183) — bornés ici comme par le
+    // CHECK SQL (1 à 240 min), pour la même raison.
+    if (serviceLateSendMin != null) {
+      payload['service_late_send_min'] = serviceLateSendMin.clamp(1, 240);
+    }
+    if (serviceLateKitchenMin != null) {
+      payload['service_late_kitchen_min'] =
+          serviceLateKitchenMin.clamp(1, 240);
+    }
+    if (serviceLatePassMin != null) {
+      payload['service_late_pass_min'] = serviceLatePassMin.clamp(1, 240);
     }
     if (payload.isEmpty) {
       final cached = LocalStorageService.getShop(shopId);
@@ -4725,6 +4742,9 @@ end \$\$;""",
             'kitchen_ready':   row['kitchen_ready'] ?? false,
             'served':          row['served'] ?? false,
             'finished':        row['finished'] ?? false,
+            // hotfix_183 — DANS LES DEUX reconstructions (celle-ci et
+            // `_onOrderChange`), sinon la date se perd à la synchronisation.
+            'service_state_at': row['service_state_at'],
             // Soft-delete (hotfix_084) — symétrie avec _mapToSaleWithStatus.
             'deleted_at':    row['deleted_at'],
             'deleted_by':    row['deleted_by'],
@@ -5250,6 +5270,8 @@ end \$\$;""",
           'kitchen_ready':   row['kitchen_ready'] ?? false,
           'served':          row['served'] ?? false,
           'finished':        row['finished'] ?? false,
+          // hotfix_183 — cf. `syncOrders`, même clé.
+          'service_state_at': row['service_state_at'],
           // Soft-delete (hotfix_084) — symétrie avec _mapToSaleWithStatus.
           // NB : une commande deleted_at != null est déjà retirée du Hive plus
           // haut, donc ces 3 champs sont en pratique toujours null ici ;
@@ -6585,6 +6607,13 @@ end \$\$;""",
     // migrée → on retombe sur le défaut plutôt que de casser le mapping.
     partnerDebtAlertDays:
         (r['partner_debt_alert_days'] as num?)?.toInt() ?? 30,
+    // Colonnes ajoutées par hotfix_183 : même défaut défensif.
+    serviceLateSendMin: (r['service_late_send_min'] as num?)?.toInt() ??
+        kServiceLateSendDefault,
+    serviceLateKitchenMin: (r['service_late_kitchen_min'] as num?)?.toInt() ??
+        kServiceLateKitchenDefault,
+    serviceLatePassMin: (r['service_late_pass_min'] as num?)?.toInt() ??
+        kServiceLatePassDefault,
     createdAt: r['created_at'] != null
         ? DateTime.tryParse(r['created_at'] as String) : null,
     kind:         ShopKindX.fromKey(r['kind'] as String?),

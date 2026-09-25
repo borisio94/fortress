@@ -126,6 +126,30 @@ Piste, sans décision : une teinte `primarySurface` plus sombre en mode sombre,
 ou un token texte dédié à cette surface. Ne PAS élargir `BrandContrast.darkText`
 aux teintes — c'est l'option écartée ci-dessus.
 
+### Mode clair — deux tokens manquants : l'OMBRE et le FOND TEINTÉ
+
+*Signalés DEUX FOIS : au lot Apparence (page Thème) et au lot Carte de
+commande (25/09/2026). Inscrits à la seconde.*
+
+Le mode clair n'a jamais été vérifié (audit du 24/09/2026), et deux lots de
+suite ont buté sur les mêmes absences :
+
+- **Pas de token d'OMBRE.** En clair, une carte blanche posée sur un fond
+  blanc n'a plus de bord (1,00:1) : la séparation doit passer par une ombre
+  légère. Chaque écran l'écrit à la main — la grille des Commandes
+  (`shadowColor` à 7 %, flou 12), la liste (`Colors.black` à 3 %), la page
+  Thème n'en a aucune faute de token. En sombre, c'est l'écart de fond qui
+  sépare, pas l'ombre.
+- **Pas de token de FOND DE PAGE TEINTÉ** vers la primaire. Le seul candidat,
+  `primarySurface`, est d'intensité très inégale selon la palette (Amber
+  `#FEF3C7`, franchement jaune ; Violet `#F5F0FF`, discret) ;
+  `AppColors.background` (`#F8F7FC`) est fixe et ne suit pas la palette.
+
+À faire : trancher les deux tokens (valeurs, et pour le fond : dérivé de la
+palette par une fonction qui s'arrête à une teinte faible, comme
+`BrandContrast`), puis les poser sur les écrans qui les attendent. Aucun lot
+ne doit les inventer en attendant.
+
 ## Cibles tactiles
 
 ### Lot 2 — les ≈ 154 cibles sous 48 px laissées hors du lot
