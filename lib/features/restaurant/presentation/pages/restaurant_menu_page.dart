@@ -786,6 +786,7 @@ class _RetiredBanner extends StatelessWidget {
               const SizedBox(width: 8),
               Text(
                 showingRetired ? 'Revenir à la carte' : 'Voir',
+                // lot 1 clair : lien interactif, garde la primaire (backlog).
                 style: AppTextStyles.caption.copyWith(color: cs.primary),
               ),
               Icon(Icons.chevron_right_rounded, size: 18, color: cs.primary),
@@ -1629,7 +1630,7 @@ class _DishMenuBtn extends StatelessWidget {
               Icon(Icons.delete_outline_rounded, size: 16, color: sem.danger),
               const SizedBox(width: 10),
               Text('Supprimer',
-                  style: AppTextStyles.bodySm.copyWith(color: sem.danger)),
+                  style: AppTextStyles.bodySm.copyWith(color: sem.dangerText)),
             ]),
           ),
       ],
@@ -1694,7 +1695,7 @@ class _SetupProgressCard extends StatelessWidget {
                       AppTextStyles.bodySmBold.copyWith(color: cs.onSurface)),
             ),
             Text('$done sur ${RestaurantSetupStep.totalSteps}',
-                style: AppTextStyles.captionBold.copyWith(color: cs.primary)),
+                style: AppTextStyles.captionBold.copyWith(color: cs.onSurface)),
           ]),
           const SizedBox(height: 10),
           ClipRRect(

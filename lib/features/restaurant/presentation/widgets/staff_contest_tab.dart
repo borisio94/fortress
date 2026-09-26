@@ -283,7 +283,7 @@ class _StaffContestTabState extends RestoTableListenerState<StaffContestTab> {
                         size: 18, color: Theme.of(sheetCtx).semantic.danger),
                     label: Text('Supprimer',
                         style: AppTextStyles.label.copyWith(
-                            color: Theme.of(sheetCtx).semantic.danger)),
+                            color: Theme.of(sheetCtx).semantic.dangerText)),
                   ),
                 ),
               ]),

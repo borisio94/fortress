@@ -159,10 +159,10 @@ class _CashClosurePageState extends ConsumerState<CashClosurePage> {
                 children: [
                   Expanded(
                       child: Text(c.varianceLabel,
-                          style: AppTextStyles.bodyBold.copyWith(color: color))),
+                          style: AppTextStyles.bodyBold.copyWith(color: sem.textFor(color)))),
                   Text(CurrencyFormatter.format(c.gap.toDouble()),
                       style:
-                          AppTextStyles.subtitleBold.copyWith(color: color)),
+                          AppTextStyles.subtitleBold.copyWith(color: sem.textFor(color))),
                 ],
               ),
               if (!c.isBalanced) ...[
@@ -319,7 +319,7 @@ class _CashClosurePageState extends ConsumerState<CashClosurePage> {
                   const SizedBox(height: 8),
                   Text(_err!,
                       style:
-                          AppTextStyles.caption.copyWith(color: sem.danger)),
+                          AppTextStyles.caption.copyWith(color: sem.dangerText)),
                 ],
                 const SizedBox(height: 14),
                 Row(
@@ -446,7 +446,7 @@ class _ClosureRow extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(closure.closureType,
-                style: AppTextStyles.bodySmBold.copyWith(color: cs.primary)),
+                style: AppTextStyles.bodySmBold.copyWith(color: cs.onSurface)),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -482,9 +482,9 @@ class _ClosureRow extends StatelessWidget {
                       ? '—'
                       : '${closure.isShort ? '−' : '+'}'
                           '${CurrencyFormatter.format(closure.gap.toDouble())}',
-                  style: AppTextStyles.bodySmBold.copyWith(color: color)),
+                  style: AppTextStyles.bodySmBold.copyWith(color: sem.textFor(color))),
               Text(closure.varianceLabel,
-                  style: AppTextStyles.micro.copyWith(color: color)),
+                  style: AppTextStyles.micro.copyWith(color: sem.textFor(color))),
             ],
           ),
         ],

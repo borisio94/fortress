@@ -111,6 +111,29 @@ warning, success), trois variantes au rôle distinct :
 texte sur surface claire : TOUJOURS la variante `*Text`. La base (`warning`…)
 reste la couleur des icônes, des traits et du texte sur voile sombre.
 
+⚠ **Sur sa propre teinte (10–14 %), `danger` de base échoue MÊME EN SOMBRE :
+4,34:1.** Ni l'audit ni le lot 1 ne l'avaient vu. Une pastille teintée écrit
+donc en `*Text` dans les deux modes (`dangerText` : 6,92 en clair, 6,32 en
+sombre).
+
+**EN VIGUEUR AU RESTAURANT (26/09/2026)** — ≈ 120 textes corrigés :
+
+- `AppSemanticColors.textFor(couleur)` rend la variante texte d'une couleur
+  d'état (le reste revient tel quel) : pour une couleur qui arrive par une
+  variable, un ternaire ou un paramètre, et qui peint souvent AUSSI une icône
+  ou une barre — seul le texte change.
+- `restoTextOn(context, couleur)` (`resto_tab_kit.dart`) pour les composants
+  qui reçoivent une couleur (`RestoPill`, `RestoMiniStat`) : état → `*Text`,
+  primaire → `onSurface`, `info` → `textSecondary`.
+- `info` n'a PAS de variante texte, et n'en aura pas : une information se dit
+  sans couleur (`textSecondary`, section 16). L'icône, la teinte et le liseré
+  gardent `info`.
+- **Garde-fou** : `test/theme/semantic_text_guard_test.dart` échoue si un
+  `TextStyle` / `copyWith` / `styleFrom` de `lib/features/restaurant/` reçoit
+  de nouveau un token d'état de base, ou la primaire hors des éléments
+  interactifs marqués « lot 1 clair ». Il ne voit pas une couleur passée par
+  une variable : c'est à `textFor` de la corriger à la source.
+
 ### La couleur de marque (la primaire) — TRANCHÉ
 
 La primaire vient de la palette choisie (8 palettes du catalogue, ou une
@@ -134,9 +157,20 @@ couleur même de la carte — 1,00:1, invisible, sur quelque 590 sites.
 
 **TRANCHÉ — la primaire n'est pas une couleur de texte fiable EN CLAIR.** Sous
 4,5:1 sur blanc pour cinq palettes (Ocean 2,77, Emerald 2,54, Sunset 2,80,
-Amber 3,19, Rose 3,53). Pour une information, `textSecondary` ; pour une
-alerte, une variante `*Text`. La primaire reste un ACCENT : trait d'onglet,
-bouton plein, sélection.
+Amber 3,19, Rose 3,53). Pour une information, un texte neutre — `onSurface`
+pour un chiffre ou un libellé (le précédent du Stock : « le prix en
+onSurface, pas la couleur de marque »), `textSecondary` pour une propriété ;
+pour une alerte, une variante `*Text`. La primaire reste un ACCENT : trait
+d'onglet, bouton plein, sélection.
+
+⚠ **Sur sa propre teinte (10–14 %), la primaire échoue AUSSI EN SOMBRE** :
+3,68 à 4,58, sous 4,5:1 sur **sept palettes sur huit** (en clair : 2,22 à
+2,97 sur cinq). C'est plus large qu'un défaut du mode clair : une pastille
+teintée de marque n'écrit jamais en primaire.
+
+**Les éléments INTERACTIFS gardent la primaire** (un lien qui perd sa couleur
+perd son signal d'action) en attendant le lot 1 clair ; chacun porte le
+marqueur `lot 1 clair` dans le code et figure NOMMÉMENT au backlog.
 
 **NON TRANCHÉ — une primaire lisible en texte EN CLAIR.** Il n'existe pas de
 token « primaire lisible en texte » en mode clair (`brandText` y vaut la
@@ -188,6 +222,9 @@ plus favorable.
 | `textHint` | 5,44 | **3,07** ✘ |
 | `dangerText` / `warningText` / `successText` | ≥ 6,44 | ≥ 7,73 |
 | `danger` / `warning` / `success` / `info` en TEXTE | **1,95 à 3,42** ✘ | ≥ 5,29 |
+| `*Text` sur leur propre teinte (10–14 %) | ≥ 6,37 | ≥ 6,32 |
+| `danger` de base sur sa teinte | **3,13** ✘ | **4,34** ✘ |
+| primaire sur sa teinte | 2,22–11,18 (✘ sur 5) | **3,68–4,58** (✘ sur 7) |
 
 ### La primaire, 8 palettes × 2 modes
 

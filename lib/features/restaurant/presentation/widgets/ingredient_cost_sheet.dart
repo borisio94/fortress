@@ -194,7 +194,7 @@ class _IngredientCostSheetState extends State<_IngredientCostSheet> {
             ],
             if (_err != null) ...[
               Text(_err!,
-                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+                  style: AppTextStyles.caption.copyWith(color: sem.dangerText)),
               const SizedBox(height: 8),
             ],
             Text(

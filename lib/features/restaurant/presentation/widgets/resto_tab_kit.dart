@@ -122,7 +122,28 @@ class RestoCard extends StatelessWidget {
   }
 }
 
-/// Pastille colorée (statut : partagé / stock bas / mode).
+/// LA COULEUR DE TEXTE d'une couleur reçue en paramètre (26/09/2026).
+///
+/// Pour les composants qui prennent UNE couleur et en peignent à la fois un
+/// fond ou une icône ET un texte (`RestoPill`, `RestoMiniStat`…). Le fond et
+/// l'icône gardent la couleur reçue ; le texte suit son fond :
+///
+///   • `danger` / `warning` / `success` → leur variante `*Text`
+///     (`AppSemanticColors.textFor`) ;
+///   • la primaire → `onSurface` : en texte elle tombe à 2,38–3,31 en clair
+///     sur cinq palettes, et sur sa propre teinte elle échoue aussi en sombre
+///     (3,68–4,58 sur sept palettes). Un CHIFFRE ou un LIBELLÉ d'information
+///     n'a pas besoin de la marque — c'est le précédent du Stock ;
+///   • `info` → `textSecondary` : une information se dit sans couleur (§ 16).
+Color restoTextOn(BuildContext context, Color base) {
+  final theme = Theme.of(context);
+  if (base == theme.colorScheme.primary) return theme.colorScheme.onSurface;
+  if (base == theme.semantic.info) return AppColors.textSecondary;
+  return theme.semantic.textFor(base);
+}
+
+/// Pastille colorée (statut : partagé / stock bas / mode). Le fond prend la
+/// couleur reçue ; le libellé, sa couleur de texte (`restoTextOn`).
 
 class RestoPill extends StatelessWidget {
   final String label;
@@ -136,8 +157,9 @@ class RestoPill extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(label,
-            style: AppTextStyles.micro
-                .copyWith(color: color, fontWeight: FontWeight.w700)),
+            style: AppTextStyles.micro.copyWith(
+                color: restoTextOn(context, color),
+                fontWeight: FontWeight.w700)),
       );
 }
 
@@ -216,7 +238,8 @@ class RestoMiniStat extends StatelessWidget {
           Text(value,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.bodyBold.copyWith(color: color)),
+              style: AppTextStyles.bodyBold
+                  .copyWith(color: restoTextOn(context, color))),
         ],
       ),
     );

@@ -24,7 +24,9 @@ class StaffScoreGauge extends StatelessWidget {
 
   const StaffScoreGauge({super.key, required this.score, this.dense = false});
 
-  /// Couleur d'une note — le même code partout dans l'application.
+  /// Couleur d'une note — le même code partout dans l'application. C'est la
+  /// couleur de BASE (la barre) ; la note ÉCRITE prend sa variante texte
+  /// (`AppSemanticColors.textFor`).
   static Color colorOf(BuildContext context, StaffScore s) {
     final sem = Theme.of(context).semantic;
     if (s.needsReplacement) return sem.danger;
@@ -58,7 +60,8 @@ class StaffScoreGauge extends StatelessWidget {
                 style: (dense
                         ? AppTextStyles.bodySmBold
                         : AppTextStyles.bodyBold)
-                    .copyWith(color: color)),
+                    .copyWith(
+                        color: Theme.of(context).semantic.textFor(color))),
             Text('/${StaffScore.baseScore}',
                 style: AppTextStyles.micro),
             if (score.surplus > 0) ...[
@@ -75,7 +78,7 @@ class StaffScoreGauge extends StatelessWidget {
                 ),
                 child: Text('+${score.surplus}',
                     style: AppTextStyles.micro.copyWith(
-                        color: Theme.of(context).semantic.success)),
+                        color: Theme.of(context).semantic.successText)),
               ),
             ],
           ],
@@ -89,7 +92,7 @@ class StaffScoreGauge extends StatelessWidget {
             Expanded(
               child: Text('À remplacer d\'urgence',
                   style: AppTextStyles.micro.copyWith(
-                      color: Theme.of(context).semantic.danger)),
+                      color: Theme.of(context).semantic.dangerText)),
             ),
           ]),
         ],

@@ -422,7 +422,7 @@ class _IngredientQuickSheetState extends State<IngredientQuickSheet> {
             if (_err != null) ...[
               const SizedBox(height: 8),
               Text(_err!,
-                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+                  style: AppTextStyles.caption.copyWith(color: sem.dangerText)),
             ],
             const SizedBox(height: 18),
             AppPrimaryButton(

@@ -60,6 +60,31 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
     required this.trackMuted,
   });
 
+  /// LA COULEUR DE TEXTE d'une couleur d'état : `danger` → `dangerText`,
+  /// `warning` → `warningText`, `success` → `successText` ; toute autre
+  /// couleur revient telle quelle.
+  ///
+  /// « Le token suit son fond » : les tokens de BASE sont faits pour une
+  /// icône, un trait ou un fond sombre ; posés en texte sur une surface
+  /// claire, ils échouent (mesuré sur les 8 palettes, au pire de la carte,
+  /// du fond de page et du verre : `warning` 2,01:1, `success` 2,38, `danger`
+  /// 3,53). Sur leur propre teinte (10–14 %), `danger` échoue MÊME EN SOMBRE
+  /// (4,34). Les variantes `*Text` passent partout : ≥ 6,37 en clair, ≥ 6,32
+  /// en sombre, teintes comprises.
+  ///
+  /// L'aiguillage sert là où la couleur arrive par une variable, un ternaire
+  /// ou un paramètre de composant — une même couleur y colore souvent un
+  /// texte ET une icône, et seul le texte doit changer.
+  ///
+  /// `info` n'a PAS de variante texte, et c'est voulu : une information se
+  /// dit sans couleur (`textSecondary`, document de design § 16).
+  Color textFor(Color base) {
+    if (base == danger) return dangerText;
+    if (base == warning) return warningText;
+    if (base == success) return successText;
+    return base;
+  }
+
   @override
   AppSemanticColors copyWith({
     Color? success,

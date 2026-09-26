@@ -1072,7 +1072,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
                         child: Text('Secteur à choisir',
                             maxLines: 1,
                             style: AppTextStyles.microBold
-                                .copyWith(color: sem.info)),
+                                .copyWith(color: AppColors.textSecondary)),
                       ),
                     ],
                   ],
@@ -1185,7 +1185,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
                     'Ajoutez au moins 1 ingrédient pour continuer — c\'est ce '
                     'lien qui permettra de calculer votre marge.',
                     style:
-                        AppTextStyles.caption.copyWith(color: sem.warning)),
+                        AppTextStyles.caption.copyWith(color: sem.warningText)),
               ),
             if (_catalog.isEmpty)
               Text(
@@ -1281,7 +1281,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
                             size: 18, color: sem.danger),
                         label: Text('Vider la composition',
                             style: AppTextStyles.label
-                                .copyWith(color: sem.danger)),
+                                .copyWith(color: sem.dangerText)),
                       ),
                     ),
                   ],
@@ -1293,7 +1293,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
               const SizedBox(height: 12),
               Text(_error!,
                   style:
-                      AppTextStyles.caption.copyWith(color: sem.danger)),
+                      AppTextStyles.caption.copyWith(color: sem.dangerText)),
             ],
             const SizedBox(height: 20),
             // Enregistrer et Supprimer sur la MÊME ligne. « Supprimer » reste
@@ -1322,7 +1322,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style:
-                            AppTextStyles.label.copyWith(color: sem.danger)),
+                            AppTextStyles.label.copyWith(color: sem.dangerText)),
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size(0, 46),
                       side: BorderSide(
@@ -1605,7 +1605,8 @@ class _RecipeSummary extends StatelessWidget {
     final sem = Theme.of(context).semantic;
     final margin = price - cost;
     final pct = price <= 0 ? 0.0 : (margin / price) * 100;
-    final accent = margin >= 0 ? sem.success : sem.danger;
+    // Couleur de la marge ÉCRITE : les variantes texte (le token suit son fond).
+    final accent = margin >= 0 ? sem.successText : sem.dangerText;
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -1813,6 +1814,7 @@ class _InfoBanner extends StatelessWidget {
             ),
             child: Text(actionLabel,
                 style: AppTextStyles.bodySmBold
+                    // lot 1 clair : lien interactif, garde la primaire (backlog).
                     .copyWith(color: AppColors.primary)),
           ),
         ],

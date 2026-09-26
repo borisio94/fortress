@@ -75,7 +75,7 @@ class RestoAccountMenu extends StatelessWidget {
               radius: 16,
               backgroundColor: cs.primary.withValues(alpha: 0.14),
               child: Text(initial,
-                  style: AppTextStyles.bodySmBold.copyWith(color: cs.primary)),
+                  style: AppTextStyles.bodySmBold.copyWith(color: cs.onSurface)),
             ),
             if (!compact) ...[
               const SizedBox(width: 9),

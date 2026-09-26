@@ -100,8 +100,25 @@ extension ServiceTabVisuals on ServiceTab {
       ServiceTab.aEnvoyer => sem.dangerText,
       ServiceTab.enPreparation => sem.warningText,
       ServiceTab.aServir => sem.successText,
-      ServiceTab.aEncaisser => cs.primary,
+      // « À encaisser » écrit une INFORMATION (badge, chronomètre) : en
+      // `onSurface`, pas en primaire — la primaire en texte tombe à 2,38–3,31
+      // en clair sur 5 palettes, et sur sa propre teinte elle échoue aussi en
+      // sombre (3,68–4,58 sur 7 palettes). L'ACTION garde la primaire :
+      // `actionTextColor`.
+      ServiceTab.aEncaisser => cs.onSurface,
+      // `info` (« À terminer ») : une information se dit sans couleur (§ 16).
       _ => cs.onSurfaceVariant,
     };
   }
+
+  /// Libellé d'un BOUTON d'action (`_StateButton`) — `textColor`, sauf
+  /// « À encaisser », qui garde la primaire : un lien ou un bouton qui perd sa
+  /// couleur perd son signal d'action.
+  ///
+  /// ⚠ SOUS LE SEUIL en clair sur ocean, emerald, sunset, rose et amber.
+  /// Inscrit au backlog (lot 1 clair : une primaire de TEXTE dérivée pour le
+  /// mode clair, comme le lot 1 l'a fait pour le sombre).
+  Color actionTextColor(BuildContext context) => this == ServiceTab.aEncaisser
+      ? Theme.of(context).colorScheme.primary
+      : textColor(context);
 }

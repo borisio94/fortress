@@ -83,7 +83,7 @@ class _StaffRatingTabState extends RestoTableListenerState<StaffRatingTab> {
                       'des ${StaffScore.urgentThreshold} points.',
               style: flagged == 0
                   ? AppTextStyles.captionHint
-                  : AppTextStyles.caption.copyWith(color: sem.danger)),
+                  : AppTextStyles.caption.copyWith(color: sem.dangerText)),
         ),
         Expanded(
           child: ranking.isEmpty
@@ -165,8 +165,8 @@ class _StaffRatingTabState extends RestoTableListenerState<StaffRatingTab> {
                               ),
                               child: Text(
                                   '${r.points > 0 ? '+' : ''}${r.points}',
-                                  style: AppTextStyles.micro
-                                      .copyWith(color: color)),
+                                  style: AppTextStyles.micro.copyWith(
+                                      color: sem.textFor(color))),
                             ),
                             const SizedBox(width: 8),
                             Expanded(

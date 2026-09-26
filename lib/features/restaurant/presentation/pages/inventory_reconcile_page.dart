@@ -245,7 +245,7 @@ class _CountRow extends StatelessWidget {
                       '${item.unit} · ${v.label}'
                       '${v.isShortage && v.financialImpact > 0 ? ' · ${CurrencyFormatter.format(v.financialImpact.toDouble())}' : ''}',
                       style: AppTextStyles.caption.copyWith(
-                          color: v.isShortage ? sem.danger : sem.warning)),
+                          color: v.isShortage ? sem.dangerText : sem.warningText)),
               ],
             ),
           ),
@@ -315,7 +315,7 @@ class _Recap extends StatelessWidget {
                         'Perte : '
                         '${CurrencyFormatter.format(lossTotal.toDouble())}',
                         style: AppTextStyles.bodyBold
-                            .copyWith(color: sem.danger)),
+                            .copyWith(color: sem.dangerText)),
                 ],
               ),
               const SizedBox(height: 10),

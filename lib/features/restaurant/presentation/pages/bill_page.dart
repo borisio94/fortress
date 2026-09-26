@@ -479,7 +479,7 @@ class _ItemsCard extends StatelessWidget {
                         if (item.modifiersLabel.isNotEmpty)
                           Text(item.modifiersLabel,
                               style: AppTextStyles.micro.copyWith(
-                                  color: semantic.warning)),
+                                  color: semantic.warningText)),
                       ],
                     ),
                   ),
@@ -506,7 +506,7 @@ class _ItemsCard extends StatelessWidget {
                     child: Text('Remise', style: AppTextStyles.bodySm)),
                 Text('− ${CurrencyFormatter.format(order.discountAmount)}',
                     style: AppTextStyles.bodySm
-                        .copyWith(color: semantic.success)),
+                        .copyWith(color: semantic.successText)),
               ],
             ),
             // Le motif, en retrait sous son montant. Absent des additions
@@ -597,7 +597,7 @@ class _SplitCard extends StatelessWidget {
                 Text('$shares × ', style: AppTextStyles.bodySecondary),
                 Text(CurrencyFormatter.format(perPerson),
                     style: AppTextStyles.subtitleBold
-                        .copyWith(color: theme.colorScheme.primary)),
+                        .copyWith(color: theme.colorScheme.onSurface)),
                 const Spacer(),
                 Text('par personne', style: AppTextStyles.captionHint),
               ],
@@ -612,7 +612,7 @@ class _SplitCard extends StatelessWidget {
                   'encaissés — ${CurrencyFormatter.format(perPerson * shares - total)} '
                   'à rendre.',
                   style: AppTextStyles.micro
-                      .copyWith(color: semantic.warning),
+                      .copyWith(color: semantic.warningText),
                 ),
               ),
           ],
@@ -630,6 +630,7 @@ class _SplitCard extends StatelessWidget {
       selected: sel,
       onSelected: (_) => onSharesChanged(value),
       labelStyle: AppTextStyles.bodySm.copyWith(
+        // lot 1 clair : lien interactif, garde la primaire (backlog).
         color: sel ? theme.colorScheme.primary : null,
         fontWeight: sel ? FontWeight.w600 : FontWeight.w500,
       ),
@@ -741,7 +742,7 @@ class _DiscountSheetState extends State<_DiscountSheet> {
             if (_err != null) ...[
               const SizedBox(height: 8),
               Text(_err!,
-                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+                  style: AppTextStyles.caption.copyWith(color: sem.dangerText)),
             ],
             const SizedBox(height: 18),
             AppPrimaryButton(

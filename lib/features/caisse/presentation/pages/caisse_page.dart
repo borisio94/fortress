@@ -5187,7 +5187,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         label: step.short,
         tooltip: step.label,
         base: _tab.color(context),
-        text: _tab.textColor(context),
+        text: _tab.actionTextColor(context),
         onPressed: () => _runStep(step.action),
       );
     }
@@ -5198,7 +5198,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         label: 'Encaisser',
         tooltip: OrderAction.advanceStatus.label,
         base: _tab.color(context),
-        text: _tab.textColor(context),
+        text: _tab.actionTextColor(context),
         onPressed: () => widget.onUpdate(SaleStatus.completed),
       );
     }
@@ -6632,12 +6632,11 @@ abstract final class _ListCols {
 /// LE TOKEN SUIT SON FOND : le fond est la couleur de BASE de l'état à faible
 /// opacité, le libellé sa variante TEXTE (`textColor`). `warning` en texte
 /// sur une teinte claire ne ferait que ~2:1 — c'est l'erreur que porte encore
-/// `_ServiceChip`, gardé pour la carte e-commerce.
+/// `_ServiceChip`, qui n'est plus rendu nulle part (code mort, au backlog).
 ///
-/// Réserve connue, inscrite : « À encaisser » écrit en `colorScheme.primary`,
-/// sous le seuil EN CLAIR sur Ocean, Emerald, Sunset, Rose et Amber tant que
-/// le lot 1 côté clair n'existe pas. L'information passe : le badge écrit
-/// l'état en toutes lettres.
+/// « À encaisser » s'écrit en `onSurface` depuis le 26/09/2026 : c'est une
+/// information, et la primaire en texte échouait (2,38–3,31 en clair sur
+/// cinq palettes ; sur sa propre teinte, 3,68–4,58 en sombre sur sept).
 class _StateBadge extends StatelessWidget {
   final ServiceTab tab;
   const _StateBadge({required this.tab});

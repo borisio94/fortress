@@ -614,7 +614,7 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
                 const SizedBox(height: 10),
                 Text(_error!,
                     style:
-                        AppTextStyles.captionHint.copyWith(color: sem.danger)),
+                        AppTextStyles.captionHint.copyWith(color: sem.dangerText)),
               ],
               const SizedBox(height: 18),
               AppPrimaryButton(
@@ -843,7 +843,7 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
               style: AppTextStyles.bodySmBold.copyWith(color: cs.onSurface)),
         ),
         Text('Retrait ${_pickupCtrl.text}',
-            style: AppTextStyles.caption.copyWith(color: cs.primary)),
+            style: AppTextStyles.caption.copyWith(color: cs.onSurface)),
       ]),
       const SizedBox(height: 2),
       Text('Ajoutés au total de la commande et retirés de votre stock.',
@@ -864,7 +864,7 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
                 style: AppTextStyles.bodySm.copyWith(color: cs.onSurface)),
           ),
           Text(CurrencyFormatter.format(_packagingTotal.toDouble()),
-              style: AppTextStyles.subtitleBold.copyWith(color: cs.primary)),
+              style: AppTextStyles.subtitleBold.copyWith(color: cs.onSurface)),
         ]),
       ],
     ];
@@ -1026,7 +1026,7 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
               ),
               Text(CurrencyFormatter.format(_total + _feeValue),
                   style: AppTextStyles.subtitleBold.copyWith(
-                      color: Theme.of(context).colorScheme.primary)),
+                      color: Theme.of(context).colorScheme.onSurface)),
             ]),
           ),
         ],
@@ -1135,7 +1135,7 @@ class _PackagingRow extends StatelessWidget {
               Text('${item.sellingPrice} F · reste ${_fmtQty(remaining)} '
                   '${item.unit}',
                   style: AppTextStyles.caption
-                      .copyWith(color: short ? sem.danger : null)),
+                      .copyWith(color: short ? sem.dangerText : null)),
             ],
           ),
         ),

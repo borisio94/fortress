@@ -205,14 +205,14 @@ class _PackagingSheetState extends State<_PackagingSheet> {
                 ),
                 Text(CurrencyFormatter.format(_total.toDouble()),
                     style: AppTextStyles.subtitleBold
-                        .copyWith(color: cs.primary)),
+                        .copyWith(color: cs.onSurface)),
               ]),
               if (_count > 0) ...[
                 const SizedBox(height: 6),
                 Text(
                     'Ajouté au total de la commande, et déduit de votre stock.',
                     style:
-                        AppTextStyles.caption.copyWith(color: sem.warning)),
+                        AppTextStyles.caption.copyWith(color: sem.warningText)),
               ],
               const SizedBox(height: 16),
               AppPrimaryButton(
@@ -275,7 +275,7 @@ class _PackagingRow extends StatelessWidget {
                 child: Text(
                     '$unitPrice F · reste ${_fmt(remaining)} ${item.unit}',
                     style: AppTextStyles.caption.copyWith(
-                        color: short ? sem.danger : null)),
+                        color: short ? sem.dangerText : null)),
               ),
             ],
           ),

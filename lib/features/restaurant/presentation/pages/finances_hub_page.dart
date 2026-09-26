@@ -355,7 +355,7 @@ class _ActivityEditorState extends State<_ActivityEditor> {
             if (_err != null) ...[
               const SizedBox(height: 8),
               Text(_err!,
-                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+                  style: AppTextStyles.caption.copyWith(color: sem.dangerText)),
             ],
             const SizedBox(height: 18),
             AppPrimaryButton(
@@ -371,7 +371,7 @@ class _ActivityEditorState extends State<_ActivityEditor> {
                   icon: Icon(Icons.delete_outline_rounded,
                       size: 18, color: sem.danger),
                   label: Text('Supprimer',
-                      style: AppTextStyles.label.copyWith(color: sem.danger)),
+                      style: AppTextStyles.label.copyWith(color: sem.dangerText)),
                 ),
               ),
             ],
@@ -650,7 +650,7 @@ class _ChargeEditorState extends State<_ChargeEditor> {
             if (_err != null) ...[
               const SizedBox(height: 8),
               Text(_err!,
-                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+                  style: AppTextStyles.caption.copyWith(color: sem.dangerText)),
             ],
             const SizedBox(height: 18),
             AppPrimaryButton(
@@ -666,7 +666,7 @@ class _ChargeEditorState extends State<_ChargeEditor> {
                   icon: Icon(Icons.delete_outline_rounded,
                       size: 18, color: sem.danger),
                   label: Text('Supprimer',
-                      style: AppTextStyles.label.copyWith(color: sem.danger)),
+                      style: AppTextStyles.label.copyWith(color: sem.dangerText)),
                 ),
               ),
             ],
@@ -1047,7 +1047,7 @@ class _DailyExpenseEditorState extends State<_DailyExpenseEditor> {
             if (_err != null) ...[
               const SizedBox(height: 8),
               Text(_err!,
-                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+                  style: AppTextStyles.caption.copyWith(color: sem.dangerText)),
             ],
             const SizedBox(height: 18),
             AppPrimaryButton(
@@ -1064,7 +1064,7 @@ class _DailyExpenseEditorState extends State<_DailyExpenseEditor> {
                   icon: Icon(Icons.delete_outline_rounded,
                       size: 18, color: sem.danger),
                   label: Text('Supprimer',
-                      style: AppTextStyles.label.copyWith(color: sem.danger)),
+                      style: AppTextStyles.label.copyWith(color: sem.dangerText)),
                 ),
               ),
             ],
@@ -1625,7 +1625,7 @@ class _LossEditorState extends State<_LossEditor> {
             if (_err != null) ...[
               const SizedBox(height: 8),
               Text(_err!,
-                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+                  style: AppTextStyles.caption.copyWith(color: sem.dangerText)),
             ],
             const SizedBox(height: 18),
             AppPrimaryButton(
@@ -1641,7 +1641,7 @@ class _LossEditorState extends State<_LossEditor> {
                   icon: Icon(Icons.delete_outline_rounded,
                       size: 18, color: sem.danger),
                   label: Text('Supprimer',
-                      style: AppTextStyles.label.copyWith(color: sem.danger)),
+                      style: AppTextStyles.label.copyWith(color: sem.dangerText)),
                 ),
               ),
             ],

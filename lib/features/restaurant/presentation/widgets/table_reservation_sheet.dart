@@ -146,7 +146,7 @@ Future<TableWriteOutcome?> showTableReservationSheet({
                       'Cette heure est déjà passée : la réservation serait '
                       'périmée aussitôt.',
                       style:
-                          AppTextStyles.caption.copyWith(color: sem.warning)),
+                          AppTextStyles.caption.copyWith(color: sem.warningText)),
                 const SizedBox(height: 20),
                 AppPrimaryButton(
                   label: 'Réserver',

@@ -772,7 +772,7 @@ class _IngredientRow extends StatelessWidget {
             PopupMenuItem(
                 value: 'delete',
                 child: Text('Supprimer',
-                    style: TextStyle(color: sem.danger))),
+                    style: TextStyle(color: sem.dangerText))),
           ],
         ),
       ]),
@@ -1083,7 +1083,7 @@ class _IngredientEditorState extends State<_IngredientEditor> {
             if (_err != null) ...[
               const SizedBox(height: 8),
               Text(_err!,
-                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+                  style: AppTextStyles.caption.copyWith(color: sem.dangerText)),
             ],
             const SizedBox(height: 18),
             AppPrimaryButton(
@@ -1099,7 +1099,7 @@ class _IngredientEditorState extends State<_IngredientEditor> {
                   icon: Icon(Icons.delete_outline_rounded,
                       size: 18, color: sem.danger),
                   label: Text('Supprimer',
-                      style: AppTextStyles.label.copyWith(color: sem.danger)),
+                      style: AppTextStyles.label.copyWith(color: sem.dangerText)),
                 ),
               ),
             ],
@@ -1667,7 +1667,7 @@ class _StockItemEditorState extends State<_StockItemEditor> {
             if (_err != null) ...[
               const SizedBox(height: 8),
               Text(_err!,
-                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+                  style: AppTextStyles.caption.copyWith(color: sem.dangerText)),
             ],
             const SizedBox(height: 18),
             AppPrimaryButton(
@@ -1683,7 +1683,7 @@ class _StockItemEditorState extends State<_StockItemEditor> {
                   icon: Icon(Icons.delete_outline_rounded,
                       size: 18, color: sem.danger),
                   label: Text('Supprimer',
-                      style: AppTextStyles.label.copyWith(color: sem.danger)),
+                      style: AppTextStyles.label.copyWith(color: sem.dangerText)),
                 ),
               ),
             ],
@@ -1820,7 +1820,7 @@ class _IngredientReceiptSheetState extends State<_IngredientReceiptSheet> {
                   'Coût moyen du stock : ${ing.costPerUnit} → '
                   '$_newUnitCost F / ${ing.unit}',
                   style: AppTextStyles.caption
-                      .copyWith(color: Theme.of(context).colorScheme.primary)),
+                      .copyWith(color: Theme.of(context).colorScheme.onSurface)),
             ],
             const SizedBox(height: 10),
             ListTile(
@@ -1849,7 +1849,7 @@ class _IngredientReceiptSheetState extends State<_IngredientReceiptSheet> {
             if (_err != null) ...[
               const SizedBox(height: 8),
               Text(_err!,
-                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+                  style: AppTextStyles.caption.copyWith(color: sem.dangerText)),
             ],
             const SizedBox(height: 18),
             AppPrimaryButton(

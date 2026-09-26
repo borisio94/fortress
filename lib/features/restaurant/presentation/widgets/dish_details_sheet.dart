@@ -69,7 +69,7 @@ class _DishDetailsSheet extends StatelessWidget {
                   child: Text(
                     CurrencyFormatter.format(product.priceSellPos),
                     style: AppTextStyles.title
-                        .copyWith(color: theme.colorScheme.primary),
+                        .copyWith(color: theme.colorScheme.onSurface),
                   ),
                 ),
                 _AvailabilityChip(

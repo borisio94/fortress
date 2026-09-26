@@ -179,7 +179,7 @@ class _CourierSheetState extends State<_CourierSheet> {
             if (_error != null) ...[
               const SizedBox(height: 8),
               Text(_error!,
-                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+                  style: AppTextStyles.caption.copyWith(color: sem.dangerText)),
             ],
             const SizedBox(height: 16),
             AppPrimaryButton(

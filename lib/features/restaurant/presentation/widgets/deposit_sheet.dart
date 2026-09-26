@@ -168,14 +168,14 @@ class _DepositSheetState extends State<_DepositSheet> {
                           style: AppTextStyles.captionHint)),
                   Text(CurrencyFormatter.format(total.toDouble()),
                       style:
-                          AppTextStyles.subtitleBold.copyWith(color: cs.primary)),
+                          AppTextStyles.subtitleBold.copyWith(color: cs.onSurface)),
                 ],
               ),
             ],
             if (_err != null) ...[
               const SizedBox(height: 8),
               Text(_err!,
-                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+                  style: AppTextStyles.caption.copyWith(color: sem.dangerText)),
             ],
             const SizedBox(height: 18),
             AppPrimaryButton(

@@ -90,7 +90,7 @@ class _OrderRecapPanelState extends State<OrderRecapPanel> {
                     const Spacer(),
                     Text(CurrencyFormatter.format(widget.total),
                         style: AppTextStyles.subtitleBold
-                            .copyWith(color: theme.colorScheme.primary)),
+                            .copyWith(color: theme.colorScheme.onSurface)),
                     if (widget.lines.isNotEmpty)
                       Icon(
                           _expanded
@@ -196,7 +196,7 @@ class _LineRow extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: AppTextStyles.micro
-                          .copyWith(color: theme.semantic.warning)),
+                          .copyWith(color: theme.semantic.warningText)),
               ],
             ),
           ),

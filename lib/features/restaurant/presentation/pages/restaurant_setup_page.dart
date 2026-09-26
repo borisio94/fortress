@@ -320,7 +320,10 @@ class _SetupStepCard extends StatelessWidget {
                   ? const Icon(Icons.check_rounded, size: 18,
                       color: Colors.white)
                   : Text('$rank',
-                      style: AppTextStyles.bodyBold.copyWith(color: accent)),
+                      // L'étape active s'écrit en `onSurface` : la primaire en
+                      // texte, sur sa propre teinte, échoue dans les deux modes.
+                      style: AppTextStyles.bodyBold.copyWith(
+                          color: active ? cs.onSurface : accent)),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -333,7 +336,7 @@ class _SetupStepCard extends StatelessWidget {
             if (done)
               Text('Fait',
                   style:
-                      AppTextStyles.caption.copyWith(color: sem.success)),
+                      AppTextStyles.caption.copyWith(color: sem.successText)),
           ]),
           const SizedBox(height: 8),
           Text(description, style: AppTextStyles.caption),

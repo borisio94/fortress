@@ -203,7 +203,7 @@ class _StaffTabState2 extends _StaffTabState<_StaffTab> {
                             : 'Fermeture à $closing',
                         style: AppTextStyles.micro.copyWith(
                             color: closing == null
-                                ? sem.warning
+                                ? sem.warningText
                                 : cs.onSurface.withValues(alpha: 0.55))),
                   ],
                 ),
@@ -283,7 +283,7 @@ class _StaffTabState2 extends _StaffTabState<_StaffTab> {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: AppTextStyles.micro
-                                        .copyWith(color: sem.warning)),
+                                        .copyWith(color: sem.warningText)),
                             ],
                           ),
                         ),
@@ -969,7 +969,7 @@ class _StaffEditorState extends State<_StaffEditor> {
             if (_err != null) ...[
               const SizedBox(height: 8),
               Text(_err!,
-                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+                  style: AppTextStyles.caption.copyWith(color: sem.dangerText)),
             ],
             const SizedBox(height: 18),
             AppPrimaryButton(
@@ -1028,7 +1028,7 @@ class _StaffEditorState extends State<_StaffEditor> {
                     label: const Text('Mise à pied'),
                     style: OutlinedButton.styleFrom(
                         minimumSize: const Size(0, 40),
-                        foregroundColor: sem.warning),
+                        foregroundColor: sem.warningText),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1055,7 +1055,7 @@ class _StaffEditorState extends State<_StaffEditor> {
                         color: sem.warning),
                     label: Text(m.isActive ? 'Archiver' : 'Réactiver',
                         style:
-                            AppTextStyles.label.copyWith(color: sem.warning)),
+                            AppTextStyles.label.copyWith(color: sem.warningText)),
                   ),
                 ),
                 Expanded(
@@ -1065,7 +1065,7 @@ class _StaffEditorState extends State<_StaffEditor> {
                         size: 18, color: sem.danger),
                     label: Text('Supprimer',
                         style:
-                            AppTextStyles.label.copyWith(color: sem.danger)),
+                            AppTextStyles.label.copyWith(color: sem.dangerText)),
                   ),
                 ),
               ]),
@@ -1223,10 +1223,12 @@ class _TimeTabState extends _StaffTabState<_TimeTab> {
     return null;
   }
 
+  /// Couleur du VERDICT écrit sous un pointage — une couleur de TEXTE, donc
+  /// les variantes `*Text` (le token suit son fond : ici le verre clair).
   static Color? _verdictColor(TimeRecord r, AppSemanticColors sem) {
-    if (r.excuseToJudge || r.overtimeToSettle) return sem.warning;
-    if (r.isUnexcused) return sem.danger;
-    if (r.hasOvertime) return sem.success;
+    if (r.excuseToJudge || r.overtimeToSettle) return sem.warningText;
+    if (r.isUnexcused) return sem.dangerText;
+    if (r.hasOvertime) return sem.successText;
     return null;
   }
 
@@ -1291,9 +1293,9 @@ class _TimeTabState extends _StaffTabState<_TimeTab> {
                   Text(r.excuseStatus.label,
                       style: AppTextStyles.micro.copyWith(
                           color: switch (r.excuseStatus) {
-                        ExcuseStatus.accepted => sem.success,
-                        ExcuseStatus.refused => sem.danger,
-                        _ => sem.warning,
+                        ExcuseStatus.accepted => sem.successText,
+                        ExcuseStatus.refused => sem.dangerText,
+                        _ => sem.warningText,
                       })),
                   // Les deux boutons restent offerts même après décision : un
                   // gérant qui a refusé trop vite, puis à qui l'employé
@@ -1321,7 +1323,7 @@ class _TimeTabState extends _StaffTabState<_TimeTab> {
                           label: const Text('Refuser'),
                           style: OutlinedButton.styleFrom(
                               minimumSize: const Size(0, 40),
-                              foregroundColor: sem.danger),
+                              foregroundColor: sem.dangerText),
                         ),
                       ),
                     ]),
@@ -1358,7 +1360,7 @@ class _TimeTabState extends _StaffTabState<_TimeTab> {
                         'les heures sont comptées mais valorisées à zéro. '
                         'Réglez-le dans l\'onglet Équipe.',
                         style: AppTextStyles.micro.copyWith(
-                            color: sem.warning)),
+                            color: sem.warningText)),
                   ] else
                     Text(
                         'Taux : '
@@ -1372,7 +1374,7 @@ class _TimeTabState extends _StaffTabState<_TimeTab> {
                             ? 'Déjà payées de la main à la main.'
                             : 'Déjà portées sur une fiche de paie.',
                         style: AppTextStyles.caption
-                            .copyWith(color: sem.success))
+                            .copyWith(color: sem.successText))
                   else ...[
                     Row(children: [
                       Expanded(
@@ -1405,7 +1407,7 @@ class _TimeTabState extends _StaffTabState<_TimeTab> {
                             'Reportées : elles s\'ajouteront à la fiche du '
                             'mois, avec la mention des heures.',
                             style: AppTextStyles.micro
-                                .copyWith(color: sem.success)),
+                                .copyWith(color: sem.successText)),
                       ),
                   ],
                 ],
@@ -1418,7 +1420,7 @@ class _TimeTabState extends _StaffTabState<_TimeTab> {
                         size: 18, color: sem.danger),
                     label: Text('Supprimer ce pointage',
                         style: AppTextStyles.label
-                            .copyWith(color: sem.danger)),
+                            .copyWith(color: sem.dangerText)),
                   ),
                 ),
               ],
@@ -1617,7 +1619,7 @@ class _PayrollTabState extends _StaffTabState<_PayrollTab> {
                         '${slips.length > 1 ? 's' : ''}',
                         style: AppTextStyles.caption)),
                 Text(CurrencyFormatter.format(total.toDouble()),
-                    style: AppTextStyles.bodyBold.copyWith(color: cs.primary)),
+                    style: AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
               ],
             ),
           ),
@@ -1711,7 +1713,7 @@ class _PayrollTabState extends _StaffTabState<_PayrollTab> {
             ),
             Text(CurrencyFormatter.format(a.amount.toDouble()),
                 style: AppTextStyles.bodySmBold.copyWith(
-                    color: a.isDeducted ? sem.success : sem.warning)),
+                    color: a.isDeducted ? sem.successText : sem.warningText)),
           ]),
         ),
     ];
@@ -1886,8 +1888,8 @@ class _PayrollTabState extends _StaffTabState<_PayrollTab> {
                 Text(CurrencyFormatter.format(cash.toDouble()),
                     style: AppTextStyles.bodySmBold.copyWith(
                         color: cash < left
-                            ? Theme.of(sheetCtx).semantic.warning
-                            : Theme.of(sheetCtx).semantic.success)),
+                            ? Theme.of(sheetCtx).semantic.warningText
+                            : Theme.of(sheetCtx).semantic.successText)),
               ]),
               const SizedBox(height: 12),
               TextField(
@@ -2116,7 +2118,7 @@ class _PayrollTabState extends _StaffTabState<_PayrollTab> {
             ),
             Text(CurrencyFormatter.format(p.amount.toDouble()),
                 style: AppTextStyles.bodySmBold.copyWith(
-                    color: p.isSettled ? sem.success : sem.warning)),
+                    color: p.isSettled ? sem.successText : sem.warningText)),
           ]),
         ),
     ];
@@ -2179,7 +2181,7 @@ class _PayrollTabState extends _StaffTabState<_PayrollTab> {
             if (a.amountDeducted > 0)
               Text('−${CurrencyFormatter.format(a.amountDeducted.toDouble())}',
                   style:
-                      AppTextStyles.bodySmBold.copyWith(color: sem.warning)),
+                      AppTextStyles.bodySmBold.copyWith(color: sem.warningText)),
           ]),
         ),
     ];
@@ -2233,7 +2235,7 @@ class _PayrollTabState extends _StaffTabState<_PayrollTab> {
                       size: 18, color: Theme.of(sheetCtx).semantic.danger),
                   label: Text('Supprimer la ligne',
                       style: AppTextStyles.label.copyWith(
-                          color: Theme.of(sheetCtx).semantic.danger)),
+                          color: Theme.of(sheetCtx).semantic.dangerText)),
                 ),
               ),
             ],
@@ -2399,7 +2401,7 @@ class _PayrollTabState extends _StaffTabState<_PayrollTab> {
                               'justifié${unexcused > 1 ? 's' : ''} ce mois-ci. '
                               'À vous de décider d\'une retenue.',
                               style: AppTextStyles.micro.copyWith(
-                                  color: Theme.of(ctx).semantic.warning)),
+                                  color: Theme.of(ctx).semantic.warningText)),
                         ),
                       ]),
                     ),
@@ -2535,7 +2537,7 @@ class _PayrollTabState extends _StaffTabState<_PayrollTab> {
                       size: 18, color: Theme.of(ctxOf(sheetCtx)).semantic.danger),
                   label: Text('Supprimer la fiche',
                       style: AppTextStyles.label.copyWith(
-                          color: Theme.of(ctxOf(sheetCtx)).semantic.danger)),
+                          color: Theme.of(ctxOf(sheetCtx)).semantic.dangerText)),
                 ),
               ),
             ],
@@ -2666,8 +2668,8 @@ class _PayrollRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: AppTextStyles.micro.copyWith(
                         color: (penalty > 0 || absence > 0)
-                            ? sem.warning
-                            : sem.success)),
+                            ? sem.warningText
+                            : sem.successText)),
             ],
           ),
         ),
@@ -2678,7 +2680,7 @@ class _PayrollRow extends StatelessWidget {
         ),
         if (s == null)
           Text('à générer',
-              style: AppTextStyles.caption.copyWith(color: sem.warning))
+              style: AppTextStyles.caption.copyWith(color: sem.warningText))
         else
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
@@ -2687,7 +2689,7 @@ class _PayrollRow extends StatelessWidget {
                   style: AppTextStyles.bodySmBold),
               Text(s.isPaid ? 'payée' : 'à payer',
                   style: AppTextStyles.micro.copyWith(
-                      color: s.isPaid ? sem.success : sem.warning)),
+                      color: s.isPaid ? sem.successText : sem.warningText)),
             ],
           ),
       ]),

@@ -8,6 +8,7 @@ import '../../../../core/services/manager_gate.dart';
 import '../../../../features/caisse/domain/entities/sale.dart';
 import '../../../../core/services/restaurant_table_service.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
@@ -823,6 +824,13 @@ class _TableCard extends StatelessWidget {
     final table = view.table;
     final status = view.status;
     final accent = status.color(semantic);
+    // Le liseré, la bordure et l'icône prennent la couleur d'état ; le TEXTE
+    // suit son fond (la teinte d'état) : variante `*Text`, et pour « Réservée »
+    // (`info`, sans variante texte) `textSecondary` — une information se dit
+    // sans couleur (document de design § 16).
+    final accentText = accent == semantic.info
+        ? AppColors.textSecondary
+        : semantic.textFor(accent);
     final waiting = view.waiting;
     // DEPUIS QUAND CETTE TABLE EST OUVERTE. `null` sur une table libre, et sur
     // une horloge déréglée — voir `table_service_age.dart`.
@@ -900,11 +908,15 @@ class _TableCard extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style:
-                                AppTextStyles.captionBold.copyWith(color: accent)),
+                                AppTextStyles.captionBold
+                                    .copyWith(color: accentText)),
                       ),
                       if (tabCount > 0) ...[
                         const SizedBox(width: 5),
-                        _TabPill(count: tabCount, color: accent),
+                        _TabPill(
+                            count: tabCount,
+                            color: accent,
+                            textColor: accentText),
                       ],
                     ]),
                     // ── 3. Clients, places, argent ─────────────────────────
@@ -1023,7 +1035,7 @@ class _TableCard extends StatelessWidget {
     // serait invisible.
     if (table.isReservationOverdue) {
       return Text('client attendu',
-          style: AppTextStyles.micro.copyWith(color: semantic.info));
+          style: AppTextStyles.micro.copyWith(color: AppColors.textSecondary));
     }
     return null;
   }
@@ -1041,7 +1053,10 @@ class _TabPill extends StatelessWidget {
   final int count;
   final Color color;
 
-  const _TabPill({required this.count, required this.color});
+  /// Couleur du chiffre : la variante texte de [color] (cf. `accentText`).
+  final Color textColor;
+  const _TabPill(
+      {required this.count, required this.color, required this.textColor});
 
   @override
   Widget build(BuildContext context) => Container(
@@ -1055,7 +1070,7 @@ class _TabPill extends StatelessWidget {
           const SizedBox(width: 3),
           Text('$count compte${count > 1 ? 's' : ''}',
               maxLines: 1,
-              style: AppTextStyles.microBold.copyWith(color: color)),
+              style: AppTextStyles.microBold.copyWith(color: textColor)),
         ]),
       );
 }
@@ -1406,7 +1421,7 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
                       if (tab.isWaitingService)
                         Text('Prête à servir',
                             style: AppTextStyles.captionHint
-                                .copyWith(color: sem.warning)),
+                                .copyWith(color: sem.warningText)),
                     ],
                   ),
                 ),
@@ -1429,7 +1444,7 @@ class _TabsSheetState extends ConsumerState<_TabsSheet> {
                 ],
                 Text(CurrencyFormatter.format(tab.total),
                     style:
-                        AppTextStyles.bodyBold.copyWith(color: cs.primary)),
+                        AppTextStyles.bodyBold.copyWith(color: cs.onSurface)),
                 PopupMenuButton<String>(
                   enabled: !_busy,
                   tooltip: 'Actions',
@@ -1564,7 +1579,7 @@ class _CancelRoundSheetState extends State<_CancelRoundSheet> {
             if (_err != null) ...[
               const SizedBox(height: 8),
               Text(_err!,
-                  style: AppTextStyles.caption.copyWith(color: sem.danger)),
+                  style: AppTextStyles.caption.copyWith(color: sem.dangerText)),
             ],
             const SizedBox(height: 18),
             AppPrimaryButton(

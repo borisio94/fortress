@@ -260,7 +260,7 @@ class _TopKpiRow extends ConsumerWidget {
         // Salle pleine : l'information vaut d'être vue de loin, c'est elle qui
         // décide si l'on fait patienter ou si l'on refuse.
         valueColor: resto.totalSeats > 0 && resto.freeSeats == 0
-            ? sem.danger
+            ? sem.dangerText
             : null,
         icon: Icons.event_seat_outlined,
         onTap: () => context.push('/shop/$shopId/restaurant/tables'),
@@ -270,7 +270,7 @@ class _TopKpiRow extends ConsumerWidget {
         value: resto.lowStockCount.toString(),
         stripe: sem.warning,
         suffix: resto.lowStockCount > 1 ? 'alertes' : 'alerte',
-        valueColor: resto.lowStockCount > 0 ? sem.danger : null,
+        valueColor: resto.lowStockCount > 0 ? sem.dangerText : null,
         icon: Icons.inventory_2_outlined,
         onTap: () => context.push('/shop/$shopId/restaurant/finances'),
       ),
@@ -539,11 +539,21 @@ class _OpenOrdersCard extends StatelessWidget {
     final sem = theme.semantic;
     final lines = resto.openOrders;
 
-    /// Couleur et icône par étape de service.
-    (Color, IconData) look(int stage) => switch (stage) {
-          2 => (sem.success, Icons.check_circle_outline_rounded),
-          1 => (sem.warning, Icons.local_fire_department_outlined),
-          _ => (cs.primary, Icons.schedule_rounded),
+    /// Couleur (icône), icône et couleur de TEXTE par étape de service. Le
+    /// texte suit son fond : variantes `*Text`, et `onSurface` plutôt que la
+    /// primaire — un libellé d'étape est une information.
+    (Color, IconData, Color) look(int stage) => switch (stage) {
+          2 => (
+              sem.success,
+              Icons.check_circle_outline_rounded,
+              sem.successText
+            ),
+          1 => (
+              sem.warning,
+              Icons.local_fire_department_outlined,
+              sem.warningText
+            ),
+          _ => (cs.primary, Icons.schedule_rounded, cs.onSurface),
         };
 
     return _Card(
@@ -593,7 +603,7 @@ class _OpenOrdersCard extends StatelessWidget {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: AppTextStyles.bodySm
-                                        .copyWith(color: look(o.stage).$1)),
+                                        .copyWith(color: look(o.stage).$3)),
                               ),
                               Icon(Icons.chevron_right_rounded,
                                   size: 20,
@@ -693,6 +703,7 @@ class _DailyMenuCard extends StatelessWidget {
         // l'inventaire e-commerce, l'écran change selon le secteur).
         onPressed: () => context.push('/shop/$shopId/inventaire'),
         child: Text('Voir la carte',
+            // lot 1 clair : lien interactif, garde la primaire (backlog).
             style: AppTextStyles.bodySm.copyWith(color: cs.primary)),
       ),
       child: shown.isEmpty
@@ -825,7 +836,7 @@ class _DishBubble extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: AppTextStyles.microBold.copyWith(
-                    color: available ? cs.primary : sem.danger)),
+                    color: available ? cs.onSurface : sem.dangerText)),
           ],
         ),
       ),
@@ -892,7 +903,7 @@ class _IngredientsCard extends StatelessWidget {
                           '${_qty(i.quantity)} ${i.unit}',
                           style: AppTextStyles.bodySmBold.copyWith(
                               color:
-                                  i.isLowStock ? sem.danger : cs.onSurface)),
+                                  i.isLowStock ? sem.dangerText : cs.onSurface)),
                     ],
                   ),
                 ),
@@ -1137,7 +1148,8 @@ class _FoodCostCard extends StatelessWidget {
                 child: Text('Food cost', style: AppTextStyles.bodyBold),
               ),
               Text('${rate.toStringAsFixed(1)} %',
-                  style: AppTextStyles.title.copyWith(color: color)),
+                  style:
+                      AppTextStyles.title.copyWith(color: sem.textFor(color))),
             ],
           ),
           const SizedBox(height: 6),
@@ -1197,7 +1209,7 @@ class _FoodCostCard extends StatelessWidget {
                 'd\'achats ne sont rattachés à aucun plat vendu : un '
                 'ingrédient dont aucune recette ne se sert, ou un plat retiré '
                 'de la carte.',
-                style: AppTextStyles.caption.copyWith(color: sem.warning)),
+                style: AppTextStyles.caption.copyWith(color: sem.warningText)),
           ],
           // Ce qui RESTE une fois le non-rattaché nommé. Là, et seulement là,
           // les trois causes historiques gardent leur sens.
@@ -1216,7 +1228,7 @@ class _FoodCostCard extends StatelessWidget {
                         'dans le stock existant.',
                 style: AppTextStyles.caption.copyWith(
                     color:
-                        report.gapBeyondUnallocated > 0 ? sem.warning : null)),
+                        report.gapBeyondUnallocated > 0 ? sem.warningText : null)),
           ],
           if (!report.usesRealFoodCost) ...[
             const SizedBox(height: 6),
@@ -1237,7 +1249,7 @@ class _FoodCostCard extends StatelessWidget {
                 '${(report.costCoverage * 100).round()} % de vos ventes : '
                 'le reste vient de plats dont le coût matière n\'est pas '
                 'renseigné.',
-                style: AppTextStyles.caption.copyWith(color: sem.warning)),
+                style: AppTextStyles.caption.copyWith(color: sem.warningText)),
           ],
         ],
       ),
@@ -1351,7 +1363,7 @@ class _FinanceTile extends StatelessWidget {
                         maxLines: 1,
                         style: AppTextStyles.title.copyWith(
                           color: negative
-                              ? sem.danger
+                              ? sem.dangerText
                               : cs.onSurface.withValues(
                                   alpha: hidden ? 0.45 : 1),
                           fontWeight: FontWeight.w800,
@@ -1519,6 +1531,7 @@ class _FinanceChartCardState extends ConsumerState<_FinanceChartCard> {
                   _on.length == _Curve.values.length
                       ? 'Tout masquer'
                       : 'Tout afficher',
+                  // lot 1 clair : lien interactif, garde la primaire (backlog).
                   style: AppTextStyles.bodySm.copyWith(color: cs.primary),
                 ),
               ),
@@ -1759,6 +1772,7 @@ class _Choice extends StatelessWidget {
         ),
         child: Text(label,
             style: AppTextStyles.bodySm.copyWith(
+              // lot 1 clair : lien interactif, garde la primaire (backlog).
               color: selected ? cs.primary : cs.onSurface,
               fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
             )),
@@ -2283,7 +2297,7 @@ class _StaffScoreCardState extends RestoTableListenerState<_StaffScoreCard> {
                       urgent.map((e) => e.member.fullName).join(', '),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.bodySm.copyWith(color: sem.danger)),
+                      style: AppTextStyles.bodySm.copyWith(color: sem.dangerText)),
                 ),
               ]),
             ),
