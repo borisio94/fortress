@@ -518,6 +518,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
   /// l'écran ne doit pas tomber sur une densité qu'il n'a pas demandée.
   bool _gridView = true;
 
+  /// RESTAURANT — le champ de recherche est-il déployé ? Replié, il n'est
+  /// qu'une loupe dans le panneau des totaux (26/09/2026, comme au Menu). Il
+  /// reste ouvert tant qu'une recherche est saisie.
+  bool _searchOpen = false;
+
   final _ds = SaleLocalDatasource();
   // Recherche libre (client, téléphone, id, ville livraison/expédition,
   // agence). Insensible à la casse / accents.
@@ -1030,7 +1035,9 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
   /// CE QU'ELLE COMPTE. « En cours » agrège les quatre rangs vivants — à
   /// envoyer, en préparation, à servir, à terminer — parce que c'est ce qu'un
   /// gérant veut savoir en entrant : combien de commandes ne sont pas finies.
-  /// « À encaisser » reste seul, c'est de l'argent dû. Le montant est le reste
+  /// Puis le reste à encaisser, en MONTANT (« 7 000 F à encaisser »,
+  /// 26/09/2026) : sur téléphone, c'est le seul endroit où il s'écrit — les
+  /// totaux n'y sont pas (lot de l'en-tête). Ce montant est le reste
   /// à encaisser de la sélection courante, pas le chiffre d'affaires : il suit
   /// donc l'onglet et la recherche, comme tout le reste de l'écran.
   ///
@@ -1042,13 +1049,11 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
         (counts[ServiceTab.enPreparation] ?? 0) +
         (counts[ServiceTab.aServir] ?? 0) +
         (counts[ServiceTab.aTerminer] ?? 0);
-    final aEncaisser = counts[ServiceTab.aEncaisser] ?? 0;
     // Les segments vides ne s'écrivent pas : « 0 en cours · 0 à encaisser »
     // occupe une ligne pour ne rien dire, et fait douter des deux autres.
     final parts = <String>[
       if (enCours > 0) '$enCours en cours',
-      if (aEncaisser > 0) '$aEncaisser à encaisser',
-      if (totalDue > 0) CurrencyFormatter.format(totalDue),
+      if (totalDue > 0) '${CurrencyFormatter.format(totalDue)} à encaisser',
     ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 2),
@@ -1123,6 +1128,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     required Map<String, double> pendingRemit,
     bool grid = false,
     bool listWide = true,
+    bool gridNarrow = false,
   }) {
             final perms = ref.watch(permissionsProvider(widget.shopId));
             return _OrderCard(
@@ -1130,6 +1136,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
             dense:    _isResto && !_gridView,
             grid:     grid,
             listWide: listWide,
+            gridNarrow: gridNarrow,
             debt:     orderDebts[orders[i].id],
             // Versement partenaire encore attendu pour cette commande (null
             // = rien à recevoir). Affiche un bandeau + un bouton de marquage.
@@ -1700,6 +1707,192 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     );
   }
 
+  // ── Recherche, dates, export — les contrôles de la ligne d'outils ────────
+  //
+  // Extraits TELS QUELS de la ligne e-commerce (26/09/2026) pour servir aussi
+  // au panneau du restaurant : un seul dessin, deux emplacements.
+
+  /// Le champ de recherche. [collapsible] (restaurant) : il prend le focus en
+  /// se déployant, et sa croix efface ET replie.
+  Widget _searchInput(BuildContext context, {bool collapsible = false}) =>
+      TextField(
+        controller: _searchCtrl,
+        autofocus: collapsible,
+        style: AppTextStyles.bodySm,
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: 'Rechercher (client, téléphone, ville…)',
+          hintStyle: AppTextStyles.bodySm
+              .copyWith(color: AppColors.textHint),
+          prefixIcon: Icon(Icons.search_rounded,
+              size: 16, color: AppColors.textHint),
+          suffixIcon: (_query.isEmpty && !collapsible) ? null : IconButton(
+            icon: Icon(Icons.close_rounded,
+                size: 14, color: AppColors.textHint),
+            splashRadius: 16,
+            onPressed: () {
+              _searchCtrl.clear();
+              if (collapsible) setState(() => _searchOpen = false);
+            },
+          ),
+          contentPadding: EdgeInsets.zero,
+          filled: true, fillColor: AppColors.inputFill,
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(
+                  color: Theme.of(context).semantic.borderSubtle)),
+          focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: AppColors.primary)),
+        ),
+      );
+
+  /// Filtre date — icône seule (inactif) ou puce avec plage (actif).
+  Widget _dateButton(BuildContext context) => Tooltip(
+        message: _dateRange == null
+            ? 'Filtrer par date' : _formatRange(_dateRange!),
+        child: InkWell(
+          onTap: _pickDateRange,
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            height: 38,
+            padding: EdgeInsets.symmetric(
+                horizontal: _dateRange != null ? 10 : 9),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: _dateRange != null
+                  ? AppColors.primary.withValues(alpha: 0.10)
+                  : AppColors.inputFill,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                  color: _dateRange != null
+                      ? AppColors.primary.withValues(alpha: 0.4)
+                      : Theme.of(context).semantic.borderSubtle),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.event_rounded, size: 16,
+                  color: _dateRange != null
+                      ? AppColors.primary : AppColors.textSecondary),
+              if (_dateRange != null) ...[
+                const SizedBox(width: 5),
+                Text(_formatRange(_dateRange!),
+                    style: AppTextStyles.captionBold
+                        .copyWith(color: AppColors.primary)),
+                const SizedBox(width: 3),
+                // Croix de 14 px : zone de 48 de large au doigt (lot 2).
+                // La puce fait 38 px de HAUT, et le reste : sa hauteur
+                // fixe plafonne la cible, sans débordement.
+                TouchTarget(
+                  onTap: () => setState(() => _dateRange = null),
+                  child: Icon(Icons.close_rounded,
+                      size: 14, color: AppColors.textHint),
+                ),
+              ],
+            ]),
+          ),
+        ),
+      );
+
+  /// Export — icône seule, si la permission l'autorise (écart compris).
+  List<Widget> _exportButton(BuildContext context) => [
+        if (ref.watch(permissionsProvider(widget.shopId))
+            .canExportOrders) ...[
+          const SizedBox(width: 6),
+          Tooltip(
+            message: 'Exporter',
+            child: InkWell(
+              onTap: _openExport,
+              borderRadius: BorderRadius.circular(20),
+              // Même poids visuel que le bouton date au repos : l'export
+              // est un outil, pas l'action principale de l'écran.
+              child: Container(
+                height: 38, width: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.inputFill,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                      color: Theme.of(context).semantic.borderSubtle),
+                ),
+                child: Icon(Icons.download_rounded,
+                    size: 16, color: AppColors.textSecondary),
+              ),
+            ),
+          ),
+        ],
+      ];
+
+  /// LES OUTILS DU RESTAURANT (26/09/2026) — loupe, dates, export.
+  ///
+  /// ORDINATEUR : dans le panneau des totaux, à droite. Le panneau reste
+  /// affiché même sans commande — sans lui, une recherche sans résultat ne se
+  /// laisserait plus effacer.
+  ///
+  /// TÉLÉPHONE (sous `kFormMobileBreakpoint`) : pas de totaux (lot de
+  /// l'en-tête) ; les outils gardent la ligne et les mesures de l'ancienne
+  /// barre de recherche — la loupe remplace le champ, qui se déploie.
+  List<Widget> _restoTools(
+    BuildContext context, {
+    required bool hasOrders,
+    required double totalPaid,
+    required double totalDue,
+  }) {
+    final open = _searchOpen || _query.isNotEmpty;
+    final tools = <Widget>[
+      if (!open) ...[
+        Tooltip(
+          message: 'Rechercher',
+          child: InkWell(
+            onTap: () => setState(() => _searchOpen = true),
+            borderRadius: BorderRadius.circular(20),
+            // Même gabarit que l'export : un outil parmi trois.
+            child: Container(
+              height: 38, width: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppColors.inputFill,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                    color: Theme.of(context).semantic.borderSubtle),
+              ),
+              child: Icon(Icons.search_rounded,
+                  size: 16, color: AppColors.textSecondary),
+            ),
+          ),
+        ),
+        const SizedBox(width: 6),
+      ],
+      _dateButton(context),
+      ..._exportButton(context),
+    ];
+    final search = SizedBox(
+        height: 38, child: _searchInput(context, collapsible: true));
+    if (MediaQuery.sizeOf(context).width < kFormMobileBreakpoint) {
+      return [
+        Container(
+          color: restoDecorActive
+              ? restoGlassFill(context)
+              : Theme.of(context).colorScheme.surface,
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          child: Row(children: [
+            if (open) ...[
+              Expanded(child: search),
+              const SizedBox(width: 8),
+            ] else
+              const Spacer(),
+            ...tools,
+          ]),
+        ),
+        Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
+      ];
+    }
+    return [
+      const SizedBox(height: 8),
+      _restoSummary(totalPaid, totalDue,
+          showTotals: hasOrders, tools: tools, search: open ? search : null),
+    ];
+  }
+
   /// LES DEUX CHIFFRES DE LA SÉLECTION — restauration.
   ///
   /// Plus de cartes, plus d'icônes : deux blocs de texte séparés par un filet
@@ -1709,7 +1902,13 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
   ///
   /// « Reste à encaisser » garde sa teinte d'attente tant qu'il n'est pas nul :
   /// c'est l'information, pas une décoration. À zéro, il redevient du texte.
-  Widget _restoSummary(double totalPaid, double totalDue) {
+  Widget _restoSummary(
+    double totalPaid,
+    double totalDue, {
+    required bool showTotals,
+    required List<Widget> tools,
+    Widget? search,
+  }) {
     final cs = Theme.of(context).colorScheme;
     final sem = Theme.of(context).semantic;
 
@@ -1744,15 +1943,32 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
       child: RestoGlassPanel(
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
         radius: 12,
-        child: IntrinsicHeight(
-          child: Row(children: [
-            block('Encaissé', totalPaid, cs.onSurface),
-            VerticalDivider(
-                width: 24, thickness: 1, color: sem.borderSubtle),
-            block('Reste à encaisser', totalDue,
-                totalDue > 0 ? sem.brandText : cs.onSurface),
+        // Les outils À DROITE, dans le même panneau (26/09/2026) ; le champ,
+        // déployé, passe dessous sur toute la largeur.
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Row(children: [
+            if (showTotals)
+              Expanded(
+                child: IntrinsicHeight(
+                  child: Row(children: [
+                    block('Encaissé', totalPaid, cs.onSurface),
+                    VerticalDivider(
+                        width: 24, thickness: 1, color: sem.borderSubtle),
+                    block('Reste à encaisser', totalDue,
+                        totalDue > 0 ? sem.brandText : cs.onSurface),
+                  ]),
+                ),
+              )
+            else
+              const Spacer(),
+            const SizedBox(width: 12),
+            ...tools,
           ]),
-        ),
+          if (search != null) ...[
+            const SizedBox(height: 8),
+            search,
+          ],
+        ]),
       ),
     );
   }
@@ -1908,140 +2124,35 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
       // ── Recherche + filtres sur UNE ligne (densité) ──────────
       // Recherche extensible + filtre date + export en icônes compactes
       // (au lieu de 2 lignes). La plage de dates active affiche son libellé.
-      Container(
-        color: restoDecorActive
-            ? restoGlassFill(context)
-            : Theme.of(context).colorScheme.surface,
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-        child: Row(children: [
-          // Barre de recherche (prend tout l'espace restant)
-          Expanded(
-            child: SizedBox(
-              height: 38,
-              child: TextField(
-                controller: _searchCtrl,
-                style: AppTextStyles.bodySm,
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: 'Rechercher (client, téléphone, ville…)',
-                  hintStyle: AppTextStyles.bodySm
-                      .copyWith(color: AppColors.textHint),
-                  prefixIcon: Icon(Icons.search_rounded,
-                      size: 16, color: AppColors.textHint),
-                  suffixIcon: _query.isEmpty ? null : IconButton(
-                    icon: Icon(Icons.close_rounded,
-                        size: 14, color: AppColors.textHint),
-                    splashRadius: 16,
-                    onPressed: () => _searchCtrl.clear(),
-                  ),
-                  contentPadding: EdgeInsets.zero,
-                  filled: true, fillColor: AppColors.inputFill,
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(
-                          color: Theme.of(context).semantic.borderSubtle)),
-                  focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: BorderSide(color: AppColors.primary)),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          // Filtre date — icône seule (inactif) ou puce avec plage (actif).
-          Tooltip(
-            message: _dateRange == null
-                ? 'Filtrer par date' : _formatRange(_dateRange!),
-            child: InkWell(
-              onTap: _pickDateRange,
-              borderRadius: BorderRadius.circular(20),
-              child: Container(
-                height: 38,
-                padding: EdgeInsets.symmetric(
-                    horizontal: _dateRange != null ? 10 : 9),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: _dateRange != null
-                      ? AppColors.primary.withValues(alpha: 0.10)
-                      : AppColors.inputFill,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                      color: _dateRange != null
-                          ? AppColors.primary.withValues(alpha: 0.4)
-                          : Theme.of(context).semantic.borderSubtle),
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.event_rounded, size: 16,
-                      color: _dateRange != null
-                          ? AppColors.primary : AppColors.textSecondary),
-                  if (_dateRange != null) ...[
-                    const SizedBox(width: 5),
-                    Text(_formatRange(_dateRange!),
-                        style: AppTextStyles.captionBold
-                            .copyWith(color: AppColors.primary)),
-                    const SizedBox(width: 3),
-                    // Croix de 14 px : zone de 48 de large au doigt (lot 2).
-                    // La puce fait 38 px de HAUT, et le reste : sa hauteur
-                    // fixe plafonne la cible, sans débordement.
-                    TouchTarget(
-                      onTap: () => setState(() => _dateRange = null),
-                      child: Icon(Icons.close_rounded,
-                          size: 14, color: AppColors.textHint),
-                    ),
-                  ],
-                ]),
-              ),
-            ),
-          ),
-          // Export — icône seule.
-          if (ref.watch(permissionsProvider(widget.shopId))
-              .canExportOrders) ...[
-            const SizedBox(width: 6),
-            Tooltip(
-              message: 'Exporter',
-              child: InkWell(
-                onTap: _openExport,
-                borderRadius: BorderRadius.circular(20),
-                // Même poids visuel que le bouton date au repos : l'export
-                // est un outil, pas l'action principale de l'écran.
-                child: Container(
-                  height: 38, width: 40,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: AppColors.inputFill,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color: Theme.of(context).semantic.borderSubtle),
-                  ),
-                  child: Icon(Icons.download_rounded,
-                      size: 16, color: AppColors.textSecondary),
-                ),
-              ),
-            ),
-          ],
-        ]),
-      ),
-      Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
-
-      // ── Synthèse de la sélection (encaissé + reste à encaisser) ──
       //
-      // RESTAURANT, TÉLÉPHONE : pas de totaux (26/09/2026). La ligne comptée
-      // de l'en-tête donne déjà le reste dû ; seul « Encaissé » disparaît —
-      // un chiffre de bilan, qu'on consulte sans agir dessus. Sur 390 px, ses
-      // ≈ 78 px (mesurés) valaient une commande de moins à l'écran. Sous le seuil d'écran
-      // officiel de 600 (`kFormMobileBreakpoint`, § 8), plutôt qu'un
-      // treizième seuil. Sur ordinateur, ils restent sur leur panneau.
-      if (orders.isNotEmpty &&
-          !(_isResto &&
-              MediaQuery.sizeOf(context).width < kFormMobileBreakpoint)) ...[
-        const SizedBox(height: 8),
-        // `_summaryBar` est PARTAGÉE avec l'e-commerce : on aiguille ici, au
-        // site d'appel, plutôt que de la plier aux deux secteurs.
-        if (_isResto)
-          _restoSummary(totalPaid, totalDue)
-        else
+      // E-COMMERCE : inchangé. RESTAURANT (26/09/2026) : la loupe, les dates
+      // et l'export rejoignent le panneau des totaux (`_restoTools`).
+      if (!_isResto) ...[
+        Container(
+          color: restoDecorActive
+              ? restoGlassFill(context)
+              : Theme.of(context).colorScheme.surface,
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          child: Row(children: [
+            // Barre de recherche (prend tout l'espace restant)
+            Expanded(
+                child: SizedBox(height: 38, child: _searchInput(context))),
+            const SizedBox(width: 8),
+            _dateButton(context),
+            ..._exportButton(context),
+          ]),
+        ),
+        Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
+        // ── Synthèse de la sélection (encaissé + reste à encaisser) ──
+        if (orders.isNotEmpty) ...[
+          const SizedBox(height: 8),
           _summaryBar(totalPaid, totalDue),
-      ],
+        ],
+      ] else
+        ..._restoTools(context,
+            hasOrders: orders.isNotEmpty,
+            totalPaid: totalPaid,
+            totalDue: totalDue),
 
       // ── Liste commandes ──────────────────────────────────────
       Expanded(
@@ -2147,7 +2258,8 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                                       orders: orders,
                                       orderDebts: orderDebts,
                                       pendingRemit: pendingRemit,
-                                      grid: true)),
+                                      grid: true,
+                                      gridNarrow: w < kOrderTileMin)),
                           ],
                         );
                     return Column(
@@ -2596,10 +2708,16 @@ class _OrderCard extends ConsumerStatefulWidget {
   /// RIEN en ligne (26/09/2026). Une seule mesure sert aussi l'en-tête.
   final bool listWide;
 
+  /// Vue GRILLE : la tuile est-elle sous son plancher (`kOrderTileMin`) ?
+  /// C'est le cas du téléphone, où la grille n'a qu'une colonne. Mesuré par
+  /// la grille, pour la même raison que [listWide].
+  final bool gridNarrow;
+
   const _OrderCard({required this.order,
     this.dense = false,
     this.grid = false,
     this.listWide = true,
+    this.gridNarrow = false,
     this.debt,
     this.pendingRemittance,
     required this.onUpdate,
@@ -2678,6 +2796,24 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeInOut,
+        // CONTOUR D'ÉTAT d'une carte ACTIVE de grille (`stateOutline`, 1,5 px,
+        // règle « pas de contour » LEVÉE pour Commandes le 26/09/2026).
+        //
+        // ⚠ PEINT PAR-DESSUS (`foregroundDecoration`), PAS EN BORDURE : une
+        // bordure dans `decoration` décale le contenu de sa largeur et
+        // grandit la carte de 3 px ; peint par-dessus, il ne coûte RIEN en
+        // hauteur. Le repasser en bordure, c'est payer 3 px par carte.
+        foregroundDecoration: widget.grid && !_tab.isSettled
+            ? BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                    color: sem.stateOutline(_tab.color(context)), width: 1.5),
+              )
+            : null,
+        // ⚠ Ci-dessous, la règle d'origine — LEVÉE le 26/09/2026 pour les
+        // cartes ACTIVES (contour d'état, ci-dessus) ; les terminées la
+        // gardent.
+        //
         // EN GRILLE, PAS DE CONTOUR — MAIS UN LISERÉ (règle du 26/09/2026,
         // cf. `state_stripe.dart`). Le contour entoure la carte et la sépare
         // du fond : c'est le travail du FOND, de l'espace et de la
@@ -2702,24 +2838,21 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                     ? Theme.of(context).scaffoldBackgroundColor
                     : Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(14),
-                boxShadow: _tab.isSettled
-                    ? null
-                    : [
-                        BoxShadow(
-                            color: Theme.of(context)
-                                .shadowColor
-                                .withValues(alpha: 0.07),
-                            blurRadius: 12,
-                            offset: const Offset(0, 3)),
-                      ],
+                // OMBRE TEINTÉE de l'état (`stateShadow`, 26/09/2026) : même
+                // flou, même décalage que l'ombre neutre qu'elle remplace.
+                boxShadow:
+                    _tab.isSettled ? null : sem.stateShadow(_tab.color(context)),
               )
             : widget.dense
                 // LIGNE DE LISTE : elle vit dans le panneau de la liste, entre
                 // deux filets — ni bordure, ni rayon, ni ombre. Une commande
                 // terminée recule par son FOND, jamais par un voile.
                 ? BoxDecoration(
+                    // Terminée : la SURFACE CREUSÉE (`sunkenSurface`,
+                    // 26/09/2026). La liste n'a pas de bloc de contenu : ce
+                    // fond ne croise donc jamais celui de la grille.
                     color: _tab.isSettled
-                        ? Theme.of(context).scaffoldBackgroundColor
+                        ? sem.sunkenSurface
                         : Colors.transparent,
                   )
                 : BoxDecoration(
@@ -4868,8 +5001,38 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     final settled = _tab.isSettled;
     final paye = widget.order.paymentStatus == PaymentStatus.paid;
     final chrono = _chronoText();
-    final action = _inlineAction(context, s, withIcon: true);
+    // TUILE ÉTROITE (téléphone) : le bouton perd son icône (≈ 23 px), qui
+    // reviennent au CONTENU — le seul élément de la ligne qui se compresse.
+    // Mesuré en Inter à 360 px (26/09/2026) : dans le bloc creusé, il ne
+    // gardait que 27 px (« Nd… ») ; le montant et le statut de paiement ne
+    // bougent pas, le libellé du bouton reste. ⚠ Mesurer en INTER : la police
+    // de test (un carré par caractère) gonfle les largeurs de ~40 %.
+    final action = _inlineAction(context, s, withIcon: !widget.gridNarrow);
     final undo = _undoButton();
+    final ligne3 = Row(children: [
+      Expanded(
+        child: Text(_contenuCourt(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyles.caption
+                .copyWith(color: AppColors.textSecondary)),
+      ),
+      const SizedBox(width: 8),
+      RestoAmountText(widget.order.total,
+          style: AppTextStyles.subtitle.copyWith(
+              fontWeight: FontWeight.w600,
+              color: _amountColor(context))),
+      // L'état de paiement QUALIFIE le montant : il le suit, en texte.
+      if (s != SaleStatus.cancelled && s != SaleStatus.refused) ...[
+        const SizedBox(width: 6),
+        Text(widget.order.paymentStatus.label,
+            maxLines: 1,
+            style: AppTextStyles.caption.copyWith(
+                color: paye ? sem.successText : sem.warningText)),
+      ],
+      if (action != null) ...[const SizedBox(width: 10), action],
+      if (undo != null) undo,
+    ]);
     return [
       // ── LIGNE 1 : qui, dans quel état, depuis combien de temps ───────
       Row(children: [
@@ -4899,43 +5062,31 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       ]),
       const SizedBox(height: 3),
       // ── LIGNE 2 : couverts · heure · retard ──────────────────────────
-      Text(_metaLine(),
+      Text.rich(_metaSpan(context),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: AppTextStyles.microSecondary),
-      // LE FILET, repris du pied du panier (26/09/2026) : il sépare ce qui
-      // dit OÙ en est la commande (table, état, heure) de ce qu'elle CONTIENT
-      // et COÛTE. Un filet et non un bloc creusé : aucun token de surface
-      // plus sombre que la carte n'existe, et le panier n'en a pas — son
-      // relief vient de ce même filet.
-      const SizedBox(height: 8),
-      Divider(height: 1, thickness: 1, color: sem.borderSubtle),
-      const SizedBox(height: 8),
       // ── LIGNE 3 : contenu · montant + paiement · action ──────────────
-      Row(children: [
-        Expanded(
-          child: Text(_contenuCourt(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.caption
-                  .copyWith(color: AppColors.textSecondary)),
+      //
+      // CARTE ACTIVE : dans un BLOC CREUSÉ (`sunkenSurface`, 26/09/2026) — le
+      // relief que le filet ne donne pas, pour +7 px (8 de marge dedans,
+      // contre 8 + 1 + 8 de filet). CARTE TERMINÉE : le filet, comme avant —
+      // son fond est déjà le plus sombre de l'écran, un bloc creusé y
+      // ressortirait en clair au lieu de s'enfoncer.
+      const SizedBox(height: 8),
+      if (settled) ...[
+        Divider(height: 1, thickness: 1, color: sem.borderSubtle),
+        const SizedBox(height: 8),
+        ligne3,
+      ] else
+        Container(
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+          decoration: BoxDecoration(
+            color: sem.sunkenSurface,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: ligne3,
         ),
-        const SizedBox(width: 8),
-        RestoAmountText(widget.order.total,
-            style: AppTextStyles.subtitle.copyWith(
-                fontWeight: FontWeight.w600,
-                color: _amountColor(context))),
-        // L'état de paiement QUALIFIE le montant : il le suit, en texte.
-        if (s != SaleStatus.cancelled && s != SaleStatus.refused) ...[
-          const SizedBox(width: 6),
-          Text(widget.order.paymentStatus.label,
-              maxLines: 1,
-              style: AppTextStyles.caption.copyWith(
-                  color: paye ? sem.successText : sem.warningText)),
-        ],
-        if (action != null) ...[const SizedBox(width: 10), action],
-        if (undo != null) undo,
-      ]),
     ];
   }
 
@@ -5064,13 +5215,22 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   }
 
   /// « 4 couverts · 19:36 · en retard » — la ligne 2 de la tuile.
-  String _metaLine() {
+  ///
+  /// « en retard » en `warningText` (26/09/2026, § 16) : c'est une ALERTE,
+  /// elle garde sa couleur ; le reste de la ligne est une information.
+  TextSpan _metaSpan(BuildContext context) {
     final covers = widget.order.covers ?? 0;
-    return [
+    final info = [
       if (covers > 0) '$covers couvert${covers > 1 ? 's' : ''}',
       _hhmm(),
-      if (_isLate()) 'en retard',
     ].join(' · ');
+    return TextSpan(text: info, children: [
+      if (_isLate())
+        TextSpan(
+            text: ' · en retard',
+            style: AppTextStyles.microSecondary
+                .copyWith(color: Theme.of(context).semantic.warningText)),
+    ]);
   }
 
   /// AVANCEMENT DU SERVICE — un bouton, celui de l'étape suivante.
@@ -5189,6 +5349,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       return _StateButton(
         icon: withIcon ? step.icon : null,
         label: step.short,
+        filled: true,
         tooltip: step.label,
         base: _tab.color(context),
         text: _tab.actionTextColor(context),
@@ -5200,6 +5361,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       return _StateButton(
         icon: withIcon ? Icons.payments_outlined : null,
         label: 'Encaisser',
+        filled: true,
         tooltip: OrderAction.advanceStatus.label,
         base: _tab.color(context),
         text: _tab.actionTextColor(context),
@@ -5210,6 +5372,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       return _StateButton(
         icon: withIcon ? Icons.print_outlined : null,
         label: 'Facture',
+        filled: false,
         tooltip: 'Facture',
         base: Theme.of(context).colorScheme.onSurfaceVariant,
         text: AppColors.textSecondary,
@@ -6654,11 +6817,17 @@ class _StateBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = tab.textColor(context);
+    // ACTIF : badge PLEIN de la couleur de l'état, texte `onStateFill`
+    // (26/09/2026). TERMINÉ : teinté, comme avant — tout recule.
+    final filled = !tab.isSettled;
+    final base = tab.color(context);
+    final fg = filled
+        ? Theme.of(context).semantic.onStateFill(base)
+        : tab.textColor(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
-        color: tab.color(context).withValues(alpha: 0.12),
+        color: filled ? base : base.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -6677,12 +6846,18 @@ class _StateBadge extends StatelessWidget {
   }
 }
 
-/// BOUTON D'ACTION DE LA CARTE — petit, en fond teinté.
+/// BOUTON D'ACTION DE LA CARTE — petit, EN FOND PLEIN de l'état.
 ///
 /// 28 px DE DESSIN, pas de cible : `tapTargetSize` adaptatif (lot 2, cf.
 /// `touch_target.dart`) — 28 px à la souris, une zone de 48 px au doigt, et la
-/// carte grandit d'autant sur un téléphone. Fond de l'état à faible opacité,
-/// bordure du même état, libellé en variante texte.
+/// carte grandit d'autant sur un téléphone.
+///
+/// RÈGLE « petit bouton en fond teinté » LEVÉE pour Commandes le 26/09/2026
+/// (rendu validé, priorité à la lisibilité du service) : [filled], le fond
+/// est la couleur de l'ÉTAT et le libellé `onStateFill` — le bouton, le
+/// liseré, le contour et le badge d'une carte disent la même chose. Il reste
+/// PETIT : la pleine largeur coûtait 30 px par carte, écartée. Non plein —
+/// « Facture », carte terminée —, un CONTOUR.
 class _StateButton extends StatelessWidget {
   final IconData? icon;
   final String label;
@@ -6691,9 +6866,13 @@ class _StateButton extends StatelessWidget {
   final Color text;
   final VoidCallback onPressed;
 
+  /// Plein (carte active) ou en contour (« Facture »).
+  final bool filled;
+
   const _StateButton({
     required this.icon,
     required this.label,
+    required this.filled,
     required this.tooltip,
     required this.base,
     required this.text,
@@ -6707,9 +6886,10 @@ class _StateButton extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10),
       tapTargetSize: adaptiveTapTargetSize,
       visualDensity: VisualDensity.standard,
-      backgroundColor: base.withValues(alpha: 0.10),
-      foregroundColor: text,
-      side: BorderSide(color: base.withValues(alpha: 0.35)),
+      backgroundColor: filled ? base : Colors.transparent,
+      foregroundColor:
+          filled ? Theme.of(context).semantic.onStateFill(base) : text,
+      side: filled ? null : BorderSide(color: base.withValues(alpha: 0.35)),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       textStyle: AppTextStyles.bodySmBold,
     );

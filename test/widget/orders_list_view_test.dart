@@ -17,6 +17,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -95,6 +96,16 @@ void main() {
   late Directory tmp;
 
   setUpAll(() async {
+    // LA POLICE DE L'APP, pas celle de test (26/09/2026). La police de test
+    // dessine chaque caractère comme un carré de la taille de la police : les
+    // LARGEURS y sont gonflées de ~40 %, et une ligne qui tient en Inter y
+    // déborde. Les mesures de largeur de ce banc sont donc celles de l'app.
+    final inter = FontLoader('Inter');
+    for (final w in [400, 500, 600, 700, 800]) {
+      final bytes = File('assets/fonts/Inter-$w.ttf').readAsBytesSync();
+      inter.addFont(Future.value(ByteData.view(bytes.buffer)));
+    }
+    await inter.load();
     tmp = Directory.systemTemp.createTempSync('fortress_orders_list');
     Hive.init(tmp.path);
     for (final name in _allBoxes) {
@@ -117,15 +128,22 @@ void main() {
           'status': done ? 'completed' : 'scheduled',
           'payment_method': 'cash',
           'created_at': now.toIso8601String(),
-          'items': const [],
+          // Un plat : le total d'une commande se CALCULE sur ses articles.
+          'items': const [
+            {
+              'product_id': 'p1',
+              'product_name': 'Ndolè',
+              'unit_price': 4500,
+              'quantity': 1,
+            },
+          ],
           'order_type': 'dine_in',
           'sent_to_kitchen': true,
           'kitchen_ready': false,
           'served': false,
           'finished': done,
           'service_state_at': now.toIso8601String(),
-          // Un montant, et son état de paiement : c1 est due, c2 payée.
-          'total': 4500.0,
+          // Son état de paiement : c1 est due, c2 payée.
           'payment_status': done ? 'paid' : 'unpaid',
         };
     await HiveBoxes.ordersBox.put('c1', order('c1'));
@@ -245,8 +263,8 @@ void main() {
     });
   }
 
-  testWidgets('grille : un filet par carte au-dessus du contenu et du '
-      'montant', (tester) async {
+  testWidgets('grille : bloc creusé pour l\u2019active, filet pour la '
+      'terminée', (tester) async {
     await pumpAt(tester, 1200, mode: 'grid');
     final theme = Theme.of(tester.element(find.byType(OrdersTab)));
     final filets = tester
@@ -256,8 +274,15 @@ void main() {
             d.thickness == 1 &&
             d.color == theme.semantic.borderSubtle)
         .length;
-    expect(filets, greaterThanOrEqualTo(2),
-        reason: 'une carte active + une terminée = deux filets');
+    expect(filets, 1, reason: 'le filet ne reste que sur la terminée');
+    final creuses = tester
+        .widgetList<Container>(find.byType(Container))
+        .where((c) =>
+            c.decoration is BoxDecoration &&
+            (c.decoration as BoxDecoration).color ==
+                theme.semantic.sunkenSurface)
+        .length;
+    expect(creuses, 1, reason: 'le bloc creusé porte la ligne de l\u2019active');
   });
 
   testWidgets('les totaux de la sélection sont sur un panneau de verre',
@@ -311,6 +336,84 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('EN COURS'), findsNothing);
     expect(find.text('TERMINÉES'), findsNothing);
+  });
+
+  // ── Rendu coloré (26/09/2026) ────────────────────────────────────────
+  testWidgets('grille : contour d\u2019état PEINT PAR-DESSUS la carte active '
+      '(il ne coûte aucune hauteur), rien sur la terminée', (tester) async {
+    await pumpAt(tester, 1200, mode: 'grid');
+    final sem = Theme.of(tester.element(find.byType(OrdersTab))).semantic;
+    final withOutline = tester
+        .widgetList<AnimatedContainer>(find.byType(AnimatedContainer))
+        .where((c) => c.foregroundDecoration != null)
+        .toList();
+    expect(withOutline, hasLength(1));
+    final border = (withOutline.single.foregroundDecoration! as BoxDecoration)
+        .border! as Border;
+    // c1 est en préparation : `warning`.
+    expect(border.top.color, sem.stateOutline(sem.warning));
+    expect(border.top.width, 1.5);
+  });
+
+  testWidgets('badge et bouton PLEINS de la couleur de l\u2019état, texte '
+      '`onStateFill` ; « Facture » en contour', (tester) async {
+    await pumpAt(tester, 1200, mode: 'grid');
+    final sem = Theme.of(tester.element(find.byType(OrdersTab))).semantic;
+    final ink = sem.onStateFill(sem.warning);
+    // Le badge de c1 : son texte est lisible sur le fond plein.
+    final badge = tester.widget<Text>(find.text('En préparation').last);
+    expect(badge.style?.color, ink);
+    // Le bouton de c1 : fond plein `warning`.
+    final plein = tester
+        .widgetList<TextButton>(find.byType(TextButton))
+        .where((b) => b.style?.backgroundColor?.resolve({}) == sem.warning);
+    expect(plein, isNotEmpty);
+    // « Facture » (c2, terminée) : un contour, pas de fond.
+    final facture =
+        tester.widget<TextButton>(find.widgetWithText(TextButton, 'Facture'));
+    expect(facture.style?.backgroundColor?.resolve({}), Colors.transparent);
+  });
+
+  testWidgets('ligne comptée : le reste dû en montant', (tester) async {
+    await pumpAt(tester, 390, mode: 'grid');
+    expect(
+        find.byWidgetPredicate((w) =>
+            w is Text &&
+            (w.data ?? '').contains('en cours') &&
+            (w.data ?? '').contains('à encaisser')),
+        findsOneWidget);
+  });
+
+  for (final width in [390.0, 1200.0]) {
+    testWidgets('$width : la loupe déploie le champ, la croix le replie',
+        (tester) async {
+      await pumpAt(tester, width, mode: 'grid');
+      expect(find.byType(TextField), findsNothing,
+          reason: 'replié : une loupe');
+      final loupe = find.byIcon(Icons.search_rounded);
+      expect(loupe, findsOneWidget);
+      // Ordinateur : dans le panneau des totaux ; téléphone : hors panneau.
+      expect(find.ancestor(of: loupe, matching: find.byType(RestoGlassPanel)),
+          width < 600 ? findsNothing : findsOneWidget);
+      await tester.tap(loupe);
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.close_rounded));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsNothing);
+    });
+  }
+
+  testWidgets('liste : la ligne terminée est sur la surface creusée',
+      (tester) async {
+    await pumpAt(tester, 1200);
+    final sem = Theme.of(tester.element(find.byType(OrdersTab))).semantic;
+    final rows = tester
+        .widgetList<AnimatedContainer>(find.byType(AnimatedContainer))
+        .where((c) =>
+            c.decoration is BoxDecoration &&
+            (c.decoration as BoxDecoration).color == sem.sunkenSurface);
+    expect(rows, hasLength(1));
   });
 }
 

@@ -196,6 +196,25 @@ deux modes, marqueurs retirés. Le menu latéral, qui contournait le thème avec
 la couleur BRUTE de la palette, lit lui aussi `brandText`. Le garde-fou n'admet
 plus aucune primaire en couleur de texte au restaurant.
 
+### Les tokens d'ÉTAT et la surface creusée — TRANCHÉ (26/09/2026)
+
+Quatre tokens pensés ENSEMBLE pour le rendu coloré de Commandes, sur
+`AppSemanticColors` (`app_theme.dart`). Tous DÉRIVÉS : c'est la FORMULE qui
+fait foi — elle survit à un changement de palette, une valeur non. Mesurés
+sur les huit palettes, dans les deux modes (`state_tokens_test.dart`).
+
+| Token | Formule | Valeur, clair | Valeur, sombre | Garantit |
+|---|---|---|---|---|
+| `sunkenSurface` | clair : `lerp(elevatedSurface, borderSubtle, 0,5)` ; sombre : `lerp(elevatedSurface, kDarkBackground, 0,75)` | #F2F3F5 | #131C2E | plus sombre que la carte (1,11 / 1,17:1) ; texte, marque, payé, en attente ≥ 4,5:1 dessus |
+| `stateOutline(état)` | l'état à `kStateOutlineAlpha` (0,40) | — | — | 1,36 à 2,57:1 contre la carte : DÉCORATION, admise parce que le badge écrit l'état |
+| `stateShadow(état)` | l'état à `kStateShadowAlpha` (0,22), flou 12, décalage 3 (ceux de l'ombre de carte) | — | — | aucune hauteur |
+| `onStateFill(fond)` | blanc ou l'encre sombre (`kDarkBackground`), celle qui contraste le plus | — | — | ≥ 4,74:1 sur danger, warning, success, info et la primaire |
+
+`sunkenSurface` sert à deux endroits qui ne se croisent pas : le bloc de
+contenu d'une carte ACTIVE de grille, et le fond d'une ligne TERMINÉE de liste
+(la liste n'a pas de bloc). Une carte terminée de grille n'a PAS de bloc
+creusé : son fond est déjà le plus sombre, le bloc y ressortirait en clair.
+
 ### Le décor du restaurant — EN VIGUEUR AU RESTAURANT
 
 Surfaces translucides d'une même famille quasi noire en sombre, blanche en
@@ -401,6 +420,17 @@ token au fil des besoins ; le bouton pleine largeur (ci-dessus).
 **Grille et liste divergent, à dessein** : la grille sert à agir (filet,
 trois lignes), la liste à voir beaucoup (une ligne alignée, sans filet). Elles
 partagent le badge d'état et la couleur du montant.
+
+**RENDU COLORÉ — le même jour, par décision produit** (rendu validé le
+26/09/2026, priorité à la lisibilité du service) : sur les cartes ACTIVES, le
+bloc creusé remplace le filet (`sunkenSurface`, +7 px mesurés), un contour
+d'état peint PAR-DESSUS la carte (`foregroundDecoration`, 0 px — en bordure il
+coûterait 3 px), une ombre teintée, un badge et un bouton PLEINS de la couleur
+de l'état (`onStateFill`) : bouton, liseré, contour et badge disent la même
+chose. Le bouton reste PETIT : la pleine largeur coûtait 30 px par carte (une
+commande de moins sur téléphone), écartée. Les terminées reculent : filet,
+badge teinté, « Facture » en contour. Outils (loupe, dates, export) dans le
+panneau des totaux ; ligne comptée « N en cours · X F à encaisser ».
 
 ---
 
@@ -948,7 +978,11 @@ commentaire ET ce registre**, sinon l'un des deux ment.
 | L'aperçu d'une palette se LIT dans le thème réel, jamais dans une table | `theme_page.dart` (`themeSwatches`) | 3 |
 | Segmenté : l'actif plus CLAIR que la piste en clair, plus FONCÉ en sombre | `theme_page.dart` (`_ModeSegmented`) | 15 |
 | Un chronomètre mesure l'attente DANS L'ÉTAT (`service_state_at`), jamais l'âge ; sans date, rien | `restaurant/domain/service_wait.dart` | 14 |
-| Le bouton d'action d'une carte est petit et en fond teinté ; le montant reste l'élément le plus lourd | `caisse_page.dart` (`_StateButton`) | 12 |
+| ~~Le bouton d'action d'une carte est petit et en fond teinté~~ — **LEVÉE pour Commandes le 26/09/2026** (rendu validé, priorité à la lisibilité du service) : petit, en FOND PLEIN de l'état (`onStateFill`) | `caisse_page.dart` (`_StateButton`) | 12 |
+| ~~Pas de contour sur les cartes~~ — **LEVÉE pour les cartes ACTIVES de Commandes le 26/09/2026** (même raison) : contour d'état peint par-dessus, `foregroundDecoration` | `caisse_page.dart` (`_buildRestoCard`) | 3 |
+| ~~Pas de bouton pleine largeur en fond plein~~ — **LEVÉE pour Commandes le 26/09/2026**, non appliquée : 30 px par carte, écartée sur mesure | `caisse_page.dart` (`_StateButton`) | 12 |
+| La hiérarchie par le fond, l'espace et la typographie — **ÉLARGIE pour Commandes le 26/09/2026** : le contour et le liseré y participent aussi | `caisse_page.dart` | 2 |
+| Les largeurs se MESURENT en Inter : la police de test gonfle les largeurs de ~40 % | `orders_list_view_test.dart` (`FontLoader('Inter')`) | 22 |
 | Un grand écran se découpe en `part` / `part of` par unité naturelle (onglet, bloc), la même bibliothèque — prouvé sans effet sur le programme compilé | en-tête de chaque fichier `*.xxx.dart` du restaurant ; backlog « Grands fichiers » | — |
 | Le domaine est du Dart pur : la couleur et l'icône d'un état vivent en présentation (extensions `*Visuals`) | `table_status_visuals.dart`, `expense_kind_visuals.dart`, `service_tab_visuals.dart` ; garde-fou `domain_pure_dart_guard_test` | — |
 

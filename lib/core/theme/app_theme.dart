@@ -7,6 +7,12 @@ import 'theme_palette.dart';
 /// Couleurs sémantiques exposées via `Theme.of(context).extension<...>()`.
 /// Permet aux pages d'utiliser `theme.semantic.success` plutôt que des
 /// `Color(0xFF...)` hardcodés ou des références directes à `AppColors`.
+/// Opacité du contour d'état d'une carte active (`stateOutline`).
+const double kStateOutlineAlpha = 0.40;
+
+/// Opacité de l'ombre teintée d'une carte active (`stateShadow`).
+const double kStateShadowAlpha = 0.22;
+
 @immutable
 class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
   final Color success;
@@ -59,6 +65,57 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
     required this.borderSubtle,
     required this.trackMuted,
   });
+
+  // ── LES QUATRE TOKENS DU RENDU COLORÉ (26/09/2026) ───────────────────────
+  //
+  // Pensés ENSEMBLE, pour l'écran Commandes du restaurant, et tous DÉRIVÉS de
+  // tokens existants — aucune couleur écrite en dur. Leurs formules sont au
+  // document de design (§ 3) : une formule survit à un changement de palette,
+  // une valeur non. Mesurés sur les huit palettes, dans les deux modes
+  // (`test/theme/state_tokens_test.dart`).
+
+  /// SURFACE CREUSÉE — un cran PLUS SOMBRE que la carte (`elevatedSurface`),
+  /// dans les deux modes : le bloc de contenu d'une carte active, le fond
+  /// d'une ligne terminée en liste.
+  ///
+  /// - clair : mi-chemin de la carte vers `borderSubtle` → #F2F3F5, 1,11:1 ;
+  /// - sombre : aux trois quarts de la carte vers le fond de page
+  ///   (`BrandContrast.kDarkBackground`) → #131C2E, 1,17:1.
+  ///
+  /// Getter et non champ : la valeur se DÉDUIT des autres tokens, elle ne se
+  /// règle pas à part (les constructeurs sont `const`).
+  Color get sunkenSurface => elevatedSurface.computeLuminance() > 0.5
+      ? Color.lerp(elevatedSurface, borderSubtle, 0.5)!
+      : Color.lerp(elevatedSurface, BrandContrast.kDarkBackground, 0.75)!;
+
+  /// CONTOUR D'ÉTAT — la couleur de l'état à [kStateOutlineAlpha], sur une
+  /// carte ACTIVE. 1,36 à 2,57:1 contre la carte : sous 3:1, admissible
+  /// seulement parce que le badge ÉCRIT l'état — c'est de la décoration, pas
+  /// l'information.
+  Color stateOutline(Color state) =>
+      state.withValues(alpha: kStateOutlineAlpha);
+
+  /// OMBRE TEINTÉE — la couleur de l'état à [kStateShadowAlpha], au flou et
+  /// au décalage de l'ombre de carte qu'elle remplace (12, 3). Elle ne prend
+  /// aucune place.
+  List<BoxShadow> stateShadow(Color state) => [
+        BoxShadow(
+            color: state.withValues(alpha: kStateShadowAlpha),
+            blurRadius: 12,
+            offset: const Offset(0, 3)),
+      ];
+
+  /// TEXTE SUR UN FOND PLEIN D'ÉTAT (badge, bouton) — le blanc ou l'encre
+  /// sombre du thème (`BrandContrast.kDarkBackground`), celle des deux qui
+  /// contraste le plus. Au moins 4,74:1 sur danger, warning, success, info et
+  /// la primaire, huit palettes, deux modes.
+  Color onStateFill(Color fill) {
+    const ink = BrandContrast.kDarkBackground;
+    return BrandContrast.contrast(Colors.white, fill) >=
+            BrandContrast.contrast(ink, fill)
+        ? Colors.white
+        : ink;
+  }
 
   /// LA COULEUR DE TEXTE d'une couleur d'état : `danger` → `dangerText`,
   /// `warning` → `warningText`, `success` → `successText` ; toute autre
