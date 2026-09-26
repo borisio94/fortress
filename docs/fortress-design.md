@@ -412,10 +412,30 @@ panier (Menu) lit la largeur d'écran. Hors du restaurant, les seuils en dur
 (le 600 répété dix-sept fois, les 900 du panier e-commerce…) restent au
 backlog.
 
-**NON TRANCHÉ — les zones hybrides** (laissé ouvert le 26/09/2026, au
-backlog). Entre 720 et 900 px, le volet panier est latéral alors que le shell
-est celui du mobile ; entre 800 et 900, la caisse e-commerce met son panier en
-ligne sous une barre du bas. Personne n'a décidé si c'est voulu.
+**TRANCHÉ — la zone 720–900 du Menu est VOULUE** (26/09/2026). Le volet
+panier y est latéral alors que le shell est déjà celui du mobile : une
+tablette en portrait garde la carte et la commande côte à côte, ce qui est le
+geste du service. Mesuré avec `menuGridLayout` (volet de 320 px, marges de
+16) :
+
+| Écran | Place de la carte | Grille |
+|---|---|---|
+| 720 | 390 px | 2 colonnes de 172 px |
+| 800 | 470 px | 2 colonnes de 212 px |
+| 899 | 569 px | 2 colonnes de 262 px |
+
+La tuile passe sous son plancher de 200 px entre 720 et ~780, sans jamais
+tomber à une colonne. Le seuil et sa raison vivent dans
+`cart_pane_provider.dart` (`kCartPaneFullWidthBelow`).
+
+**Au-dessus de 900, barre latérale DÉPLIÉE** (247 px, repliée par défaut au
+restaurant) : le volet prend le tiers de l'ÉCRAN, barre comprise, et la carte
+tombe à 2 colonnes de 138 px à 900, sous 200 jusqu'à ~1 060. Barre repliée
+(76 px) : 224 px à 900. Au backlog — le corriger demanderait que le volet lise
+le corps de page et non l'écran, ce qui lève la règle ci-dessous.
+
+**NON TRANCHÉ — la caisse e-commerce entre 800 et 900** : panier en ligne sous
+une barre du bas (backlog).
 
 ### Le conteneur, pas l'écran — TRANCHÉ
 

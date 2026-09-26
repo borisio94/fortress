@@ -7,9 +7,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// ce constat a révélé — un bouton « Carte » n'a de sens que là où la carte
 /// est cachée, donc exactement sous ce nombre. Une seule source.
 ///
-/// 720 et non 600 : c'est la largeur à partir de laquelle deux colonnes
-/// tiennent côte à côte sans que la grille de plats tombe à une seule carte
-/// par ligne.
+/// 720 et non 600 : au-dessus, le volet (320 px au moins) laisse à la carte
+/// deux colonnes de plats côte à côte — MESURÉ le 26/09/2026 avec
+/// `menuGridLayout` : 172 px par tuile à 720, 212 à 800, 262 à 899. La tuile
+/// passe sous son plancher de 200 px entre 720 et ~780 (la grille garde ses
+/// deux colonnes, plus étroites) ; elle ne tombe jamais à une seule.
+///
+/// ZONE 720–900 VOULUE (document de design § 8) : le shell y est déjà celui
+/// du mobile (900), mais une tablette en portrait garde la carte et la
+/// commande côte à côte — c'est le geste du service. Ne pas aligner ce seuil
+/// sur le 900 du shell sans relire cette décision.
 const double kCartPaneFullWidthBelow = 720;
 
 /// Volet panier de droite VISIBLE ou replié — RESTAURATION.

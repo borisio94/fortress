@@ -400,7 +400,11 @@ dans `CurrencyFormatter.compact` ; le restaurant est en règle).*
 
 ## Disposition
 
-### Zones hybrides entre 720 et 900 px — à trancher sur pièce
+### Zones hybrides entre 720 et 900 px — Menu TRANCHÉ, caisse e-commerce ouverte
+
+*26/09/2026 :* la zone du Menu est TRANCHÉE « voulue » (document de design
+§ 8, mesures à l'appui). Reste la caisse e-commerce (ci-dessous).
+
 
 *Laissé NON TRANCHÉ le 26/09/2026 (lot « seuils de largeur »).* Entre 720 et
 900 px, le Menu du restaurant ouvre son panier en volet LATÉRAL alors que le
@@ -413,6 +417,17 @@ le 900 du shell.
 `_PrincipalTab`) n'est plus atteinte par le restaurant — « Modifier la
 commande » ne lui est plus proposé, et « Nouvelle vente » ramène au Menu. Ce
 cas (audit N6) est désormais purement e-commerce.
+
+### Menu, barre latérale dépliée entre 900 et ~1 060 px
+
+*Inscrit le 26/09/2026, en tranchant la zone 720–900.* Le volet panier du
+Menu vaut le tiers de l'ÉCRAN, barre latérale comprise. Barre DÉPLIÉE
+(247 px) : la carte tombe à 2 colonnes de 138 px à 900, et reste sous le
+plancher de 200 px jusqu'à ~1 060. Barre repliée (défaut du restaurant) : pas
+de problème (224 px à 900). Correctif possible : le volet mesure le CORPS de
+page (tiers du corps, plein écran quand la carte à côté tomberait sous deux
+colonnes de 200) — lève la règle « le volet lit l'écran » (§ 8), touche le
+bouton « Carte » du panier partagé et `width_threshold_guard_test`.
 
 ### Seuils de largeur en dur hors du restaurant
 
