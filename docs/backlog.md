@@ -14,7 +14,18 @@ sont pas des défauts d'un écran : c'est la PALETTE qui est en cause, et un
 écran ne peut que les contourner. Les contournements sont nommés ci-dessous
 pour qu'on sache quoi défaire le jour où le token sera corrigé.
 
-### `AppColors.textHint` en sombre — sous le seuil AA du petit texte
+### ~~`AppColors.textHint` en sombre — sous le seuil AA du petit texte~~ — RÉSOLU
+
+*Soldé le 26/09/2026 par « fix(thème): textHint en sombre dérivé à 4,5:1 ».*
+Valeur dérivée `#8190A6` = `lerp(#64748B, textSecondary, 0,60)`, 4,51 sur la
+carte, dans `AppColors` ET `AppTheme._dTextHint` ; garde-fou
+`text_hint_contrast_test.dart`. Global : l'e-commerce bouge aussi, en sombre
+seulement ; le clair est inchangé. Le contournement de l'écran Commandes
+(`textHint` réservé aux onglets vides) RESTE : c'est une règle de hiérarchie,
+plus une rustine. Hors garantie : la teinte de marque (aucun gris n'y tient,
+voir la section 3 du document de design).
+
+Historique :
 
 *Signalé deux fois : lot 1 des marges (3,95:1 sur le panneau de verre du mode
 restaurant, cf. `resto_surfaces.dart`), puis épuration de l'écran Commandes

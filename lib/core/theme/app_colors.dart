@@ -151,7 +151,12 @@ class AppColors {
   static const _textSecondaryLight = Color(0xFF4B5563); // gray-600 (~7:1 en clair)
   static const _textSecondaryDark  = Color(0xFF94A3B8); // slate-400 (lisible sur slate)
   static const _textHintLight      = Color(0xFF5B6472);
-  static const _textHintDark       = Color(0xFF64748B); // slate-500
+  // DÉRIVÉE (26/09/2026) : lerp(slate-500 #64748B, textSecondary #94A3B8,
+  // 0,60) = #8190A6 — le premier pas qui tient 4,5:1 sur la PIRE surface
+  // sombre (la carte #1E293B : 4,51). L'ancien slate-500 n'y faisait que
+  // 3,07. Reste plus éteint que textSecondary. Même valeur que
+  // `AppTheme._dTextHint` (test/theme/text_hint_contrast_test.dart).
+  static const _textHintDark       = Color(0xFF8190A6);
 
   static Color get textPrimary   => _isDark ? _textPrimaryDark   : _textPrimaryLight;
   static Color get textSecondary => _isDark ? _textSecondaryDark : _textSecondaryLight;

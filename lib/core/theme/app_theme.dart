@@ -716,7 +716,9 @@ class AppTheme {
   static const Color _dInputFill = Color(0xFF334155);
   static const Color _dTextPrimary   = Color(0xFFF1F5F9); // slate 100
   static const Color _dTextSecondary = Color(0xFF94A3B8); // slate 400
-  static const Color _dTextHint      = Color(0xFF64748B); // slate 500
+  // = AppColors.textHint en sombre : lerp(slate 500, _dTextSecondary, 0,60),
+  // dérivée pour tenir 4,5:1 sur la carte (voir app_colors.dart).
+  static const Color _dTextHint      = Color(0xFF8190A6);
 
   static ThemeData dark({ThemePalette? palette}) {
     final p = palette ?? kDefaultPalette;

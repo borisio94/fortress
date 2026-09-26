@@ -93,7 +93,17 @@ pas en `const`.
 |---|---|---|---|
 | `textPrimary` / `colorScheme.onSurface` | `#111827` | `#F1F5F9` | Texte principal |
 | `textSecondary` | `#4B5563` | `#94A3B8` | Tout l'atténué lisible : métadonnées, informations, onglets inactifs |
-| `textHint` | `#5B6472` | `#64748B` | **Réservé aux onglets VIDES** (voir la section 4) |
+| `textHint` | `#5B6472` | `#8190A6` (dérivée) | **Réservé aux onglets VIDES** (voir la section 4) |
+
+**`textHint` en sombre est DÉRIVÉE** (26/09/2026) : `lerp(#64748B,
+textSecondary #94A3B8, 0,60)` — le premier pas qui tient 4,5:1 sur la pire
+surface sombre (la carte, 4,51). L'ancien slate-500 n'y faisait que 3,07.
+Même valeur pour `AppTheme._dTextHint` (indices des champs, `labelSmall`).
+Garantie sur le fond, la carte, la surface creusée et le verre du restaurant ;
+**PAS sur la teinte de marque** (`brandSurface`, 3,10 à 3,96) — aucun gris
+neutre n'y tient, `textSecondary` compris (4,07 à 4,40 sur quatre palettes) :
+sur elle, le texte s'écrit en `brandText`. Vérifié par
+`test/theme/text_hint_contrast_test.dart`.
 
 ### Les tokens SÉMANTIQUES — TRANCHÉ
 
@@ -257,7 +267,7 @@ plus favorable.
 |---|---|---|
 | `textPrimary` | 16,12 | 13,35 |
 | `textSecondary` | 6,87 | 5,71 |
-| `textHint` | 5,44 | **3,07** ✘ |
+| `textHint` | 5,44 | 4,51 (3,07 avant le 26/09/2026) |
 | `dangerText` / `warningText` / `successText` | ≥ 6,44 | ≥ 7,73 |
 | `danger` / `warning` / `success` / `info` en TEXTE | **1,95 à 3,42** ✘ | ≥ 5,29 |
 | `*Text` sur leur propre teinte (10–14 %) | ≥ 6,37 | ≥ 6,32 |
@@ -282,8 +292,8 @@ est imposée d'office quand le logo est monochrome.
 
 ### La dette ouverte (backlog)
 
-`textHint` en sombre (3,07:1) ; texte en primaire sur `primarySurface` en
-sombre (3,4 à 3,96:1). Voir la section 21.
+Texte en primaire sur `primarySurface` en sombre (3,4 à 3,96:1). Voir la
+section 21. (`textHint` en sombre, 3,07:1, a été levée le 26/09/2026.)
 
 **TRANCHÉ — un fond de marque sous du BLANC s'écrit `AppColors.primaryFill`**
 (lot 1b, 26/09/2026). En sombre, `AppColors.primary` est la variante TEXTE,
@@ -637,7 +647,7 @@ surface (feuille opaque, section sous son titre) : la raison de la carte ne
 joue pas, et une carte dans une feuille ferait une carte dans une carte. La
 phrase dit ce qui manque et, s'il y a lieu, où agir ; elle s'écrit en
 `caption` / `textSecondary` (6,87:1 en clair, 5,71 en sombre) — jamais en
-`captionHint`, dont le `textHint` tombe à 3,07:1 en sombre (7 des 10 notes
+`captionHint`, dont le `textHint` tombait à 3,07:1 en sombre (7 des 10 notes
 de la liste y étaient). `RestoEmptyState` reste la règle quand l'état vide
 EST l'écran : l'Addition (« Table introuvable », « Aucune commande en cours »
 avec son bouton « Prendre une commande ») était le dernier écran du module en
@@ -962,6 +972,7 @@ commentaire ET ce registre**, sinon l'un des deux ment.
 | Règle | Écrite dans | Section |
 |---|---|---|
 | Deux valeurs de primaire, dérivées ; ne pas y remettre la palette | `core/theme/brand_contrast.dart`, `app_colors.dart` | 3 |
+| `textHint` sombre dérivée (lerp vers `textSecondary`, 0,60), 4,5:1 hors teinte de marque | `app_colors.dart`, `app_theme.dart` (`_dTextHint`) | 3 |
 | Cibles de 48 px au doigt, pièges de hauteur fixe | `core/widgets/touch_target.dart` | 17 |
 | Échelle typographique, jamais de `fontSize` en dur | `core/theme/app_text_styles.dart` | 5 |
 | Le texte vit sur le décor, jamais sur une photo | `resto_surfaces.dart` | 7 |
@@ -1009,7 +1020,7 @@ Le détail vit dans `docs/backlog.md` ; ici, l'index.
 
 **Dette ouverte :**
 
-- Palette : `textHint` en sombre (3,07:1) ; texte sur `primarySurface` en
+- Palette : texte sur `primarySurface` en
   sombre (3,4–3,96:1) ; fond de marque sombre de Midnight à 1,93:1 contre la
   carte (bord du bouton) ; `printer_page.dart` (fichier d'un autre chantier,
   un bouton à repointer vers `primaryFill`).
