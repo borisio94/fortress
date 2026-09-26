@@ -334,6 +334,31 @@ pour laquelle le restaurant a le sien).
 (bloc du panier, abonnement, notifications). Ses deux états vides sont
 couverts par le garde-fou de sources, pas par un test d'écran.
 
+## Périodes
+
+### Trois sélecteurs de période hors du restaurant, sur le même état
+
+*Inscrit le 26/09/2026, en clôturant le lot « sélecteur de période unique »
+côté restaurant (déjà unifié : `RestoPeriodButton`, `e8851af` / `89476ca`).*
+
+Tous lisent et écrivent `dashPeriodProvider`, avec des listes différentes :
+
+- **Tableau de bord e-commerce** (`dashboard_page.dart`) — `_PeriodPicker` +
+  `_DateRangePicker` ; aujourd'hui, hier, semaine, mois, année,
+  personnalisée. Garde en plus un **miroir local** de l'état, synchronisé à la
+  main : le supprimer touche sa logique d'état, pas seulement l'affichage.
+- **Hub central** (`hub_dashboard_page.dart`) — `_CompactPeriodSelector` ;
+  aujourd'hui, mois, **trimestre**, année ; forme compacte.
+- **Finances e-commerce** (`finances_page.dart`) — `PeriodSelector`
+  (`shared/widgets/period_selector.dart`), qui se dit « composant unique » et
+  n'a qu'un usage ; toutes les périodes, **trimestre compris**.
+
+**Effet visible de la divergence** : l'état étant partagé, un trimestre
+choisi au Hub s'applique au tableau de bord du restaurant, qui l'affiche
+(« Trimestre ») mais ne le propose pas — aucune ligne de son menu n'est alors
+active. À trancher : le trimestre partout ou nulle part ; un seul sélecteur
+partagé pour l'e-commerce et le Hub.
+
 ## Code mort
 
 ### `_ServiceChip` — une pastille que plus rien ne rend

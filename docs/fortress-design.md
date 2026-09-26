@@ -619,12 +619,22 @@ copies.
 
 `DateFormatter` (`dayMonthYear`…). « Depuis le … » pour une ancienneté.
 
-### Périodes — EN VIGUEUR AU RESTAURANT
+### Périodes — TRANCHÉ AU RESTAURANT (26/09/2026)
 
-Un seul sélecteur au restaurant, `RestoPeriodButton` (tableau de bord,
-hub Finances), sur l'état partagé `dashPeriodProvider`. **NON TRANCHÉ** : cinq
-implémentations coexistent dans l'app, avec des listes de périodes
-différentes (le trimestre existe au Hub, pas au restaurant).
+**Un seul sélecteur de PÉRIODE au restaurant : `RestoPeriodButton`**
+(`resto_period_sheet.dart` ; tableau de bord, hub Finances), sur l'état
+partagé `dashPeriodProvider`. Périodes proposées : aujourd'hui, hier, semaine,
+mois, année, personnalisée — **pas de trimestre** (quatre-vingt-dix jours
+glissants, une fenêtre qu'aucun gérant ne demande).
+
+Une DATE UNIQUE (date d'achat, de dépense, de réservation, jour de pointage,
+bornes d'un concours) n'est pas une période : elle garde son
+`showDatePicker` de champ (11 au restaurant, vérifiés un par un le
+26/09/2026).
+
+**NON TRANCHÉ hors du restaurant** — trois autres sélecteurs sur le même
+état, au backlog : tableau de bord e-commerce (avec un miroir local),
+Hub central (avec le trimestre), Finances e-commerce (`PeriodSelector`).
 
 ---
 
