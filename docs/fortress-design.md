@@ -774,9 +774,25 @@ gestes répétés du service.
 
 Un état qui ne parle que par la couleur doit être doublé par un libellé ou
 une icône (plan de salle : liseré + libellé + légende ; commandes : liseré +
-badge écrit, section 16 ; stock : icône avant couleur). Cas ouverts : alerte
-prix du panier, statut d'un ticket de messagerie, liseré « sans prix » de
-l'inventaire.
+badge écrit, section 16 ; stock : icône avant couleur).
+
+**Au restaurant, tous les cas de l'audit sont doublés** (lot « couleur jamais
+seule », 26/09/2026) :
+
+| État | Doublé par |
+|---|---|
+| Urgence en cuisine | sans objet : l'écran cuisine n'existe plus |
+| Retard de service | « en retard » écrit dans la ligne de la tuile de commande |
+| Âge d'une table | icône qui change + « oubliée ? » écrit |
+| Note « à remplacer » (jauge compacte) | sous-titre et bandeau nominatif de la carte |
+| Alerte prix du panier | bandeau « Alerte marge » écrit + icône ⚠ sur la pastille de la ligne |
+
+Une couleur qui DOUBLE un texte se pose en variante texte (`warningText`,
+`brandText`…) : l'orange de base écrit dans le panier tombait à 1,76–2,02:1 en
+clair, 5,80–6,66:1 en `warningText` (`cart_text_color_guard_test`).
+
+Cas ouverts, hors restaurant : statut d'un ticket de messagerie, lignes du
+panier e-commerce, liseré « sans prix » de l'inventaire (backlog).
 
 ### Taille du texte
 

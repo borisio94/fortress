@@ -627,9 +627,13 @@ class _PriceAlertBanner extends StatelessWidget {
       Expanded(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Titre ÉCRIT en variante texte : l'orange de base y tombait à
+              // 2,02:1 en clair (`warningText` : 6,66:1). L'icône et le fond
+              // gardent la base. Les deux secteurs (lot « couleur jamais
+              // seule », 26/09/2026).
               Text('Alerte marge',
-                  style: AppTextStyles.captionBold
-                      .copyWith(color: AppColors.warning)),
+                  style: AppTextStyles.captionBold.copyWith(
+                      color: Theme.of(context).semantic.warningText)),
               ...alerts.map((i) => Text(
                 '• ${i.productName}${i.variantName != null ? ' — ${i.variantName}' : ''} : '
                     '${CurrencyFormatter.format(i.effectivePrice)} '
@@ -680,7 +684,14 @@ class _RestoCartItemRow extends StatelessWidget {
     final sem   = theme.semantic;
     final hasPriceAlert = item.isPriceAlertTriggered;
     final priceModified = item.customPrice != null;
-    final amountColor = hasPriceAlert ? AppColors.warning : AppColors.primary;
+    // Le FOND teinté garde la couleur de BASE ; ce qui est ÉCRIT, et l'icône
+    // qui l'accompagne, prend la variante TEXTE. L'orange de base écrit
+    // tombait à 1,94:1 (montant) et 1,76:1 (pastille) en clair — `warningText`
+    // y donne 6,39 et 5,80:1. Hors alerte, texte de marque = `brandText`
+    // (lot 1 clair) : cette ligne avait échappé au garde-fou, qui ne parcourt
+    // que `features/restaurant/` (lot « couleur jamais seule », 26/09/2026).
+    final amountFill = hasPriceAlert ? AppColors.warning : AppColors.primary;
+    final amountColor = hasPriceAlert ? sem.warningText : sem.brandText;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -724,14 +735,19 @@ class _RestoCartItemRow extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
-                          color: amountColor.withValues(alpha: 0.14),
+                          color: amountFill.withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Row(mainAxisSize: MainAxisSize.min, children: [
                           Icon(
-                              priceModified
-                                  ? Icons.edit_rounded
-                                  : Icons.sell_outlined,
+                              // L'ALERTE SE DIT AUSSI PAR L'ICÔNE, pas par la
+                              // seule teinte : le bandeau « Alerte marge » est
+                              // en haut du panier, la ligne peut être loin.
+                              hasPriceAlert
+                                  ? Icons.warning_amber_rounded
+                                  : priceModified
+                                      ? Icons.edit_rounded
+                                      : Icons.sell_outlined,
                               size: 12,
                               color: amountColor),
                           const SizedBox(width: 4),

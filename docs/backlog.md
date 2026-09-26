@@ -305,6 +305,26 @@ style ; une couleur passée par une variable lui échappe (le lot en a trouvé
 ≈ 50 à la main). Et il ne couvre que `lib/features/restaurant/` : les écrans
 restaurant logés ailleurs (`caisse_page.dart`) n'y sont pas.
 
+Le panier restaurant (`cart_widget.dart`) a désormais son garde-fou ciblé,
+`cart_text_color_guard_test` (26/09/2026) : il lit TOUTE couleur de base
+dans la ligne restaurant et le bandeau « Alerte marge », variables comprises,
+et n'admet que fonds teintés, icônes et variables `…Fill`. Sa méthode
+pourrait remplacer celle du garde-fou général.
+
+### Couleur seule — les trois cas e-commerce de l'audit
+
+*Inscrit le 26/09/2026, en clôturant le lot « couleur jamais seule » côté
+restaurant.*
+
+- Statut d'un ticket de messagerie : pastille de 8 px sans libellé
+  (`tickets_page.dart`).
+- Lignes du panier e-commerce : seul le montant passe en `warning` sur une
+  alerte prix (`cart_widget.dart`, `_CartItemRow`) — le bandeau « Alerte
+  marge », partagé, est déjà écrit et lisible. Ces montants sont aussi en
+  orange de BASE écrit (≈ 2:1 en clair), comme l'était la ligne restaurant.
+- Liseré de 3 px « sans prix de vente » de l'inventaire : rouge seul
+  (`inventaire_page.dart`, porte des modifications d'un autre chantier).
+
 ## États vides
 
 ### Les chemins écrits des notes vides deviendraient des liens
