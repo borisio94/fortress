@@ -1814,8 +1814,7 @@ class _InfoBanner extends StatelessWidget {
             ),
             child: Text(actionLabel,
                 style: AppTextStyles.bodySmBold
-                    // lot 1 clair : lien interactif, garde la primaire (backlog).
-                    .copyWith(color: AppColors.primary)),
+                    .copyWith(color: Theme.of(context).semantic.brandText)),
           ),
         ],
       ),

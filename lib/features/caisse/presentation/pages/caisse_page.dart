@@ -6558,9 +6558,16 @@ class _WideActionButton extends StatelessWidget {
     final bg = filled
         ? color.withValues(alpha: disabled ? 0.4 : 1)
         : color.withValues(alpha: disabled ? 0.05 : 0.10);
+    // Le LIBELLÉ d'un bouton NON plein à la couleur de marque passe par
+    // `brandText` : tenu à 4,5:1 sur sa propre teinte dans les deux modes
+    // (lot 1 clair, 26/09/2026). `color` reste la primaire pour le FOND — un
+    // bouton plein porte du blanc, et `brandText` y serait trop clair en sombre.
+    final text = color == AppColors.primary
+        ? Theme.of(context).semantic.brandText
+        : color;
     final fg = filled
         ? Colors.white
-        : color.withValues(alpha: disabled ? 0.5 : 1);
+        : text.withValues(alpha: disabled ? 0.5 : 1);
     // Dimensionné au CONTENU + padding compact H10/V3. Pas de wrapper qui
     // remplit la largeur → en `Wrap` (contraintes lâches) le bouton épouse son
     // contenu et s'enchaîne sur la ligne ; en `Expanded` (contraintes serrées)

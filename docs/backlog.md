@@ -63,6 +63,10 @@ contraste de la primaire et n'ont rien à défaire.
 
 ### Lot 1b — fonds pleins peints à la main en primaire, sous du texte blanc
 
+> **Mise à jour du 26/09/2026 (lot 1 clair)** : EN CLAIR, la dette est
+> soldée — la primaire claire dérivée porte le blanc à ≥ 5,84:1 sur les huit
+> palettes. Ce qui suit ne vaut plus que pour le mode SOMBRE.
+
 *Compromis ACCEPTÉ le 25/09/2026 avec le lot 1 (tokens de marque en sombre).
 Inscrit le jour même pour ne pas devenir une dette oubliée.*
 
@@ -270,36 +274,14 @@ encore :
 
 ## Couleurs en texte
 
-### Lot 1 clair — les éléments interactifs qui gardent la primaire en texte
+### ~~Lot 1 clair — les éléments interactifs qui gardent la primaire en texte~~ — RÉSOLU
 
-*Inscrit le 26/09/2026 avec le lot « couleurs sémantiques en texte ».*
-
-La primaire en texte échoue en clair sur Ocean, Emerald, Sunset, Rose et
-Amber (2,38–3,31), et sur sa propre teinte aussi en sombre sur sept palettes
-(3,68–4,58). Les INFORMATIONS sont passées en `onSurface` ; ces éléments
-INTERACTIFS l'ont gardée, parce qu'un lien sans couleur perd son signal
-d'action. Chacun porte le marqueur `lot 1 clair` (le garde-fou
-`semantic_text_guard_test` le reconnaît). Le jour du lot 1 clair — une
-primaire de TEXTE dérivée pour le mode clair, comme `BrandContrast.darkText`
-en sombre —, ce sont eux qu'il faut repasser :
-
-1. **Menu** — lien « Voir » / « Revenir à la carte » des plats retirés
-   (`restaurant_menu_page.dart`).
-2. **Tableau de bord** — bouton « Voir la carte » de la carte « Menu du jour »
-   (`restaurant_dashboard_page.dart`).
-3. **Tableau de bord** — bouton « Tout masquer / Tout afficher » des courbes
-   Finances (`restaurant_dashboard_page.dart`).
-4. **Tableau de bord** — choix de secteur SÉLECTIONNÉ (« Global », nom du
-   secteur), `_Choice`, sur sa teinte primaire (`restaurant_dashboard_page.dart`).
-5. **Fiche plat** — bouton « Nouvelle » de la bannière « aucune catégorie »
-   (`_InfoBanner`, `dish_form_sheet.dart`), sur `brandSurface`.
-6. **Addition** — puce de partage SÉLECTIONNÉE (« Non », « ÷ n »)
-   (`ChoiceChip`, `bill_page.dart`).
-7. **Commandes** — bouton « Encaisser » de la carte (`_StateButton`, via
-   `ServiceTabVisuals.actionTextColor`, `caisse_page.dart`), sur sa teinte.
-8. **Commandes** — libellé d'un bouton d'action non plein à la couleur par
-   défaut de `OrderAction.color()` = `AppColors.primary` (`_WideActionButton`,
-   `caisse_page.dart`).
+*Inscrit le 26/09/2026, résolu le même jour par le lot 1 clair.* La primaire
+du mode clair est dérivée (`BrandContrast.lightText`) ; les huit éléments
+(lien « Voir » du Menu, « Voir la carte » et « Tout masquer » du tableau de
+bord, choix de secteur sélectionné, « Nouvelle » de la fiche plat, puce de
+partage de l'addition, bouton « Encaisser », boutons d'action non pleins)
+s'écrivent en `semantic.brandText`, marqueurs retirés.
 
 ### Informations écrites en couleur d'état — écart à la section 16
 

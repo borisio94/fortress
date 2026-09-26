@@ -13,7 +13,12 @@ import 'theme_palette.dart';
 /// constantes car elles ne dépendent pas du thème choisi.
 class AppColors {
   // ── Palette active (runtime) ───────────────────────────────────────────────
-  static Color _primary        = kDefaultPalette.primary;
+  /// Primaire du mode CLAIR — dérivée elle aussi depuis le 26/09/2026
+  /// ([BrandContrast.lightText], lot 1 clair) : la couleur de la palette
+  /// assombrie jusqu'à 4,5:1 sur blanc, fond et teintes. Elle sert le texte
+  /// ET les fonds sous du blanc (les deux exigent une primaire foncée).
+  static Color _primary        =
+      BrandContrast.lightText(kDefaultPalette.primary);
   static Color _primaryLight   = kDefaultPalette.primaryLight;
   static Color _primaryDark    = kDefaultPalette.primaryDark;
   static Color _primarySurface = kDefaultPalette.primarySurface;
@@ -48,7 +53,7 @@ class AppColors {
   /// chaque changement de palette dans les paramètres.
   static void applyPalette(ThemePalette p) {
     _palette        = p;
-    _primary        = p.primary;
+    _primary        = BrandContrast.lightText(p.primary);
     _primaryLight   = p.primaryLight;
     _primaryDark    = p.primaryDark;
     _primaryOnDark  = BrandContrast.darkText(p.primary);

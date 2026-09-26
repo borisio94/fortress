@@ -703,8 +703,7 @@ class _DailyMenuCard extends StatelessWidget {
         // l'inventaire e-commerce, l'écran change selon le secteur).
         onPressed: () => context.push('/shop/$shopId/inventaire'),
         child: Text('Voir la carte',
-            // lot 1 clair : lien interactif, garde la primaire (backlog).
-            style: AppTextStyles.bodySm.copyWith(color: cs.primary)),
+            style: AppTextStyles.bodySm.copyWith(color: Theme.of(context).semantic.brandText)),
       ),
       child: shown.isEmpty
           ? const _EmptyBlock(
@@ -1531,8 +1530,7 @@ class _FinanceChartCardState extends ConsumerState<_FinanceChartCard> {
                   _on.length == _Curve.values.length
                       ? 'Tout masquer'
                       : 'Tout afficher',
-                  // lot 1 clair : lien interactif, garde la primaire (backlog).
-                  style: AppTextStyles.bodySm.copyWith(color: cs.primary),
+                  style: AppTextStyles.bodySm.copyWith(color: Theme.of(context).semantic.brandText),
                 ),
               ),
             ],
@@ -1772,8 +1770,7 @@ class _Choice extends StatelessWidget {
         ),
         child: Text(label,
             style: AppTextStyles.bodySm.copyWith(
-              // lot 1 clair : lien interactif, garde la primaire (backlog).
-              color: selected ? cs.primary : cs.onSurface,
+              color: selected ? Theme.of(context).semantic.brandText : cs.onSurface,
               fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
             )),
       ),

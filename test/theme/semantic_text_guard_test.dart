@@ -13,9 +13,11 @@
 // passée par une variable lui échappe : c'est à `AppSemanticColors.textFor`
 // et `restoTextOn` de la rendre juste à la source.
 //
-// LA PRIMAIRE est lue aussi, avec UNE exception nommée : un élément
-// INTERACTIF qui la garde en attendant le lot 1 clair porte le marqueur
-// `lot 1 clair` sur la ligne précédente. Tout autre usage en texte échoue.
+// LA PRIMAIRE est lue aussi, SANS exception depuis le lot 1 clair
+// (26/09/2026) : un texte de marque s'écrit en `semantic.brandText`, la seule
+// valeur tenue à 4,5:1 sur ses propres teintes dans les DEUX modes
+// (`colorScheme.primary` ne l'est pas en sombre : 3,68–4,58 sur sept
+// palettes). Une information s'écrit en `onSurface`.
 
 import 'dart:io';
 
@@ -66,7 +68,7 @@ void main() {
       .where((f) => !_deadCode.any((d) => f.path.endsWith(d)))
       .toList();
 
-  List<String> offenders(RegExp pattern, {bool allowMarked = false}) {
+  List<String> offenders(RegExp pattern) {
     final out = <String>[];
     for (final f in files) {
       final src = f.readAsStringSync();
@@ -79,12 +81,6 @@ void main() {
           continue;
         }
         final line = '\n'.allMatches(src.substring(0, m.start)).length + 1;
-        if (allowMarked) {
-          final lines = src.split('\n');
-          final before = lines.sublist(
-              line - 3 < 0 ? 0 : line - 3, line - 1);
-          if (before.any((l) => l.contains('lot 1 clair'))) continue;
-        }
         out.add('${f.path.replaceAll('\\', '/')}:$line  ${m.group(0)}');
       }
     }
@@ -97,12 +93,11 @@ void main() {
             'successText) ; `info` s\'écrit en textSecondary (§ 16)');
   });
 
-  test('la primaire en texte : seulement les éléments interactifs marqués '
-      '« lot 1 clair »', () {
-    expect(offenders(_primary, allowMarked: true), isEmpty,
-        reason: 'une information s\'écrit en onSurface ; un lien ou un '
-            'bouton qui garde la primaire porte le marqueur « lot 1 clair » '
-            '(backlog)');
+  test('aucune primaire en couleur de texte : brandText ou onSurface', () {
+    expect(offenders(_primary), isEmpty,
+        reason: 'un lien ou un bouton de marque s\'écrit en '
+            'semantic.brandText (tenu sur ses teintes dans les deux modes) ; '
+            'une information en onSurface');
   });
 
   test('le garde-fou voit bien ce qu\'il doit voir', () {

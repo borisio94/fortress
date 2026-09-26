@@ -630,8 +630,7 @@ class _SplitCard extends StatelessWidget {
       selected: sel,
       onSelected: (_) => onSharesChanged(value),
       labelStyle: AppTextStyles.bodySm.copyWith(
-        // lot 1 clair : lien interactif, garde la primaire (backlog).
-        color: sel ? theme.colorScheme.primary : null,
+        color: sel ? theme.semantic.brandText : null,
         fontWeight: sel ? FontWeight.w600 : FontWeight.w500,
       ),
     );

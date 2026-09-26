@@ -786,8 +786,7 @@ class _RetiredBanner extends StatelessWidget {
               const SizedBox(width: 8),
               Text(
                 showingRetired ? 'Revenir à la carte' : 'Voir',
-                // lot 1 clair : lien interactif, garde la primaire (backlog).
-                style: AppTextStyles.caption.copyWith(color: cs.primary),
+                style: AppTextStyles.caption.copyWith(color: Theme.of(context).semantic.brandText),
               ),
               Icon(Icons.chevron_right_rounded, size: 18, color: cs.primary),
             ]),

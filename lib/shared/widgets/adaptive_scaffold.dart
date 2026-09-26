@@ -1059,8 +1059,8 @@ class _MobileDrawerRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    // Cf. _SidebarRow : accent palette adaptatif, inactif lisible en sombre.
-    final accent = isDark ? palette.primaryLight : palette.primary;
+    // Cf. _SidebarRow : accent = `brandText`, inactif lisible en sombre.
+    final accent = theme.semantic.brandText;
     final fg = selected
         ? accent
         : (isDark
@@ -1808,10 +1808,13 @@ class _SidebarRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    // Accent = primary de la palette active (variante claire en sombre pour
-    // rester lisible sur le fond teinté profond). Inactif : gris secondaire
-    // en clair, onSurface atténué en sombre (lisible sur toutes les palettes).
-    final accent = isDark ? palette.primaryLight : palette.primary;
+    // Accent = `brandText` : la primaire DÉRIVÉE, lisible à 4,5:1 sur le fond
+    // de la barre ET sur sa teinte de sélection, dans les deux modes (lot 1
+    // clair, 26/09/2026). Avant, la couleur BRUTE de la palette contournait le
+    // thème : 2,54–3,53:1 en clair sur cinq palettes, `primaryLight` sous le
+    // seuil en sombre sur trois. Inactif : gris secondaire en clair,
+    // onSurface atténué en sombre.
+    final accent = theme.semantic.brandText;
     final fg = selected
         ? accent
         : (isDark

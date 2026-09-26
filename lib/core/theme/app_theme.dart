@@ -189,11 +189,18 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
   /// Dérive une instance light avec `brand` adapté à la palette utilisateur.
   /// Tous les autres tokens (success/warning/danger/etc.) restent universels
   /// — seules les 3 variantes brand suivent la palette boutique custom.
-  factory AppSemanticColors.lightForBrand(Color brand) {
+  ///
+  /// [primary] = la primaire BRUTE de la palette. `brandSurface` en est la
+  /// teinte à 10 % (son aspect ne change pas) ; `brand` et `brandText` sont
+  /// [BrandContrast.lightText] — lisibles à 4,5:1 sur la carte, le fond ET
+  /// ces teintes (lot 1 clair, 26/09/2026). Avant, ils valaient la primaire
+  /// brute : 2,31 à 3,13:1 sur `brandSurface` pour cinq palettes.
+  factory AppSemanticColors.lightForBrand(Color primary) {
     final brandSurface = Color.alphaBlend(
-      brand.withValues(alpha: 0.10),
+      primary.withValues(alpha: 0.10),
       const Color(0xFFFFFFFF),
     );
+    final brand = BrandContrast.lightText(primary);
     return AppSemanticColors(
       success:         const Color(0xFF10B981),
       warning:         const Color(0xFFF59E0B),
@@ -207,7 +214,7 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
       successText:     const Color(0xFF065F46),
       brand:           brand,
       brandSurface:    brandSurface,
-      brandText:       brand, // primary saturé est lisible sur sa surface ~10%
+      brandText:       brand,
       elevatedSurface: const Color(0xFFFFFFFF),
       borderSubtle:    const Color(0xFFE5E7EB),
       trackMuted:      const Color(0xFFF3F4F6),
@@ -258,11 +265,27 @@ class AppTheme {
   /// Construit un ThemeData clair à partir d'une [ThemePalette].
   /// Si `palette` est null, utilise la palette Fortress par défaut (violet).
   static ThemeData light({ThemePalette? palette}) {
-    final p = palette ?? kDefaultPalette;
-    return _buildLight(p);
+    final raw = palette ?? kDefaultPalette;
+    // LOT 1 CLAIR (26/09/2026) — la primaire du thème clair est DÉRIVÉE, comme
+    // en sombre : [BrandContrast.lightText], assombrie jusqu'à 4,5:1 sur la
+    // carte, le fond et ses teintes. Tout le thème clair (texte, icône, trait,
+    // fond de bouton) la lit via `p.primary`. Seules la graine du schéma et la
+    // teinte `brandSurface` partent de la couleur BRUTE : leur aspect ne change
+    // pas. Ne pas « simplifier » en repassant `palette` directement.
+    final p = ThemePalette(
+      id: raw.id,
+      labelFr: raw.labelFr,
+      labelEn: raw.labelEn,
+      primary: BrandContrast.lightText(raw.primary),
+      primaryLight: raw.primaryLight,
+      primaryDark: raw.primaryDark,
+      primarySurface: raw.primarySurface,
+      previewGradient: raw.previewGradient,
+    );
+    return _buildLight(p, raw.primary);
   }
 
-  static ThemeData _buildLight(ThemePalette p) => ThemeData(
+  static ThemeData _buildLight(ThemePalette p, Color rawPrimary) => ThemeData(
     useMaterial3: true,
     // Ripple classique (cercle qui s'étend) sur TOUS les widgets à encre :
     // boutons, IconButton, ListTile, InkWell… — bien plus visible que
@@ -271,10 +294,10 @@ class AppTheme {
     // Brand dynamique : suit la palette utilisateur. Les autres tokens
     // (success/warning/danger/etc.) restent universels via la factory.
     extensions: <ThemeExtension<dynamic>>[
-      AppSemanticColors.lightForBrand(p.primary),
+      AppSemanticColors.lightForBrand(rawPrimary),
     ],
     colorScheme: ColorScheme.fromSeed(
-      seedColor: p.primary,
+      seedColor: rawPrimary,
       primary:   p.primary,
       brightness: Brightness.light,
       // Forcer surface et background blancs — empêche Material3

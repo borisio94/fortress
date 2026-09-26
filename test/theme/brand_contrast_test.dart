@@ -179,17 +179,111 @@ void main() {
     }
   });
 
+  group('BrandContrast.lightText — lot 1 clair (26/09/2026)', () {
+    for (final p in all) {
+      test('${p.id} : ≥ 4,5:1 sur carte, fond, verre et ses teintes ; le blanc '
+          'y tient aussi', () {
+        final t = BrandContrast.lightText(p.primary);
+        expect(
+            BrandContrast.worstContrast(
+                t, BrandContrast.lightSurfaces(p.primary)),
+            greaterThanOrEqualTo(4.5));
+        // … et sur SES PROPRES teintes : l'app teinte avec la valeur dérivée.
+        expect(
+            BrandContrast.worstContrast(t, [
+              for (final a in BrandContrast.kLightTintAlphas) ...[
+                Color.alphaBlend(t.withValues(alpha: a), white),
+                Color.alphaBlend(
+                    t.withValues(alpha: a), BrandContrast.kLightBackground),
+              ],
+            ]),
+            greaterThanOrEqualTo(4.5));
+        // En clair les deux usages convergent : la même valeur porte du blanc.
+        expect(BrandContrast.contrast(white, t), greaterThanOrEqualTo(4.5));
+      });
+    }
+
+    test('une couleur déjà lisible n\'est PAS touchée, les autres oui', () {
+      for (final p in all) {
+        final alreadyOk = BrandContrast.worstContrast(
+                p.primary, BrandContrast.lightSurfaces(p.primary)) >=
+            4.5;
+        expect(BrandContrast.lightText(p.primary) == p.primary, alreadyOk,
+            reason: p.id);
+      }
+    });
+
+    test('au catalogue, cinq palettes bougent : Ocean, Emerald, Sunset, Rose, '
+        'Amber', () {
+      final moved = [
+        for (final p in kAllPalettes)
+          if (BrandContrast.lightText(p.primary) != p.primary) p.id,
+      ];
+      expect(moved, unorderedEquals(
+          ['ocean', 'emerald', 'sunset', 'rose', 'amber']));
+    });
+
+    for (final p in all) {
+      test('${p.id} : le thème clair la lit partout', () {
+        final t = AppTheme.light(palette: p);
+        final d = BrandContrast.lightText(p.primary);
+        expect(t.colorScheme.primary, d);
+        expect(t.semantic.brand, d);
+        expect(t.semantic.brandText, d);
+        expect(t.elevatedButtonTheme.style!.backgroundColor!.resolve({}), d);
+        // La teinte garde son aspect : calculée depuis la couleur BRUTE.
+        expect(t.semantic.brandSurface,
+            Color.alphaBlend(p.primary.withValues(alpha: 0.10), white));
+      });
+    }
+
+    test('le menu latéral : brandText tient sur le fond de la barre et sa '
+        'teinte de sélection, dans les deux modes', () {
+      for (final p in all) {
+        for (final (t, grounds) in [
+          (AppTheme.light(palette: p), [white, BrandContrast.kLightBackground]),
+          (
+            AppTheme.dark(palette: p),
+            [
+              BrandContrast.kDarkBackground,
+              // Chrome du restaurant en sombre (`restoChromeOpaque`).
+              Color.alphaBlend(const Color(0xFF0B0F14).withValues(alpha: 0.86),
+                  const Color(0xFF10161D)),
+            ]
+          ),
+        ]) {
+          final fg = t.semantic.brandText;
+          for (final g in grounds) {
+            for (final a in [0.0, 0.12, 0.14]) {
+              final bg = Color.alphaBlend(fg.withValues(alpha: a), g);
+              expect(BrandContrast.contrast(fg, bg),
+                  greaterThanOrEqualTo(4.5),
+                  reason: '${p.id} ${t.brightness.name} a=$a');
+            }
+          }
+        }
+      }
+    });
+  });
+
   group('AppColors.primary — getter adaptatif', () {
     tearDown(() {
       AppColors.applyBrightness(Brightness.light);
       AppColors.applyPalette(kDefaultPalette);
     });
 
-    test('en CLAIR : la valeur de la palette, inchangée', () {
-      for (final p in kAllPalettes) {
+    test('en CLAIR : la variante dérivée du lot 1 clair, ≥ 4,5:1 sur blanc',
+        () {
+      for (final p in all) {
         AppColors.applyPalette(p);
         AppColors.applyBrightness(Brightness.light);
-        expect(AppColors.primary, p.primary, reason: p.id);
+        expect(AppColors.primary, BrandContrast.lightText(p.primary),
+            reason: p.id);
+        expect(
+            BrandContrast.contrast(
+                AppColors.primary, BrandContrast.kLightCard),
+            greaterThanOrEqualTo(4.5),
+            reason: p.id);
       }
     });
 

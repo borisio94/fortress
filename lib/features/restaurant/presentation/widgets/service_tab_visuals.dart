@@ -112,13 +112,11 @@ extension ServiceTabVisuals on ServiceTab {
   }
 
   /// Libellé d'un BOUTON d'action (`_StateButton`) — `textColor`, sauf
-  /// « À encaisser », qui garde la primaire : un lien ou un bouton qui perd sa
-  /// couleur perd son signal d'action.
-  ///
-  /// ⚠ SOUS LE SEUIL en clair sur ocean, emerald, sunset, rose et amber.
-  /// Inscrit au backlog (lot 1 clair : une primaire de TEXTE dérivée pour le
-  /// mode clair, comme le lot 1 l'a fait pour le sombre).
+  /// « À encaisser », qui garde la couleur de marque : un bouton qui perd sa
+  /// couleur perd son signal d'action. `brandText`, et non `colorScheme.
+  /// primary` : le bouton pose son libellé sur SA TEINTE, où seule `brandText`
+  /// tient 4,5:1 dans les deux modes (lot 1 clair, 26/09/2026).
   Color actionTextColor(BuildContext context) => this == ServiceTab.aEncaisser
-      ? Theme.of(context).colorScheme.primary
+      ? Theme.of(context).semantic.brandText
       : textColor(context);
 }

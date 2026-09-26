@@ -127,6 +127,72 @@ abstract final class BrandContrast {
         darkTint(primary, kBrandSurfaceAlpha),
       ]);
 
+  // ─── MODE CLAIR (lot 1 clair, 26/09/2026) ─────────────────────────────────
+  //
+  // En clair, les deux usages NE S'OPPOSENT PAS : être lisible SUR le blanc et
+  // PORTER du blanc exigent tous deux une primaire assez FONCÉE. Une seule
+  // valeur dérivée sert donc les deux — texte, icône, trait ET fond de bouton.
+  //
+  // Mesuré avant : Ocean 2,77:1 sur blanc, Emerald 2,54, Sunset 2,80, Amber
+  // 3,19, Rose 3,53 — texte ET libellé blanc des boutons sous le seuil. Après :
+  // ces cinq palettes foncent de 21 à 32 % (≈ la nuance « 700 » de leur
+  // teinte) ; Violet, Midnight et Indigo ne bougent pas.
+
+  /// Surfaces CLAIRES sur lesquelles la primaire est lue (valeurs du thème
+  /// clair, dupliquées pour garder la fonction pure) : carte, fond de page.
+  static const Color kLightCard       = Color(0xFFFFFFFF);
+  static const Color kLightBackground = Color(0xFFF8F7FC);
+
+  /// Opacité du verre clair du restaurant (`restoGlassFill`), posé sur le fond.
+  static const double kLightGlassAlpha = 0.91;
+
+  /// Teintes de marque sur lesquelles un TEXTE de marque se pose en clair :
+  /// sélection, pastille, bouton d'état (10 à 14 %), `brandSurface` (10 %).
+  static const List<double> kLightTintAlphas = [0.10, 0.12, 0.14];
+
+  /// Toutes les surfaces claires d'un texte de marque, teintes comprises —
+  /// chaque teinte sur la carte ET sur le fond (le plus sombre des deux est le
+  /// pire cas).
+  static List<Color> lightSurfaces(Color primary) => [
+        kLightCard,
+        kLightBackground,
+        Color.alphaBlend(
+            _white.withValues(alpha: kLightGlassAlpha), kLightBackground),
+        for (final a in kLightTintAlphas) ...[
+          Color.alphaBlend(primary.withValues(alpha: a), kLightCard),
+          Color.alphaBlend(primary.withValues(alpha: a), kLightBackground),
+        ],
+      ];
+
+  /// LA primaire du mode clair : [primary] assombrie jusqu'à 4,5:1 sur la
+  /// carte, le fond, le verre, les teintes de la couleur BRUTE (`brandSurface`)
+  /// ET les teintes d'ELLE-MÊME. Rendue telle quelle si elle tient déjà
+  /// (Violet, Midnight, Indigo). Le blanc y tient alors aussi : elle sert le
+  /// texte comme le fond des boutons.
+  ///
+  /// POURQUOI SES PROPRES TEINTES : l'application teinte avec la valeur
+  /// DÉRIVÉE (`AppColors.primary.withValues(alpha: 0.1)` sous un texte en
+  /// `AppColors.primary`, sélection du menu latéral…). Calculée sur les seules
+  /// teintes brutes, Ocean tombait à 4,37:1 sur sa sélection à 12 % — mesuré
+  /// par `brand_contrast_test`. Le candidat change à chaque pas, ses teintes
+  /// aussi : d'où la boucle propre plutôt que [readableOn].
+  static Color lightText(Color primary) {
+    final base = primary.withValues(alpha: 1);
+    final fixed = lightSurfaces(base);
+    for (var i = 0; i <= _steps; i++) {
+      final c = Color.lerp(base, _black, i / _steps)!;
+      final surfaces = [
+        ...fixed,
+        for (final a in kLightTintAlphas) ...[
+          Color.alphaBlend(c.withValues(alpha: a), kLightCard),
+          Color.alphaBlend(c.withValues(alpha: a), kLightBackground),
+        ],
+      ];
+      if (worstContrast(c, surfaces) >= kMinTextContrast) return c;
+    }
+    return _black;
+  }
+
   /// Fond sous un libellé BLANC : [base] assombri jusqu'à ce que le blanc y
   /// tienne 4,5:1. Rendu tel quel s'il tient déjà (Midnight, Violet en clair).
   static Color fillUnderWhite(Color base) =>

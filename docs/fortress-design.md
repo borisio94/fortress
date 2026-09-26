@@ -130,8 +130,8 @@ sombre).
   gardent `info`.
 - **Garde-fou** : `test/theme/semantic_text_guard_test.dart` échoue si un
   `TextStyle` / `copyWith` / `styleFrom` de `lib/features/restaurant/` reçoit
-  de nouveau un token d'état de base, ou la primaire hors des éléments
-  interactifs marqués « lot 1 clair ». Il ne voit pas une couleur passée par
+  de nouveau un token d'état de base, ou la primaire (un texte de marque
+  s'écrit en `brandText`). Il ne voit pas une couleur passée par
   une variable : c'est à `textFor` de la corriger à la source.
 
 ### La couleur de marque (la primaire) — TRANCHÉ
@@ -144,38 +144,57 @@ ne sert deux usages opposés :
 - être lisible SUR la carte sombre `#1E293B` exige une luminance ≥ **0,273** ;
 - porter du texte blanc exige une luminance ≤ **0,183**.
 
+**En clair, les deux usages CONVERGENT** (lot 1 clair, 26/09/2026) : être
+lisible sur le blanc et porter du blanc exigent tous deux une primaire assez
+foncée. Une seule valeur dérivée, `BrandContrast.lightText`, sert donc le
+texte, l'icône, le trait ET le fond des boutons — assombrie jusqu'à 4,5:1 sur
+la carte, le fond, le verre, les teintes de la couleur brute ET **ses propres
+teintes** (l'app teinte avec la valeur dérivée : calculée sans elles, Ocean
+tombait à 4,37:1 sur la sélection du menu latéral).
+
+| Palette | Avant | Après | Blanc dessus |
+|---|---|---|---|
+| Ocean | `#0EA5E9` | `#096B98` | 2,77 → 5,86 |
+| Emerald | `#10B981` | `#0A7350` | 2,54 → 5,86 |
+| Sunset | `#F97316` | `#A34B0E` | 2,80 → 5,86 |
+| Rose | `#EC4899` | `#AE3571` | 3,53 → 5,91 |
+| Amber | `#D97706` | `#985404` | 3,19 → 5,84 |
+
+Violet, Midnight et Indigo ne bougent pas. Les palettes issues d'un logo
+suivent la même règle. La graine du schéma et `brandSurface` partent de la
+couleur BRUTE : les teintes gardent leur aspect.
+
 | Usage | Clair | Sombre | Source |
 |---|---|---|---|
-| Texte, icône, trait, indicateur | `palette.primary` | `BrandContrast.darkText(primary)` — éclaircie jusqu'à 4,5:1 sur carte, piste, fond | `AppColors.primary`, `colorScheme.primary` |
-| `brand` / `brandText` (vivent sur `brandSurface`) | `palette.primary` | `BrandContrast.darkBrandText(primary)` — tenu aussi sur `brandSurface` | `theme.semantic` |
-| Fond d'un bouton plein, sous du blanc | `palette.primary` | `BrandContrast.fillUnderWhite(primaryLight)` | thème des Elevated / FilledButton |
+| Texte, icône, trait, indicateur | `BrandContrast.lightText(primary)` | `BrandContrast.darkText(primary)` — éclaircie jusqu'à 4,5:1 sur carte, piste, fond | `AppColors.primary`, `colorScheme.primary` |
+| `brand` / `brandText` (vivent sur `brandSurface`) | `BrandContrast.lightText(primary)` | `BrandContrast.darkBrandText(primary)` — tenu aussi sur `brandSurface` | `theme.semantic` |
+| Fond d'un bouton plein, sous du blanc | `BrandContrast.lightText(primary)` (la même) | `BrandContrast.fillUnderWhite(primaryLight)` | thème des Elevated / FilledButton |
 | Contenu posé SUR la primaire (sombre) | blanc | `#0F172A` (fond du thème) | `colorScheme.onPrimary` |
 
 **⚠ Ne jamais remettre une valeur de palette dans un getter sombre.** C'est
 ce qu'il y avait avant le 25/09/2026 : sur Midnight, la primaire valait la
 couleur même de la carte — 1,00:1, invisible, sur quelque 590 sites.
 
-**TRANCHÉ — la primaire n'est pas une couleur de texte fiable EN CLAIR.** Sous
-4,5:1 sur blanc pour cinq palettes (Ocean 2,77, Emerald 2,54, Sunset 2,80,
-Amber 3,19, Rose 3,53). Pour une information, un texte neutre — `onSurface`
-pour un chiffre ou un libellé (le précédent du Stock : « le prix en
-onSurface, pas la couleur de marque »), `textSecondary` pour une propriété ;
-pour une alerte, une variante `*Text`. La primaire reste un ACCENT : trait
-d'onglet, bouton plein, sélection.
+**TRANCHÉ — le rôle décide de la couleur d'un texte.** Une INFORMATION
+s'écrit en neutre — `onSurface` pour un chiffre ou un libellé (le précédent du
+Stock : « le prix en onSurface, pas la couleur de marque »), `textSecondary`
+pour une propriété ; une ALERTE en variante `*Text`. Un texte de MARQUE (lien,
+bouton, sélection) s'écrit en `semantic.brandText` — la seule valeur tenue sur
+ses propres teintes dans les DEUX modes. Avant le lot 1 clair, la primaire
+échouait en clair sur cinq palettes (Ocean 2,77, Emerald 2,54, Sunset 2,80,
+Amber 3,19, Rose 3,53).
 
 ⚠ **Sur sa propre teinte (10–14 %), la primaire échoue AUSSI EN SOMBRE** :
 3,68 à 4,58, sous 4,5:1 sur **sept palettes sur huit** (en clair : 2,22 à
 2,97 sur cinq). C'est plus large qu'un défaut du mode clair : une pastille
 teintée de marque n'écrit jamais en primaire.
 
-**Les éléments INTERACTIFS gardent la primaire** (un lien qui perd sa couleur
-perd son signal d'action) en attendant le lot 1 clair ; chacun porte le
-marqueur `lot 1 clair` dans le code et figure NOMMÉMENT au backlog.
-
-**NON TRANCHÉ — une primaire lisible en texte EN CLAIR.** Il n'existe pas de
-token « primaire lisible en texte » en mode clair (`brandText` y vaut la
-primaire brute). `BrandContrast` pourrait la dériver comme en sombre ; rien
-n'est décidé.
+**Les éléments INTERACTIFS** (un lien qui perd sa couleur perd son signal
+d'action) — les huit que le lot précédent avait marqués « lot 1 clair » —
+s'écrivent en `semantic.brandText` depuis le lot 1 clair : lisibles dans les
+deux modes, marqueurs retirés. Le menu latéral, qui contournait le thème avec
+la couleur BRUTE de la palette, lit lui aussi `brandText`. Le garde-fou n'admet
+plus aucune primaire en couleur de texte au restaurant.
 
 ### Le décor du restaurant — EN VIGUEUR AU RESTAURANT
 
@@ -224,7 +243,8 @@ plus favorable.
 | `danger` / `warning` / `success` / `info` en TEXTE | **1,95 à 3,42** ✘ | ≥ 5,29 |
 | `*Text` sur leur propre teinte (10–14 %) | ≥ 6,37 | ≥ 6,32 |
 | `danger` de base sur sa teinte | **3,13** ✘ | **4,34** ✘ |
-| primaire sur sa teinte | 2,22–11,18 (✘ sur 5) | **3,68–4,58** (✘ sur 7) |
+| primaire sur sa teinte (avant le lot 1 clair) | 2,22–11,18 (✘ sur 5) | **3,68–4,58** (✘ sur 7) |
+| `brandText` sur sa teinte, et sur ses propres teintes (clair) | ≥ 4,5 | ≥ 4,5 |
 
 ### La primaire, 8 palettes × 2 modes
 
@@ -245,7 +265,8 @@ est imposée d'office quand le logo est monochrome.
 
 `textHint` en sombre (3,07:1) ; texte en primaire sur `primarySurface` en
 sombre (3,4 à 3,96:1) ; fonds pleins peints à la main en primaire sous du
-blanc (lot 1b). Voir la section 21.
+blanc (lot 1b) — EN SOMBRE seulement depuis le lot 1 clair. Voir la
+section 21.
 
 ---
 

@@ -36,10 +36,14 @@ void main() {
       }
     });
 
-    test('en clair : la primaire BRUTE — ce que l\'app affiche aujourd\'hui',
+    test('en clair : la primaire DÉRIVÉE du lot 1 clair, qui porte le blanc',
         () {
       for (final p in kAllPalettes) {
-        expect(themeSwatches(p, Brightness.light).text, p.primary,
+        final sw = themeSwatches(p, Brightness.light);
+        expect(sw.text, BrandContrast.lightText(p.primary), reason: p.id);
+        expect(
+            BrandContrast.contrast(const Color(0xFFFFFFFF), sw.fill),
+            greaterThanOrEqualTo(4.5),
             reason: p.id);
       }
     });
