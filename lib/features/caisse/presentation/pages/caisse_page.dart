@@ -1109,12 +1109,14 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     required Map<String, PartnerDebtInfo> orderDebts,
     required Map<String, double> pendingRemit,
     bool grid = false,
+    bool listWide = true,
   }) {
             final perms = ref.watch(permissionsProvider(widget.shopId));
             return _OrderCard(
             order:    orders[i],
             dense:    _isResto && !_gridView,
             grid:     grid,
+            listWide: listWide,
             debt:     orderDebts[orders[i].id],
             // Versement partenaire encore attendu pour cette commande (null
             // = rien à recevoir). Affiche un bandeau + un bouton de marquage.
@@ -2138,8 +2140,13 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                     child: RestoGlassPanel(
                       padding: EdgeInsets.zero,
                       radius: 14,
-                      child: Column(children: [
-                        const _OrdersListHeader(),
+                      // UNE mesure, ici, hors des `IntrinsicHeight` des lignes
+                      // (cf. `_OrderCard.listWide`) : l'en-tête et les lignes
+                      // basculent ensemble.
+                      child: LayoutBuilder(builder: (context, box) {
+                      final wide = box.maxWidth >= kOrderListRowMin;
+                      return Column(children: [
+                        if (wide) const _OrdersListHeader(),
                         Expanded(
                           child: ListView.separated(
                             // En bas : la place du bouton flottant.
@@ -2154,10 +2161,12 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                             itemBuilder: (_, i) => _cardFor(i,
                                 orders: sorted,
                                 orderDebts: orderDebts,
-                                pendingRemit: pendingRemit),
+                                pendingRemit: pendingRemit,
+                                listWide: wide),
                           ),
                         ),
-                      ]),
+                      ]);
+                      }),
                     ),
                   );
                 })
@@ -2528,9 +2537,18 @@ class _OrderCard extends ConsumerStatefulWidget {
   /// dépliement, les actions et les gardes restent les mêmes objets.
   final bool grid;
 
+  /// Vue LISTE : la liste tient-elle ses colonnes sur une ligne ?
+  ///
+  /// MESURÉ PAR LA LISTE, pas par la carte, et c'est une contrainte, pas un
+  /// goût : la ligne vit sous l'`IntrinsicHeight` du liseré, et Flutter refuse
+  /// les dimensions intrinsèques d'un `LayoutBuilder` — la ligne ne rendait
+  /// RIEN en ligne (26/09/2026). Une seule mesure sert aussi l'en-tête.
+  final bool listWide;
+
   const _OrderCard({required this.order,
     this.dense = false,
     this.grid = false,
+    this.listWide = true,
     this.debt,
     this.pendingRemittance,
     required this.onUpdate,
@@ -4895,12 +4913,11 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     );
 
     return [
-      LayoutBuilder(builder: (context, box) {
-        // La largeur de la LIGNE (conteneur), liseré et marges déjà retirés :
-        // on la ramène à celle de la liste pour comparer au même seuil que
-        // l'en-tête.
-        final wide =
-            box.maxWidth + _ListCols.inset >= kOrderListRowMin;
+      Builder(builder: (context) {
+        // La largeur est celle de la LISTE, mesurée par elle : un
+        // `LayoutBuilder` ici, sous l'`IntrinsicHeight` du liseré, faisait
+        // lever Flutter et la ligne ne rendait rien (cf. `listWide`).
+        final wide = widget.listWide;
         final action =
             _inlineAction(context, widget.order.status, withIcon: !wide);
         if (wide) {
@@ -6586,10 +6603,6 @@ abstract final class _ListCols {
   static const double action = 78;
   static const double chevron = 18;
   static const double gap = 8;
-
-  /// Ce qui sépare la ligne du bord de la liste : le liseré (3) et la marge
-  /// de chaque côté.
-  static const double inset = 3 + 2 * _kListPadH;
 }
 
 /// BADGE D'ÉTAT — l'état en toutes lettres, sur un fond teinté.
@@ -6698,7 +6711,8 @@ class _OrdersSectionTitle extends StatelessWidget {
 
 /// EN-TÊTE DE COLONNES de la liste — `micro` espacé (on demandait 8 px :
 /// l'échelle commence à 10). Mêmes largeurs que les lignes (`_ListCols`) ;
-/// il se tait quand la ligne passe sur deux.
+/// la liste ne le pose que quand ses lignes tiennent sur une (même mesure
+/// qu'elles, cf. `_OrderCard.listWide`).
 class _OrdersListHeader extends StatelessWidget {
   const _OrdersListHeader();
 
@@ -6712,9 +6726,7 @@ class _OrdersListHeader extends StatelessWidget {
               textAlign: right ? TextAlign.right : TextAlign.left,
               style: style),
         );
-    return LayoutBuilder(builder: (context, box) {
-      if (box.maxWidth < kOrderListRowMin) return const SizedBox.shrink();
-      return Column(children: [
+    return Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(
               3 + _kListPadH, 10, _kListPadH, 8),
@@ -6739,7 +6751,6 @@ class _OrdersListHeader extends StatelessWidget {
             thickness: 1,
             color: Theme.of(context).semantic.borderSubtle),
       ]);
-    });
   }
 }
 
