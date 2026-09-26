@@ -1621,7 +1621,10 @@ class _FinanceChartCardState extends ConsumerState<_FinanceChartCard> {
             interval: yStep <= 0 ? null : yStep,
             getTitlesWidget: (v, _) => Padding(
               padding: const EdgeInsets.only(right: 6),
-              child: Text(_compact(v),
+              // Le compact CANONIQUE (§ 14) : « 2,5k », pas « 3k » — la copie
+              // locale arrondissait à l'entier et l'axe mentait sur un pas de
+              // 2 500. Le bénéfice peut être négatif : le signe est géré.
+              child: Text(CurrencyFormatter.compact(v),
                   maxLines: 1, style: AppTextStyles.micro),
             ),
           ),
@@ -1847,16 +1850,6 @@ class _SectorCard extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Montant compact pour l'axe vertical (12 500 → « 13k »).
-String _compact(double v) {
-  final a = v.abs();
-  if (a >= 1000000) {
-    return '${(v / 1000000).toStringAsFixed(a >= 10000000 ? 0 : 1)}M';
-  }
-  if (a >= 1000) return '${(v / 1000).toStringAsFixed(0)}k';
-  return v.toStringAsFixed(0);
 }
 
 /// Répartition des commandes par canal de service, en anneau + légende.

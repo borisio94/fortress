@@ -65,16 +65,42 @@ class CurrencyFormatter {
     return fmt.format(amount);
   }
 
-  /// Abréviation compacte d'un nombre : `1 234 567 → "1.2M"`,
-  /// `12 345 → "12.3k"`, sinon entier sans décimale.
-  /// Forme canonique partagée par les KPI Finances/Dashboard (k à 1
-  /// décimale, pas de gestion du signe, pas de symbole). Les écrans qui
-  /// ont volontairement un format différent (symbole accolé, k à 0
-  /// décimale, valeur absolue…) gardent leur propre implémentation.
+  /// Abréviation compacte d'un nombre, SANS symbole — KPI, graduations
+  /// d'axe (règle unique, document de design § 14, 26/09/2026) :
+  ///
+  ///     1 500 → « 1,5k »     10 000 → « 10k »     12 500 → « 12,5k »
+  ///     125 000 → « 125k »   1 250 000 → « 1,3M »  −12 500 → « -12,5k »
+  ///
+  /// - UNE décimale seulement quand elle porte une information : jamais
+  ///   « ,0 », et aucune au-delà de 100 (« 125k », pas « 125,0k ») ;
+  /// - la VIRGULE décimale, comme [format] (locale `fr_CM`) ;
+  /// - le SIGNE géré : une perte reste une perte (« -12,5k »).
+  ///
+  /// Avant : « 10.0k », point décimal, et « -12500 » pour un négatif ; le
+  /// graphique du restaurant avait sa propre copie, qui arrondissait à
+  /// l'entier — sur un pas de 2 500, l'axe lisait « 3k, 5k, 8k ».
   static String compact(double v) {
-    if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(1)}M';
-    if (v >= 1000)    return '${(v / 1000).toStringAsFixed(1)}k';
-    return v.toStringAsFixed(0);
+    final a = v.abs();
+    final String body;
+    // Seuils pris APRÈS arrondi : 999 950 donne « 1M », pas « 1000k ».
+    if (a >= 999500) {
+      body = '${_compactUnit(a / 1000000)}M';
+    } else if (a >= 999.5) {
+      body = '${_compactUnit(a / 1000)}k';
+    } else {
+      body = a.round().toString();
+    }
+    return (v < 0 && body != '0') ? '-$body' : body;
+  }
+
+  /// [x] (≥ 0) à une décimale au plus, virgule française, sans « ,0 » ;
+  /// entier dès 100.
+  static String _compactUnit(double x) {
+    if (x >= 100) return x.round().toString();
+    final tenths = (x * 10).round();
+    return tenths % 10 == 0
+        ? '${tenths ~/ 10}'
+        : '${tenths ~/ 10},${tenths % 10}';
   }
 
   static String _symbol(String currency) {

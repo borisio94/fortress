@@ -359,6 +359,28 @@ choisi au Hub s'applique au tableau de bord du restaurant, qui l'affiche
 active. À trancher : le trimestre partout ou nulle part ; un seul sélecteur
 partagé pour l'e-commerce et le Hub.
 
+## Montants
+
+### Hors du restaurant : copies du compact et montants hors formateur
+
+*Inscrit le 26/09/2026 avec le lot « montants » (règle compacte unique posée
+dans `CurrencyFormatter.compact` ; le restaurant est en règle).*
+
+- **Six copies locales du compact**, qui ne suivent pas la règle (« 2k »,
+  point décimal…) : `hub_dashboard_page` (×2), `clients_page` (×2),
+  `admin_subscriptions_page`, et les `_compact` / `_fmt` de l'e-commerce qui,
+  eux, délèguent déjà au canonique.
+- **≥ 16 montants affichés hors `CurrencyFormatter`** (audit, § d) — les plus
+  exposés d'abord : la **page publique de suivi de commande**
+  (`order_tracking_page`, « XAF » en dur, vue par les CLIENTS) et le **message
+  WhatsApp** du catalogue (`catalogue_page`) ; puis `admin_panel_page`
+  (« XAF »), `stock_movements_page`, `dashboard_page` (sans séparateur de
+  milliers), `caisse_page`, `new_product_draft_sheet`,
+  `product_quick_add_page`, `new_web_order_banner`.
+- **14 `NumberFormat` directs** et 3 boucles `StringBuffer` identiques de
+  séparation des milliers (`subscription_page`, `super_admin_page`,
+  `delivery_message_builder`).
+
 ## Code mort
 
 ### `_ServiceChip` — une pastille que plus rien ne rend

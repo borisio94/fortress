@@ -611,9 +611,23 @@ mettre le nombre en valeur, sans le reformater. **Jamais** de
 `toStringAsFixed(0)` suivi de « XAF » ou « FCFA » en dur — la page publique
 de suivi le fait encore.
 
-**NON TRANCHÉ — le compact.** `CurrencyFormatter.compact` rend 1 500 en
-« 1.5k » ; six copies locales rendent « 2k ». Choisir, puis supprimer les
-copies.
+**TRANCHÉ (26/09/2026) — le compact : `CurrencyFormatter.compact`, une seule
+règle** (KPI, graduations d'axe ; sans symbole) :
+
+| 1 500 | 10 000 | 12 500 | 125 000 | 1 250 000 | −12 500 |
+|---|---|---|---|---|---|
+| 1,5k | 10k | 12,5k | 125k | 1,3M | -12,5k |
+
+Une décimale seulement quand elle porte une information (jamais « ,0 »,
+aucune dès 100) ; la VIRGULE décimale, comme `format` ; le signe géré. Avant :
+« 10.0k », point décimal, « -12500 » pour une perte — et le graphique du
+restaurant arrondissait à l'entier (« 3k, 5k, 8k » sur un pas de 2 500).
+Testé valeur par valeur (`currency_compact_test`).
+
+Au restaurant : aucun montant hors `CurrencyFormatter` (vérifié le
+26/09/2026 — les `toStringAsFixed` restants sont des quantités, des
+pourcentages ou des pré-remplissages de champ). Hors restaurant : six copies
+locales du compact et ≥ 16 montants hors formateur, au backlog.
 
 ### Dates
 
