@@ -18,6 +18,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:fortress/core/services/activity_service.dart';
+import 'package:fortress/core/services/ingredient_service.dart';
+import 'package:fortress/core/services/recipe_service.dart';
 import 'package:fortress/core/storage/hive_boxes.dart';
 import 'package:fortress/core/storage/local_storage_service.dart';
 import 'package:fortress/core/theme/app_theme.dart';
@@ -170,7 +173,16 @@ void main() {
   setUp(() async {
     await HiveBoxes.productsBox.clear();
     await HiveBoxes.recipeIngredientsBox.clear();
+    await HiveBoxes.ingredientsBox.clear();
+    await HiveBoxes.restaurantActivitiesBox.clear();
   });
+
+  /// Remplit nom, catégorie « Plats » et prix : le minimum d'un plat valide.
+  Future<void> fillMinimum(WidgetTester tester, String name) async {
+    await tester.enterText(field('Poulet DG'), name);
+    await press(tester, find.text('Plats'));
+    await tester.enterText(field('3500'), '4000');
+  }
 
   testWidgets('création : les refus arrivent dans l\'ordre nom → catégorie → prix',
       (tester) async {
@@ -239,8 +251,12 @@ void main() {
     await press(tester, find.text('Créer le plat'));
     final created = dishes().single;
 
+    expect(find.text('Supprimer'), findsNothing,
+        reason: 'pas de suppression pour un plat qui n\'existe pas encore');
+
     state = await open(tester, existing: created);
     expect(find.text('Enregistrer'), findsOneWidget);
+    expect(find.text('Supprimer'), findsOneWidget);
     expect(find.widgetWithText(TextField, 'Koki'), findsOneWidget);
     expect(find.widgetWithText(TextField, '2000'), findsOneWidget);
 
@@ -285,5 +301,66 @@ void main() {
     expect(LocalStorageService.getCategories('shop1'), contains('Desserts'));
     expect(find.text('Desserts'), findsOneWidget,
         reason: 'la nouvelle catégorie est proposée dans la fiche');
+  });
+
+  testWidgets('composition : un ingrédient coché est écrit dans la recette',
+      (tester) async {
+    final ing = (await tester.runAsync(() =>
+        IngredientService.create(shopId: 'shop1', name: 'Tomate')))!;
+    final state = await open(tester);
+    await fillMinimum(tester, 'Omelette');
+    expect(find.text('Générosité des portions'), findsNothing);
+
+    await press(tester, find.text('Tomate'));
+    expect(find.text('Générosité des portions'), findsOneWidget,
+        reason: 'le bloc des portions apparaît avec le premier ingrédient');
+    await press(tester, find.text('Créer le plat'));
+
+    expect(state().result, isTrue);
+    final lines = RecipeService.forProduct('shop1', dishes().single.id!);
+    expect(lines.map((l) => l.ingredientId), [ing.id]);
+  });
+
+  testWidgets('composition : « Vider la composition » retire tout après '
+      'confirmation', (tester) async {
+    await tester.runAsync(
+        () => IngredientService.create(shopId: 'shop1', name: 'Oignon'));
+    await open(tester);
+    await press(tester, find.text('Oignon'));
+    await press(tester, find.text('Vider la composition'));
+    expect(find.text('Supprimer la fiche recette ?'), findsOneWidget);
+    await press(tester, find.text('Supprimer'));
+
+    expect(find.text('Générosité des portions'), findsNothing);
+    expect(find.text('Vider la composition'), findsNothing);
+  });
+
+  testWidgets('réglages repliés : coût, stock, vitrine et secteur sont '
+      'enregistrés', (tester) async {
+    final bar = (await tester.runAsync(
+        () => ActivityService.create(shopId: 'shop1', name: 'Bar')))!;
+    final state = await open(tester);
+    await fillMinimum(tester, 'Bière');
+
+    expect(find.text('Secteur à choisir'), findsOneWidget,
+        reason: 'repli fermé, boutique à secteurs, aucun choisi');
+    expect(find.text('Suivre le stock'), findsNothing);
+    await press(tester, find.text('Coût, secteur, stock et visibilité'));
+    expect(find.text('Secteur à choisir'), findsNothing);
+
+    await tester.enterText(field('0'), '1200');
+    // Ordre des interrupteurs : stock, vente, vitrine.
+    await press(tester, find.byType(Switch).at(0));
+    await press(tester, find.byType(Switch).at(2));
+    await press(tester, find.text('Bar'));
+    await press(tester, find.text('Créer le plat'));
+
+    expect(state().result, isTrue);
+    final p = dishes().single;
+    expect(p.priceBuy, 1200);
+    expect(p.trackStock, isTrue);
+    expect(p.isActive, isTrue);
+    expect(p.isVisibleWeb, isFalse);
+    expect(p.activityId, bar.id);
   });
 }
