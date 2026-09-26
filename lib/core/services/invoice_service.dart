@@ -6,9 +6,11 @@ import '../../features/caisse/domain/entities/sale.dart';
 import '../../features/caisse/domain/entities/sale_item.dart';
 import '../../features/caisse/domain/invoice_theme.dart';
 import '../../features/shop_selector/domain/entities/shop_summary.dart';
+import '../config/restaurant_mode.dart';
 import '../utils/currency_formatter.dart';
 import 'logo_color_extractor.dart';
 import 'logo_storage_service.dart';
+import 'resto_ticket_pdf.dart';
 
 /// Génération de la facture PDF A4 personnalisée — logo de la
 /// boutique + palette dérivée. Lecture seule (aucune écriture
@@ -52,6 +54,20 @@ class InvoiceService {
     required ShopSummary shop,
     PdfPageFormat format = roll80,
   }) async {
+    // RESTAURANT : son propre ticket — tout en noir, sans logo, Inter
+    // embarquée (`resto_ticket_pdf.dart`). Avant le logo, qu'il n'imprime
+    // pas. Le ticket e-commerce et la facture A4 ne passent pas par ici.
+    if (format.width < _ticketMaxWidth && isRestaurantSector(shop.sector)) {
+      try {
+        final doc = pw.Document();
+        doc.addPage(await RestoTicketPdf.page(
+            sale: sale, shop: shop, format: format));
+        return doc.save();
+      } catch (e, st) {
+        debugPrint('[InvoiceService] ticket restaurant échoué : $e\n$st');
+        return Uint8List(0);
+      }
+    }
     // 1. Charger les bytes du logo (cache → fetch). Si null, on
     //    génère sans logo (fallback gracieux).
     Uint8List? logoBytes;

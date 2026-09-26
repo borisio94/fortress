@@ -7,6 +7,52 @@ referme.
 
 ---
 
+## ⚠ PRIORITAIRE — Mentions légales du ticket
+
+### Le NIU n'existe pas : les tickets n'ont pas de valeur fiscale
+
+*Constaté à la refonte du ticket de caisse restaurant (26/09/2026). Inscrit
+PRIORITAIRE par décision produit : plus grave que tout le chantier visuel, et
+invisible.*
+
+Une facture émise par un commerce déclaré au Cameroun doit porter son **NIU**
+(Numéro d'Identifiant Unique). Fortress ne le stocke NULLE PART — ni `shops`,
+ni `ShopSummary`, ni les réglages, ni les migrations. Pas davantage le RCCM, la
+raison sociale, le régime fiscal, l'adresse ni la ville de la boutique. Les
+utilisateurs impriment aujourd'hui des tickets sans valeur devant
+l'administration.
+
+Le ticket restaurant est prêt à les recevoir : la ligne NIU n'apparaît pas
+tant que la donnée n'existe pas (pied de `RestoTicket`).
+
+Coût du lot de données : un hotfix (`shops` : `niu`, `rccm`, `legal_name`,
+`tax_regime`, `address`, `city`) ; les champs dans `ShopSummary` et les deux
+chemins de synchronisation ; un formulaire dans les réglages de la boutique.
+**Repoussé derrière l'autre chantier** : `shop_settings_page.dart` y est déjà
+modifié, c'est là qu'est le vrai coût — ne pas y ouvrir un second front.
+
+### Pas de numéro de commande court
+
+Le ticket restaurant imprime « Réf. » + les 6 derniers caractères de l'id.
+Un vrai numéro séquentiel est un lot à part : une séquence serveur ne marche
+pas hors ligne (le ticket s'imprime avant la synchro), un compteur local entre
+en collision dès deux postes.
+
+### Les ids de commande du restaurant sont encore horodatés
+
+`restaurant_order_service.dart` (lignes 249, 343, 408, 539) crée ses commandes
+en `order_<millisecondes>`, alors que la caisse est passée à l'UUID v4 (id
+devinable, collision de deux commandes dans la même milliseconde). C'est ce
+format qui imprimait « ORDER_17 » sur tous les tickets.
+
+### Ticket e-commerce — les glyphes absents de Helvetica
+
+Le ticket e-commerce (non touché, décision de secteur) imprime toujours en
+Helvetica : le « − » de la remise et l'apostrophe « ’ » n'y sortent pas.
+Correctif connu : celui du restaurant (Inter embarquée, `RestoTicketPdf`).
+
+---
+
 ## Dette de palette
 
 Des tokens dont la valeur ne tient pas le contraste là où ils servent. Ce ne

@@ -338,6 +338,33 @@ seule : la caisse plafonne à 13 ; un bouton à 16 y paraît trop gros.
 tickets 80 mm) ont leurs propres tailles, en points PDF — hors de cette
 échelle.
 
+### Le ticket de caisse du restaurant — TRANCHÉ (26/09/2026)
+
+Ticket PROPRE au restaurant (`RestoTicket` pour le contenu, domaine pur ;
+`RestoTicketPdf` pour le dessin), choisi sur `shop.sector` dans
+`InvoiceService.generatePdf`. Le ticket e-commerce ne bouge pas. Il
+s'imprime sur papier THERMIQUE, d'où ces règles :
+
+- **Tout en noir.** Ni couleur de marque ni gris : une teinte sort tramée.
+  La hiérarchie passe par la taille et la graisse. **Pas de logo**, pour la
+  même raison.
+- **Inter embarquée** (400/700, sous-ensemble : ~12 Ko par ticket). Helvetica,
+  la police PDF par défaut, n'a ni le « − » (U+2212), ni l'apostrophe « ’ »
+  (U+2019) : la remise s'imprimait sans son signe. L'espace fine U+202F de
+  `CurrencyFormatter` n'existe dans aucune des deux polices : elle devient
+  U+00A0 à l'impression (`RestoTicketPdf.money`).
+- **Une ligne dont la donnée manque n'existe pas.** Jamais de champ vide,
+  jamais de donnée inventée.
+- **« Réf. » + les 6 derniers caractères de l'id**, comme le catalogue — pas
+  « n° » : ce n'est pas une séquence.
+- En-tête : nom en capitales, puis « Restaurant » SEUL (la ville n'existe pas
+  en base, et le pays n'en est pas une).
+- Règlement dans son propre bloc encadré : chaque règlement (espèces : ce que
+  le client a tendu), le rendu, le reste dû. Le reste dû lit les règlements
+  enregistrés, pas seulement `amountPaid` (voir `_settlement`).
+- Largeurs : 80 mm et 58 mm ; sous 190 pt, le total passe de 14 à 12 pt et le
+  nom de 13 à 11. Bancs : `resto_ticket_test.dart`, `resto_ticket_pdf_test.dart`.
+
 **État** : 300 `fontSize` en dur subsistent dans l'UI, dont 33 hors échelle,
 0 au restaurant (audit du 24/09/2026).
 
@@ -972,6 +999,7 @@ commentaire ET ce registre**, sinon l'un des deux ment.
 | Règle | Écrite dans | Section |
 |---|---|---|
 | Deux valeurs de primaire, dérivées ; ne pas y remettre la palette | `core/theme/brand_contrast.dart`, `app_colors.dart` | 3 |
+| Ticket restaurant : tout noir, Inter embarquée, ligne sans donnée absente | `features/restaurant/domain/resto_ticket.dart`, `core/services/resto_ticket_pdf.dart` | 5 |
 | `textHint` sombre dérivée (lerp vers `textSecondary`, 0,60), 4,5:1 hors teinte de marque | `app_colors.dart`, `app_theme.dart` (`_dTextHint`) | 3 |
 | Cibles de 48 px au doigt, pièges de hauteur fixe | `core/widgets/touch_target.dart` | 17 |
 | Échelle typographique, jamais de `fontSize` en dur | `core/theme/app_text_styles.dart` | 5 |
