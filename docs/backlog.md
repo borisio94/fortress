@@ -440,6 +440,41 @@ de la pure présentation, sans `SchemaMigrator`.
   `material.dart` sans usage apparent ;
 - `inventaire/domain/entities/product.dart` — `foundation.dart`.
 
+## Grands fichiers
+
+### Le restaurant est découpé ; restent les classes géantes et les fichiers partagés
+
+*Inscrit le 26/09/2026 avec le lot « grands fichiers ».*
+
+**Fait** : les 7 fichiers du restaurant de plus de 1 500 lignes sont découpés
+en `part` / `part of` par unité naturelle (18 fichiers `part`) —
+`restaurant_staff_page` 2 871 → 334 l. (+ équipe, pointage, paie),
+`restaurant_dashboard_page` 2 542 → 700 (+ service, finances, activité),
+`dish_form_sheet` 1 913 → 1 360 (+ recette, pièces), `restaurant_stock_page`
+1 877 → 293 (+ ingrédients, fournitures), `restaurant_menu_page` 1 759 → 770
+(+ en-tête, grille), `finances_hub_page` 1 693 → 169 (+ un fichier par
+onglet), `restaurant_tables_page` 1 603 → 664 (+ carte, feuilles).
+
+**Preuve** : le build compilé est le MÊME programme que celui d'avant —
+seuls l'ordre des tables, des listes d'héritage et la numérotation des
+signatures changent (comparaison canonique : chaque index de signature
+remplacé par la signature qu'il désigne ; contrôle négatif : un seul
+caractère changé dans une chaîne est détecté).
+
+**Restent — les classes géantes** (un `part` découpe un fichier, pas une
+classe ; les réduire, c'est extraire de vrais composants, avec un risque sur
+le comportement : un lot à part, AVEC des tests d'écran d'abord) :
+l'état de la fiche plat (≈ 1 260 l.), l'onglet Paie (≈ 1 030), la fiche
+employé (≈ 760), la page Menu (≈ 655), la page Plan de salle (≈ 600).
+
+**Restent — les grands fichiers hors restaurant**, à reprendre quand l'autre
+chantier aura commité (la plupart portent ses modifications) :
+`caisse_page` 7 289 l. (M), `inventaire_page` 5 208 (M), `super_admin_page`
+4 972, `product_form_page` 4 538 (M), `cart_widget` 2 921,
+`catalogue_page` 2 913 (M), `adaptive_scaffold` 2 727 (M), `parametres_page`
+2 050 (M), `product_grid_widget` 1 942 (M), `employees_page` 1 819,
+`caisse_bloc` 1 508 (M).
+
 ## Code mort
 
 ### ~~`_ServiceChip` — une pastille que plus rien ne rend~~ — SUPPRIMÉ
