@@ -613,9 +613,3 @@ class _DishMenuBtn extends StatelessWidget {
     );
   }
 }
-
-/// Résultat de l'éditeur de stock du jour : `count == null` = illimité.
-class _CountResult {
-  final int? count;
-  const _CountResult(this.count);
-}

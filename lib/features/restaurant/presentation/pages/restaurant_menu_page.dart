@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -25,10 +24,10 @@ import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/product_image_card.dart';
 import '../../../caisse/presentation/widgets/cart_widget.dart';
+import '../widgets/daily_count_sheet.dart';
 import '../widgets/dish_details_sheet.dart';
-import '../../../../core/utils/name_key.dart';
-import '../../domain/category_labels.dart';
 import '../../domain/menu_grid_geometry.dart';
+import '../../domain/menu_view.dart';
 import '../widgets/dish_form_sheet.dart';
 import '../widgets/resto_dish_visuals.dart';
 import '../widgets/resto_empty_state.dart';
@@ -39,6 +38,7 @@ import '../widgets/resto_surfaces.dart';
 
 part 'restaurant_menu_page.header.dart';
 part 'restaurant_menu_page.grid.dart';
+part 'restaurant_menu_page.cart.dart';
 
 /// Tables dont un changement doit redessiner cet écran.
 ///
@@ -175,74 +175,15 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     super.dispose();
   }
 
-  /// Le catalogue COMPLET de la boutique, plats retirés compris.
-  List<Product> get _allProducts =>
-      LocalStorageService.getProductsForShop(widget.shopId);
-
-  /// LA CARTE : les plats réellement vendables.
-  ///
-  /// C'est le filtre que posent déjà toutes les autres surfaces de vente
-  /// (cf. `Product.isSellable`) et que cet écran était seul à ne pas poser : un
-  /// plat décoché s'affichait comme les autres, sans tampon, et se commandait.
-  List<Product> get _products =>
-      _allProducts.where((p) => p.isSellable).toList();
-
-  /// Les plats RETIRÉS de la vente. Ils restent au catalogue : c'est d'ici
-  /// qu'on les rouvre.
-  List<Product> get _retired =>
-      _allProducts.where((p) => !p.isSellable).toList();
-
-  /// Ce que la grille affiche en ce moment — la carte, ou les plats retirés.
-  List<Product> get _source => _showRetired ? _retired : _products;
-
-  /// Libellé de chaque catégorie, par clé `nameKey`.
-  ///
-  /// « Plats » et « plats » faisaient deux onglets : la catégorie est une
-  /// chaîne libre, et rien ne les rapprochait. Elles n'en font plus qu'un,
-  /// sous l'orthographe la plus portée (cf. `categoryLabels`). Rien n'est
-  /// réécrit : chaque plat garde son texte.
-  Map<String, String> get _labels =>
-      categoryLabels(_source.map((p) => p.categoryId));
-
-  /// Catégories réellement portées par au moins un plat — une catégorie
-  /// vide n'aurait aucun contenu à filtrer.
-  List<String> get _categories => _labels.values.toList()..sort();
-
-  /// Nombre de plats par catégorie, plus le total sous la clé `null`.
-  ///
-  /// Remplace les vignettes photo de l'ancienne barre : à la taille d'une
-  /// pastille, une photo de plat n'est plus qu'une tache de couleur, alors
-  /// qu'un compte dit exactement ce qu'on trouvera en filtrant.
-  ///
-  /// Compté sur `_source` et non sur la carte entière : en mode « plats
-  /// retirés », les nombres doivent décrire ce qui est à l'écran.
-  Map<String?, int> get _categoryCounts {
-    final labels = _labels;
-    final counts = <String?, int>{null: _source.length};
-    for (final p in _source) {
-      final c = p.categoryId?.trim() ?? '';
-      if (c.isEmpty) continue;
-      // Compté sous le LIBELLÉ retenu, celui de l'onglet : « plats » ajoute
-      // au compteur de « Plats ».
-      final label = labels[nameKey(c)] ?? c;
-      counts[label] = (counts[label] ?? 0) + 1;
-    }
-    return counts;
-  }
-
-  List<Product> get _visible {
-    var all = _source;
-    if (_category != null) {
-      all = all.where((p) => sameCategory(p.categoryId, _category)).toList();
-    }
-    final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return all;
-    return all.where((p) {
-      if (p.name.toLowerCase().contains(q)) return true;
-      final d = p.description;
-      return d != null && d.toLowerCase().contains(q);
-    }).toList();
-  }
+  /// Ce que montre la page en ce moment — carte ou plats retirés, filtrés
+  /// par catégorie et par recherche. Les règles vivent dans `MenuView`
+  /// (domaine, sous test) ; relu à chaque build, comme l'était Hive.
+  MenuView get _view => MenuView(
+        all: LocalStorageService.getProductsForShop(widget.shopId),
+        showRetired: _showRetired,
+        category: _category,
+        query: _query,
+      );
 
   void _addToCart(Product p) {
     final pid = p.id;
@@ -384,71 +325,15 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     if (mounted) setState(() {});
   }
 
-  /// Éditeur du stock du jour d'un plat (admin) — un nombre, ou illimité.
-  /// Passe par le châssis de formulaire canonique (clavier natif géré).
+  /// Éditeur du stock du jour d'un plat (admin) — la feuille
+  /// `DailyCountSheet` rend un nombre, ou illimité.
   Future<void> _editCount(Product p) async {
     final pid = p.id;
     if (pid == null || pid.isEmpty) return;
     final a = DailyMenuService.read(widget.shopId, pid);
-    final ctrl = TextEditingController(text: a.count?.toString() ?? '');
-    int? parse() {
-      final t = ctrl.text.trim();
-      return t.isEmpty ? null : int.tryParse(t);
-    }
-
-    final result = await showAdaptiveFormSheet<_CountResult>(
+    final result = await showAdaptiveFormSheet<DailyCountResult>(
       context: context,
-      builder: (sheetCtx) => AdaptiveFormFrame(
-        title: 'Stock du jour',
-        subtitle: p.name,
-        icon: Icons.inventory_2_outlined,
-        body: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Nombre de plats disponibles aujourd\'hui. Le compteur diminue '
-                'à chaque commande ; à 0 le plat passe « épuisé ». Laissez vide '
-                'pour un stock illimité.',
-                style: AppTextStyles.caption,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: ctrl,
-                autofocus: true,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'Nombre de plats',
-                  hintText: 'ex. 20 (vide = illimité)',
-                ),
-                onSubmitted: (_) =>
-                    Navigator.of(sheetCtx).pop(_CountResult(parse())),
-              ),
-              const SizedBox(height: 20),
-              Row(children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(sheetCtx)
-                        .pop(const _CountResult(null)),
-                    child: const Text('Illimité'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: () =>
-                        Navigator.of(sheetCtx).pop(_CountResult(parse())),
-                    child: const Text('Enregistrer'),
-                  ),
-                ),
-              ]),
-            ],
-          ),
-        ),
-      ),
+      builder: (_) => DailyCountSheet(dishName: p.name, current: a.count),
     );
     if (result == null) return; // fermé sans valider
     await DailyMenuService.setCount(widget.shopId, pid, result.count);
@@ -467,7 +352,8 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     // peut y FAIRE qui se protège, pas la porte.
     final canEdit = perms.canEditProduct;
     final canAdd = perms.canAddProduct;
-    final products = _visible;
+    final view = _view;
+    final products = view.visible;
     // Lu ICI et non dans le `builder` du BlocBuilder : `ref.watch` ne vaut que
     // pendant le build de ce widget-ci, pas dans la closure d'un autre.
     final paneVisible = ref.watch(cartPaneVisibleProvider);
@@ -515,52 +401,15 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
             // l'utilisateur n'ait pas replié le volet depuis le bouton 🛒.
             final open = cart.items.isNotEmpty && paneVisible;
             return Row(children: [
-              Expanded(child: _buildMenu(products, isAdmin,
+              Expanded(child: _buildMenu(view, products, isAdmin,
                   canDelete: canDelete, canEdit: canEdit, canAdd: canAdd)),
-              // Animé en largeur : le volet glisse au lieu d'apparaître d'un
-              // bloc, ce qui rend visible d'où il vient.
-              // Le panier est un BLOC À PART : coins arrondis et écart avec la
-              // carte, comme la maquette. L'écart est compris DANS la largeur
-              // animée — ajouté à côté, il apparaîtrait d'un coup au premier
-              // article pendant que le panier, lui, glisse encore.
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutCubic,
-                width: open ? _cartPaneWidth(context) + _kCartGap : 0,
-                child: open
-                    // `ClipRect` + `OverflowBox` : pendant l'animation, la
-                    // largeur imposée est inférieure à la largeur finale du
-                    // panier. Sans ces deux-là, Flutter tenterait de comprimer
-                    // sa mise en page à chaque image et lèverait un débordement.
-                    ? ClipRect(
-                        child: OverflowBox(
-                          alignment: Alignment.centerLeft,
-                          maxWidth: _cartPaneWidth(context) + _kCartGap,
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: _kCartGap),
-                            child: SizedBox(
-                              width: _cartPaneWidth(context),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: CartWidget(
-                                    shopId: widget.shopId, isEcommerce: true),
-                              ),
-                            ),
-                          ),
-                        ),
-                      )
-                    : const SizedBox.shrink(),
-              ),
+              _MenuCartPane(open: open, shopId: widget.shopId),
             ]);
           },
         ),
       ),
     );
   }
-
-  /// Écart entre la carte et le volet panier — les deux sont des blocs
-  /// distincts, pas deux moitiés d'une même surface.
-  static const double _kCartGap = 10;
 
   /// Le volet panier est-il déployé ?
   ///
@@ -573,39 +422,19 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
     return hasItems && ref.watch(cartPaneVisibleProvider);
   }
 
-  /// Largeur du volet : assez pour lire une ligne d'article, jamais plus du
-  /// tiers de l'écran — la carte doit rester l'écran principal.
-  double _cartPaneWidth(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    // Le seuil est partagé avec le panier, qui doit savoir s'il recouvre la
-    // carte pour proposer d'y revenir. Voir `kCartPaneFullWidthBelow`.
-    return w < kCartPaneFullWidthBelow ? w : (w / 3).clamp(320.0, 420.0);
-  }
-
   Widget _buildMenu(
+    MenuView view,
     List<Product> products,
     bool isAdmin, {
     required bool canDelete,
     required bool canEdit,
     required bool canAdd,
   }) {
-    // CARTE TOTALEMENT VIDE — pas « aucun résultat », mais aucun plat du tout.
-    //
-    // Dans ce cas la recherche et les filtres de catégorie disparaissent :
-    // chercher et trier zéro élément ne peut rien donner, et deux barres de
-    // tri au-dessus d'un écran vide laissent croire que quelque chose est
-    // filtré alors qu'il n'y a simplement rien. Elles reviennent au premier
-    // plat enregistré.
-    final emptyMenu = _source.isEmpty;
-    // Des plats existent, mais tous retirés de la vente : ce n'est PAS une
-    // carte vide, et le dire ferait chercher une saisie déjà faite.
-    final allRetired = !_showRetired && _products.isEmpty && _retired.isNotEmpty;
-    // Conséquence : sur une carte vide, la recherche et la catégorie encore
-    // en mémoire ne décident plus du message — leurs commandes ne sont plus à
-    // l'écran, on ne pourrait ni les effacer ni comprendre d'où sort
-    // « aucun plat trouvé ».
-    final searching = !emptyMenu && _query.trim().isNotEmpty;
-    final category = emptyMenu ? null : _category;
+    // Carte vide, tout retiré, recherche en cours : les règles et leurs
+    // raisons sont dans `MenuView` (isEmptyMenu, isAllRetired, isSearching).
+    final emptyMenu = view.isEmptyMenu;
+    final category = view.effectiveCategory;
+    final empty = view.emptyKind;
     return Column(
         children: [
           // En-tête EN TÊTE DU CORPS et non dans la barre du haut : le titre
@@ -619,8 +448,8 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
           // laissant croire qu'il y a une carte.
           if (!emptyMenu)
             _MenuHeader(
-              dishCount: _source.length,
-              categoryCount: _categories.length,
+              dishCount: view.source.length,
+              categoryCount: view.categories.length,
               retired: _showRetired,
               // La loupe s'efface quand le champ est déployé : il porte déjà sa
               // propre croix de fermeture.
@@ -631,9 +460,9 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
           // Porte de retour vers les plats retirés — et retour à la carte.
           // Affiché même quand la grille est vide : c'est précisément le cas où
           // l'on a besoin de savoir que les plats sont ailleurs.
-          if (_retired.isNotEmpty || _showRetired)
+          if (view.retired.isNotEmpty || _showRetired)
             _RetiredBanner(
-              count: _retired.length,
+              count: view.retired.length,
               showingRetired: _showRetired,
               onToggle: () => setState(() {
                 _showRetired = !_showRetired;
@@ -656,8 +485,8 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
                 }),
               ),
             _CategoryBar(
-              categories: _categories,
-              counts: _categoryCounts,
+              categories: view.categories,
+              counts: view.categoryCounts,
               selected: _category,
               onSelect: (c) => setState(() => _category = c),
             ),
@@ -665,32 +494,34 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
           Expanded(
             child: products.isEmpty
                 ? RestoEmptyState(
-                    icon: searching
+                    icon: empty == MenuEmptyKind.noMatch
                         ? Icons.search_off_rounded
                         : Icons.restaurant_rounded,
-                    title: searching
-                        ? 'Aucun plat trouvé'
-                        : _showRetired
-                            ? 'Aucun plat retiré'
-                            : allRetired
-                                ? 'Tous vos plats sont retirés'
-                                : category == null
-                                    ? 'Carte vide'
-                                    : 'Aucun plat dans « $category »',
-                    subtitle: searching
-                        ? 'Aucun plat ne correspond à « ${_query.trim()} ». '
-                            'Essayez un autre mot ou changez de catégorie.'
-                        : _showRetired
-                            ? 'Toute votre carte est en vente.'
-                            : allRetired
-                                ? 'Vos plats existent, mais aucun n\'est en '
-                                    'vente. Ouvrez « plats retirés » pour en '
-                                    'remettre un à la carte.'
-                                : category == null
-                                    ? 'Ajoutez vos plats pour composer la '
-                                        'carte de votre établissement.'
-                                    : 'Choisissez une autre catégorie ou '
-                                        'ajoutez un plat.',
+                    title: switch (empty) {
+                      MenuEmptyKind.noMatch => 'Aucun plat trouvé',
+                      MenuEmptyKind.noRetired => 'Aucun plat retiré',
+                      MenuEmptyKind.allRetired => 'Tous vos plats sont retirés',
+                      MenuEmptyKind.emptyMenu => 'Carte vide',
+                      MenuEmptyKind.emptyCategory =>
+                        'Aucun plat dans « $category »',
+                    },
+                    subtitle: switch (empty) {
+                      MenuEmptyKind.noMatch =>
+                        'Aucun plat ne correspond à « ${_query.trim()} ». '
+                            'Essayez un autre mot ou changez de catégorie.',
+                      MenuEmptyKind.noRetired =>
+                        'Toute votre carte est en vente.',
+                      MenuEmptyKind.allRetired =>
+                        'Vos plats existent, mais aucun n\'est en '
+                            'vente. Ouvrez « plats retirés » pour en '
+                            'remettre un à la carte.',
+                      MenuEmptyKind.emptyMenu =>
+                        'Ajoutez vos plats pour composer la '
+                            'carte de votre établissement.',
+                      MenuEmptyKind.emptyCategory =>
+                        'Choisissez une autre catégorie ou '
+                            'ajoutez un plat.',
+                    },
                     // Sans le droit de créer, l'état vide reste informatif :
                     // proposer un bouton qui refuserait ensuite serait pire
                     // que ne rien proposer.

@@ -16,8 +16,9 @@ import 'package:flutter_test/flutter_test.dart';
 /// Lectures de la largeur d'ÉCRAN admises : décisions sur l'écran entier.
 const _screenWidthAllowed = {
   // Volet panier : plein écran sous `kCartPaneFullWidthBelow`, latéral
-  // au-dessus — une décision sur l'écran entier.
-  'restaurant_menu_page.dart',
+  // au-dessus — une décision sur l'écran entier. Dans son propre fichier
+  // depuis le lot « classes géantes » (26/09/2026).
+  'restaurant_menu_page.cart.dart',
 };
 
 final _literalWidth = RegExp(
@@ -70,6 +71,6 @@ void main() {
     ''';
     expect(literalThresholds({'a.dart': src}), hasLength(2));
     expect(screenWidthReads({'a.dart': src}), hasLength(1));
-    expect(screenWidthReads({'restaurant_menu_page.dart': src}), isEmpty);
+    expect(screenWidthReads({'restaurant_menu_page.cart.dart': src}), isEmpty);
   });
 }
