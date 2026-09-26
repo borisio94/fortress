@@ -63,6 +63,32 @@ extension ServiceTabVisuals on ServiceTab {
     };
   }
 
+  /// La couleur du LISERÉ d'état (`kStateStripeWidth`), liste ET grille.
+  ///
+  /// UNE COMMANDE TERMINÉE RECULE, SON LISERÉ AUSSI. Il portait
+  /// `onSurfaceVariant` : 8,73–8,82:1 sur son fond en clair, le trait le plus
+  /// marqué de l'écran, sur les cartes qui doivent s'effacer. Il passe à
+  /// `outlineVariant`, le gris de la même famille neutre, mesuré sur les huit
+  /// palettes contre le fond d'une carte terminée :
+  ///
+  ///               clair        sombre
+  ///   terminée    1,59–1,60    1,90–1,92
+  ///   active min  2,15         4,50
+  ///
+  /// Visible, et sous le plus faible des liserés actifs dans les deux modes.
+  /// Écartés : `outline` (4,19–4,23 en clair, plus marqué que trois états
+  /// actifs) et `borderSubtle` (1,16 en clair : il ne se voit plus).
+  ///
+  /// LES ACTIFS, contre la carte, en clair : « À envoyer » 3,76 · « En
+  /// préparation » 2,15 · « À servir » 2,54 · « À terminer » 3,68 · « À
+  /// encaisser » (la marque) de 2,54 (emerald) à 14,63 (midnight), sous 3:1
+  /// sur ocean, emerald et sunset. En sombre, tous à 4,50 ou plus. Sous 3:1,
+  /// le liseré n'est admissible QUE parce que le badge écrit l'état à côté —
+  /// retirer le badge, c'est laisser la couleur seule.
+  Color stripeColor(BuildContext context) => isSettled
+      ? Theme.of(context).colorScheme.outlineVariant
+      : color(context);
+
   /// Variante LISIBLE SUR FOND CLAIR — texte de pastille, libellé de liseré.
   ///
   /// Le token suit son fond, c'est la règle du module : `warning` est calibré

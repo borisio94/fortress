@@ -589,6 +589,36 @@ distingue plus rien.
 
 Le point de notification est un **point ambre**, pas un compteur rouge.
 
+### Liseré d'état — TRANCHÉ (26/09/2026)
+
+**Contour non, liseré oui, sous deux conditions**
+(`restaurant/presentation/widgets/state_stripe.dart`) :
+
+- Un **contour** entoure une carte et la sépare du fond : **interdit**. Le
+  fond, l'espace et la typographie font ce travail.
+- Un **liseré** — un trait sur le seul bord gauche — ne sépare rien : il
+  porte l'état. **Permis** quand (1) l'état est l'information principale de
+  la carte, ET (2) un libellé écrit l'état à côté.
+
+**Une seule épaisseur : 4 px** (`kStateStripeWidth`). Le Plan de salle
+l'avait, la liste des commandes était à 3, la grille n'en avait pas — deux
+épaisseurs pour la même grammaire, apparues sans décision.
+
+**Une carte terminée recule, son liseré aussi** (`stripeColor`) :
+`outlineVariant`, 1,59–1,60:1 sur son fond en clair, 1,90–1,92 en sombre —
+visible, et sous le plus faible des liserés actifs (2,15 en clair, 4,50 en
+sombre). Il portait `onSurfaceVariant` (8,78:1) : le trait le plus marqué de
+l'écran, sur les cartes qui doivent s'effacer.
+
+⚠ **Sous 3:1 en clair**, contre la carte : « En préparation » 2,15 et « À
+servir » 2,54 sur toutes les palettes ; « À encaisser » 2,54 à 2,80 sur
+emerald, ocean et sunset. Le liseré n'est admissible que par le badge qui
+écrit l'état — **ne jamais retirer le badge pour alléger**.
+
+EN VIGUEUR AU RESTAURANT : cartes de commande (liste et grille), cartes de
+table du Plan de salle. Hors règle, au backlog : le liseré de NATURE des
+tuiles du tableau de bord (3 px), les liserés de l'e-commerce.
+
 ---
 
 ## 17. Accessibilité
@@ -616,9 +646,10 @@ gestes répétés du service.
 ### La couleur jamais seule — TRANCHÉ
 
 Un état qui ne parle que par la couleur doit être doublé par un libellé ou
-une icône (plan de salle : liseré + libellé + légende ; stock : icône avant
-couleur). Cas ouverts : alerte prix du panier, statut d'un ticket de
-messagerie, liseré « sans prix » de l'inventaire.
+une icône (plan de salle : liseré + libellé + légende ; commandes : liseré +
+badge écrit, section 16 ; stock : icône avant couleur). Cas ouverts : alerte
+prix du panier, statut d'un ticket de messagerie, liseré « sans prix » de
+l'inventaire.
 
 ### Taille du texte
 
@@ -729,6 +760,8 @@ Le détail vit dans `docs/backlog.md` ; ici, l'index.
   selon la largeur (section 19).
 - Doublons de mécanisme (section 10) : onglets, périodes, étiquettes d'état,
   montants compacts, avatars.
+- Liserés hors de la règle de la section 16 : tuiles du tableau de bord
+  restaurant (3 px, liseré de nature), liserés de l'e-commerce.
 
 ---
 

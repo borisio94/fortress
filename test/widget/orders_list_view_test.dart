@@ -9,6 +9,10 @@
 // Aucun test ne montait l'écran — les tests de la carte portaient sur des
 // règles pures. Celui-ci monte le VRAI `OrdersTab`, en vue liste, sur Hive
 // temporaire, aux deux largeurs (ligne unique et repli sur deux lignes).
+//
+// LE LISERÉ D'ÉTAT (26/09/2026) : même grammaire en liste et en grille —
+// 4 px (`kStateStripeWidth`), la couleur de l'état pour une commande active,
+// `outlineVariant` pour une terminée, qui recule (`stripeColor`).
 
 import 'dart:io';
 
@@ -23,6 +27,7 @@ import 'package:fortress/core/storage/hive_boxes.dart';
 import 'package:fortress/core/storage/local_storage_service.dart';
 import 'package:fortress/core/theme/app_theme.dart';
 import 'package:fortress/features/caisse/presentation/pages/caisse_page.dart';
+import 'package:fortress/features/restaurant/presentation/widgets/state_stripe.dart';
 import 'package:fortress/features/shop_selector/domain/entities/shop_summary.dart';
 
 // Copie de `HiveBoxes._allBoxes` (privée) : l'écran lit des boîtes variées.
@@ -102,8 +107,6 @@ void main() {
         currency: 'XAF',
         country: 'CM',
         sector: 'restaurant'));
-    // La vue LISTE, comme l'opérateur l'a choisie.
-    await HiveBoxes.settingsBox.put('orders_view_mode', 'list');
     final now = DateTime.now().toUtc();
     Map<String, dynamic> order(String id, {bool done = false}) => {
           'id': id,
@@ -128,7 +131,14 @@ void main() {
     if (tmp.existsSync()) tmp.deleteSync(recursive: true);
   });
 
-  Future<void> pumpAt(WidgetTester tester, double width) async {
+  /// [mode] : `list` ou `grid`, comme l'opérateur l'a choisi (réglage lu
+  /// au montage de l'écran).
+  Future<void> pumpAt(WidgetTester tester, double width,
+      {String mode = 'list'}) async {
+    // Vraie écriture disque : hors du temps simulé du test, sinon elle
+    // n'aboutit jamais.
+    await tester.runAsync(
+        () => HiveBoxes.settingsBox.put('orders_view_mode', mode));
     tester.view.physicalSize = Size(width, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -165,14 +175,46 @@ void main() {
       };
       await pumpAt(tester, width);
       FlutterError.onError = previous;
-      // ignore: avoid_print
-      for (final e in errors) print('ERR>> $e');
+      for (final e in errors) {
+        // ignore: avoid_print
+        print('ERR>> $e');
+      }
       expect(errors, isEmpty,
           reason: 'une exception de mise en page = une ligne vide en ligne');
       // Une ligne = un chevron : les deux commandes sont là.
       expect(find.byIcon(Icons.keyboard_arrow_down_rounded), findsNWidgets(2));
       // L'en-tête suit la MÊME mesure que les lignes.
       expect(find.text('TEMPS'), header ? findsOneWidget : findsNothing);
+    });
+  }
+
+  /// Les liserés d'état à l'écran : un `Container` de la largeur du liseré,
+  /// peint. Rien d'autre sur cet écran n'a cette forme.
+  List<Color> stripes(WidgetTester tester) => tester
+      .widgetList<Container>(find.byWidgetPredicate((w) =>
+          w is Container &&
+          w.color != null &&
+          w.constraints?.minWidth == kStateStripeWidth &&
+          w.constraints?.maxWidth == kStateStripeWidth))
+      .map((c) => c.color!)
+      .toList();
+
+  for (final mode in ['list', 'grid']) {
+    testWidgets('$mode : un liseré par commande, qui recule quand elle est '
+        'terminée', (tester) async {
+      await pumpAt(tester, 1200, mode: mode);
+      final theme = Theme.of(tester.element(find.byType(OrdersTab)));
+      final found = stripes(tester);
+      expect(found, hasLength(2),
+          reason: 'une commande active + une terminée = deux liserés de '
+              '$kStateStripeWidth px');
+      // c1 est en préparation : sa couleur d'état.
+      expect(found, contains(theme.semantic.warning));
+      // c2 est encaissée : elle recule, son liseré aussi.
+      expect(found, contains(theme.colorScheme.outlineVariant));
+      expect(found, isNot(contains(theme.colorScheme.onSurfaceVariant)),
+          reason: 'le gris appuyé faisait de la terminée le trait le plus '
+              'marqué de l\'écran');
     });
   }
 }

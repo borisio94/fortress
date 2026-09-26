@@ -30,6 +30,7 @@ import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/services/service_incident_service.dart';
 import '../../../../core/widgets/touch_target.dart';
 import '../widgets/resto_section_header.dart';
+import '../widgets/state_stripe.dart';
 
 /// Plan de salle — grille des tables colorées par statut (PR-1).
 ///
@@ -850,7 +851,7 @@ class _TableCard extends StatelessWidget {
         Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(width: 4, color: accent),
+            Container(width: kStateStripeWidth, color: accent),
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(9, 6, 2, 6),

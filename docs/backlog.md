@@ -243,6 +243,31 @@ page se donne elle-même, et le même modèle que le restaurant (titre dans le
 corps pour une page racine, dans la barre pour une sous-page) — à décider
 pour l'e-commerce, dont le shell historique garde son fil d'ariane.
 
+## Liserés
+
+### Liserés hors de la règle « contour non, liseré d'état oui »
+
+*Inscrit le 26/09/2026 avec le lot « liseré en grille ».*
+
+La règle (document de design, section 16) : un liseré sur le seul bord
+gauche, 4 px (`kStateStripeWidth`), permis quand l'état est l'information
+principale de la carte ET qu'un libellé l'écrit à côté. Ne la suivent pas
+encore :
+
+- **Tableau de bord restaurant** (`restaurant_dashboard_page.dart:299`) :
+  liseré de **3 px** sur les tuiles d'indicateurs, qui porte la NATURE de
+  l'indicateur (l'argent en vert…), pas un état. À trancher : la règle
+  s'étend-elle aux liserés de nature (→ 4 px), ou ce liseré devient-il autre
+  chose ?
+- **E-commerce** (hors périmètre sans décision) : liseré « stock bas / sans
+  prix » de l'inventaire (`inventaire_page.dart:2479`), liseré de tendance du
+  Hub central (`hub_dashboard_page.dart:877`), liseré primaire de la section
+  Propriétaire (`employees_page.dart:1121`).
+- **Point d'état de 6 px** sur les membres d'« Accès à l'app »
+  (`employees_page.dart:1307`) : même fonction, avec libellé ; mais l'état
+  n'y est pas l'information principale (c'est la personne) → la règle du
+  liseré ne s'y applique pas telle quelle.
+
 ## Code mort
 
 ### `EmptyCartDashboard` — un réglage qui ne commandait rien

@@ -82,6 +82,7 @@ import '../../../../core/utils/phone_formatter.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../crm/data/models/client_model.dart';
 import '../../../restaurant/presentation/widgets/resto_surfaces.dart';
+import '../../../restaurant/presentation/widgets/state_stripe.dart';
 import '../../../../core/widgets/touch_target.dart';
 import '../../../restaurant/presentation/widgets/service_settings_sheet.dart';
 import '../../../restaurant/domain/service_wait.dart';
@@ -2627,8 +2628,13 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeInOut,
-        // EN GRILLE, NI CONTOUR NI LISERÉ : la hiérarchie passe par le FOND,
-        // l'espace et la typographie.
+        // EN GRILLE, PAS DE CONTOUR — MAIS UN LISERÉ (règle du 26/09/2026,
+        // cf. `state_stripe.dart`). Le contour entoure la carte et la sépare
+        // du fond : c'est le travail du FOND, de l'espace et de la
+        // typographie, il reste interdit. Le liseré ne fait pas le tour et ne
+        // sépare rien : il porte l'ÉTAT, sur un seul côté. Il est permis ici
+        // parce que l'état est l'information principale de la carte ET que le
+        // badge l'écrit en toutes lettres à côté.
         //
         // DEUX SURFACES, PAS UN VOILE. Soldée → surface de fond, à plat. Active
         // → surface de carte, ÉLEVÉE. L'ombre n'est pas un ornement : en clair,
@@ -2636,7 +2642,10 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         // sur le décor blanc n'a plus AUCUN bord (1,00:1) une fois la bordure
         // retirée. C'est l'élévation qui les lui rend.
         //
-        // La LISTE garde son rendu exact : bordure, liseré, ombre d'origine.
+        // Le liseré ne change rien à ce calcul : découpé DANS la carte, sur le
+        // seul bord gauche, il laisse les trois autres à 1,00:1 — l'ombre y
+        // reste nécessaire. Une carte TERMINÉE, sans ombre, n'a plus que lui
+        // pour bord.
         decoration: widget.grid
             ? BoxDecoration(
                 color: _tab.isSettled
@@ -2687,7 +2696,18 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         // MÊME COULEUR que l'onglet et la pastille : `serviceTabOf` est
         // l'unique source, les trois ne peuvent pas se contredire.
         //
-        // `IntrinsicHeight` est le prix à payer pour qu'une bande de 3 px
+        // LISTE ET GRILLE, MÊME GRAMMAIRE : même épaisseur (`kStateStripeWidth`,
+        // celle du Plan de salle), même couleur (`stripeColor`). Une commande
+        // terminée recule, son liseré aussi : `outlineVariant`, pas le gris
+        // appuyé qu'elle portait (mesures dans `stripeColor`).
+        //
+        // ⚠ PLUSIEURS COULEURS SONT SOUS 3:1 sur leur carte, en clair :
+        // « En préparation » 2,15, « À servir » 2,54 sur TOUTES les palettes,
+        // « À encaisser » 2,54 à 2,80 sur emerald, ocean et sunset. Le liseré
+        // n'est admissible que parce que le badge écrit l'état à côté : NE
+        // RETIRE PAS LE BADGE en croyant alléger.
+        //
+        // `IntrinsicHeight` est le prix à payer pour qu'une bande de 4 px
         // s'étire sur une hauteur que seul son voisin détermine. Il coûte une
         // passe de mesure supplémentaire par carte — acceptable sur une liste
         // de service, à surveiller si elle devait porter des centaines de
@@ -2696,9 +2716,9 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // En grille, le point de 6 px devant le repère le remplace.
-              if (!widget.grid)
-                Container(width: 3, color: _tab.color(context)),
+              Container(
+                  width: kStateStripeWidth,
+                  color: _tab.stripeColor(context)),
               Expanded(
                 child: Padding(
                   // Tuile de ~92 px en grille ; ligne de ~48 px en liste.
@@ -4792,10 +4812,12 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   /// carte) et son état de paiement, puis le bouton d'action — petit, en fond
   /// teinté (`_StateButton`).
   ///
-  /// PAS DE LISERÉ EN GRILLE — décision confirmée le 25/09/2026 : la hiérarchie
-  /// passe par le FOND, l'espace et la typographie (cf. la décoration, plus
-  /// haut). Le badge écrit l'état en toutes lettres : la couleur ne le porte
-  /// jamais seule.
+  /// LE LISERÉ D'ÉTAT, COMME EN LISTE (26/09/2026 — revient sur la décision
+  /// du 25/09). Sans lui, la liste et la grille disaient le même état dans
+  /// deux grammaires. La règle « la hiérarchie passe par le fond » visait les
+  /// CONTOURS, qui restent interdits ; le liseré porte l'état sur un seul côté
+  /// (cf. `state_stripe.dart`). Il ne vaut que parce que le badge écrit l'état
+  /// en toutes lettres : la couleur ne le porte jamais seule.
   ///
   /// LE CHRONOMÈTRE mesure l'attente DANS L'ÉTAT (`service_state_at`), pas
   /// l'âge de la commande. Sans date — commande antérieure à la colonne —, il
@@ -6729,7 +6751,7 @@ class _OrdersListHeader extends StatelessWidget {
     return Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(
-              3 + _kListPadH, 10, _kListPadH, 8),
+              kStateStripeWidth + _kListPadH, 10, _kListPadH, 8),
           child: Row(children: [
             col(_ListCols.temps, 'TEMPS'),
             const SizedBox(width: _ListCols.gap),
