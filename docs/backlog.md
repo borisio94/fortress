@@ -440,6 +440,18 @@ de la pure présentation, sans `SchemaMigrator`.
   `material.dart` sans usage apparent ;
 - `inventaire/domain/entities/product.dart` — `foundation.dart`.
 
+### Le journal d'activité exige Supabase, même pour une écriture locale
+
+*Inscrit le 26/09/2026, trouvé en montant le banc de test de la fiche plat.*
+`AppDatabase.saveCategory` écrit la catégorie dans Hive, puis appelle
+`ActivityLogService.log`, qui lit `Supabase.instance` sans garde. Si
+`Supabase.initialize` a échoué au démarrage (`main.dart` le tolère : mode hors
+ligne), la catégorie est bien enregistrée mais l'appel lève — l'écran qui
+l'attend (fiche plat, « + Nouvelle ») s'arrête en erreur. Même risque pour
+tout appelant de `ActivityLogService.log`. Le banc contourne en initialisant
+un Supabase factice ; le correctif serait une garde dans `log` (acteur `null`
+quand Supabase est absent — la ligne part déjà dans la file).
+
 ## Grands fichiers
 
 ### Le restaurant est découpé ; restent les classes géantes et les fichiers partagés
@@ -464,7 +476,8 @@ caractère changé dans une chaîne est détecté).
 **Restent — les classes géantes** (un `part` découpe un fichier, pas une
 classe ; les réduire, c'est extraire de vrais composants, avec un risque sur
 le comportement : un lot à part, AVEC des tests d'écran d'abord) :
-l'état de la fiche plat (≈ 1 260 l.), l'onglet Paie (≈ 1 030), la fiche
+l'état de la fiche plat (≈ 1 260 l. ; banc de test
+`test/widget/dish_form_sheet_test.dart` posé le 26/09/2026), l'onglet Paie (≈ 1 030), la fiche
 employé (≈ 760), la page Menu (≈ 655), la page Plan de salle (≈ 600).
 
 **Restent — les grands fichiers hors restaurant**, à reprendre quand l'autre
