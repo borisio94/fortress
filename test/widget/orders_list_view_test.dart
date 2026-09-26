@@ -269,5 +269,48 @@ void main() {
             matching: find.byType(RestoGlassPanel)),
         findsOneWidget);
   });
+
+  // ── En-tête sur téléphone (26/09/2026) ───────────────────────────────
+  testWidgets('au restaurant, jamais de barre « À planifier » — toutes ses '
+      'commandes sont `scheduled` sans date', (tester) async {
+    for (final width in [390.0, 1200.0]) {
+      await pumpAt(tester, width, mode: 'grid');
+      expect(find.textContaining('À planifier'), findsNothing,
+          reason: 'largeur $width');
+    }
+  });
+
+  testWidgets('téléphone : pas de totaux ; ordinateur : sur leur panneau',
+      (tester) async {
+    await pumpAt(tester, 390, mode: 'grid');
+    expect(find.text('Reste à encaisser'), findsNothing);
+    await pumpAt(tester, 1200, mode: 'grid');
+    expect(find.text('Reste à encaisser'), findsOneWidget);
+  });
+
+  testWidgets('téléphone : la première commande monte de 123 px (314 → 191)',
+      (tester) async {
+    await pumpAt(tester, 390, mode: 'grid');
+    // MESURÉ avant le lot : chevron de la première carte à 314,5 px ; après,
+    // 191,5 — barre « À planifier » (≈ 45) et totaux (≈ 78) retirés. Une
+    // carte de grille et son écart font ≈ 123 : une commande de plus.
+    final top = tester
+        .getRect(find.byIcon(Icons.keyboard_arrow_down_rounded).first)
+        .top;
+    expect(top, lessThanOrEqualTo(191.5),
+        reason: 'barre « À planifier » et totaux retirés du téléphone');
+  });
+
+  testWidgets('grille : les titres de section n\u2019apparaissent que s\u2019ils '
+      'opposent deux sections', (tester) async {
+    await pumpAt(tester, 1200, mode: 'grid');
+    expect(find.text('EN COURS'), findsOneWidget);
+    expect(find.text('TERMINÉES'), findsOneWidget);
+    // Un seul onglet, une seule section : plus de titre.
+    await tester.tap(find.textContaining('En préparation').first);
+    await tester.pumpAndSettle();
+    expect(find.text('EN COURS'), findsNothing);
+    expect(find.text('TERMINÉES'), findsNothing);
+  });
 }
 

@@ -1776,7 +1776,16 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
     // « En retard / à planifier » : commandes programmées hors radar. Les
     // compteurs sont tirés de la liste FILTRÉE (recherche comprise) : la barre
     // annonce exactement ce que le filtre affichera.
-    final lateList       = _lateUnplanned(base);
+    //
+    // JAMAIS AU RESTAURANT (26/09/2026). C'est la planification des
+    // LIVRAISONS de l'e-commerce ; or le restaurant crée TOUTES ses commandes
+    // en `scheduled` sans date prévue (`restaurant_order_service.dart`) : dès
+    // qu'une commande était ouverte, la barre affichait « À planifier · N » en
+    // permanence — un compteur qui mesurait une notion e-commerce sur des
+    // données restaurant, et ≈ 45 px d'en-tête sur téléphone (mesuré). Le retard, au
+    // restaurant, se lit sur chaque carte (« en retard »). La barre du
+    // versement partenaire, elle, reste : elle a un sens quand elle s'affiche.
+    final lateList       = _isResto ? const <Sale>[] : _lateUnplanned(base);
     final unplannedCount = lateList.where((o) => o.scheduledAt == null).length;
     final lateCount      = lateList.length - unplannedCount;
     final hasLate  = lateList.isNotEmpty;
@@ -2015,7 +2024,16 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
       Divider(height: 1, color: Theme.of(context).semantic.borderSubtle),
 
       // ── Synthèse de la sélection (encaissé + reste à encaisser) ──
-      if (orders.isNotEmpty) ...[
+      //
+      // RESTAURANT, TÉLÉPHONE : pas de totaux (26/09/2026). La ligne comptée
+      // de l'en-tête donne déjà le reste dû ; seul « Encaissé » disparaît —
+      // un chiffre de bilan, qu'on consulte sans agir dessus. Sur 390 px, ses
+      // ≈ 78 px (mesurés) valaient une commande de moins à l'écran. Sous le seuil d'écran
+      // officiel de 600 (`kFormMobileBreakpoint`, § 8), plutôt qu'un
+      // treizième seuil. Sur ordinateur, ils restent sur leur panneau.
+      if (orders.isNotEmpty &&
+          !(_isResto &&
+              MediaQuery.sizeOf(context).width < kFormMobileBreakpoint)) ...[
         const SizedBox(height: 8),
         // `_summaryBar` est PARTAGÉE avec l'e-commerce : on aiguille ici, au
         // site d'appel, plutôt que de la plier aux deux secteurs.
@@ -2135,13 +2153,21 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // UN TITRE N'EST DIT QUE S'IL OPPOSE (26/09/2026) :
+                        // une section seule — un onglet filtré, un service
+                        // sans commande close — n'a rien à distinguer, et
+                        // son titre coûtait 31 px. Même logique que les
+                        // onglets vides qui s'effacent.
                         if (active.isNotEmpty) ...[
-                          const _OrdersSectionTitle('En cours'),
+                          if (done.isNotEmpty)
+                            const _OrdersSectionTitle('En cours'),
                           tiles(active),
                         ],
                         if (done.isNotEmpty) ...[
-                          if (active.isNotEmpty) const SizedBox(height: 22),
-                          const _OrdersSectionTitle('Terminées'),
+                          if (active.isNotEmpty) ...[
+                            const SizedBox(height: 22),
+                            const _OrdersSectionTitle('Terminées'),
+                          ],
                           tiles(done),
                         ],
                       ],

@@ -892,6 +892,13 @@ contre barre du bas et tiroir), la densité (cibles de 48 px au doigt), les
 colonnes d'une grille, le volet panier en plein écran sous 720 px, une ligne
 qui passe de une à trois rangées (Accès à l'app).
 
+**Commandes au restaurant, sous 600 px (26/09/2026)** : pas de totaux — la
+ligne comptée de l'en-tête donne déjà le reste dû, et « Encaissé » est un
+chiffre de bilan. Mesuré à 390 × 844 : la première commande passe de 314 à
+191 px, une commande de plus visible. Sur toutes les largeurs : la barre
+« À planifier » (notion e-commerce) n'y est plus, et un titre de section ne
+s'affiche que s'il en oppose deux (`caisse_page.dart`, `OrdersTab`).
+
 **Ce qui n'a PAS le droit de différer :** une permission (qui voit quoi), un
 libellé, une action disponible, un widget épuré d'un côté et resté tel quel
 de l'autre.
