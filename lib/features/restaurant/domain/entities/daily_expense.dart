@@ -1,26 +1,25 @@
-import 'package:flutter/material.dart';
-
 import '../../../../core/storage/schema_migrator.dart';
 
 /// Catégories de dépense quotidienne — alignées sur le CHECK SQL de
 /// `daily_expenses.category` (hotfix_149).
+///
+/// Du Dart pur : l'icône de chaque catégorie vit en présentation
+/// (`expense_kind_visuals.dart`).
 enum ExpenseKind {
-  achatMarche('achat_marche', 'Achat marché', Icons.shopping_basket_outlined),
-  electricite('electricite', 'Électricité', Icons.bolt_outlined),
-  gaz('gaz', 'Gaz', Icons.local_fire_department_outlined),
-  eau('eau', 'Eau', Icons.water_drop_outlined),
-  transport('transport', 'Transport', Icons.local_taxi_outlined),
-  entretien('entretien', 'Entretien', Icons.cleaning_services_outlined),
-  personnel('personnel', 'Extras personnel', Icons.person_add_alt_outlined),
-  consigneRendue(
-      'consigne_rendue', 'Consigne rendue', Icons.assignment_return_outlined),
-  autre('autre', 'Autre', Icons.more_horiz_rounded);
+  achatMarche('achat_marche', 'Achat marché'),
+  electricite('electricite', 'Électricité'),
+  gaz('gaz', 'Gaz'),
+  eau('eau', 'Eau'),
+  transport('transport', 'Transport'),
+  entretien('entretien', 'Entretien'),
+  personnel('personnel', 'Extras personnel'),
+  consigneRendue('consigne_rendue', 'Consigne rendue'),
+  autre('autre', 'Autre');
 
-  const ExpenseKind(this.key, this.label, this.icon);
+  const ExpenseKind(this.key, this.label);
 
   final String key;
   final String label;
-  final IconData icon;
 
   /// L'achat de matières premières EST le food cost réel : c'est la seule
   /// catégorie comparable au coût matières théorique des fiches recettes.

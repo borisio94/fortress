@@ -35,6 +35,7 @@ import '../../domain/entities/restaurant_activity.dart';
 import '../widgets/resto_period_sheet.dart';
 import '../widgets/resto_tab_kit.dart';
 import '../widgets/resto_section_header.dart';
+import '../widgets/expense_kind_visuals.dart';
 import '../widgets/resto_underline_tabs.dart';
 
 /// HUB FINANCES DU RESTAURANT — ce que l'établissement dépense et perd.

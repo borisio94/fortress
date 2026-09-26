@@ -1,6 +1,4 @@
-import 'package:flutter/material.dart';
 import '../../../../core/storage/schema_migrator.dart';
-import '../../../../core/theme/app_theme.dart';
 
 /// Statut d'une table du plan de salle.
 ///
@@ -26,35 +24,8 @@ extension RestaurantTableStatusX on RestaurantTableStatus {
         RestaurantTableStatus.reservee  => 'Réservée',
       };
 
-  /// Icône de la carte — uniquement des glyphes DÉJÀ utilisés ailleurs dans
-  /// l'app. Le repo a un historique documenté d'icônes Material récentes
-  /// absentes de la police bundlée (cf. commentaires shell_nav_items.dart) :
-  /// `ti-armchair` / `chair_rounded` sont donc évités au profit de valeurs sûres.
-  IconData get icon => switch (this) {
-        RestaurantTableStatus.libre     => Icons.check_circle_outline_rounded,
-        RestaurantTableStatus.occupee   => Icons.people_rounded,
-        RestaurantTableStatus.addition  => Icons.receipt_long_rounded,
-        RestaurantTableStatus.reservee  => Icons.access_time_rounded,
-      };
-
-  /// Couleur d'accent, résolue depuis les tokens sémantiques du thème
-  /// (jamais de `Color(0xFF…)` en dur — cf. règle projet).
-  Color color(AppSemanticColors s) => switch (this) {
-        RestaurantTableStatus.libre     => s.success,
-        RestaurantTableStatus.occupee   => s.warning,
-        RestaurantTableStatus.addition  => s.danger,
-        RestaurantTableStatus.reservee  => s.info,
-      };
-
-  /// Fond de carte — surface teintée du même token.
-  Color surface(AppSemanticColors s) => switch (this) {
-        RestaurantTableStatus.libre     => s.successSurface,
-        RestaurantTableStatus.occupee   => s.warningSurface,
-        RestaurantTableStatus.addition  => s.dangerSurface,
-        // Pas de `infoSurface` dans AppSemanticColors → dérivé du token info,
-        // ce qui reste cohérent en clair comme en sombre.
-        RestaurantTableStatus.reservee  => s.info.withValues(alpha: 0.12),
-      };
+  // Couleur et surface de chaque statut : en présentation
+  // (`table_status_visuals.dart`) — le domaine reste du Dart pur.
 
   /// Lecture tolérante : une valeur inconnue (donnée legacy, faute de frappe
   /// côté base) retombe sur `libre` plutôt que de faire planter la page.

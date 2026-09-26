@@ -32,6 +32,7 @@ import '../../../../core/services/service_incident_service.dart';
 import '../../../../core/widgets/touch_target.dart';
 import '../widgets/resto_section_header.dart';
 import '../widgets/state_stripe.dart';
+import '../widgets/table_status_visuals.dart';
 
 /// Plan de salle — grille des tables colorées par statut (PR-1).
 ///

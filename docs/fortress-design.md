@@ -853,6 +853,7 @@ commentaire ET ce registre**, sinon l'un des deux ment.
 | Segmenté : l'actif plus CLAIR que la piste en clair, plus FONCÉ en sombre | `theme_page.dart` (`_ModeSegmented`) | 15 |
 | Un chronomètre mesure l'attente DANS L'ÉTAT (`service_state_at`), jamais l'âge ; sans date, rien | `restaurant/domain/service_wait.dart` | 14 |
 | Le bouton d'action d'une carte est petit et en fond teinté ; le montant reste l'élément le plus lourd | `caisse_page.dart` (`_StateButton`) | 12 |
+| Le domaine est du Dart pur : la couleur et l'icône d'un état vivent en présentation (extensions `*Visuals`) | `table_status_visuals.dart`, `expense_kind_visuals.dart`, `service_tab_visuals.dart` ; garde-fou `domain_pure_dart_guard_test` | — |
 
 **Pour créer une règle** : l'écrire au plus près du code qu'elle gouverne,
 AVEC sa raison mesurée (un contraste, un débordement, un cas), puis

@@ -420,6 +420,26 @@ Paramètres), deux fonds d'une AUTRE couleur sous du blanc sont apparus :
 `if (kDebugMode)` et sa chaîne est ABSENTE du `main.dart.js` servi en
 production (vérifié). Rien à faire.
 
+## Architecture
+
+### Cinq fichiers de domaine importent encore Flutter (hors restaurant)
+
+*Inscrit le 26/09/2026, en clôturant le lot « domaine sans Flutter » côté
+restaurant (`restaurant_table.dart`, `daily_expense.dart` : couleurs et
+icônes passées en présentation ; garde-fou `domain_pure_dart_guard_test`).*
+L'audit supposait une migration de format (« `IconData` est stocké ») :
+c'est FAUX — les entités se sérialisent par leurs clés ; le déplacement est
+de la pure présentation, sans `SchemaMigrator`.
+
+- `caisse/domain/entities/sale.dart` — `Color get color` sur deux enums de
+  statut (e-commerce, au cœur de la caisse) ;
+- `expenses/domain/entities/expense.dart` — icônes et couleurs des dépenses
+  e-commerce ;
+- `caisse/domain/invoice_theme.dart` — une `Color` ;
+- `caisse/domain/usecases/order_receipt_usecase.dart` — importe
+  `material.dart` sans usage apparent ;
+- `inventaire/domain/entities/product.dart` — `foundation.dart`.
+
 ## Code mort
 
 ### ~~`_ServiceChip` — une pastille que plus rien ne rend~~ — SUPPRIMÉ
