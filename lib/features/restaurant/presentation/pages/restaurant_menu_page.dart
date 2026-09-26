@@ -26,6 +26,7 @@ import '../../../../shared/widgets/product_image_card.dart';
 import '../../../caisse/presentation/widgets/cart_widget.dart';
 import '../widgets/daily_count_sheet.dart';
 import '../widgets/dish_details_sheet.dart';
+import '../../domain/cart_pane_layout.dart';
 import '../../domain/menu_grid_geometry.dart';
 import '../../domain/menu_view.dart';
 import '../widgets/dish_form_sheet.dart';
@@ -400,11 +401,18 @@ class _RestaurantMenuPageState extends ConsumerState<RestaurantMenuPage> {
             // Deux conditions, pas une : il faut quelque chose à montrer ET que
             // l'utilisateur n'ait pas replié le volet depuis le bouton 🛒.
             final open = cart.items.isNotEmpty && paneVisible;
-            return Row(children: [
-              Expanded(child: _buildMenu(view, products, isAdmin,
-                  canDelete: canDelete, canEdit: canEdit, canAdd: canAdd)),
-              _MenuCartPane(open: open, shopId: widget.shopId),
-            ]);
+            // Le CORPS de page, et non l'écran : barre latérale dépliée, il
+            // est de 247 px plus étroit, et c'est lui qui dit si la carte
+            // tient encore à côté du volet (`cartPaneLayout`).
+            return LayoutBuilder(builder: (context, c) {
+              final layout = _MenuCartPane.layoutFor(context, c.maxWidth);
+              return Row(children: [
+                Expanded(child: _buildMenu(view, products, isAdmin,
+                    canDelete: canDelete, canEdit: canEdit, canAdd: canAdd)),
+                _MenuCartPane(
+                    open: open, shopId: widget.shopId, layout: layout),
+              ]);
+            });
           },
         ),
       ),

@@ -3,6 +3,10 @@ part of 'restaurant_menu_page.dart';
 // Le VOLET PANIER de la page Menu, à droite de la carte. Sorti du `build` de
 // `_RestaurantMenuPageState` le 26/09/2026 (lot « classes géantes ») ; la page
 // garde ce qui décide de son ouverture (panier non vide, volet non replié).
+//
+// Sa disposition — largeur, et s'il RECOUVRE la carte — vient de
+// `cartPaneLayout` (domaine, sous test) : la largeur lit l'écran, la décision
+// de recouvrir lit le CORPS de page (barre latérale déduite).
 
 /// Le volet panier, animé en largeur : fermé, il ne prend aucune place.
 class _MenuCartPane extends StatelessWidget {
@@ -10,20 +14,25 @@ class _MenuCartPane extends StatelessWidget {
   final bool open;
   final String shopId;
 
-  const _MenuCartPane({required this.open, required this.shopId});
+  /// Largeur, et recouvrement de la carte (`layoutFor`).
+  final CartPaneLayout layout;
 
-  /// Écart entre la carte et le volet panier — les deux sont des blocs
-  /// distincts, pas deux moitiés d'une même surface.
-  static const double _kCartGap = 10;
+  const _MenuCartPane({
+    required this.open,
+    required this.shopId,
+    required this.layout,
+  });
 
-  /// Largeur du volet : assez pour lire une ligne d'article, jamais plus du
-  /// tiers de l'écran — la carte doit rester l'écran principal.
-  static double _width(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    // Le seuil est partagé avec le panier, qui doit savoir s'il recouvre la
-    // carte pour proposer d'y revenir. Voir `kCartPaneFullWidthBelow`.
-    return w < kCartPaneFullWidthBelow ? w : (w / 3).clamp(320.0, 420.0);
-  }
+  /// La disposition du volet dans un corps de page de [bodyWidth].
+  ///
+  /// Seul endroit du restaurant qui lit la largeur d'ÉCRAN (garde-fou
+  /// `width_threshold_guard_test`) : la LARGEUR du volet est un tiers de
+  /// l'écran, une décision sur l'écran entier.
+  static CartPaneLayout layoutFor(BuildContext context, double bodyWidth) =>
+      cartPaneLayout(
+        screenWidth: MediaQuery.of(context).size.width,
+        bodyWidth: bodyWidth,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -33,10 +42,15 @@ class _MenuCartPane extends StatelessWidget {
     // carte, comme la maquette. L'écart est compris DANS la largeur
     // animée — ajouté à côté, il apparaîtrait d'un coup au premier
     // article pendant que le panier, lui, glisse encore.
+    //
+    // RECOUVRANT, il n'a ni écart ni côté : il prend le corps entier. L'écart
+    // ajouté à une largeur déjà pleine le faisait déborder de la rangée.
+    final gap = layout.coversMenu ? 0.0 : kCartPaneGap;
+    final full = layout.width + gap;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
-      width: open ? _width(context) + _kCartGap : 0,
+      width: open ? full : 0,
       child: open
           // `ClipRect` + `OverflowBox` : pendant l'animation, la
           // largeur imposée est inférieure à la largeur finale du
@@ -45,15 +59,17 @@ class _MenuCartPane extends StatelessWidget {
           ? ClipRect(
               child: OverflowBox(
                 alignment: Alignment.centerLeft,
-                maxWidth: _width(context) + _kCartGap,
+                maxWidth: full,
                 child: Padding(
-                  padding: const EdgeInsets.only(left: _kCartGap),
+                  padding: EdgeInsets.only(left: gap),
                   child: SizedBox(
-                    width: _width(context),
+                    width: layout.width,
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(16),
                       child: CartWidget(
-                          shopId: shopId, isEcommerce: true),
+                          shopId: shopId,
+                          isEcommerce: true,
+                          coversMenu: layout.coversMenu),
                     ),
                   ),
                 ),

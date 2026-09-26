@@ -428,11 +428,16 @@ La tuile passe sous son plancher de 200 px entre 720 et ~780, sans jamais
 tomber à une colonne. Le seuil et sa raison vivent dans
 `cart_pane_provider.dart` (`kCartPaneFullWidthBelow`).
 
-**Au-dessus de 900, barre latérale DÉPLIÉE** (247 px, repliée par défaut au
-restaurant) : le volet prend le tiers de l'ÉCRAN, barre comprise, et la carte
-tombe à 2 colonnes de 138 px à 900, sous 200 jusqu'à ~1 060. Barre repliée
-(76 px) : 224 px à 900. Au backlog — le corriger demanderait que le volet lise
-le corps de page et non l'écran, ce qui lève la règle ci-dessous.
+**TRANCHÉ — le volet recouvre la carte quand elle n'a plus 390 px à côté
+de lui** (26/09/2026, `cartPaneLayout`, domaine, sous test). 390 = 720 − 320
+− 10 : la place qu'elle garde au seuil de la zone voulue. La LARGEUR du volet
+lit l'écran (un tiers, 320 à 420) ; la décision de RECOUVRIR lit le CORPS de
+page. En shell mobile rien ne change (bascule à 720). Barre latérale DÉPLIÉE
+(247 px), le volet recouvre la carte jusqu'à 970 px d'écran — elle tombait à
+2 colonnes de 138 px à 900 — puis se pose à côté, carte ≥ 390 px. Le bouton
+« Carte » du panier suit la même décision (`CartWidget.coversMenu`).
+Recouvrant, le volet prend le corps entier sans écart : l'écart ajouté le
+faisait déborder de 10 px.
 
 **NON TRANCHÉ — la caisse e-commerce entre 800 et 900** : panier en ligne sous
 une barre du bas (backlog).
@@ -444,7 +449,8 @@ son conteneur (`LayoutBuilder`), pas celle de l'écran.** Sur ordinateur, la
 largeur utile est l'écran moins la barre latérale (247 px) : lire l'écran a
 fait prendre la branche « large » à une tuile de 342 px, et déborder de 70 px
 (`caisse_page.dart`, commit `2d57517`). Seules les décisions qui portent sur
-l'écran ENTIER (volet panier, shell) lisent l'écran.
+l'écran ENTIER lisent l'écran : le shell, et la LARGEUR du volet panier — sa
+décision de recouvrir la carte lit le corps de page (ci-dessus).
 
 ---
 

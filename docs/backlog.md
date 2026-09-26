@@ -418,7 +418,10 @@ le 900 du shell.
 commande » ne lui est plus proposé, et « Nouvelle vente » ramène au Menu. Ce
 cas (audit N6) est désormais purement e-commerce.
 
-### Menu, barre latérale dépliée entre 900 et ~1 060 px
+### ~~Menu, barre latérale dépliée entre 900 et ~1 060 px~~ — CORRIGÉ
+
+*Corrigé le 26/09/2026* : la décision de recouvrir lit le corps de page
+(`cartPaneLayout`, document de design § 8). Constat d'origine :
 
 *Inscrit le 26/09/2026, en tranchant la zone 720–900.* Le volet panier du
 Menu vaut le tiers de l'ÉCRAN, barre latérale comprise. Barre DÉPLIÉE

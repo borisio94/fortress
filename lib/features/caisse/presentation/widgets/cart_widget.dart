@@ -42,8 +42,14 @@ class CartWidget extends ConsumerStatefulWidget {
   /// l'appelant sait dans lequel des deux cas il se trouve.
   final VoidCallback? onOrderPlaced;
 
+  /// Le panier RECOUVRE-t-il la carte ? Commande le bouton « Carte » du pied
+  /// (restauration). Le Menu le sait — sa décision lit le corps de page,
+  /// barre latérale déduite (`cartPaneLayout`) ; `null` pour les autres
+  /// hôtes, qui gardent le test sur l'écran (`kCartPaneFullWidthBelow`).
+  final bool? coversMenu;
+
   const CartWidget({super.key, required this.shopId,
-    this.isEcommerce = false, this.onOrderPlaced});
+    this.isEcommerce = false, this.onOrderPlaced, this.coversMenu});
 
   @override
   ConsumerState<CartWidget> createState() => _CartWidgetState();
@@ -184,7 +190,8 @@ class _CartWidgetState extends ConsumerState<CartWidget> {
               // ── Récap + bouton ────────────────────────────────────────
               _CartFooter(shopId: shopId, state: state, l: l,
                   isEcommerce: isEcommerce, onOrderPlaced: onOrderPlaced,
-                  serviceType: _serviceType),
+                  serviceType: _serviceType,
+                  coversMenu: widget.coversMenu),
             ]),
           ),
           ),
@@ -1552,9 +1559,12 @@ class _CartFooter extends ConsumerWidget {
   /// Canal pré-sélectionné dans l'en-tête (restauration) — transmis tel quel
   /// à la feuille « Type de commande », qui s'ouvre alors dessus.
   final String? serviceType;
+
+  /// Voir `CartWidget.coversMenu`.
+  final bool? coversMenu;
   const _CartFooter({required this.shopId, required this.state,
     required this.l, this.isEcommerce = false, this.onOrderPlaced,
-    this.serviceType});
+    this.serviceType, this.coversMenu});
 
   /// Vrai quand le sous-total DIFFÈRE du total (taxe, frais, remise ou
   /// livraison). Sinon, en e-commerce, la ligne « Sous-total » ne faisait que
@@ -1931,8 +1941,9 @@ class _CartFooter extends ConsumerWidget {
                 // Il remplace « Vider », remonté dans l'en-tête : le pied n'a
                 // que deux places, et celle-ci sert à chaque plat quand
                 // l'autre servait une fois par erreur.
-                if (MediaQuery.of(context).size.width <
-                    kCartPaneFullWidthBelow) ...[
+                if (coversMenu ??
+                    MediaQuery.of(context).size.width <
+                        kCartPaneFullWidthBelow) ...[
                   Expanded(
                     child: ElevatedButton.icon(
                       style: secondaryStyle,
