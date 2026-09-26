@@ -34,6 +34,7 @@ import '../../domain/entities/restaurant_activity.dart';
 import 'resto_empty_state.dart';
 
 part 'dish_form_sheet.recipe.dart';
+part 'dish_form_sheet.save.dart';
 part 'dish_form_sheet.sections.dart';
 part 'dish_form_sheet.widgets.dart';
 
@@ -229,6 +230,8 @@ class _DishFormSheetState extends State<DishFormSheet> {
 
   bool get _isEdit => widget.existing != null;
 
+  late final _DishStore _store = _DishStore(widget.shopId);
+
   @override
   void initState() {
     super.initState();
@@ -365,7 +368,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
 
   Future<void> _submit() async {
     final name = _nameCtrl.text.trim();
-    final price = double.tryParse(_priceCtrl.text.trim().replaceAll(',', '.'));
+    final price = _parseAmount(_priceCtrl.text);
 
     if (name.isEmpty) {
       setState(() => _error = 'Donnez un nom au plat.');
@@ -399,44 +402,22 @@ class _DishFormSheetState extends State<DishFormSheet> {
       // `??=` : le premier essai fixe l'identifiant, les suivants le reprennent
       // — une reprise après erreur RÉÉCRIT le même plat.
       final productId = existing?.id ?? (_newProductId ??= 'prod_$ts');
-      final cost = double.tryParse(
-              _costCtrl.text.trim().replaceAll(',', '.')) ??
-          0;
-
-      // Variante implicite : conserve celle du plat en édition (elle porte
-      // l'URL d'image déjà uploadée), sinon on en crée une.
-      final baseVariant = (existing != null && existing.variants.isNotEmpty)
-          ? existing.variants.first
-          : ProductVariant(id: 'var_$ts', name: name);
-
-      final variant = baseVariant.copyWith(
+      final cost = _parseAmount(_costCtrl.text) ?? 0;
+      final product = _buildDishProduct(
+        existing: existing,
+        productId: productId,
+        shopId: widget.shopId,
         name: name,
-        priceBuy: cost,
-        priceSellPos: price,
-        priceSellWeb: price,
-      );
-
-      final product = Product(
-        id: productId,
-        storeId: widget.shopId,
-        name: name,
-        categoryId: _category,
-        description: _descCtrl.text.trim().isEmpty
-            ? null
-            : _descCtrl.text.trim(),
-        priceBuy: cost,
-        // Un seul prix : la distinction comptoir / web est une notion
-        // e-commerce, sans objet sur une carte de restaurant.
-        priceSellPos: price,
-        priceSellWeb: price,
+        category: _category,
+        description: _descCtrl.text,
+        price: price,
+        cost: cost,
         isActive: _isActive,
         isVisibleWeb: _isVisibleWeb,
         trackStock: _trackStock,
         activityId: _activityId,
         rating: _rating,
-        imageUrl: existing?.imageUrl,
-        variants: [variant],
-        createdAt: existing?.createdAt ?? DateTime.now(),
+        ts: ts,
       );
 
       await AppDatabase.saveProduct(product, skipValidation: true);
@@ -447,30 +428,13 @@ class _DishFormSheetState extends State<DishFormSheet> {
       // ouvert, alors que le plat était déjà écrit — sans sa recette, donc
       // chiffré à zéro et faussant la répartition du coût des ingrédients.
 
+      // La photo est un ORNEMENT : son échec n'emporte rien (`enqueuePhoto`).
       if (_imageBytes != null) {
-        // La photo est un ORNEMENT : `enqueue` écrit dans Hive sans filet
-        // (`box.add` nu, avec les octets de l'image dedans). Une box pleine ou
-        // fermée faisait perdre la recette d'un plat, pour une vignette.
-        try {
-          await PendingImageUploadService.enqueue(
-            shopId: widget.shopId,
-            productId: productId,
-            variantIdx: 0,
-            bytes: _imageBytes!,
-            name: 'shops/${widget.shopId}/products/${ts}_0',
-            // Les bytes sortent de `validateAndReadImage` déjà ré-encodés en
-            // PNG : annoncer un autre type ferait enregistrer du PNG sous une
-            // extension mensongère.
-            mimeType: 'image/png',
-            isPrimary: true,
-          );
-          unawaited(PendingImageUploadService.flush());
-        } catch (e) {
-          debugPrint('[DishForm] photo non mise en file : $e');
-        }
+        await _store.enqueuePhoto(
+            productId: productId, bytes: _imageBytes!, ts: ts);
       }
 
-      final recipeSaved = await _trySyncRecipeLines(productId);
+      final recipeSaved = await _store.trySyncRecipe(productId, _recipe);
       if (!mounted) return;
       if (!recipeSaved) {
         // Le plat est CONSERVÉ : la saisie ne doit pas être perdue, et le plat
@@ -497,55 +461,6 @@ class _DishFormSheetState extends State<DishFormSheet> {
   }
 
   // ── Composition du plat ────────────────────────────────────────────────
-
-  /// Écrit la recette, avec UN réessai.
-  ///
-  /// Renvoie `false` si les deux tentatives échouent. `_syncRecipeLines` est
-  /// idempotent — `addLink` met à jour la ligne existante au lieu d'en créer une
-  /// seconde — donc rejouer ne peut pas doubler une composition.
-  ///
-  /// Un seul réessai, pas une boucle : ce qui peut échouer ici est une écriture
-  /// Hive locale. Si elle échoue deux fois de suite, insister ne changera rien
-  /// et fera attendre quelqu'un en plein service.
-  Future<bool> _trySyncRecipeLines(String productId) async {
-    for (var attempt = 1; attempt <= 2; attempt++) {
-      try {
-        await _syncRecipeLines(productId);
-        return true;
-      } catch (e) {
-        debugPrint('[DishForm] recette, tentative $attempt : $e');
-      }
-    }
-    return false;
-  }
-
-  /// Aligne les liens persistés sur le brouillon `_recipe` : (ré)écrit les
-  /// présents, supprime ceux décochés.
-  Future<void> _syncRecipeLines(String productId) async {
-    final currentIds = _recipe.map((d) => d.ingredientId).toSet();
-    for (final line in RecipeService.forProduct(widget.shopId, productId)) {
-      if (!currentIds.contains(line.ingredientId)) {
-        await RecipeService.removeLine(line);
-      }
-    }
-    for (final d in _recipe) {
-      await RecipeService.addLink(
-        shopId: widget.shopId,
-        productId: productId,
-        ingredientId: d.ingredientId,
-        portionWeight: d.portionWeight,
-        // Quantités écrites SEULEMENT pour les ingrédients chiffrés à la
-        // fiche : pour les autres le champ n'est pas affiché, et passer 0
-        // effacerait une quantité déjà pesée si l'ingrédient repassait un
-        // instant en répartition. `null` = « ne touche pas ».
-        quantity: d.usesSheet ? d.qtyValue : null,
-        unit: d.usesSheet ? d.unit : null,
-        // Passer par le formulaire VAUT confirmation : la valeur a été
-        // affichée, relue, et validée par l'enregistrement.
-        quantityConfirmed: d.usesSheet ? d.qtyValue > 0 : null,
-      );
-    }
-  }
 
   /// Coût matières du plat sur le MOIS EN COURS, tel que la répartition
   /// l'impute aujourd'hui.
@@ -590,7 +505,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
     // A-t-il coûté quelque chose ? La feuille de création écrit la dépense
     // elle-même ; on la relit plutôt que de faire remonter un second résultat,
     // et c'est la base qui fait foi.
-    if (_purchasesFor(ing.id) > 0) _purchasedIngredients.add(ing);
+    if (_store.purchasesFor(ing.id) > 0) _purchasedIngredients.add(ing);
     setState(() {
       _catalog.add(ing);
       _catalog.sort(
@@ -608,7 +523,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
   /// Vide la fiche recette du plat.
   ///
   /// Comme tout le reste du formulaire, c'est un changement de BROUILLON : il
-  /// n'est appliqué en base qu'à l'enregistrement (`_syncRecipeLines` retire
+  /// n'est appliqué en base qu'à l'enregistrement (`_DishStore.syncRecipe` retire
   /// alors les lignes absentes du brouillon). Fermer sans enregistrer ne perd
   /// donc rien — et `removeLine` remet au passage les ingrédients concernés en
   /// « spécialisé » s'ils ne servent plus qu'à un seul plat.
@@ -703,7 +618,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
   /// corrige.
   Future<void> _resolveOrphanPurchases() async {
     final total = _purchasedIngredients.fold<int>(
-        0, (s, i) => s + _purchasesFor(i.id));
+        0, (s, i) => s + _store.purchasesFor(i.id));
     final names = _purchasedIngredients.map((i) => i.name).join(', ');
     final many = _purchasedIngredients.length > 1;
 
@@ -728,36 +643,11 @@ class _DishFormSheetState extends State<DishFormSheet> {
     // `null` = la boîte a été fermée sans choisir : on reste dans le formulaire
     // plutôt que de décider à sa place.
     if (keep == null || !mounted) return;
-    if (keep != true) await _discardOrphanPurchases();
+    if (keep != true) await _store.discardPurchases(_purchasedIngredients);
     // Vidée dans les deux cas : la question a été posée, `canPop` laisse
     // désormais passer.
     _purchasedIngredients.clear();
     if (mounted) Navigator.of(context).pop(false);
-  }
-
-  /// Supprime les achats ET les ingrédients qui les portent.
-  ///
-  /// Les deux ensemble : garder un ingrédient sans achat le ferait remonter en
-  /// orange dans la liste des ingrédients « sans dépense », pour une saisie que
-  /// l'utilisateur vient justement d'annuler.
-  Future<void> _discardOrphanPurchases() async {
-    for (final ing in _purchasedIngredients) {
-      for (final e in DailyExpenseService.forShop(widget.shopId)) {
-        if (e.ingredientId == ing.id) {
-          await DailyExpenseService.delete(e.id, widget.shopId);
-        }
-      }
-      await IngredientService.delete(ing.id, widget.shopId);
-    }
-  }
-
-  /// Total des achats déjà rattachés à cet ingrédient (FCFA).
-  int _purchasesFor(String ingredientId) {
-    var total = 0;
-    for (final e in DailyExpenseService.forShop(widget.shopId)) {
-      if (e.ingredientId == ingredientId) total += e.amount;
-    }
-    return total;
   }
 
   Widget _buildForm(BuildContext context) {
@@ -874,9 +764,7 @@ class _DishFormSheetState extends State<DishFormSheet> {
               requireIngredient: widget.requireIngredient,
               hasSheetLine: _hasSheetLine,
               allocatedCost: _allocatedCost,
-              price: double.tryParse(
-                      _priceCtrl.text.trim().replaceAll(',', '.')) ??
-                  0,
+              price: _parseAmount(_priceCtrl.text) ?? 0,
               isNewDish: !_isEdit,
               saving: _saving,
               onCreateIngredient: _createIngredientInline,

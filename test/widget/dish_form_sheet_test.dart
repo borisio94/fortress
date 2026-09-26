@@ -19,6 +19,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fortress/core/services/activity_service.dart';
+import 'package:fortress/core/services/daily_expense_service.dart';
 import 'package:fortress/core/services/ingredient_service.dart';
 import 'package:fortress/core/services/recipe_service.dart';
 import 'package:fortress/core/storage/hive_boxes.dart';
@@ -175,6 +176,7 @@ void main() {
     await HiveBoxes.recipeIngredientsBox.clear();
     await HiveBoxes.ingredientsBox.clear();
     await HiveBoxes.restaurantActivitiesBox.clear();
+    await HiveBoxes.dailyExpensesBox.clear();
   });
 
   /// Remplit nom, catégorie « Plats » et prix : le minimum d'un plat valide.
@@ -362,5 +364,78 @@ void main() {
     expect(p.isActive, isTrue);
     expect(p.isVisibleWeb, isFalse);
     expect(p.activityId, bar.id);
+  });
+
+  /// Crée « Piment » (2 kg payés 3 000) par la feuille « Nouvel ingrédient »
+  /// de la fiche : un achat écrit AVANT que le plat n'existe.
+  Future<void> buyIngredientInline(WidgetTester tester) async {
+    await press(tester, find.text('Nouvel ingrédient'));
+    TextField input(String hint) => tester.widget<TextField>(find.ancestor(
+        of: find.textContaining(hint), matching: find.byType(TextField)));
+    Finder inputF(String hint) => find.ancestor(
+        of: find.textContaining(hint), matching: find.byType(TextField));
+    expect(input('Poulet, huile rouge').controller, isNotNull);
+    await tester.enterText(inputF('Poulet, huile rouge'), 'Piment');
+    await tester.enterText(inputF('ex. 25'), '2');
+    await tester.enterText(inputF('ex. 35000'), '3000');
+    await tester.pumpAndSettle();
+    await press(tester, find.text('Créer et ajouter'));
+  }
+
+  int piments() => IngredientService.forShop('shop1')
+      .where((i) => i.name == 'Piment')
+      .length;
+  int expenses() => DailyExpenseService.forShop('shop1').length;
+
+  /// Ferme la fiche comme le bouton retour (passe par `PopScope`).
+  Future<void> closeSheet(WidgetTester tester) async {
+    await tester.runAsync(() async {
+      await tester.state<NavigatorState>(find.byType(Navigator).last).maybePop();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    });
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('achat orphelin : fermer sans créer le plat demande, '
+      '« Supprimer » efface l\'achat et l\'ingrédient', (tester) async {
+    final state = await open(tester);
+    await buyIngredientInline(tester);
+    expect(piments(), 1);
+    expect(expenses(), 1, reason: 'l\'achat est écrit dès la création');
+
+    await closeSheet(tester);
+    expect(find.text('Garder cet achat ?'), findsOneWidget);
+    await press(tester, find.text('Supprimer'));
+
+    expect(state().done, isTrue);
+    expect(state().result, isFalse);
+    expect(piments(), 0);
+    expect(expenses(), 0);
+  });
+
+  testWidgets('achat orphelin : « Garder » conserve l\'achat et l\'ingrédient',
+      (tester) async {
+    final state = await open(tester);
+    await buyIngredientInline(tester);
+    await closeSheet(tester);
+    await press(tester, find.text('Garder'));
+
+    expect(state().result, isFalse);
+    expect(piments(), 1);
+    expect(expenses(), 1);
+  });
+
+  testWidgets('achat puis plat créé : aucune question, l\'ingrédient est dans '
+      'la recette', (tester) async {
+    final state = await open(tester);
+    await fillMinimum(tester, 'Sauce piment');
+    await buyIngredientInline(tester);
+    await press(tester, find.text('Créer le plat'));
+
+    expect(find.text('Garder cet achat ?'), findsNothing);
+    expect(state().result, isTrue);
+    final lines = RecipeService.forProduct('shop1', dishes().single.id!);
+    expect(lines, hasLength(1));
+    expect(expenses(), 1);
   });
 }
