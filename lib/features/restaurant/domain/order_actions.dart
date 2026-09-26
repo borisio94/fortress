@@ -49,7 +49,7 @@ enum OrderAction {
   /// Frais de livraison et dette partenaire — JAMAIS en restauration.
   editFees('Modifier les frais (livraison…)'),
 
-  /// Édition des articles.
+  /// Édition des articles — JAMAIS en restauration (voir `orderActionsFor`).
   editOrder('Modifier la commande'),
 
   /// Suppression définitive.
@@ -153,7 +153,14 @@ List<OrderAction> orderActionsFor({
     out.add(OrderAction.editFees);
   }
 
-  if (canEdit && status != SaleStatus.completed) {
+  // JAMAIS EN RESTAURATION (26/09/2026). L'action chargeait la commande dans
+  // le panier puis menait à la caisse e-commerce ; or « Commander », au
+  // restaurant, ignore la commande en cours de modification et en CRÉE une
+  // nouvelle (feuille « Type de commande » → envoi en cuisine) : l'originale
+  // restait, la commande était DUPLIQUÉE — second bon en cuisine, montant
+  // compté deux fois. Au restaurant, une commande se complète par ses propres
+  // gestes (ajout de plats à la table, annulation d'une tournée).
+  if (!isResto && canEdit && status != SaleStatus.completed) {
     out.add(OrderAction.editOrder);
   }
 

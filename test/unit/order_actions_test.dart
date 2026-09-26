@@ -140,12 +140,26 @@ void main() {
       }
     });
 
-    test('11 · modifier la commande : permis et pas encore encaissée', () {
-      expect(actions(), contains(OrderAction.editOrder));
-      expect(actions(canEdit: false), isNot(contains(OrderAction.editOrder)));
-      // Les articles sont figés une fois la commande complétée.
-      expect(actions(status: SaleStatus.completed),
+    test('11 · modifier la commande : e-commerce, permis et pas encore '
+        'encaissée', () {
+      expect(actions(isResto: false), contains(OrderAction.editOrder));
+      expect(actions(isResto: false, canEdit: false),
           isNot(contains(OrderAction.editOrder)));
+      // Les articles sont figés une fois la commande complétée.
+      expect(actions(isResto: false, status: SaleStatus.completed),
+          isNot(contains(OrderAction.editOrder)));
+    });
+
+    test('11 bis · JAMAIS en restauration, sur aucun statut', () {
+      // « Commander » y crée une nouvelle commande au lieu de modifier celle
+      // chargée : proposer l'action DUPLIQUAIT la commande (26/09/2026).
+      for (final s in SaleStatus.values) {
+        for (final appro in [true, false]) {
+          expect(actions(status: s, isApprovalSale: appro),
+              isNot(contains(OrderAction.editOrder)),
+              reason: '$s${appro ? ' (tournée)' : ''}');
+        }
+      }
     });
 
     test('12 · supprimer : statut autorisé ET rien d\'encaissé', () {
@@ -171,12 +185,11 @@ void main() {
   });
 
   group('Les maxima simultanés', () {
-    test('programmée : une principale et quatre secondaires', () {
+    test('programmée : une principale et trois secondaires', () {
       expect(actions(status: SaleStatus.scheduled), [
         OrderAction.advanceStatus,
         OrderAction.cancelOrRefuse,
         OrderAction.relaunchClient,
-        OrderAction.editOrder,
         OrderAction.deleteOrder,
       ]);
     });
@@ -195,9 +208,11 @@ void main() {
         OrderAction.closeApprovalRound,
         OrderAction.cancelApprovalRound,
         OrderAction.relaunchClient,
-        OrderAction.editOrder,
         OrderAction.deleteOrder,
       ]);
+      // En e-commerce, la modification reste proposée.
+      expect(actions(isApprovalSale: true, isResto: false),
+          contains(OrderAction.editOrder));
     });
 
     test('LE PLAFOND RÉEL, balayé sur toutes les combinaisons', () {
@@ -227,7 +242,8 @@ void main() {
       // SEPT en théorie : les combinaisons à sept exigent `isResto: false`,
       // qui seul débloque `editFees`.
       expect(toutes, 7);
-      // SIX EN RESTAURATION, et c'est le seul chiffre qui gouverne la rangée :
+      // SIX EN RESTAURATION (jusqu'au 26/09/2026), et c'est le seul chiffre
+      // qui gouverne la rangée :
       // `_buildRestoCard` n'est atteinte que si `_isResto`, donc le `!isResto`
       // de `editFees` y est toujours faux. Le bouton « Modifier les frais » ne
       // s'y affiche JAMAIS — sa condition y est du code mort, conservée telle
@@ -236,7 +252,10 @@ void main() {
       // SIX, C'EST CE QUI JUSTIFIE LA REFONTE : l'ancien `Row` alignait une
       // action principale de 195 px et cinq icônes de 30 px, écarts compris
       // 381 px — dans une tuile de grille qui n'en offre que 311.
-      expect(enResto, 6);
+      //
+      // CINQ depuis le 26/09/2026 : « Modifier la commande » n'est plus
+      // proposé en restauration (il dupliquait la commande).
+      expect(enResto, 5);
     });
   });
 

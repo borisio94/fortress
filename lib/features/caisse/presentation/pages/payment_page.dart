@@ -48,7 +48,12 @@ class PaymentPage extends StatelessWidget {
             shopId: shopId,
             onNewSale: () {
               context.read<CaisseBloc>().add(ClearCart());
-              context.go('/shop/$shopId/caisse');
+              // RESTAURANT : retour au Menu, là où se compose une commande —
+              // `/caisse` est la caisse e-commerce, dont la mise en page
+              // changeait avec la largeur (audit O5, 26/09/2026).
+              context.go(isRestaurantShop(shopId)
+                  ? '/shop/$shopId/inventaire'
+                  : '/shop/$shopId/caisse');
             },
           )),
         );

@@ -496,8 +496,9 @@ navigateur.
 
 Menu du compte, cloche, titre : alignés par le lot Shell (25/09/2026). Le
 tiroir filtre désormais ses sous-items par secteur, comme la barre latérale.
-Reste : l'édition d'une commande qui n'ouvre pas le même écran selon la
-largeur (section 19).
+Fermé : l'édition d'une commande au restaurant n'ouvre plus aucun écran : elle
+dupliquait la commande, et n'est plus proposée (lot « Commandes / Caisse
+restaurant », 26/09/2026 — section 19).
 
 ---
 
@@ -837,9 +838,18 @@ qui dit POURQUOI. Une branche sans commentaire est présumée être un oubli.
 
 **Oublis connus (audit du 24/09/2026)** : titre absent sur ordinateur, titre
 répété sur mobile, menu du compte non épuré sur mobile, cloche réservée à des
-publics différents — **corrigés par le lot Shell (25/09/2026)**. Reste :
-l'édition d'une commande dans deux écrans selon la largeur. Voir la
-section 21.
+publics différents — **corrigés par le lot Shell (25/09/2026)**.
+
+**Édition d'une commande — FERMÉ (26/09/2026).** Au restaurant, « Modifier la
+commande » chargeait la commande dans le panier et menait à la caisse
+e-commerce, dont la mise en page changeait à 800 px (panier en ligne
+au-dessus, invisible en dessous). Le vrai défaut était dessous : le
+« Commander » du restaurant crée une commande au lieu de modifier celle
+chargée — la commande était DUPLIQUÉE. L'action n'est plus proposée au
+restaurant (`order_actions.dart`, test « 11 bis ») ; une commande s'y complète
+par l'ajout de plats à la table et l'annulation d'une tournée. Après un
+paiement, « Nouvelle vente » ramène au Menu, plus à la caisse. La caisse
+`/caisse` n'est donc plus un écran du restaurant.
 
 ---
 
@@ -903,8 +913,7 @@ Le détail vit dans `docs/backlog.md` ; ici, l'index.
 - Code mort : `ExpenseFormSheet`, `PartnerLedgerDetailPage`,
   `DottedBorderBox` (e-commerce). Au restaurant, supprimé le 26/09/2026 :
   `KitchenTicketCard` et la pastille de service de `caisse_page`.
-- Shell : titres de page de l'e-commerce (backlog) ; édition d'une commande
-  selon la largeur (section 19).
+- Shell : titres de page de l'e-commerce (backlog).
 - Doublons de mécanisme (section 10) : onglets, périodes, étiquettes d'état,
   montants compacts, avatars.
 - Liserés hors de la règle de la section 16 : tuiles du tableau de bord

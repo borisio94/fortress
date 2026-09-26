@@ -409,6 +409,11 @@ shell est déjà en disposition « téléphone » (barre du bas, tiroir) ; entre
 bas. À juger à l'œil, à ~800 px, avant de décider : voulu, ou à aligner sur
 le 900 du shell.
 
+*26/09/2026 :* la caisse (`/caisse`, seuil 800 lu sur l'ÉCRAN dans
+`_PrincipalTab`) n'est plus atteinte par le restaurant — « Modifier la
+commande » ne lui est plus proposé, et « Nouvelle vente » ramène au Menu. Ce
+cas (audit N6) est désormais purement e-commerce.
+
 ### Seuils de largeur en dur hors du restaurant
 
 *Inscrit le 26/09/2026.* Le restaurant n'a plus que des seuils nommés (§ 8).
