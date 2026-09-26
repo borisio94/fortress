@@ -487,7 +487,13 @@ de 20 tests — FAIT), la page Menu (≈ 643 → 474 : sous `AppScaffold`, donc
 sans banc d'écran ; filtres et cas d'écran vide sortis en domaine pur
 `domain/menu_view.dart` sous 16 tests unitaires, feuille « Stock du jour »
 publique sous 8 tests, volet panier en widget — FAIT), la page Plan de salle
-(≈ 600).
+(≈ 590 → 416 : sous `AppScaffold` aussi ; le choix des actions d'une table
+sorti en domaine pur `domain/table_actions.dart` sous 7 tests unitaires,
+feuille des couverts publique sous 6 tests, menu d'actions en widget — FAIT).
+
+**Lot « classes géantes » CLOS le 26/09/2026.** Reste de sa portée : aucun
+test d'ÉCRAN pour les pages Menu et Plan de salle (voir « Pas de banc de test
+pour un écran sous `AppScaffold` »).
 
 **Restent — les grands fichiers hors restaurant**, à reprendre quand l'autre
 chantier aura commité (la plupart portent ses modifications) :

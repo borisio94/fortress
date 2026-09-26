@@ -13,12 +13,13 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
-import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../widgets/resto_fab.dart';
 import '../widgets/resto_empty_state.dart';
 import '../../domain/room_headline.dart';
+import '../../domain/table_actions.dart';
+import '../widgets/table_covers_sheet.dart';
 import '../widgets/table_form_sheet.dart';
 import '../widgets/table_reservation_sheet.dart';
 import '../../domain/entities/restaurant_table.dart';
@@ -36,6 +37,7 @@ import '../widgets/table_status_visuals.dart';
 
 part 'restaurant_tables_page.card.dart';
 part 'restaurant_tables_page.sheets.dart';
+part 'restaurant_tables_page.actions.dart';
 
 /// Plan de salle — grille des tables colorées par statut (PR-1).
 ///
@@ -193,86 +195,14 @@ class _RestaurantTablesPageState
   // le tap sur la carte : c'est la feuille « Type de commande » du Menu qui
   // ouvre désormais le service en posant la table et ses couverts.
 
-  /// Sélecteur de couverts (+/−) borné par la capacité de la table.
-  ///
-  /// Sert à l'ouverture du service ET à l'ajustement en cours de repas, quand
-  /// des convives s'en vont : [title] et [confirmLabel] distinguent les deux.
-  ///
-  /// Le bouton portait « Ouvrir la table » dans les deux cas — y compris pour
-  /// ajuster les couverts d'une table déjà ouverte, c'est-à-dire, depuis que
-  /// l'ouverture de service passe par le Menu, dans tous les cas réels.
+  /// Sélecteur de couverts (+/−) borné par la capacité de la table — la
+  /// feuille `TableCoversSheet`.
   Future<int?> _askCovers(RestaurantTable table,
       {String? title, String? confirmLabel}) {
-    var covers = table.covers ?? table.capacity;
     return showAdaptiveFormSheet<int>(
       context: context,
-      builder: (sheetCtx) => StatefulBuilder(
-        builder: (ctx, setSheetState) {
-          final theme = Theme.of(ctx);
-          return AdaptiveFormFrame(
-            title: title ?? 'Ouvrir ${table.name}',
-            subtitle: 'Capacité ${table.capacity} personnes',
-            icon: Icons.people_rounded,
-            body: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const AppFieldLabel('Nombre de couverts'),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _StepperButton(
-                        icon: Icons.remove_rounded,
-                        // Un service à 0 couvert n'a pas de sens.
-                        onTap: covers > 1
-                            ? () => setSheetState(() => covers--)
-                            : null,
-                      ),
-                      SizedBox(
-                        width: 88,
-                        child: Text(
-                          '$covers',
-                          textAlign: TextAlign.center,
-                          style: AppTextStyles.display.copyWith(
-                              color: theme.colorScheme.onSurface),
-                        ),
-                      ),
-                      _StepperButton(
-                        icon: Icons.add_rounded,
-                        // BORNÉ À LA CAPACITÉ. Le compteur montait jusqu'à
-                        // `capacity + 6` « pour les tables jointes », en
-                        // affichant un avertissement — puis `updateCovers`
-                        // re-clampait à la capacité, en silence. La valeur
-                        // saisie était écrasée sans un mot.
-                        //
-                        // Les tables jointes ne sont supportées nulle part
-                        // ailleurs : la prise de commande borne à la place
-                        // restante, `computeSeating` plafonne, et
-                        // la carte (« 4 sur 6 ») plafonne à la capacité.
-                        // C'était une intention isolée, contredite par tout le
-                        // reste du module.
-                        onTap: covers < table.capacity
-                            ? () => setSheetState(() => covers++)
-                            : null,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  AppPrimaryButton(
-                    label: confirmLabel ?? 'Ouvrir la table',
-                    icon: Icons.check_rounded,
-                    fullWidth: true,
-                    onTap: () => Navigator.of(ctx).pop(covers),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+      builder: (_) => TableCoversSheet(
+          table: table, title: title, confirmLabel: confirmLabel),
     );
   }
 
@@ -282,141 +212,44 @@ class _RestaurantTablesPageState
   /// informative : elle ouvrait la prise de commande au tap, or toute commande
   /// passe par le Menu. Ce qui reste ici relève de la table elle-même.
   ///
-  /// Le contenu suit l'état : une table LIBRE n'a ni addition à réclamer ni
-  /// couverts à ajuster, mais elle peut être supprimée — ce qu'une table en
-  /// service ne peut pas (on effacerait des additions ouvertes).
+  /// Le choix des actions selon l'état de la table est dans le domaine
+  /// (`tableActionsFor`) ; la feuille `_TableActionsSheet` les affiche.
   Future<void> _showTableActions(RestaurantTable table) async {
     final theme = Theme.of(context);
-    // TROIS états, pas deux. `isFree` inclut désormais les réservations
-    // périmées : s'en tenir à `free` / `!free` proposerait une addition et un
-    // ajustement de couverts sur une table simplement RETENUE, où personne
-    // n'est encore assis.
-    final free = table.isFree;
-    final reserved = table.hasLiveReservation;
-    final inService = !free && !reserved;
-    await showModalBottomSheet<void>(
+    final action = await showModalBottomSheet<TableAction>(
       context: context,
       backgroundColor: theme.colorScheme.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 12),
-            Text(table.name, style: AppTextStyles.subtitleBold),
-            // `displayStatus` : une réservation périmée s'annonce « Libre »,
-            // comme partout ailleurs.
-            Text(table.displayStatus.label,
-                style: AppTextStyles.captionHint),
-            const SizedBox(height: 8),
-            const Divider(height: 1),
-            if (inService) ...[
-              ListTile(
-                leading: Icon(Icons.receipt_long_rounded,
-                    color: theme.semantic.danger),
-                title: Text(table.status == RestaurantTableStatus.addition
-                    ? 'Voir l\'addition'
-                    : 'Demander l\'addition'),
-                subtitle: const Text('Récapitulatif, partage et encaissement'),
-                onTap: () async {
-                  Navigator.of(ctx).pop();
-                  // Bascule le statut avant d'ouvrir : la table doit passer
-                  // en rouge sur le plan de salle dès que le client réclame
-                  // l'addition, même si le serveur n'encaisse pas tout de suite.
-                  if (table.status != RestaurantTableStatus.addition) {
-                    await RestaurantTableService.requestBill(table);
-                  }
-                  if (mounted) _openBill(table);
-                },
-              ),
-              // Comptes de la table : consulter, TRANSFÉRER vers une autre
-              // table, FUSIONNER. Ces deux opérations n'existent nulle part
-              // ailleurs — elles étaient atteintes par le tap sur la carte,
-              // elles se rangent naturellement ici.
-              ListTile(
-                leading: Icon(Icons.receipt_outlined,
-                    color: theme.colorScheme.primary),
-                title: const Text('Comptes de la table'),
-                subtitle: const Text('Consulter, transférer, fusionner'),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _openTabs(
-                      table,
-                      RestaurantTabService.tabsForTable(
-                          widget.shopId, table.id));
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.event_seat_outlined,
-                    color: theme.colorScheme.primary),
-                title: const Text('Des places se libèrent'),
-                subtitle: Text(
-                    '${table.covers ?? table.capacity} couverts sur '
-                    '${table.capacity} — ajustez si des convives sont partis'),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _editCovers(table);
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.check_circle_outline_rounded,
-                    color: theme.semantic.success),
-                title: const Text('Libérer la table'),
-                subtitle: const Text('Remet la table en statut Libre'),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _releaseTable(table);
-                },
-              ),
-            ],
-            // RETENUE : rien à encaisser, rien à ajuster — seulement rendre
-            // la table si le client ne vient pas.
-            if (reserved)
-              ListTile(
-                leading: Icon(Icons.event_busy_outlined,
-                    color: theme.semantic.warning),
-                title: const Text('Annuler la réservation'),
-                subtitle: Text('Retenue pour '
-                    '${_hhmmOf(table.reservationTime)}'
-                    '${(table.reservationName ?? '').trim().isEmpty
-                        ? ''
-                        : ' — ${table.reservationName!.trim()}'}'),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _cancelReservation(table);
-                },
-              ),
-            // LIBRE : réserver, ouvert à tout membre — un client appelle, le
-            // serveur qui décroche note.
-            if (free)
-              ListTile(
-                leading: Icon(Icons.access_time_rounded,
-                    color: theme.colorScheme.primary),
-                title: const Text('Réserver la table'),
-                subtitle: const Text('Retenue jusqu\'à l\'arrivée du client'),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _reserveTable(table);
-                },
-              ),
-            if (free && _canManageRoom)
-              ListTile(
-                leading: Icon(Icons.delete_outline_rounded,
-                    color: theme.semantic.danger),
-                title: const Text('Supprimer la table'),
-                subtitle: const Text('Possible tant qu\'aucun service n\'y '
-                    'est ouvert'),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  _deleteTable(table);
-                },
-              ),
-            const SizedBox(height: 8),
-          ],
-        ),
+      builder: (_) => _TableActionsSheet(
+        table: table,
+        actions: tableActionsFor(table, canManageRoom: _canManageRoom),
       ),
     );
+    if (action == null || !mounted) return;
+    switch (action) {
+      case TableAction.bill:
+        // Bascule le statut avant d'ouvrir : la table doit passer en rouge
+        // sur le plan de salle dès que le client réclame l'addition, même si
+        // le serveur n'encaisse pas tout de suite.
+        if (table.status != RestaurantTableStatus.addition) {
+          await RestaurantTableService.requestBill(table);
+        }
+        if (mounted) _openBill(table);
+      case TableAction.tabs:
+        _openTabs(
+            table, RestaurantTabService.tabsForTable(widget.shopId, table.id));
+      case TableAction.covers:
+        _editCovers(table);
+      case TableAction.release:
+        _releaseTable(table);
+      case TableAction.cancelReservation:
+        _cancelReservation(table);
+      case TableAction.reserve:
+        _reserveTable(table);
+      case TableAction.delete:
+        _deleteTable(table);
+    }
   }
 
   /// Formulaire de création d'une table.
@@ -499,11 +332,6 @@ class _RestaurantTablesPageState
           'changement. Il s\'appliquera après synchronisation.');
     }
   }
-
-  static String _hhmmOf(DateTime? d) => d == null
-      ? 'une heure non précisée'
-      : '${d.hour.toString().padLeft(2, '0')}:'
-          '${d.minute.toString().padLeft(2, '0')}';
 
   Future<void> _deleteTable(RestaurantTable table) async {
     // Même filet. La suppression est DURE : elle ne doit pas dépendre du seul
@@ -662,3 +490,9 @@ class _RestaurantTablesPageState
     );
   }
 }
+
+/// Heure d'une réservation, `HH:mm` — ou la mention qu'elle n'est pas connue.
+String _hhmmOf(DateTime? d) => d == null
+    ? 'une heure non précisée'
+    : '${d.hour.toString().padLeft(2, '0')}:'
+        '${d.minute.toString().padLeft(2, '0')}';
