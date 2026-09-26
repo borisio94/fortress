@@ -2165,11 +2165,11 @@ class _InlineMultiMenuState extends State<_InlineMultiMenu> {
                           duration: const Duration(milliseconds: 120),
                           width: 14, height: 14,
                           decoration: BoxDecoration(
-                            color: sel ? AppColors.primary : Colors.transparent,
+                            color: sel ? AppColors.primaryFill : Colors.transparent,
                             borderRadius: BorderRadius.circular(3),
                             border: Border.all(
                                 color: sel
-                                    ? AppColors.primary
+                                    ? AppColors.primaryFill
                                     : cs.onSurface.withValues(alpha: 0.4),
                                 width: 1.5),
                           ),
