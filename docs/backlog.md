@@ -478,9 +478,12 @@ classe ; les réduire, c'est extraire de vrais composants, avec un risque sur
 le comportement : un lot à part, AVEC des tests d'écran d'abord) :
 l'état de la fiche plat (≈ 1 260 l. → 696 le 26/09/2026 : sections
 d'affichage et enregistrement extraits sous un banc de 12 tests,
-`test/widget/dish_form_sheet_test.dart` — FAIT), l'onglet Paie (sorti de la
-page Personnel dans `widgets/staff_payroll_tab.dart` pour être testable) (≈ 1 030), la fiche
-employé (≈ 760), la page Menu (≈ 655), la page Plan de salle (≈ 600).
+`test/widget/dish_form_sheet_test.dart` — FAIT), l'onglet Paie (≈ 1 030 l.
+→ 402 le 26/09/2026 : sorti de la page Personnel dans
+`widgets/staff_payroll_tab.dart`, feuilles et listes extraites sous un banc de
+12 tests — FAIT), la fiche employé (≈ 760 ; sortie de la page dans
+`widgets/staff_editor_sheet.dart` pour être testable), la page Menu (≈ 655),
+la page Plan de salle (≈ 600).
 
 **Restent — les grands fichiers hors restaurant**, à reprendre quand l'autre
 chantier aura commité (la plupart portent ses modifications) :

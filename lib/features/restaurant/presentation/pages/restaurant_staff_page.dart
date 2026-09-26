@@ -1,7 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'
-    show FilteringTextInputFormatter, LengthLimitingTextInputFormatter;
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/services/staff_service.dart';
@@ -10,20 +7,15 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_confirm_dialog.dart';
-import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_scaffold.dart';
-import '../../../../shared/widgets/app_select_menu.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/storage/local_storage_service.dart';
-import '../../../hr/data/providers/employees_provider.dart';
-import '../../../hr/domain/models/employee.dart';
-import '../../../hr/domain/models/job_titles.dart';
 import '../../domain/entities/shift_evaluation.dart';
 import '../../domain/entities/staff_absence.dart';
 import '../../domain/entities/staff_member.dart';
-import '../../domain/staff_account_link.dart';
 import '../../domain/entities/time_record.dart';
 import '../widgets/resto_empty_state.dart';
+import '../widgets/staff_editor_sheet.dart';
 import '../widgets/staff_payroll_tab.dart';
 import '../widgets/resto_surfaces.dart';
 import '../widgets/resto_table_listener.dart';
@@ -153,147 +145,3 @@ class _StaffHeaderState extends RestoTableListenerState<_StaffHeader> {
 /// même besoin et ne pouvaient pas hériter d'une classe privée.
 abstract class _StaffTabState<T extends StatefulWidget>
     extends RestoTableListenerState<T> {}
-
-/// Sélecteur de jour au gabarit d'un champ de formulaire.
-class _DayField extends StatelessWidget {
-  final String label;
-  final DateTime value;
-  final ValueChanged<DateTime> onPick;
-
-  const _DayField(
-      {required this.label, required this.value, required this.onPick});
-
-  @override
-  Widget build(BuildContext context) => InkWell(
-        onTap: () async {
-          final d = await showDatePicker(
-            context: context,
-            initialDate: value,
-            // Une mise à pied se régularise parfois après coup, et un congé
-            // s'accorde pour le mois prochain : la fenêtre couvre les deux.
-            firstDate: DateTime.now().subtract(const Duration(days: 90)),
-            lastDate: DateTime.now().add(const Duration(days: 365)),
-          );
-          if (d != null) onPick(d);
-        },
-        child: InputDecorator(
-          decoration: InputDecoration(
-            labelText: label,
-            suffixIcon: const Icon(Icons.calendar_today_rounded, size: 16),
-          ),
-          child: Text(
-              '${value.day.toString().padLeft(2, '0')}/'
-              '${value.month.toString().padLeft(2, '0')}/${value.year}',
-              style: AppTextStyles.body),
-        ),
-      );
-}
-
-/// Champ en lecture seule — même gabarit qu'un `TextField`, sans la saisie.
-class _ReadOnlyField extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _ReadOnlyField({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) => InputDecorator(
-        decoration: InputDecoration(labelText: label),
-        child: Text(value, style: AppTextStyles.body),
-      );
-}
-
-/// Choix de la personne parmi les comptes « Accès à l'app » de la boutique.
-///
-/// Les comptes DÉJÀ inscrits au personnel sont retirés de la liste : les
-/// proposer laisserait créer deux fiches pour la même personne, donc deux
-/// codes de badge et deux bulletins de paie.
-///
-/// Un `Consumer` local plutôt qu'une page entière convertie à Riverpod : seule
-/// cette portion dépend du provider, et la remonter obligerait à toucher la
-/// page, ses trois onglets et leurs états.
-class _AccountPicker extends ConsumerWidget {
-  final String shopId;
-  final String selected;
-
-  /// Le personnel déjà inscrit, réduit au lien et au nom. Voir
-  /// `staff_account_link.dart` pour la règle de rapprochement.
-  final List<StaffLink> staffLinks;
-
-  /// `(identifiant, nom, fonction)`. L'IDENTIFIANT est le point de ce lot :
-  /// sans lui, la fiche ne saurait pas de quel compte elle vient, et deux
-  /// homonymes se confondraient à la prochaine ouverture du formulaire.
-  ///
-  /// La fonction vient du compte et est recopiée sur la fiche : elle n'est
-  /// plus choisie deux fois.
-  final void Function(String userId, String name, String jobTitle) onSelect;
-
-  const _AccountPicker({
-    required this.shopId,
-    required this.selected,
-    required this.staffLinks,
-    required this.onSelect,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(employeesProvider(shopId));
-    final all = async.valueOrNull ?? const <Employee>[];
-    final names = [
-      for (final e in all)
-        if (e.fullName.trim().isNotEmpty &&
-            !accountHasStaffRecord(
-                userId: e.userId,
-                fullName: e.fullName,
-                staff: staffLinks))
-          e.fullName.trim(),
-    ]..sort();
-    // Retrouver le COMPTE à partir du nom choisi : la liste déroulante ne sait
-    // rendre qu'une chaîne. Deux homonymes tous deux éligibles restent
-    // indiscernables ICI — le premier de la liste l'emporte. C'est une limite
-    // de la liste déroulante, pas du rapprochement : dès que l'un des deux a
-    // sa fiche, l'autre reste seul proposé.
-    Employee? accountFor(String name) {
-      for (final e in all) {
-        if (e.fullName.trim() == name) return e;
-      }
-      return null;
-    }
-
-    if (async.isLoading && all.isEmpty) {
-      return const _ReadOnlyField(
-          label: 'Personne', value: 'Chargement des comptes…');
-    }
-    if (names.isEmpty) {
-      // Dire QUOI faire, et où. Une liste vide sans explication ressemble à
-      // une panne alors que c'est un état de départ parfaitement normal.
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const _ReadOnlyField(
-              label: 'Personne', value: 'Aucun compte disponible'),
-          const SizedBox(height: 6),
-          Text(
-              all.isEmpty
-                  ? 'Créez d\'abord le compte de cette personne dans '
-                      '« Accès à l\'app ».'
-                  : 'Tous les comptes de la boutique sont déjà inscrits au '
-                      'personnel.',
-              style: AppTextStyles.captionHint),
-        ],
-      );
-    }
-    return AppSelectWidget(
-      label: 'Personne',
-      required: true,
-      items: names,
-      value: selected.isEmpty ? null : selected,
-      icon: Icons.person_outline_rounded,
-      onChanged: (name) {
-        final account = accountFor(name);
-        if (account == null) return;
-        onSelect(account.userId, name, account.jobTitle.trim());
-      },
-    );
-  }
-}
