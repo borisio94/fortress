@@ -11,6 +11,7 @@ import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../hr/domain/models/job_titles.dart';
 import '../../domain/entities/shift_evaluation.dart';
+import 'resto_empty_state.dart';
 
 /// RÉGLAGES DU PERSONNEL — l'horaire et le prix d'une heure en plus.
 ///
@@ -162,10 +163,9 @@ class _StaffSettingsSheetState extends State<_StaffSettingsSheet> {
                 style: AppTextStyles.captionHint),
             const SizedBox(height: 10),
             if (_rates.isEmpty)
-              Text(
+              const RestoEmptyNote(
                   'Aucune fonction déclarée. Créez-les dans « Accès à l\'app » '
-                  'ou sur les fiches du personnel.',
-                  style: AppTextStyles.captionHint)
+                  'ou sur les fiches du personnel.')
             else
               // Bornée en hauteur : douze fonctions ne doivent pas repousser le
               // bouton d'enregistrement hors de l'écran.

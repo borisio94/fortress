@@ -24,6 +24,7 @@ import '../../domain/entities/restaurant_table.dart';
 import '../../domain/order_author.dart';
 import '../../../../shared/providers/order_attach_provider.dart';
 import '../widgets/deposit_sheet.dart';
+import '../widgets/resto_empty_state.dart';
 import '../widgets/packaging_sheet.dart';
 import '../widgets/payment_sheet.dart';
 
@@ -282,12 +283,20 @@ class _BillPageState extends ConsumerState<BillPage> {
     final table = _table;
     final order = _order;
 
+    // ÉTATS VIDES — l'écran entier : une CARTE, pas un texte seul au milieu
+    // du vide (document de design § 11). Ils étaient les deux derniers écrans
+    // du module en texte nu.
     if (table == null) {
       return AppScaffold(
         shopId: widget.shopId,
         title: 'Addition',
         isRootPage: false,
-        body: const Center(child: Text('Table introuvable.')),
+        // Rien à créer ici : pas de bouton, la flèche de retour suffit.
+        body: const RestoEmptyState(
+          icon: Icons.table_restaurant_outlined,
+          title: 'Table introuvable',
+          subtitle: 'Elle a peut-être été supprimée du plan de salle.',
+        ),
       );
     }
     if (order == null || order.items.isEmpty) {
@@ -295,14 +304,14 @@ class _BillPageState extends ConsumerState<BillPage> {
         shopId: widget.shopId,
         title: 'Addition — ${table.name}',
         isRootPage: false,
-        body: const Center(
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Text(
-              'Aucune commande en cours sur cette table.',
-              textAlign: TextAlign.center,
-            ),
-          ),
+        // L'état vide porte son chemin : prendre une commande, au Menu — la
+        // même destination que l'état vide de l'écran Commandes.
+        body: RestoEmptyState(
+          icon: Icons.receipt_long_outlined,
+          title: 'Aucune commande en cours',
+          subtitle: 'Cette table n\'a rien à régler pour le moment.',
+          actionLabel: 'Prendre une commande',
+          onAction: () => context.go('/shop/${widget.shopId}/inventaire'),
         ),
       );
     }

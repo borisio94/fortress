@@ -513,8 +513,23 @@ propre bouton de création — c'est pourquoi le bouton flottant disparaît sur
 un écran vide.
 
 Exception écrite, à ne pas étendre : l'onglet Fournitures du Stock
-(`_SuppliesEmptyState`). **NON TRANCHÉ** : les « Aucun… » en texte nu DANS une
-sous-section ou une feuille (≈ 12 cas) — la règle vaut-elle à cette échelle ?
+(`_SuppliesEmptyState`).
+
+**TRANCHÉ (26/09/2026) — dans une section ou une feuille, une PHRASE, pas une
+carte : `RestoEmptyNote`.** À cette échelle le texte est déjà posé sur une
+surface (feuille opaque, section sous son titre) : la raison de la carte ne
+joue pas, et une carte dans une feuille ferait une carte dans une carte. La
+phrase dit ce qui manque et, s'il y a lieu, où agir ; elle s'écrit en
+`caption` / `textSecondary` (6,87:1 en clair, 5,71 en sombre) — jamais en
+`captionHint`, dont le `textHint` tombe à 3,07:1 en sombre (7 des 10 notes
+de la liste y étaient). `RestoEmptyState` reste la règle quand l'état vide
+EST l'écran : l'Addition (« Table introuvable », « Aucune commande en cours »
+avec son bouton « Prendre une commande ») était le dernier écran du module en
+texte nu.
+
+Garde-fou : `test/theme/empty_state_guard_test.dart` — une phrase en
+« Aucun / Rien » en `Text` nu, rendue sous un `…isEmpty`, échoue. Il ne voit
+pas une liste vide testée autrement (la feuille Livreur teste un décompte).
 
 ### Chargement, erreur, hors ligne
 

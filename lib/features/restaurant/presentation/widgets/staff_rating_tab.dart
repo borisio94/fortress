@@ -135,9 +135,8 @@ class _StaffRatingTabState extends RestoTableListenerState<StaffRatingTab> {
                 StaffScoreGauge(score: score),
                 const SizedBox(height: 14),
                 if (events.isEmpty)
-                  Text(
-                      'Rien à signaler ce mois-ci — la note est au maximum.',
-                      style: AppTextStyles.captionHint)
+                  const RestoEmptyNote(
+                      'Rien à signaler ce mois-ci — la note est au maximum.')
                 else ...[
                   const Text('Historique du mois',
                       style: AppTextStyles.label),

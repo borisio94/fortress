@@ -308,6 +308,32 @@ style ; une couleur passée par une variable lui échappe (le lot en a trouvé
 ≈ 50 à la main). Et il ne couvre que `lib/features/restaurant/` : les écrans
 restaurant logés ailleurs (`caisse_page.dart`) n'y sont pas.
 
+## États vides
+
+### Les chemins écrits des notes vides deviendraient des liens
+
+*Inscrit le 26/09/2026 avec le lot « états vides », par décision : pas dans
+ce lot (ajouter des navigations dépasse un lot visuel).* Des `RestoEmptyNote`
+disent où agir sans y mener : « Créez-les dans « Accès à l'app » »
+(`staff_settings_sheet`), « dans Finances → Activités » (`dish_form_sheet`,
+secteurs), « dans Finances → Fournitures » (`order_type_sheet`,
+`packaging_sheet`), « avec le poste « Livreur » dans Personnel »
+(`courier_sheet`).
+
+### L'e-commerce garde ≈ 21 états vides locaux
+
+*Hors périmètre du lot restaurant.* `_EmptyState` ×5, `_Empty` ×3,
+`_EmptyHint` ×2, `_EmptyCart`, `_EmptyProducts`, trois dans `dashboard_page`…
+face à `EmptyStateWidget`, partagé, dont le bouton n'est pas centré (raison
+pour laquelle le restaurant a le sien).
+
+### Pas de banc de test pour un écran sous `AppScaffold`
+
+*Inscrit le 26/09/2026.* L'Addition n'a pas pu être montée en test : son
+`AppScaffold` ouvre un canal Supabase et exige tout l'habillage de l'app
+(bloc du panier, abonnement, notifications). Ses deux états vides sont
+couverts par le garde-fou de sources, pas par un test d'écran.
+
 ## Code mort
 
 ### `_ServiceChip` — une pastille que plus rien ne rend

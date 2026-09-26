@@ -31,6 +31,7 @@ import '../../domain/category_labels.dart';
 import '../../domain/entities/ingredient.dart';
 import '../../domain/entities/recipe_ingredient.dart';
 import '../../domain/entities/restaurant_activity.dart';
+import 'resto_empty_state.dart';
 
 /// Ouvre la feuille de saisie d'un plat. Retourne `true` si un plat a été
 /// créé ou modifié.
@@ -851,10 +852,9 @@ class _DishFormSheetState extends State<DishFormSheet> {
   /// désormais où ça se passe.
   Widget _activityField(BuildContext context) {
     if (_activities.isEmpty) {
-      return Text(
+      return const RestoEmptyNote(
           'Aucun secteur défini. Ils se créent dans Finances → Activités, pour '
-          'séparer les chiffres du bar et de la cuisine.',
-          style: AppTextStyles.caption);
+          'séparer les chiffres du bar et de la cuisine.');
     }
     return Wrap(
       spacing: 8,
@@ -1188,10 +1188,9 @@ class _DishFormSheetState extends State<DishFormSheet> {
                         AppTextStyles.caption.copyWith(color: sem.warningText)),
               ),
             if (_catalog.isEmpty)
-              Text(
+              const RestoEmptyNote(
                   'Aucun ingrédient dans votre catalogue. Créez-en un pour '
-                  'commencer à suivre le coût de ce plat.',
-                  style: AppTextStyles.caption)
+                  'commencer à suivre le coût de ce plat.')
             else
               Wrap(
                 spacing: 8,

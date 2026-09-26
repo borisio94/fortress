@@ -19,6 +19,7 @@ import '../../domain/order_attach.dart';
 import '../../domain/table_drift.dart';
 import 'courier_sheet.dart';
 import '../../../../core/widgets/touch_target.dart';
+import 'resto_empty_state.dart';
 
 /// ENREGISTREMENT D'UNE COMMANDE prise depuis le Menu — Module 3 du flux.
 ///
@@ -826,11 +827,10 @@ class _OrderTypeSheetState extends State<_OrderTypeSheet> {
   List<Widget> _buildTakeaway(ColorScheme cs) {
     if (_packagingItems.isEmpty) {
       return [
-        Text(
+        const RestoEmptyNote(
             'Aucun emballage facturable. Créez vos barquettes et vos sachets '
             'dans Finances → Fournitures, avec un prix de vente — c\'est lui '
-            'qui les rend proposables ici.',
-            style: AppTextStyles.captionHint),
+            'qui les rend proposables ici.'),
         const SizedBox(height: 10),
         Text('Vous pouvez envoyer la commande sans emballage.',
             style: AppTextStyles.caption),

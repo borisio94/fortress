@@ -254,3 +254,25 @@ class RestoEmptyState extends StatelessWidget {
     );
   }
 }
+
+/// LISTE VIDE à l'intérieur d'une SECTION ou d'une FEUILLE — une phrase, pas
+/// une carte (document de design § 11, tranché le 26/09/2026).
+///
+/// À cette échelle, le texte est déjà posé sur une surface : la feuille est
+/// opaque, la section vit sous son titre. La raison de la carte — un texte à nu
+/// sur la photo de salle, qui se lit comme un écran pas fini de charger — n'y
+/// joue pas, et une carte dans une feuille ferait une carte dans une carte.
+/// [RestoEmptyState] reste la règle quand l'état vide EST l'écran.
+///
+/// La phrase dit ce qui manque et, s'il y a lieu, où agir. Toujours en
+/// `caption` / `textSecondary` (6,87:1 en clair, 5,71 en sombre) : ces notes
+/// étaient pour la plupart en `captionHint`, dont le `textHint` tombe à
+/// 3,07:1 en sombre.
+class RestoEmptyNote extends StatelessWidget {
+  final String text;
+  const RestoEmptyNote(this.text, {super.key});
+
+  @override
+  Widget build(BuildContext context) =>
+      Text(text, style: AppTextStyles.caption);
+}

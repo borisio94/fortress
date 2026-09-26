@@ -7,6 +7,7 @@ import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../domain/entities/staff_member.dart';
+import 'resto_empty_state.dart';
 
 /// Livreur retenu pour une commande : un nom, et le numéro auquel le joindre.
 class CourierChoice {
@@ -147,11 +148,10 @@ class _CourierSheetState extends State<_CourierSheet> {
                 ),
               const Divider(height: 22),
             ] else ...[
-              Text(
+              const RestoEmptyNote(
                   'Aucun livreur dans votre personnel. Ajoutez-en un avec le '
                   'poste « Livreur » dans Personnel, ou saisissez ci-dessous '
-                  'un livreur de passage.',
-                  style: AppTextStyles.captionHint),
+                  'un livreur de passage.'),
               const SizedBox(height: 14),
             ],
             Text('Livreur de passage', style: AppTextStyles.caption),

@@ -1683,8 +1683,7 @@ class _PayrollTabState extends _StaffTabState<_PayrollTab> {
     final list = StaffService.advances(widget.shopId, month: _monthKey);
     if (list.isEmpty) {
       return [
-        Text('Aucune avance versée sur ce mois.',
-            style: AppTextStyles.captionHint),
+        const RestoEmptyNote('Aucune avance versée sur ce mois.'),
       ];
     }
     return [
@@ -2085,7 +2084,7 @@ class _PayrollTabState extends _StaffTabState<_PayrollTab> {
     final list = StaffService.penalties(widget.shopId);
     if (list.isEmpty) {
       return [
-        Text('Aucune casse imputée.', style: AppTextStyles.captionHint),
+        const RestoEmptyNote('Aucune casse imputée.'),
       ];
     }
     return [
@@ -2133,8 +2132,7 @@ class _PayrollTabState extends _StaffTabState<_PayrollTab> {
     final list = StaffService.absences(widget.shopId);
     if (list.isEmpty) {
       return [
-        Text('Aucune mise à pied ni congé enregistré.',
-            style: AppTextStyles.captionHint),
+        const RestoEmptyNote('Aucune mise à pied ni congé enregistré.'),
       ];
     }
     return [

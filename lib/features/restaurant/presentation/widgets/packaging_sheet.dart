@@ -11,6 +11,7 @@ import '../../../../shared/widgets/app_field.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../domain/entities/stock_item.dart';
 import '../../../../core/widgets/touch_target.dart';
+import 'resto_empty_state.dart';
 
 /// EMBALLAGES d'une commande — barquettes, sachets, boîtes.
 ///
@@ -176,11 +177,10 @@ class _PackagingSheetState extends State<_PackagingSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (_items.isEmpty)
-              Text(
+              const RestoEmptyNote(
                   'Aucun emballage facturable. Créez vos barquettes et vos '
                   'sachets dans Finances → Fournitures, avec un prix de '
-                  'vente — c\'est lui qui les rend proposables ici.',
-                  style: AppTextStyles.captionHint)
+                  'vente — c\'est lui qui les rend proposables ici.')
             else ...[
               Text(
                   'Ce que vous ajoutez est facturé au client et retiré de '
