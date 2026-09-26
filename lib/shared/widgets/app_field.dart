@@ -35,6 +35,23 @@ class AppField extends StatefulWidget {
   final bool isPhone;
   final void Function(String fullNumber, bool isValid)? onPhoneChanged;
 
+  /// Teinte imposée à la bordure, quel que soit l'état du champ.
+  ///
+  /// Sert à faire porter au champ lui-même un message affiché dessous : sans
+  /// elle, un avertissement flotte sous un champ qui a l'air normal, et on ne
+  /// sait pas lequel il concerne quand il y en a plusieurs à l'écran.
+  ///
+  /// `null` (défaut) = la bordure habituelle, calculée depuis le contenu et le
+  /// focus. Aucun champ existant ne change.
+  final Color? borderColor;
+
+  /// Style du texte indicatif (placeholder).
+  ///
+  /// `null` (défaut) = `AppTextStyles.inputHint`. À ne renseigner que pour
+  /// remonter le contraste là où le fond l'exige — un placeholder trop pâle se
+  /// lit comme un champ désactivé, et on n'ose plus y écrire.
+  final TextStyle? hintStyle;
+
   const AppField({
     super.key,
     this.controller,
@@ -55,6 +72,8 @@ class AppField extends StatefulWidget {
     // phone mode
     this.isPhone = false,
     this.onPhoneChanged,
+    this.borderColor,
+    this.hintStyle,
   });
 
   @override
@@ -172,18 +191,23 @@ class _AppFieldState extends State<AppField> {
 
   // ── Border helpers ────────────────────────────────────────────────────────
   Color get _borderColor {
+    // Imposée par l'appelant : elle prime sur l'état du champ.
+    final forced = widget.borderColor;
+    if (forced != null) return forced;
     if (widget.isPhone) {
       if (!_phoneHasInput) return AppColors.primary.withValues(alpha:0.5);
       return _phoneValid ? AppColors.primary : AppColors.error;
     }
     return _hasValue
         ? AppColors.primary.withValues(alpha:0.5)
-        : const Color(0xFFE5E7EB);
+        : AppColors.inputBorder;
   }
 
   double get _borderWidth {
     if (widget.isPhone) return _phoneHasInput && _phoneValid ? 1.5 : 1.0;
-    return 1.0;
+    // Une bordure imposée signale quelque chose : à 1 px elle passerait
+    // inaperçue à côté d'un champ rempli, qui est déjà teinté.
+    return widget.borderColor != null ? 1.5 : 1.0;
   }
 
   OutlineInputBorder _border(Color color, {double width = 1}) =>
@@ -221,7 +245,7 @@ class _AppFieldState extends State<AppField> {
         // Séparateur
         Container(
           width: 1, height: 22,
-          color: const Color(0xFFE5E7EB),
+          color: AppColors.divider,
           margin: const EdgeInsets.symmetric(horizontal: 4),
         ),
         // Saisie
@@ -270,8 +294,8 @@ class _AppFieldState extends State<AppField> {
   // ── Mode normal ───────────────────────────────────────────────────────────
   Widget _buildNormalField() {
     final fillColor = widget.style == AppFieldStyle.white
-        ? Colors.white
-        : const Color(0xFFF9FAFB);
+        ? AppColors.surface
+        : AppColors.inputFill;
 
     return TextFormField(
       controller:   widget.controller,
@@ -289,7 +313,7 @@ class _AppFieldState extends State<AppField> {
       onChanged: widget.onChanged,
       decoration: InputDecoration(
         hintText: widget.hint,
-        hintStyle: AppTextStyles.inputHint,
+        hintStyle: widget.hintStyle ?? AppTextStyles.inputHint,
         prefixIcon: widget.prefixIcon != null
             ? Icon(widget.prefixIcon, size: 15,
             color: const Color(0xFFAAAAAA))
@@ -300,7 +324,7 @@ class _AppFieldState extends State<AppField> {
         isDense:   widget.isDense,
         contentPadding:
         const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-        border:        _border(const Color(0xFFE5E7EB)),
+        border:        _border(AppColors.inputBorder),
         enabledBorder: _border(_borderColor, width: _borderWidth),
         focusedBorder: _border(AppColors.primary, width: 1.5),
         errorBorder:   _border(AppColors.error),
@@ -329,20 +353,20 @@ class _CountryPicker extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Row(children: [
         Text(c.isoCode,
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
-                color: Color(0xFF374151))),
+                color: AppColors.onSurface)),
         const SizedBox(width: 8),
         Text(c.dialCode,
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
-                color: Color(0xFF374151))),
+                color: AppColors.onSurface)),
         const SizedBox(width: 6),
         Expanded(child: Text(c.nameFr,
-            style: const TextStyle(
-                fontSize: 12, color: Color(0xFF6B7280)),
+            style: TextStyle(
+                fontSize: 12, color: AppColors.textSecondary),
             overflow: TextOverflow.ellipsis)),
       ]),
     )).toList(),
@@ -352,13 +376,13 @@ class _CountryPicker extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Text('${selected.isoCode} ${selected.dialCode}',
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFF374151))),
+                    color: AppColors.onSurface)),
             const SizedBox(width: 2),
-            const Icon(Icons.keyboard_arrow_down_rounded,
-                size: 14, color: Color(0xFF9CA3AF)),
+            Icon(Icons.keyboard_arrow_down_rounded,
+                size: 14, color: AppColors.textHint),
           ]),
     ),
   );

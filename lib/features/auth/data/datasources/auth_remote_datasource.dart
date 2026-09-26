@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/storage/secure_storage.dart';
 import '../../../../core/storage/local_storage_service.dart';
@@ -21,7 +23,12 @@ abstract class AuthRemoteDataSource {
 // ─────────────────────────────────────────────────────────────────────────────
 // Supabase Auth + fallback Hive offline
 // ─────────────────────────────────────────────────────────────────────────────
-class AuthRemoteDataSourceMock implements AuthRemoteDataSource {
+/// L'IMPLÉMENTATION RÉELLE. Elle s'appelait `AuthRemoteDataSourceMock`
+/// jusqu'au 21/09/2026, et c'est la seule qui existe : `injection_container`
+/// la câble en production, chaque connexion et chaque inscription passent par
+/// elle. Le nom a trompé un audit du parcours d'entrée, qui a cherché ailleurs
+/// le code qui authentifie vraiment.
+class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   final _supabase = AuthSupabaseDataSource();
 
   @override
@@ -102,8 +109,38 @@ class AuthRemoteDataSourceMock implements AuthRemoteDataSource {
           statusCode: 401);
     }
 
-    await SecureStorageService.saveAccessToken('offline_token_$normalEmail');
+    // ISOLATION (anti-fuite inter-comptes, appareil partagé) — même garde que
+    // le login EN LIGNE, qui l'avait et que celui-ci n'avait pas. L'écart est
+    // resté sans conséquence tant que la déconnexion emportait tout : plus
+    // rien ne subsistait d'un autre compte. Depuis que la file d'envoi survit
+    // à la déconnexion, l'écart devient une fuite — les écritures du compte
+    // précédent partiraient sous la session de celui-ci.
+    final previousOwner = LocalStorageService.getLocalDataOwnerId();
+    if (previousOwner != null && previousOwner != user.id) {
+      debugPrint('[Auth] connexion hors ligne : données locales d\'un autre '
+          'compte ($previousOwner ≠ ${user.id}) → purge anti-fuite');
+      // Même contrepartie qu'en ligne : le secret du compte précédent part
+      // AVANT la purge, tant que sa fiche porte encore son e-mail.
+      final previous = LocalStorageService.getUser(previousOwner);
+      final mail = previous?.email.trim().toLowerCase() ?? '';
+      if (mail.isNotEmpty) {
+        await SecureStorageService.deletePassword(mail);
+      }
+      await LocalStorageService.purgeOnLogout();
+      // La purge a emporté la boîte `users`, DONT la fiche qu'on vient
+      // d'authentifier. Le chemin EN LIGNE la ré-écrit juste après (`saveUser`
+      // après la garde) ; celui-ci ne le faisait pas, et `setCurrentUserId`
+      // ci-dessous aurait pointé sur une fiche absente — session ouverte,
+      // utilisateur introuvable au redémarrage suivant.
+      await LocalStorageService.saveUser(user);
+    }
+
+    // PAS DE JETON FACTICE. On écrivait ici `offline_token_<email>` dans le
+    // stockage sécurisé ET dans Hive. Rien ne l'a jamais relu : la session
+    // réelle appartient à gotrue, et une connexion hors ligne n'en ouvre
+    // aucune. Ça donnait l'apparence d'un jeton là où il n'y en a pas.
     await LocalStorageService.setCurrentUserId(user.id);
+    await LocalStorageService.setLocalDataOwnerId(user.id);
     return UserModel.fromEntity(user);
   }
 
@@ -120,9 +157,26 @@ class AuthRemoteDataSourceMock implements AuthRemoteDataSource {
 
   @override
   Future<void> logout() async {
-    try { await _supabase.logout(); } catch (_) {}
-    await LocalStorageService.clearCurrentUser();
+    // Nettoyage LOCAL D'ABORD — ne dépend d'aucun réseau, donc ne peut JAMAIS
+    // bloquer la déconnexion. CAUSE RACINE du « ne redirige pas vers /login » :
+    // quand `_supabase.logout()` (signOut) se bloquait (réseau lent / verrou
+    // multi-onglet GoTrue sur web), la purge + le clear tokens placés APRÈS ne
+    // s'exécutaient pas, et `_onLogout` n'atteignait jamais son `emit`.
+    //
+    // Anti-fuite inter-comptes (appareil partagé) : purge TOUTES les données
+    // métier locales (produits, prix d'achat, clients, panier, ventes
+    // offline…) en conservant les préférences device (taille de texte, thème,
+    // dernier email…). Remplace l'ancien clearCurrentUser (qui n'effaçait que
+    // l'id et laissait tout le reste en clair dans Hive).
+    await LocalStorageService.purgeOnLogout();
     await SecureStorageService.clearTokens();
+    // signOut Supabase (efface la session GoTrue locale) — BORNÉ par un timeout
+    // pour ne jamais figer la déconnexion si le réseau ou le verrou GoTrue
+    // multi-onglet (web) bloque. Best-effort : la session locale est déjà
+    // purgée ci-dessus.
+    try {
+      await _supabase.logout().timeout(const Duration(seconds: 3));
+    } catch (_) {}
   }
 
   @override

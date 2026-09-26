@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -64,7 +65,7 @@ class PaymentBreakdownWidget extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('Répartition paiements',
             style: AppTextStyles.label.copyWith(
-                color: const Color(0xFF0F172A))),
+                color: AppColors.onSurface)),
         const SizedBox(height: 12),
         ...sorted.map((e) {
           final pct = total > 0 ? e.value / total : 0.0;
@@ -79,21 +80,21 @@ class PaymentBreakdownWidget extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(child: Text(pm.label,
                     style: AppTextStyles.bodySmBold.copyWith(
-                        color: const Color(0xFF374151)))),
+                        color: AppColors.onSurface))),
                 Text(CurrencyFormatter.format(e.value),
                     style: AppTextStyles.bodySmBold.copyWith(
                         color: pm.color)),
                 const SizedBox(width: 6),
                 Text('${(pct * 100).toStringAsFixed(0)}%',
                     style: AppTextStyles.micro.copyWith(
-                        color: const Color(0xFF9CA3AF))),
+                        color: AppColors.textHint)),
               ]),
               const SizedBox(height: 4),
               ClipRRect(
                 borderRadius: BorderRadius.circular(2),
                 child: LinearProgressIndicator(
                   value: pct, minHeight: 4,
-                  backgroundColor: const Color(0xFFF3F4F6),
+                  backgroundColor: AppColors.inputFill,
                   valueColor: AlwaysStoppedAnimation(pm.color),
                 ),
               ),

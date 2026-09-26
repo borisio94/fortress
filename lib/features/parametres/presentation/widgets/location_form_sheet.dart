@@ -348,7 +348,7 @@ class _LocationFormSheetState extends ConsumerState<LocationFormSheet> {
                             ? 'Disponible dans les sélections'
                             : 'Masqué des sélections',
                         style: AppTextStyles.caption.copyWith(
-                            color: const Color(0xFF9CA3AF))),
+                            color: AppColors.textHint)),
                   ),
                 const SizedBox(height: 8),
 
@@ -366,7 +366,7 @@ class _LocationFormSheetState extends ConsumerState<LocationFormSheet> {
                     child: ElevatedButton(
                       onPressed: _submitting ? null : _submit,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: AppColors.primaryFill,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(
@@ -432,7 +432,7 @@ class _Field extends StatelessWidget {
       hintText: hint,
       hintStyle: AppTextStyles.bodySm.copyWith(color: const Color(0xFFBBBBBB)),
       prefixIcon: Icon(icon, size: 15, color: const Color(0xFFAAAAAA)),
-      filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
+      filled: true, fillColor: AppColors.inputFill, isDense: true,
       contentPadding: const EdgeInsets.symmetric(
           horizontal: 12, vertical: 11),
       border: OutlineInputBorder(
@@ -496,7 +496,7 @@ class _TypeOption extends StatelessWidget {
       duration: const Duration(milliseconds: 150),
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
       decoration: BoxDecoration(
-        color: selected ? color.withValues(alpha:0.10) : const Color(0xFFF9FAFB),
+        color: selected ? color.withValues(alpha:0.10) : AppColors.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: selected ? color : Theme.of(context).semantic.borderSubtle,
@@ -505,14 +505,14 @@ class _TypeOption extends StatelessWidget {
       ),
       child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
         Icon(icon, size: 15,
-            color: selected ? color : const Color(0xFF9CA3AF)),
+            color: selected ? color : AppColors.textHint),
         const SizedBox(width: 6),
         Flexible(
           child: Text(label,
               maxLines: 1, overflow: TextOverflow.ellipsis,
               style: AppTextStyles.bodySm.copyWith(
                   fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-                  color: selected ? color : const Color(0xFF6B7280))),
+                  color: selected ? color : AppColors.textSecondary)),
         ),
       ]),
     ),
@@ -588,8 +588,8 @@ class _DeliveryTemplatePicker extends ConsumerWidget {
           ...shopTpls.map((t) => DropdownMenuItem<String?>(
                 value: t.id,
                 child: Row(children: [
-                  const Icon(Icons.store_outlined, size: 13,
-                      color: Color(0xFF9CA3AF)),
+                  Icon(Icons.store_outlined, size: 13,
+                      color: AppColors.textHint),
                   const SizedBox(width: 6),
                   Flexible(child: Text(
                       '${t.name}${t.isDefault ? " ★" : ""}',
@@ -615,7 +615,7 @@ class _DeliveryTemplatePicker extends ConsumerWidget {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
-            color: const Color(0xFFF9FAFB),
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: Theme.of(context).semantic.borderSubtle),
           ),
@@ -625,8 +625,8 @@ class _DeliveryTemplatePicker extends ConsumerWidget {
               value: list.any((t) => t.id == selectedId)
                   ? selectedId
                   : null,
-              icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                  size: 18, color: Color(0xFF9CA3AF)),
+              icon: Icon(Icons.keyboard_arrow_down_rounded,
+                  size: 18, color: AppColors.textHint),
               items: items,
               onChanged: (v) => _handleChanged(context, ref, list, v),
             ),

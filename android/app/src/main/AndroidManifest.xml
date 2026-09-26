@@ -1,4 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Prise de photo d'un produit depuis la fiche. `required="false"` est
+         indispensable : déclarer la permission seule ferait considérer la
+         caméra comme matériel requis par le Play Store, qui masquerait alors
+         l'application aux appareils sans caméra. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera"
+                  android:required="false"/>
     <application
         android:label="fortress"
         android:name="${applicationName}"

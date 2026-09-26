@@ -1,3 +1,16 @@
+/// LES TRADUCTIONS VIVENT ICI, ET NULLE PART AILLEURS.
+///
+/// `pubspec.yaml` porte `generate: true` et le dépôt contient
+/// `lib/core/i18n/l10n/app_fr.arb` et `app_en.arb` — mais ce fichier est écrit
+/// À LA MAIN et ne dérive pas d'eux. Une clé ajoutée ou corrigée dans un ARB
+/// n'apparaît jamais à l'écran tant qu'elle n'est pas portée ici.
+///
+/// Les deux ARB portent le même avertissement depuis le 21/09/2026. Les
+/// remettre en source demanderait de basculer sur `flutter gen-l10n`, ce qui
+/// touche chaque chaîne de l'application : c'est un chantier, pas un
+/// correctif.
+library;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -747,6 +760,7 @@ class AppLocalizations {
   String get noData        => _isFr ? 'Aucune donnée' : 'No data';
   String get loading       => _isFr ? 'Chargement...' : 'Loading...';
   String get offlineMode   => _isFr ? 'Mode hors-ligne — données synchronisées dès le retour' : 'Offline mode — data will sync when back online';
+  String get offlineShort  => _isFr ? 'Hors ligne' : 'Offline';
   String get periodToday   => _isFr ? "Aujourd'hui"  : 'Today';
   String get periodWeek    => _isFr ? 'Semaine'      : 'Week';
   String get periodMonth   => _isFr ? 'Mois'         : 'Month';
@@ -799,6 +813,14 @@ class AppLocalizations {
   String get dashCancelled      => _isFr ? 'Annulé' : 'Cancelled';
   String get dashFinancialSummary => _isFr ? 'Résumé financier'      : 'Financial summary';
   String get dashProductCost      => _isFr ? 'Coût des produits'     : 'Product cost';
+  /// Avertissement affiché sur la ligne « Coût des produits » quand des
+  /// articles vendus n'ont aucun prix d'achat connu : leur marge est comptée
+  /// à 100 %, donc le bénéfice affiché est surestimé.
+  String dashCostUnknown(int n) => _isFr
+      ? '$n article(s) vendu(s) sans prix d\'achat connu : le bénéfice '
+        'affiché est surestimé. Renseignez leur prix d\'achat pour corriger.'
+      : '$n item(s) sold with no known cost price: the profit shown is '
+        'overstated. Set their cost price to correct it.';
   String get dashScrappedLoss     => _isFr ? 'Pertes rebuts'         : 'Scrap losses';
   String get dashRepairCost       => _isFr ? 'Coûts réparation'      : 'Repair costs';
   String get dashOperatingExpenses => _isFr ? 'Dépenses opérationnelles' : 'Operating expenses';
@@ -969,6 +991,7 @@ class AppLocalizations {
   String get priceEditSubtitle    => _isFr ? 'Pour cette vente uniquement'
       : 'For this sale only';
   String get priceEditOriginal    => _isFr ? 'Prix original'         : 'Original price';
+  String get priceEditQuickDiscounts => _isFr ? 'Remises rapides'    : 'Quick discounts';
   String get priceEditCost        => _isFr ? 'Prix de revient'       : 'Cost price';
   String get priceEditCostUnknown => _isFr ? 'Prix de revient non défini'
       : 'Cost price not set';
@@ -981,8 +1004,14 @@ class AppLocalizations {
       ? '⚠ Marge de ${pct.toStringAsFixed(0)}% inférieure à 30% — êtes-vous sûr ?'
       : '⚠ Margin of ${pct.toStringAsFixed(0)}% below 30% — are you sure?';
   String get priceEditBelowCost   => _isFr
-      ? '✗ Prix inférieur au prix de revient — impossible'
-      : '✗ Price below cost — not allowed';
+      ? '⚠ Vente à perte — prix sous le prix de revient (déstockage). Autorisé.'
+      : '⚠ Below-cost sale — loss (clearance). Allowed.';
+  String get priceEditBelowCostTitle => _isFr ? 'Vente à perte' : 'Below-cost sale';
+  String get priceEditBelowCostBody  => _isFr
+      ? 'Ce prix est INFÉRIEUR au prix de revient : vous vendez à perte '
+        '(déstockage). Confirmer quand même ?'
+      : 'This price is BELOW cost: you are selling at a loss (clearance). '
+        'Confirm anyway?';
   String get priceEditReset       => _isFr ? 'Réinitialiser'         : 'Reset';
   String get priceEditApply       => _isFr ? 'Appliquer'             : 'Apply';
   String get priceEditConfirmTitle => _isFr ? 'Marge inférieure à 30%'
@@ -1114,6 +1143,7 @@ class AppLocalizations {
   String get prodStockMinAlert    => _isFr ? 'Alerte stock min.'       : 'Min stock alert';
   String get prodIsActive         => _isFr ? 'Produit actif'           : 'Active product';
   String get prodIsVisibleWeb     => _isFr ? 'Visible sur le web'      : 'Visible on web';
+  String get prodTrackStock       => _isFr ? 'Suivi du stock'          : 'Track stock';
   String get prodRating           => _isFr ? 'Note (0–5)'              : 'Rating (0–5)';
   String get prodPricing          => _isFr ? 'Tarification'            : 'Pricing';
   String get prodStockInfo        => _isFr ? 'Stock & alertes'         : 'Stock & alerts';
@@ -1279,6 +1309,7 @@ class AppLocalizations {
   String get prodImageOnline   => _isFr ? 'Image en ligne'             : 'Online image';
   String get prodImageNone     => _isFr ? 'Aucune image sélectionnée'  : 'No image selected';
   String get webShopVisibleHint  => _isFr ? 'Visible en boutique en ligne' : 'Visible in online shop';
+  String get trackStockHint      => _isFr ? 'Décochez pour un plat ou un service (aucun décompte)' : 'Uncheck for a dish or service (no stock count)';
 
 
 

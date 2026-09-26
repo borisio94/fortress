@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'brand_contrast.dart';
 import 'theme_palette.dart';
 
 /// Couleurs globales de l'application.
@@ -12,12 +13,51 @@ import 'theme_palette.dart';
 /// constantes car elles ne dépendent pas du thème choisi.
 class AppColors {
   // ── Palette active (runtime) ───────────────────────────────────────────────
-  static Color _primary        = kDefaultPalette.primary;
+  /// Primaire du mode CLAIR — dérivée elle aussi depuis le 26/09/2026
+  /// ([BrandContrast.lightText], lot 1 clair) : la couleur de la palette
+  /// assombrie jusqu'à 4,5:1 sur blanc, fond et teintes. Elle sert le texte
+  /// ET les fonds sous du blanc (les deux exigent une primaire foncée).
+  static Color _primary        =
+      BrandContrast.lightText(kDefaultPalette.primary);
   static Color _primaryLight   = kDefaultPalette.primaryLight;
   static Color _primaryDark    = kDefaultPalette.primaryDark;
   static Color _primarySurface = kDefaultPalette.primarySurface;
 
-  static Color get primary        => _primary;
+  /// Variante TEXTE de la primaire en sombre — dérivée, jamais choisie
+  /// (cf. [BrandContrast.darkText]).
+  static Color _primaryOnDark =
+      BrandContrast.darkText(kDefaultPalette.primary);
+
+  /// Fond sous du BLANC en sombre — la valeur des boutons du thème
+  /// ([BrandContrast.fillUnderWhite] de `primaryLight`).
+  static Color _primaryFillOnDark =
+      BrandContrast.fillUnderWhite(kDefaultPalette.primaryLight);
+
+  /// La primaire de la palette — en SOMBRE, sa variante lisible.
+  ///
+  /// En sombre, ce getter ne rend PAS la valeur de la palette : il rend
+  /// [BrandContrast.darkText], la primaire éclaircie jusqu'à 4,5:1 sur les
+  /// surfaces sombres. Avant le 25/09/2026 il rendait la valeur brute, et sur
+  /// Midnight elle était IDENTIQUE à la carte (1,00:1) : quelque 590 textes,
+  /// icônes et traits invisibles. Ne pas y remettre `_primary`.
+  ///
+  /// ⚠ Ce n'est PAS un fond sous du blanc en sombre : c'est [primaryFill].
+  /// Un fond et un texte ne peuvent pas partager une valeur en sombre (voir
+  /// `brand_contrast.dart`).
+  static Color get primary        => _isDark ? _primaryOnDark : _primary;
+
+  /// LE FOND DE MARQUE SOUS DU BLANC — bouton plein, pastille, bulle peints à
+  /// la main avec un contenu blanc (lot 1b, 26/09/2026).
+  ///
+  /// En CLAIR, c'est [primary] : la primaire claire dérivée porte déjà le
+  /// blanc (≥ 5,84:1) — rien ne change à l'écran. En SOMBRE, c'est le fond des
+  /// boutons du thème (`fillUnderWhite(primaryLight)`, ≥ 4,5:1 sous le blanc) :
+  /// [primary] y est la variante TEXTE, claire, et le blanc n'y tenait que
+  /// 2,54 à 3,25:1 sur les huit palettes.
+  ///
+  /// Un contenu en `onPrimary` (texte foncé en sombre) reste sur [primary] :
+  /// il y tient déjà (5,49–7,04:1), et ce fond-ci le casserait.
+  static Color get primaryFill    => _isDark ? _primaryFillOnDark : _primary;
   static Color get primaryLight   => _primaryLight;
   static Color get primaryDark    => _primaryDark;
   static Color get primarySurface => _primarySurface;
@@ -30,9 +70,11 @@ class AppColors {
   /// chaque changement de palette dans les paramètres.
   static void applyPalette(ThemePalette p) {
     _palette        = p;
-    _primary        = p.primary;
+    _primary        = BrandContrast.lightText(p.primary);
     _primaryLight   = p.primaryLight;
     _primaryDark    = p.primaryDark;
+    _primaryOnDark  = BrandContrast.darkText(p.primary);
+    _primaryFillOnDark = BrandContrast.fillUnderWhite(p.primaryLight);
     _refreshPrimarySurface();
   }
 
@@ -86,20 +128,48 @@ class AppColors {
   static Color get inputBorder => _isDark ? _borderDark     : _borderLight;
   static Color get divider     => _isDark ? _borderDark     : _borderLight;
 
-  // ── Textes ─────────────────────────────────────────────────────────────────
-  // Restent const : utilisés dans des `const TextStyle` (AppTextStyles).
-  // En sombre, les Text principaux héritent du textTheme (cf. PR-1) ;
-  // ces tokens ne servent que pour des couleurs explicites résiduelles.
-  static const textPrimary   = Color(0xFF111827);
-  // Assombri (gray-500 → gray-600) pour un texte/icônes secondaires plus
-  // lisibles — pilote aussi captions, iconTheme et icônes de champs. ~7:1 AA.
-  static const textSecondary = Color(0xFF4B5563);
-  // Hint (placeholders) légèrement assombri aussi (gray-500 → gray-600 doux).
-  static const textHint      = Color(0xFF5B6472);
+  // Texte PRINCIPAL adaptatif (brightness-aware) — pendant de `colorScheme
+  // .onSurface` mais lisible sans `context`. Remplace les `Color(0xFF111827)`
+  // / `Color(0xFF0F172A)` posés en dur sur des textes/icônes : quasi-noir en
+  // clair, quasi-blanc (slate-100) en sombre.
+  static const _onSurfaceLight = Color(0xFF111827);
+  static const _onSurfaceDark  = Color(0xFFF1F5F9);
+  static Color get onSurface => _isDark ? _onSurfaceDark : _onSurfaceLight;
+
+  // ── Textes (brightness-aware) ───────────────────────────────────────────────
+  // Ces 3 tokens sont désormais des GETTERS qui suivent le mode clair/sombre
+  // (comme surface/background/onSurface). Un `color: AppColors.textPrimary`
+  // posé en dur devient donc lisible en sombre sans passer par le context.
+  // Valeurs sombres alignées sur le textTheme de `AppTheme.dark`
+  // (_dTextPrimary / _dTextSecondary / _dTextHint) pour une cohérence stricte.
+  //
+  // Conséquence : ils ne sont plus utilisables dans une expression `const`.
+  // Les échelons `AppTextStyles.*Secondary` / `*Hint` qui les consomment sont
+  // donc devenus des getters eux aussi (cf. app_text_styles.dart).
+  static const _textPrimaryLight   = Color(0xFF111827);
+  static const _textPrimaryDark    = Color(0xFFF1F5F9); // slate-100
+  static const _textSecondaryLight = Color(0xFF4B5563); // gray-600 (~7:1 en clair)
+  static const _textSecondaryDark  = Color(0xFF94A3B8); // slate-400 (lisible sur slate)
+  static const _textHintLight      = Color(0xFF5B6472);
+  // DÉRIVÉE (26/09/2026) : lerp(slate-500 #64748B, textSecondary #94A3B8,
+  // 0,60) = #8190A6 — le premier pas qui tient 4,5:1 sur la PIRE surface
+  // sombre (la carte #1E293B : 4,51). L'ancien slate-500 n'y faisait que
+  // 3,07. Reste plus éteint que textSecondary. Même valeur que
+  // `AppTheme._dTextHint` (test/theme/text_hint_contrast_test.dart).
+  static const _textHintDark       = Color(0xFF8190A6);
+
+  static Color get textPrimary   => _isDark ? _textPrimaryDark   : _textPrimaryLight;
+  static Color get textSecondary => _isDark ? _textSecondaryDark : _textSecondaryLight;
+  static Color get textHint      => _isDark ? _textHintDark      : _textHintLight;
 
   static const google   = Color(0xFFEA4335);
   static const facebook = Color(0xFF1877F2);
   static const apple    = Color(0xFF000000);
+
+  /// Vert officiel WhatsApp — couleur de marque (identique clair/sombre),
+  /// utilisée par les CTA « partager sur WhatsApp ». Nommée ici pour éviter
+  /// les `Color(0xFF25D366)` dispersés.
+  static const whatsapp = Color(0xFF25D366);
 
   /// Palette stable utilisée pour dériver une couleur identifiable par
   /// hash du nom de variante quand le champ `variant.color` n'est pas

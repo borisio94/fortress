@@ -1,6 +1,7 @@
 import '../../../../core/services/export_models.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
+import '../../../../core/utils/order_revenue_class.dart';
 import '../../../inventaire/domain/entities/stock_location.dart';
 
 /// Source de données pour l'export Commandes — offline-first Hive.
@@ -9,10 +10,35 @@ import '../../../inventaire/domain/entities/stock_location.dart';
 /// l'entité `Sale` complète : l'export n'a besoin que de quelques
 /// colonnes scalaires + une agrégation des items, donc le passe-plat
 /// JSON suffit et reste insensible aux évolutions futures de l'entité.
+///
+/// DEUX LIMITES CONNUES, non corrigées ici — candidates à P2-C :
+///
+///   1. AUCUN FILTRE DE PÉRIODE. L'export sort tout l'historique, alors que
+///      le tableau de bord travaille sur une plage et date les commandes
+///      `completed` par `completed_at` (et non `created_at`). L'accord
+///      entre la somme de « Montant CA » et le chiffre d'affaires affiché
+///      ne vaut donc qu'à PÉRIMÈTRE ÉGAL, pas dans l'absolu.
+///
+///   2. LE TOTAL EST CALCULÉ DEUX FOIS. `_totalFromMap` ici, et un calcul
+///      en ligne dans `dashboard_providers.dart`. Les deux formules se
+///      ressemblent fortement — articles − remise, puis TVA, puis frais et
+///      livraison — mais elles n'ont PAS été prouvées identiques. Tant
+///      qu'elles vivent séparément, un écart peut apparaître sans que rien
+///      ne le signale. Le classement CA/perte, lui, est bien partagé
+///      (`classifyOrderStatus`) : c'est le montant qui ne l'est pas encore.
 class OrdersExportSource {
   const OrdersExportSource._();
 
-  /// Header CSV/PDF — 9 colonnes spec.
+  /// Header CSV/PDF — 12 colonnes.
+  ///
+  /// Les trois dernières ont été ajoutées parce que « Montant » seul induit
+  /// en erreur : une commande annulée y figure avec un montant d'apparence
+  /// normale, si bien que sommer la colonne donne CA + pertes + en-attente,
+  /// c'est-à-dire rien de défini. « Montant CA » et « Montant perte » se
+  /// somment directement et tombent d'accord avec le tableau de bord.
+  ///
+  /// Toute colonne nouvelle s'ajoute EN FIN : `_collectGlobal` écrit
+  /// `row[8]` en dur pour préfixer l'emplacement du nom de boutique.
   static const List<String> header = [
     'ID',
     'Date',
@@ -23,6 +49,9 @@ class OrdersExportSource {
     'Articles',
     'Livreur',
     'Emplacement',
+    'Catégorie',
+    'Montant CA',
+    'Montant perte',
   ];
 
   static List<List<Object?>> collect(ExportScope scope) {
@@ -124,8 +153,12 @@ class OrdersExportSource {
         fees += (f['amount'] as num?)?.toDouble() ?? 0;
       }
     }
+    // Livraison COMPRISE : elle est facturée au client (cf. `Sale.total`).
+    // L'export l'omettait, si bien que la colonne « Total » ne correspondait
+    // ni à la facture, ni au tableau de bord, ni à ce qui avait été encaissé.
+    final delivery = (m['delivery_price'] as num?)?.toDouble() ?? 0;
     final taxed = (subtotal - discountAmount) * (1 + taxRate / 100);
-    return taxed + fees;
+    return taxed + fees + delivery;
   }
 
   static int _itemsCount(Map<String, dynamic> m) {
@@ -198,16 +231,27 @@ class OrdersExportSource {
     final locationLabel = locationId != null
         ? (locations[locationId]?.name ?? 'Emplacement supprimé')
         : 'Boutique';
+    final total = _totalFromMap(m);
+    // Le classement vient du helper partagé, jamais réécrit ici : c'est ce
+    // qui garantit que la somme de « Montant CA » égale le chiffre
+    // d'affaires du tableau de bord, et celle de « Montant perte » ses
+    // pertes. Aucune colonne « Montant en attente » n'est produite — le
+    // tableau de bord ne calcule aucun total pour cette famille, une
+    // colonne ne pourrait donc s'accorder avec rien.
+    final revClass = classifyOrderStatus(m['status'] as String?);
     return [
       _shortId(m['id']?.toString()),
       _formatDate(m['created_at']?.toString()),
       clientLabel,
       _statusLabel(m['status'] as String?),
       _paymentLabel(m),
-      _totalFromMap(m),
+      total,
       _itemsCount(m),
       (m['delivery_person_name'] as String?) ?? '',
       locationLabel,
+      revClass.labelFr,
+      revClass == OrderRevenueClass.revenue ? total : 0,
+      revClass == OrderRevenueClass.loss    ? total : 0,
     ];
   }
 

@@ -14,6 +14,19 @@ Future<T?> showFormSheet<T>({
   Color? backgroundColor,
   ShapeBorder? shape,
 }) {
+  // FOND PLEIN, EN RESTAURATION COMME AILLEURS.
+  //
+  // La feuille était translucide en mode restaurant, « pour laisser deviner le
+  // décor de salle ». Mais ce qui passe derrière une feuille, ce n'est pas le
+  // décor : c'est la PAGE. On lisait au travers, sur toute la hauteur, le texte
+  // et les boutons de l'écran d'en dessous — deux interfaces superposées, avec
+  // deux boutons pleins presque au même endroit.
+  //
+  // Le voile de la barrière était allégé à 0,30 pour la même raison, ce qui
+  // n'arrangeait rien : le peu qui traversait n'était même pas assombri. Retour
+  // au défaut Material.
+  //
+  // Hors restauration, rien ne change : c'était déjà la surface pleine.
   return showModalBottomSheet<T>(
     context: context,
     isScrollControlled: isScrollControlled,

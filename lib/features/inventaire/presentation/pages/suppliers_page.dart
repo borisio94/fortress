@@ -77,7 +77,7 @@ class _SuppliersPageState extends State<SuppliersPage> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                       decoration: BoxDecoration(
-                          color: AppColors.primary, borderRadius: BorderRadius.circular(8)),
+                          color: AppColors.primaryFill, borderRadius: BorderRadius.circular(8)),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         const Icon(Icons.add_rounded, size: 15, color: Colors.white),
                         const SizedBox(width: 6),
@@ -196,7 +196,7 @@ class _SuppliersPageState extends State<SuppliersPage> {
                 icon: Icon(isEdit ? Icons.check_rounded : Icons.add_rounded, size: 18),
                 label: Text(isEdit ? 'Enregistrer' : 'Ajouter'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                  backgroundColor: AppColors.primaryFill, foregroundColor: Colors.white,
                   elevation: 0, shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10))),
               ),

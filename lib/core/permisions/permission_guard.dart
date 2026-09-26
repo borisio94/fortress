@@ -10,6 +10,7 @@ import 'subscription_provider.dart';
 import 'app_permissions.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../storage/hive_boxes.dart';
+import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
 
 // ─── Widget garde-fou pour les actions protégées ──────────────────────────────
 // Usage :
@@ -166,7 +167,13 @@ class _Banner extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      color: color.withValues(alpha:0.12),
+      // En mode restaurant, le bandeau reprend la teinte des cartes : sur le
+      // décor de salle, un aplat teinté à 12 % devenait une bande orange vive
+      // qui écrasait le haut de page. Le texte et l'icône gardent la couleur
+      // d'alerte, c'est eux qui portent le sens.
+      color: restoDecorActive
+          ? restoGlassFill(context)
+          : color.withValues(alpha: 0.12),
       child: Row(children: [
         Icon(icon, size: 16, color: color),
         const SizedBox(width: 8),

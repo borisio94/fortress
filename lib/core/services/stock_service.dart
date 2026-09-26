@@ -8,6 +8,7 @@ import '../../features/inventaire/domain/entities/stock_location.dart';
 import '../../features/inventaire/domain/entities/stock_level.dart';
 import '../../features/inventaire/domain/entities/stock_transfer.dart';
 import 'activity_log_service.dart';
+import 'arrival_costing_service.dart';
 
 /// Erreur dédiée : tentative de vente avec un stock insuffisant
 /// (ou variante introuvable). Throwée par `StockService.sale` et
@@ -61,6 +62,12 @@ class StockService {
     required String cause,
     String? notes,
     String? referenceId,
+    /// Coût de revient unitaire de l'arrivage (prix d'achat + part des frais
+    /// du lot, cf. `ArrivalCostingService`). Quand il est fourni et > 0, le
+    /// `priceBuy` de la variante devient la moyenne pondérée entre le stock
+    /// déjà présent et celui qui entre. `null` → le coût n'est pas touché
+    /// (comportement historique de tous les autres appelants).
+    double? landedUnitCost,
   }) async {
     final result = _findVariant(shopId, productId, variantId);
     if (result == null) {
@@ -74,15 +81,33 @@ class StockService {
     final beforeAvail = v.stockAvailable;
     final beforePhys  = v.stockPhysical;
 
+    // Valorisation : moyenne pondérée sur le stock DISPONIBLE avant entrée.
+    final newPriceBuy = (landedUnitCost != null && landedUnitCost > 0)
+        ? ArrivalCostingService.weightedAverageUnitCost(
+            currentQty:       beforeAvail,
+            currentUnitCost:  v.priceBuy,
+            incomingQty:      quantity,
+            incomingUnitCost: landedUnitCost)
+        : null;
+
     final updated = v.copyWith(
       stockAvailable: v.stockAvailable + quantity,
       stockPhysical:  v.stockPhysical + quantity,
+      priceBuy:       newPriceBuy,
     );
 
-    await _saveVariant(product, vIdx, updated, shopId);
+    // `Product.priceBuy` n'est qu'un miroir de la variante de base (cf.
+    // product_form_page) — l'inventaire et le fallback du dashboard le
+    // lisent. On le tient à jour quand c'est cette variante qui bouge.
+    final mainIdx = product.variants.indexWhere((x) => x.isMain);
+    final baseIdx = mainIdx >= 0 ? mainIdx : 0;
+    await _saveVariant(product, vIdx, updated, shopId,
+        productPriceBuy: (newPriceBuy != null && vIdx == baseIdx)
+            ? newPriceBuy : null);
     debugPrint('[Stock] ✅ arrivalAvailable +$quantity : '
         'available $beforeAvail → ${updated.stockAvailable}, '
-        'physical $beforePhys → ${updated.stockPhysical}');
+        'physical $beforePhys → ${updated.stockPhysical}'
+        '${newPriceBuy != null ? ', priceBuy ${v.priceBuy} → $newPriceBuy' : ''}');
     _log(shopId: shopId, productId: productId, variantId: variantId,
       type: 'arrival_available', quantity: quantity,
       beforeAvail: beforeAvail, afterAvail: updated.stockAvailable,
@@ -102,6 +127,68 @@ class StockService {
         if ((referenceId ?? '').isNotEmpty) 'reference': referenceId,
       },
     );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // 1 bis. FRAIS SUR STOCK EXISTANT — priceBuy + part de frais, stock inchangé
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /// Impute [feePerPiece] au prix d'achat d'une variante SANS toucher au
+  /// stock (bon de « frais seuls » : la facture de transport ou le quittus
+  /// de douane arrive après la marchandise, déjà entrée en stock).
+  ///
+  /// Aucune écriture dans `stock_movements` : rien ne bouge côté quantités,
+  /// et y inscrire une ligne à quantité nulle polluerait la réconciliation
+  /// (`reconcileShop` compare les mouvements au stock réel). La traçabilité
+  /// passe par le journal d'activité, qui garde l'avant/après du coût.
+  ///
+  /// Retourne `false` si la variante est introuvable — l'appelant décide
+  /// quoi en faire, rien n'est écrit.
+  static Future<bool> applyCostSurcharge({
+    required String shopId,
+    required String productId,
+    required String variantId,
+    required double feePerPiece,
+    int? piecesCharged,
+    String? referenceId,
+  }) async {
+    if (!feePerPiece.isFinite || feePerPiece <= 0) return false;
+    final result = _findVariant(shopId, productId, variantId);
+    if (result == null) {
+      debugPrint('[Stock] ❌ applyCostSurcharge: variante introuvable '
+          'shopId=$shopId productId=$productId variantId=$variantId');
+      return false;
+    }
+    final (product, vIdx) = result;
+    final v = product.variants[vIdx];
+
+    final before = v.priceBuy;
+    final after  = ArrivalCostingService.surchargedUnitCost(
+        currentUnitCost: before, feePerPiece: feePerPiece);
+    final updated = v.copyWith(priceBuy: after);
+
+    final mainIdx = product.variants.indexWhere((x) => x.isMain);
+    final baseIdx = mainIdx >= 0 ? mainIdx : 0;
+    await _saveVariant(product, vIdx, updated, shopId,
+        productPriceBuy: vIdx == baseIdx ? after : null);
+    debugPrint('[Stock] ✅ applyCostSurcharge +$feePerPiece/pièce : '
+        'priceBuy $before → $after');
+
+    await ActivityLogService.log(
+      action:      'cost_surcharge',
+      targetType:  'product',
+      targetId:    productId,
+      targetLabel: '${product.name} — ${updated.name}',
+      shopId:      shopId,
+      details: {
+        'fee_per_piece':  feePerPiece,
+        'price_buy_before': before,
+        'price_buy_after':  after,
+        if (piecesCharged != null) 'pieces_charged': piecesCharged,
+        if ((referenceId ?? '').isNotEmpty) 'reference': referenceId,
+      },
+    );
+    return true;
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -314,6 +401,10 @@ class StockService {
     String? productId,
     String? orderId,
     String? reason,
+    /// Code STRUCTURÉ du motif (prix / qualité / différent / autre), rangé à
+    /// part du texte libre : `notes` reste lisible par un humain, `cause` se
+    /// filtre et se compte. Les deux vivent dans la même ligne de journal.
+    String? cause,
   }) async {
     final lvl = AppDatabase.getStockLevel(variantId, locationId);
     if (lvl == null) return;
@@ -337,6 +428,7 @@ class StockService {
       afterPhys:   updated.stockPhysical,
       referenceId: orderId,
       notes:       reason ?? 'Annulation vente livrée par location distincte',
+      cause:       cause,
     );
   }
 
@@ -355,6 +447,8 @@ class StockService {
     required int quantity,
     String? orderId,
     String? reason,
+    /// Code STRUCTURÉ du motif de retour — cf. `reverseSaleFromLocation`.
+    String? cause,
   }) async {
     final result = _findVariant(shopId, productId, variantId);
     if (result == null) return;
@@ -382,6 +476,7 @@ class StockService {
       afterPhys:   updated.stockPhysical,
       referenceId: orderId,
       notes:       reason ?? 'Annulation vente (commande reprogrammée)',
+      cause:       cause,
     );
   }
 
@@ -819,10 +914,25 @@ class StockService {
   /// par l'utilisateur, sa valeur prime sur tout transfert/écho récent).
   static Future<void> _saveVariant(
       Product product, int vIdx, ProductVariant updated, String shopId,
-      {bool forceStockLevelSync = false}) async {
+      // FIX perte d'affichage stock : `_saveVariant` n'est appelé QUE par des
+      // mouvements LOCAUX autoritatifs (vente, retour, arrivée, incident,
+      // transfert, recalcul…). Le StockLevel de la boutique DOIT donc toujours
+      // suivre la variante fraîchement modifiée. Sans forçage, la garde
+      // anti-écho de `_syncShopStockLevelsFromProduct` (TTL 1 h) bloquait cette
+      // propagation quand un StockLevel avait été écrit récemment (ex. vente
+      // dans l'heure suivant la création du produit) → l'inventaire/la grille
+      // (qui lisent le StockLevel) restaient sur l'ancienne valeur alors que
+      // `variant.stockAvailable` était correct. Forcer la synchro repose la
+      // garde (via saveStockLevel) → la protection contre les PULLS DISTANTS
+      // périmés (syncProducts, force=false) reste intacte.
+      {bool forceStockLevelSync = true,
+      /// Nouveau prix d'achat à répercuter sur le produit lui-même (miroir
+      /// de la variante de base). `null` → inchangé.
+      double? productPriceBuy}) async {
     final variants = List<ProductVariant>.from(product.variants);
     variants[vIdx] = updated;
-    await AppDatabase.saveProduct(product.copyWith(variants: variants),
+    await AppDatabase.saveProduct(
+        product.copyWith(variants: variants, priceBuy: productPriceBuy),
         skipValidation: true, // pas de revalidation SKU pour les mises à jour stock
         forceStockLevelSync: forceStockLevelSync);
     AppDatabase.notifyProductChange(shopId);
@@ -859,15 +969,42 @@ class StockService {
       'status': status,
       'cause': cause,
       'notes': notes,
-      'reference_id': referenceId,
+      // `reference` et NON `reference_id` : la colonne s'appelle ainsi dans
+      // la table (hotfix_010). La clé fautive faisait rejeter CHAQUE push en
+      // PGRST204, rejouer 10 fois, puis disparaître en silence — c'est l'une
+      // des raisons pour lesquelles `caf84ba` ne refermait rien du tout.
+      //
+      // Effet de bord réparé au passage : `StockMovement.fromMap` lit
+      // `reference`, donc la référence des mouvements journalisés ici
+      // arrivait TOUJOURS nulle à l'affichage.
+      'reference': referenceId,
       'created_by': user?.name,
       'created_at': now.toIso8601String(),
-      // GF-7 : pour les mouvements `adjustment`, on duplique notes dans
-      // `reason` — c'est la colonne contrainte par le CHECK Supabase
-      // (hotfix_082). Pour les autres types, reason reste null.
-      if (type == 'adjustment') 'reason': notes,
+      // GF-7 : pour les mouvements `adjustment`, `reason` est OBLIGATOIRE
+      // (CHECK non vide, hotfix_082). On le remplit avec notes, sinon cause,
+      // sinon un défaut explicite — JAMAIS vide (sinon upsert rejeté 23514
+      // puis droppé silencieusement). Pour les autres types, reason reste null.
+      if (type == 'adjustment')
+        'reason': (notes ?? '').trim().isNotEmpty
+            ? notes
+            : ((cause ?? '').trim().isNotEmpty ? cause : 'Ajustement de stock'),
     };
     HiveBoxes.stockMovementsBox.put(map['id'], map);
+    // POUSSÉ AU SERVEUR, et pas seulement écrit en local.
+    //
+    // `stock_movements` est synchronisée en PASSTHROUGH : `_syncTablePassthrough`
+    // efface toute ligne Hive de la boutique absente du distant. Son garde-fou
+    // ne protège que les lignes ayant une écriture en attente dans la file
+    // offline — un `put` Hive seul n'en crée aucune. Le journal était donc
+    // purgé à la première synchronisation.
+    //
+    // Ce n'est pas qu'une perte d'historique : le recalcul de stock et
+    // `reconcileShop` LISENT ce journal (quatre chemins dans ce fichier). Un
+    // journal amputé reconstruit un stock faux, puis l'écrit.
+    //
+    // `bgUpsert` (et non `_bgWrite`, privé à AppDatabase) — même voie que les
+    // incidents plus haut dans ce service.
+    AppDatabase.bgUpsert('stock_movements', map);
   }
 
   // ════════════════════════════════════════════════════════════════════════════

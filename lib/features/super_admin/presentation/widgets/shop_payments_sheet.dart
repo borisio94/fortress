@@ -65,7 +65,7 @@ class _ShopPaymentsSheetState extends State<ShopPaymentsSheet> {
                     color: theme.colorScheme.onSurface))),
             FilledButton.icon(
               onPressed: _openRecordForm,
-              style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.primaryFill),
               icon: const Icon(Icons.add_rounded, size: 16),
               label: const Text('Enregistrer'),
             ),
@@ -296,7 +296,7 @@ class _RecordPaymentFormState extends State<_RecordPaymentForm> {
             child: FilledButton(
               onPressed: _saving ? null : _submit,
               style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.primary,
+                  backgroundColor: AppColors.primaryFill,
                   padding: const EdgeInsets.symmetric(vertical: 14)),
               child: _saving
                   ? const SizedBox(width: 18, height: 18,

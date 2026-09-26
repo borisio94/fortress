@@ -15,6 +15,7 @@ import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/language_switcher.dart';
 import '../../../../shared/widgets/auth_fields.dart';
 import '../../../../core/validators/password_policy.dart';
+import '../../../../core/theme/app_theme.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mot de passe oublié — flux unifié OTP email pour tous :
@@ -211,10 +212,10 @@ class _ForgotPasswordPageState extends ConsumerState<ForgotPasswordPage> {
                       ? const EdgeInsets.symmetric(vertical: 32)
                       : EdgeInsets.zero,
                   decoration: isDesktop ? BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(20),
                   ) : null,
-                  color: isDesktop ? null : Colors.white,
+                  color: isDesktop ? null : AppColors.surface,
                   padding: EdgeInsets.symmetric(
                       horizontal: isDesktop ? 36 : 20,
                       vertical: isDesktop ? 40 : 24),
@@ -231,7 +232,10 @@ class _ForgotPasswordPageState extends ConsumerState<ForgotPasswordPage> {
           top: 12, right: 16,
           child: SafeArea(
             child: LanguageSwitcher(
-              backgroundColor: Colors.white.withValues(alpha:0.92),
+              // Un voile BLANC sur un écran sombre reste blanc. La surface
+              // du thème, elle, suit le mode.
+              backgroundColor:
+                  AppColors.surface.withValues(alpha: 0.92),
             ),
           ),
         ),
@@ -315,7 +319,7 @@ class _EmailStep extends StatelessWidget {
         Text(l.forgotTitle,
             style: tt.titleLarge?.copyWith(
               fontWeight: FontWeight.w800,
-              color: const Color(0xFF0F172A), letterSpacing: 0.3,
+              color: AppColors.onSurface, letterSpacing: 0.3,
             )),
         const SizedBox(height: 8),
         Text(
@@ -323,7 +327,7 @@ class _EmailStep extends StatelessWidget {
           'unique pour réinitialiser votre mot de passe.',
           textAlign: TextAlign.center,
           style: AppTextStyles.bodySm
-              .copyWith(color: const Color(0xFF6B7280), height: 1.6),
+              .copyWith(color: AppColors.textSecondary, height: 1.6),
         ),
         const SizedBox(height: 28),
         EmailField(
@@ -387,6 +391,7 @@ class _OtpStep extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
+    final semantic = Theme.of(context).semantic;
     return Column(mainAxisSize: MainAxisSize.min, children: [
       const FortressLogo.light(size: 30),
       const SizedBox(height: 24),
@@ -395,18 +400,18 @@ class _OtpStep extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: const Color(0xFFFFF7ED),
-            border: Border.all(color: const Color(0xFFFBBF24)),
+            color: AppColors.warning.withValues(alpha: 0.12),
+            border: Border.all(color: semantic.warning),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.shield_outlined,
-                size: 14, color: Color(0xFFF59E0B)),
+            Icon(Icons.shield_outlined,
+                size: 14, color: semantic.warning),
             const SizedBox(width: 6),
             Flexible(child: Text(
               'Compte Administrateur — Vérification renforcée requise',
               style: AppTextStyles.captionBold
-                  .copyWith(color: const Color(0xFF92400E)),
+                  .copyWith(color: semantic.warningText),
             )),
           ]),
         ),
@@ -422,14 +427,14 @@ class _OtpStep extends StatelessWidget {
       const SizedBox(height: 18),
       Text('Entrez le code',
           style: tt.titleMedium?.copyWith(
-            fontWeight: FontWeight.w800, color: const Color(0xFF0F172A))),
+            fontWeight: FontWeight.w800, color: AppColors.onSurface)),
       const SizedBox(height: 6),
       Text(
         'Un code à $otpLength chiffres a été envoyé à $email. '
         'Vérifiez aussi vos spams.',
         textAlign: TextAlign.center,
         style: AppTextStyles.bodySm
-            .copyWith(color: const Color(0xFF6B7280), height: 1.5),
+            .copyWith(color: AppColors.textSecondary, height: 1.5),
       ),
       const SizedBox(height: 22),
 
@@ -438,7 +443,7 @@ class _OtpStep extends StatelessWidget {
         const SizedBox(height: 6),
         Text(error!,
             style: AppTextStyles.caption
-                .copyWith(color: const Color(0xFFEF4444))),
+                .copyWith(color: semantic.danger)),
       ],
 
       const SizedBox(height: 20),
@@ -459,7 +464,7 @@ class _OtpStep extends StatelessWidget {
           style: AppTextStyles.bodySm.copyWith(
             fontWeight: FontWeight.w600,
             color: resendCooldown > 0
-                ? const Color(0xFF9CA3AF)
+                ? AppColors.textHint
                 : AppColors.primary,
           ),
         ),
@@ -471,12 +476,12 @@ class _OtpStep extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.arrow_back_rounded, size: 14,
-                color: Color(0xFF6B7280)),
+            Icon(Icons.arrow_back_rounded, size: 14,
+                color: AppColors.textSecondary),
             const SizedBox(width: 6),
             Text('Changer d\'email',
                 style: AppTextStyles.bodySm
-                    .copyWith(color: const Color(0xFF6B7280))),
+                    .copyWith(color: AppColors.textSecondary)),
           ],
         ),
       ),
@@ -504,6 +509,7 @@ class _NewPasswordStep extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tt = Theme.of(context).textTheme;
+    final semantic = Theme.of(context).semantic;
 
     return Form(
       key: formKey,
@@ -515,17 +521,17 @@ class _NewPasswordStep extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: const Color(0xFFECFDF5),
-            border: Border.all(color: const Color(0xFF10B981)),
+            color: AppColors.secondary.withValues(alpha: 0.12),
+            border: Border.all(color: semantic.success),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.verified_user_outlined, size: 14,
-                color: Color(0xFF10B981)),
+            Icon(Icons.verified_user_outlined, size: 14,
+                color: semantic.success),
             const SizedBox(width: 6),
             Text('Identité vérifiée ✓',
                 style: AppTextStyles.captionBold
-                    .copyWith(color: const Color(0xFF065F46))),
+                    .copyWith(color: semantic.successText)),
           ]),
         ),
         const SizedBox(height: 20),
@@ -533,7 +539,7 @@ class _NewPasswordStep extends StatelessWidget {
         Text('Nouveau mot de passe',
             style: tt.titleMedium?.copyWith(
                 fontWeight: FontWeight.w800,
-                color: const Color(0xFF0F172A))),
+                color: AppColors.onSurface)),
         const SizedBox(height: 6),
         Text(
           isSuperAdmin
@@ -543,7 +549,7 @@ class _NewPasswordStep extends StatelessWidget {
                 'caractère spécial pour un mot de passe BON.',
           textAlign: TextAlign.center,
           style: AppTextStyles.caption
-              .copyWith(color: const Color(0xFF6B7280), height: 1.5),
+              .copyWith(color: AppColors.textSecondary, height: 1.5),
         ),
         const SizedBox(height: 18),
 
@@ -591,7 +597,7 @@ class _PinField extends StatelessWidget {
     final border = OutlineInputBorder(
       borderRadius: BorderRadius.circular(10),
       borderSide: BorderSide(
-          color: error != null ? AppColors.error : const Color(0xFFE5E7EB),
+          color: error != null ? AppColors.error : AppColors.divider,
           width: 1),
     );
     final dots = '·' * length;
@@ -606,15 +612,15 @@ class _PinField extends StatelessWidget {
       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
       style: TextStyle(
         fontSize: fontSize, fontWeight: FontWeight.w700,
-        color: const Color(0xFF0F172A), letterSpacing: spacing,
+        color: AppColors.onSurface, letterSpacing: spacing,
       ),
       decoration: InputDecoration(
         counterText: '',
         hintText: dots,
         hintStyle: TextStyle(
-            color: const Color(0xFFBBBBBB),
+            color: AppColors.textHint,
             fontSize: fontSize, letterSpacing: spacing),
-        filled: true, fillColor: const Color(0xFFF9FAFB),
+        filled: true, fillColor: AppColors.inputFill,
         contentPadding: const EdgeInsets.symmetric(vertical: 14),
         border: border,
         enabledBorder: border,

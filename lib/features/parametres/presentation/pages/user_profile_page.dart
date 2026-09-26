@@ -228,7 +228,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                   Expanded(
                     child: FilledButton(
                       style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: AppColors.primaryFill,
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                       onPressed: (_saving || !_hasChanges) ? null : _saveProfile,
@@ -273,7 +273,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                 width: double.infinity,
                 child: FilledButton(
                   style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                   onPressed: _saving ? null : _changePassword,

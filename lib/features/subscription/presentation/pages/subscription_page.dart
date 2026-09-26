@@ -807,7 +807,7 @@ class _TrialSummaryCard extends ConsumerWidget {
             style: AppTextStyles.body.copyWith(height: 1.45),
           ),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             'Souscrivez pour continuer à enregistrer vos ventes et '
             'garder l\'accès complet à vos données.',
             style: AppTextStyles.bodySmSecondary,

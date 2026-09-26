@@ -3,15 +3,20 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/database/app_database.dart';
+import '../../../../core/services/delivery_zone_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/dimens.dart';
 import '../../../../shared/widgets/app_switch.dart';
+import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/form_sheet.dart';
 import '../../../crm/domain/entities/client.dart';
 import '../../../crm/presentation/pages/clients_page.dart' show ClientFormSheet;
+import '../../../parametres/domain/entities/delivery_quartier.dart';
+import '../../../parametres/domain/entities/delivery_zone.dart';
 import '../../domain/entities/sale.dart' show DeliveryMode;
 
 /// Résultat du sheet "Enregistrer commande" (sprint UX commande).
@@ -42,6 +47,11 @@ class OrderCreationResult {
   /// le client en garde certains, le reste revient. Si `true`, le stock est
   /// réservé à la création puis réconcilié à la clôture de la tournée.
   final bool      isApprovalSale;
+  /// Frais de livraison par quartier (PR-2). `deliveryPrice` MAJORE le total
+  /// facturé. `deliveryQuartier`/`deliveryZone` figés sur la commande.
+  final double    deliveryPrice;
+  final String?   deliveryQuartier;
+  final String?   deliveryZone;
   const OrderCreationResult({
     required this.client,
     required this.scheduledAt,
@@ -50,6 +60,9 @@ class OrderCreationResult {
     required this.createdAt,
     this.amountPaid = 0,
     this.isApprovalSale = false,
+    this.deliveryPrice = 0,
+    this.deliveryQuartier,
+    this.deliveryZone,
   });
 }
 
@@ -73,6 +86,10 @@ Future<OrderCreationResult?> showOrderCreationSheet(
   // exigés (retrait en boutique = pas d'adresse). `null` ou tout autre mode →
   // comportement historique (ville/quartier requis).
   DeliveryMode? deliveryMode,
+  // Livraison par quartier (PR-2) — pré-remplissage en édition.
+  double?   initialDeliveryPrice,
+  String?   initialQuartier,
+  String?   initialZone,
 }) {
   return showFormSheet<OrderCreationResult>(
     context: context,
@@ -87,6 +104,9 @@ Future<OrderCreationResult?> showOrderCreationSheet(
       initialIsApprovalSale: initialIsApprovalSale,
       lockApproval:          lockApproval,
       deliveryMode:          deliveryMode,
+      initialDeliveryPrice:  initialDeliveryPrice,
+      initialQuartier:       initialQuartier,
+      initialZone:           initialZone,
     ),
   );
 }
@@ -102,6 +122,9 @@ class _OrderCreationSheet extends StatefulWidget {
   final bool      initialIsApprovalSale;
   final bool      lockApproval;
   final DeliveryMode? deliveryMode;
+  final double?   initialDeliveryPrice;
+  final String?   initialQuartier;
+  final String?   initialZone;
   const _OrderCreationSheet({
     required this.shopId,
     this.initialClient,
@@ -113,14 +136,33 @@ class _OrderCreationSheet extends StatefulWidget {
     this.initialIsApprovalSale = false,
     this.lockApproval = false,
     this.deliveryMode,
+    this.initialDeliveryPrice,
+    this.initialQuartier,
+    this.initialZone,
   });
   @override
   State<_OrderCreationSheet> createState() => _OrderCreationSheetState();
 }
 
 class _OrderCreationSheetState extends State<_OrderCreationSheet> {
+  /// Délai par défaut entre l'heure de commande et l'heure de livraison.
+  /// Une commande neuve arrive donc pré-remplie à `_createdAt + 1 h` au
+  /// lieu d'un champ vide qui bloquait `_confirm` tant qu'on n'avait pas
+  /// ouvert les deux pickers.
+  static const Duration _kDeliveryLead = Duration(hours: 1);
+
   Client? _client;
   DateTime? _date;
+
+  /// `true` dès que l'heure de livraison a été fixée à la main (picker ou
+  /// croix d'effacement), ou héritée d'une commande existante.
+  ///
+  /// Tant que c'est `false`, `_date` SUIT `_createdAt + 1 h` : antidater la
+  /// commande décale la livraison avec elle. Une fois l'utilisateur passé
+  /// par le picker, on ne touche plus à son choix — sinon changer la date
+  /// de commande écraserait silencieusement une heure de livraison
+  /// négociée avec le client.
+  bool _dateTouched = false;
   // Date à laquelle la commande est effectivement passée. Default = now.
   // Antidatable sans limite passée (pour rattrapage de ventes hors-ligne /
   // saisie tardive / clôture comptable). PAS dans le futur (sinon ce
@@ -128,55 +170,123 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
   late DateTime _createdAt;
   late final TextEditingController _cityCtrl;
   late final TextEditingController _addressCtrl;
-  // Suivi paiement à la création (hotfix_065). 3 modes mutually exclusifs :
-  //   • none    : `_amountPaid = 0` (commande naît `unpaid`)
-  //   • full    : `_amountPaid = orderTotal` (commande naît `paid`)
-  //   • partial : `_amountPaid = saisi par l'utilisateur`
-  _PaymentChoice _paymentChoice = _PaymentChoice.none;
-  late final TextEditingController _amountPaidCtrl;
   // Vente « à choisir sur place » : réserve le stock à la création puis
   // réconcilie à la clôture de la tournée (cf. reserveApprovalOrder).
   bool _isApprovalSale = false;
   String? _error;
+
+  // ── Livraison par quartier (PR-2) ─────────────────────────────────────────
+  List<String>           _cities    = [];
+  List<DeliveryZone>     _zones     = [];
+  List<DeliveryQuartier> _quartiers = []; // pour la ville courante
+  String? _selectedQuartierId;
+  double  _deliveryPrice = 0;
+  String? _deliveryQuartierName;
+  String? _deliveryZoneName;
+  String? _zoneFilter;     // chip de zone sélectionné (filtre la liste)
+  bool    _showManual = false;
+  late final TextEditingController _manualNameCtrl;
+  late final TextEditingController _manualPriceCtrl;
 
   @override
   void initState() {
     super.initState();
     _isApprovalSale = widget.initialIsApprovalSale;
     _client    = widget.initialClient;
-    _date      = widget.initialDate;
+    // `_createdAt` AVANT `_date` : le défaut de livraison en dépend.
     _createdAt = widget.initialCreatedAt ?? DateTime.now();
+    // Commande neuve → livraison pré-remplie à +1 h. Édition (ou date déjà
+    // posée dans le panier) → on reprend telle quelle et on la gèle.
+    _dateTouched = widget.initialDate != null;
+    _date        = widget.initialDate ?? _createdAt.add(_kDeliveryLead);
     _cityCtrl    = TextEditingController(
         text: widget.initialCity ?? widget.initialClient?.city ?? '');
     _addressCtrl = TextEditingController(
         text: widget.initialAddress ?? widget.initialClient?.district ?? '');
-    _amountPaidCtrl = TextEditingController();
+    _manualNameCtrl  = TextEditingController();
+    _manualPriceCtrl = TextEditingController();
+    // Livraison par quartier : charge le référentiel de la boutique.
+    _cities = DeliveryZoneService.citiesForShop(widget.shopId);
+    _zones  = DeliveryZoneService.zonesForShop(widget.shopId);
+    _deliveryPrice        = widget.initialDeliveryPrice ?? 0;
+    _deliveryQuartierName = widget.initialQuartier;
+    _deliveryZoneName     = widget.initialZone;
+    _reloadQuartiers();
   }
 
   @override
   void dispose() {
     _cityCtrl.dispose();
     _addressCtrl.dispose();
-    _amountPaidCtrl.dispose();
+    _manualNameCtrl.dispose();
+    _manualPriceCtrl.dispose();
     super.dispose();
   }
 
-  /// Calcule le montant déjà encaissé selon le choix utilisateur.
-  /// Capé au total pour éviter une incohérence en cas de saisie > total.
-  double _resolveAmountPaid() {
-    final total = widget.orderTotal ?? 0;
-    switch (_paymentChoice) {
-      case _PaymentChoice.none:
-        return 0;
-      case _PaymentChoice.full:
-        return total;
-      case _PaymentChoice.partial:
-        final v = double.tryParse(
-            _amountPaidCtrl.text.trim().replaceAll(',', '.'));
-        if (v == null || v <= 0) return 0;
-        return v.clamp(0, total).toDouble();
+  /// Recharge les quartiers configurés pour la ville saisie + restaure la
+  /// sélection si le quartier pré-rempli existe encore dans la liste.
+  void _reloadQuartiers() {
+    final city = _cityCtrl.text.trim();
+    _quartiers = city.isEmpty
+        ? <DeliveryQuartier>[]
+        : DeliveryZoneService.quartiersForShop(widget.shopId, city: city);
+    // Re-synchroniser la sélection avec le nom pré-rempli (édition).
+    if (_selectedQuartierId == null && _deliveryQuartierName != null) {
+      final match = _quartiers.where(
+          (q) => q.name.toLowerCase() == _deliveryQuartierName!.toLowerCase());
+      if (match.isNotEmpty) _selectedQuartierId = match.first.id;
     }
   }
+
+  String? _zoneNameOf(String? zoneId) {
+    if (zoneId == null) return null;
+    final z = _zones.where((e) => e.id == zoneId);
+    return z.isEmpty ? null : z.first.name;
+  }
+
+  void _selectQuartier(DeliveryQuartier q) {
+    setState(() {
+      _selectedQuartierId   = q.id;
+      _deliveryPrice        = q.price.toDouble();
+      _deliveryQuartierName = q.name;
+      _deliveryZoneName     = _zoneNameOf(q.zoneId);
+      _addressCtrl.text     = q.name; // l'adresse figée = le quartier
+      _showManual = false;
+      _error = null;
+    });
+  }
+
+  Future<void> _addManualQuartier() async {
+    final city  = _cityCtrl.text.trim();
+    final name  = _manualNameCtrl.text.trim();
+    final price = int.tryParse(_manualPriceCtrl.text.trim().replaceAll(' ', ''));
+    if (city.isEmpty) {
+      setState(() => _error = 'Renseigne d\'abord la ville.');
+      return;
+    }
+    if (name.isEmpty || price == null || price < 0) {
+      setState(() => _error = 'Nom du quartier + prix valides requis.');
+      return;
+    }
+    final q = await DeliveryZoneService.addQuartier(
+        shopId: widget.shopId, city: city, name: name, price: price);
+    if (!mounted) return;
+    setState(() {
+      _quartiers =
+          DeliveryZoneService.quartiersForShop(widget.shopId, city: city);
+      _manualNameCtrl.clear();
+      _manualPriceCtrl.clear();
+    });
+    _selectQuartier(q);
+    if (mounted) AppSnack.success(context, 'Quartier ajouté à votre liste');
+  }
+
+  /// Calcule le montant déjà encaissé selon le choix utilisateur.
+  /// Toujours `0` : une commande naît NON encaissée.
+  ///
+  /// L'encaissement est réservé à la clôture (statut Terminé) — cf. la
+  /// section paiement retirée de ce sheet.
+  double _resolveAmountPaid() => 0;
 
   Future<void> _pickClient() async {
     final picked = await showModalBottomSheet<Client>(
@@ -205,7 +315,9 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
 
   Future<void> _pickDate() async {
     final now = DateTime.now();
-    final initial = _date ?? now.add(const Duration(hours: 2));
+    // Repli aligné sur le défaut (+1 h après la commande) : le picker
+    // s'ouvre là où le champ pointait, même après un effacement.
+    final initial = _date ?? _createdAt.add(_kDeliveryLead);
     // Antidatable : firstDate = DateTime(2020) pour permettre de
     // numériser une livraison passée (commande déjà livrée avant
     // l'inscription Fortress). lastDate +365j pour garder la possibilité
@@ -226,6 +338,8 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
     if (t == null || !mounted) return;
     setState(() {
       _date = DateTime(d.year, d.month, d.day, t.hour, t.minute);
+      // Choix explicite : la livraison ne suit plus la date de commande.
+      _dateTouched = true;
     });
   }
 
@@ -252,7 +366,13 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
     // future, on clampe à maintenant (sinon la commande serait dans le
     // futur, ce qui contredit la sémantique createdAt).
     if (picked.isAfter(now)) picked = now;
-    setState(() => _createdAt = picked);
+    setState(() {
+      _createdAt = picked;
+      // Tant que l'heure de livraison n'a pas été fixée à la main, elle
+      // reste collée à +1 h : antidater une commande d'hier place la
+      // livraison à hier + 1 h, pas à demain.
+      if (!_dateTouched) _date = picked.add(_kDeliveryLead);
+    });
   }
 
   void _confirm() {
@@ -290,6 +410,9 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
       createdAt:       _createdAt,
       amountPaid:      _resolveAmountPaid(),
       isApprovalSale:  _isApprovalSale,
+      deliveryPrice:    isPickup ? 0 : _deliveryPrice,
+      deliveryQuartier: isPickup ? null : _deliveryQuartierName,
+      deliveryZone:     isPickup ? null : _deliveryZoneName,
     ));
   }
 
@@ -304,193 +427,450 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
     return d.year == now.year && d.month == now.month && d.day == now.day;
   }
 
+  void _onCityChanged() {
+    setState(() {
+      // Ville modifiée → la sélection quartier n'a plus de sens.
+      _selectedQuartierId   = null;
+      _deliveryPrice        = 0;
+      _deliveryQuartierName = null;
+      _deliveryZoneName     = null;
+      _zoneFilter           = null;
+      _showManual           = false;
+      _error                = null;
+      _reloadQuartiers();
+    });
+  }
+
+  /// Section livraison « par quartier » : ville (étape A) → quartier avec
+  /// prix (étape B) → ajout manuel (étape C) → récapitulatif.
+  List<Widget> _buildDeliveryByQuartier(BuildContext context) {
+    final sem  = Theme.of(context).semantic;
+    final city = _cityCtrl.text.trim();
+    final hasCity = city.isNotEmpty;
+    // Zones présentes parmi les quartiers de la ville (pour les chips).
+    final zoneIds = _quartiers
+        .map((q) => q.zoneId)
+        .whereType<String>()
+        .toSet()
+        .toList();
+    final visibleQuartiers = _zoneFilter == null
+        ? _quartiers
+        : _quartiers.where((q) => q.zoneId == _zoneFilter).toList();
+
+    return [
+      // ── Étape A : Ville ────────────────────────────────────────────────
+      TextField(
+        controller: _cityCtrl,
+        style: AppTextStyles.body.copyWith(color: AppColors.onSurface),
+        onChanged: (_) => _onCityChanged(),
+        decoration: InputDecoration(
+          labelText: 'Ville',
+          labelStyle:
+              AppTextStyles.bodySm.copyWith(color: AppColors.textSecondary),
+          hintText: 'Douala',
+          hintStyle: AppTextStyles.bodySm.copyWith(color: AppColors.textHint),
+          isDense: true,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: sem.borderSubtle)),
+          enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: sem.borderSubtle)),
+          focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
+        ),
+      ),
+      // Villes configurées (remplissage rapide).
+      if (_cities.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Wrap(spacing: 6, runSpacing: 6, children: [
+          for (final c in _cities)
+            ActionChip(
+              label: Text(c, style: AppTextStyles.caption),
+              onPressed: () {
+                _cityCtrl.text = c;
+                _onCityChanged();
+              },
+              backgroundColor: AppColors.primarySurface,
+              side: BorderSide(color: AppColors.primary.withValues(alpha: 0.3)),
+              visualDensity: VisualDensity.compact,
+            ),
+        ]),
+      ],
+
+      // ── Étape B : Quartier (visible seulement si ville saisie) ─────────
+      if (hasCity) ...[
+        const SizedBox(height: 14),
+        const _SectionLabel('Quartier de livraison'),
+        // Chips de zone (si des zones existent pour cette ville).
+        if (zoneIds.length > 1) ...[
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            ChoiceChip(
+              label: const Text('Toutes'),
+              selected: _zoneFilter == null,
+              onSelected: (_) => setState(() => _zoneFilter = null),
+              labelStyle: AppTextStyles.caption,
+            ),
+            for (final zid in zoneIds)
+              ChoiceChip(
+                label: Text(_zoneNameOf(zid) ?? 'Zone'),
+                selected: _zoneFilter == zid,
+                onSelected: (_) => setState(() => _zoneFilter = zid),
+                labelStyle: AppTextStyles.caption,
+              ),
+          ]),
+          const SizedBox(height: 8),
+        ],
+        if (_quartiers.isEmpty)
+          // Aucun quartier configuré pour cette ville → saisie libre de
+          // l'adresse (fallback) + possibilité d'ajouter un quartier.
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _LabeledField(
+              label: 'Quartier / adresse',
+              controller: _addressCtrl,
+              hint: 'Bonapriso',
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Aucun tarif de livraison configuré pour « $city ». '
+              'Saisissez l\'adresse, ou ajoutez un quartier tarifé ci-dessous.',
+              style: AppTextStyles.captionHint
+                  .copyWith(color: AppColors.textSecondary),
+            ),
+          ])
+        else
+          // Menu déroulant (compact) — évite une longue liste verticale.
+          InputDecorator(
+            decoration: InputDecoration(
+              isDense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              filled: true,
+              fillColor: AppColors.inputFill,
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: sem.borderSubtle)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: sem.borderSubtle)),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: AppColors.primary, width: 1.5)),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: visibleQuartiers.any((q) => q.id == _selectedQuartierId)
+                    ? _selectedQuartierId
+                    : null,
+                isExpanded: true,
+                isDense: true,
+                hint: Text('Choisir le quartier',
+                    style:
+                        AppTextStyles.body.copyWith(color: AppColors.textHint)),
+                icon: const Icon(Icons.arrow_drop_down_rounded),
+                style: AppTextStyles.body.copyWith(color: AppColors.onSurface),
+                items: [
+                  for (final q in visibleQuartiers)
+                    DropdownMenuItem<String>(
+                      value: q.id,
+                      child: Row(children: [
+                        Expanded(
+                          child: Text(q.name,
+                              maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: AppTextStyles.body
+                                  .copyWith(color: AppColors.onSurface)),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(CurrencyFormatter.format(q.price.toDouble()),
+                            style: AppTextStyles.bodyBold
+                                .copyWith(color: AppColors.textSecondary)),
+                      ]),
+                    ),
+                ],
+                onChanged: (id) {
+                  if (id == null) return;
+                  final q = visibleQuartiers.firstWhere((e) => e.id == id);
+                  _selectQuartier(q);
+                },
+              ),
+            ),
+          ),
+        const SizedBox(height: 8),
+        // ── Étape C : Quartier non listé ──────────────────────────────
+        if (!_showManual)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => setState(() => _showManual = true),
+              icon: const Icon(Icons.add_location_alt_outlined, size: 16),
+              label: const Text('Quartier non listé ?'),
+              style: TextButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  padding: EdgeInsets.zero),
+            ),
+          )
+        else
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.inputFill,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: sem.borderSubtle),
+            ),
+            child: Column(children: [
+              _LabeledField(
+                label: 'Nom du quartier',
+                controller: _manualNameCtrl,
+                hint: 'Ex. Logbessou',
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _manualPriceCtrl,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                ],
+                style: AppTextStyles.body.copyWith(color: AppColors.onSurface),
+                decoration: InputDecoration(
+                  labelText: 'Prix livraison (FCFA)',
+                  labelStyle: AppTextStyles.bodySm
+                      .copyWith(color: AppColors.textSecondary),
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: sem.borderSubtle)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: sem.borderSubtle)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide:
+                          BorderSide(color: AppColors.primary, width: 1.5)),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => setState(() => _showManual = false),
+                    child: const Text('Annuler'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _addManualQuartier,
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryFill,
+                        foregroundColor: Colors.white,
+                        elevation: 0),
+                    child: const Text('Ajouter et sélectionner'),
+                  ),
+                ),
+              ]),
+            ]),
+          ),
+      ],
+      // Récapitulatif Produits / Livraison / Total retiré : le pied de page
+      // affiche désormais le total et la part livraison (« dont livraison »).
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final sem = Theme.of(context).semantic;
+    final isPickup = widget.deliveryMode == DeliveryMode.pickup;
     return AdaptiveFormFrame(
       title: 'Enregistrer la commande',
       icon:  Icons.shopping_bag_outlined,
-      body: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _SectionLabel('Client'),
-                _PickerTile(
-                  icon:  Icons.person_outline_rounded,
-                  label: _client?.name ?? 'Choisir / créer un client',
-                  hint:  _client?.phone,
-                  onTap: _pickClient,
-                  highlight: _client != null,
-                ),
-                const SizedBox(height: 14),
-                _SectionLabel('Date de la commande'),
-                _PickerTile(
-                  icon:  Icons.history_rounded,
-                  label: _fmtDate(_createdAt),
-                  hint:  _isToday(_createdAt)
-                      ? 'Aujourd\'hui (par défaut)'
-                      : 'Antidatée',
-                  onTap: _pickCreatedAt,
-                  highlight: !_isToday(_createdAt),
-                ),
-                const SizedBox(height: 14),
-                _SectionLabel('Date de livraison souhaitée'),
-                _PickerTile(
-                  icon:  Icons.event_outlined,
-                  label: _date == null
-                      ? 'Choisir la date et l\'heure'
-                      : _fmtDate(_date!),
-                  onTap: _pickDate,
-                  trailing: _date == null
-                      ? null
-                      : IconButton(
-                          icon: const Icon(Icons.close_rounded, size: 16),
-                          onPressed: () => setState(() => _date = null),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                              minWidth: 28, minHeight: 28),
-                        ),
-                ),
-                const SizedBox(height: 14),
-                // FIX 2 — retrait en boutique : pas d'adresse à saisir.
-                if (widget.deliveryMode == DeliveryMode.pickup) ...[
-                  _SectionLabel('Lieu de livraison'),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF9FAFB),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: Theme.of(context).semantic.borderSubtle),
-                    ),
-                    child: Row(children: [
-                      const Icon(Icons.storefront_outlined,
-                          size: 16, color: AppColors.textSecondary),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Retrait en boutique — aucune adresse de livraison requise.',
-                          style: AppTextStyles.captionHint.copyWith(
-                              color: AppColors.textSecondary),
-                        ),
-                      ),
-                    ]),
-                  ),
-                ] else ...[
-                  _SectionLabel('Lieu de livraison'),
-                  _LabeledField(
-                    label: 'Ville',
-                    controller: _cityCtrl,
-                    hint: 'Douala',
-                  ),
-                  const SizedBox(height: 8),
-                  _LabeledField(
-                    label: 'Quartier / adresse',
-                    controller: _addressCtrl,
-                    hint: 'Bonapriso',
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Pré-rempli depuis la fiche client. Si modifié, la fiche '
-                    'sera mise à jour ; cette commande conservera l\'adresse '
-                    'exacte saisie ici.',
-                    style: AppTextStyles.captionHint.copyWith(
-                        color: Theme.of(context).colorScheme.onSurface
-                            .withValues(alpha: 0.55)),
-                  ),
-                ],
-                // ── Vente « à choisir sur place » ────────────────────
-                // Le livreur emporte plusieurs articles, le client en garde
-                // certains, le reste revient. Le stock est réservé à la
-                // création puis réconcilié à la clôture de la tournée.
-                const SizedBox(height: 16),
-                _ApprovalSaleToggle(
-                  value: _isApprovalSale,
-                  enabled: !widget.lockApproval,
-                  onChanged: (v) => setState(() => _isApprovalSale = v),
-                ),
-                // ── Section paiement (cf. hotfix_065) ────────────────
-                // Affiché seulement si orderTotal connu (l'appelant l'a
-                // passé). Permet de saisir directement un acompte ou un
-                // paiement total dès la création — sans devoir ouvrir
-                // un dialog acompte après coup.
-                if ((widget.orderTotal ?? 0) > 0) ...[
-                  const SizedBox(height: 16),
-                  _SectionLabel(
-                      'Paiement reçu — Total ${_fmtMoney(widget.orderTotal!)}'),
-                  _PaymentChoiceRow(
-                    selected: _paymentChoice,
-                    onChanged: (v) => setState(() => _paymentChoice = v),
-                  ),
-                  if (_paymentChoice == _PaymentChoice.partial) ...[
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: _amountPaidCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(
-                            RegExp(r'[0-9.,]')),
-                      ],
-                      style: AppTextStyles.input
-                          .copyWith(fontWeight: FontWeight.w700),
-                      decoration: InputDecoration(
-                        hintText: 'Montant de l\'acompte',
-                        suffixText: CurrencyFormatter.currentSymbol,
-                        isDense: true,
-                        filled: true,
-                        fillColor: const Color(0xFFF9FAFB),
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                                color: sem.borderSubtle)),
-                      ),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ],
-                ],
-                if (_error != null) ...[
-                  const SizedBox(height: 8),
-                  Text(_error!,
-                      style: AppTextStyles.captionHint
-                          .copyWith(color: sem.danger)),
-                ],
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
-            child: Row(children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 44)),
-                  child: const Text('Annuler'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _confirm,
-                  icon: const Icon(Icons.check_circle_outline_rounded,
-                      size: 18),
-                  label: const Text('Enregistrer'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size(0, 44),
-                  ),
-                ),
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(
+            AppSpacing.xl, AppSpacing.lg, AppSpacing.xl, AppSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ── 1. Client ────────────────────────────────────────────────
+            const _SectionLabel('Client'),
+            _FormCard(children: [
+              _IconRow(
+                icon:      Icons.person_outline_rounded,
+                iconColor: sem.warning,
+                iconBg:    sem.warningSurface,
+                title:     _client?.name ?? 'Choisir / créer un client',
+                subtitle:  _client?.phone,
+                onTap:     _pickClient,
               ),
             ]),
+            const SizedBox(height: AppSpacing.lg),
+
+            // ── 2. Planification ─────────────────────────────────────────
+            const _SectionLabel('Planification'),
+            _FormCard(children: [
+              _IconRow(
+                icon:      Icons.calendar_today_outlined,
+                iconColor: sem.info,
+                iconBg:    sem.info.withValues(alpha: 0.12),
+                title:     _fmtDate(_createdAt),
+                subtitle:  _isToday(_createdAt)
+                    ? 'Date de commande · aujourd\'hui (par défaut)'
+                    : 'Date de commande · antidatée',
+                onTap:     _pickCreatedAt,
+              ),
+              _IconRow(
+                icon:      Icons.local_shipping_outlined,
+                iconColor: sem.success,
+                iconBg:    sem.successSurface,
+                title:     _date == null
+                    ? 'Choisir la date et l\'heure'
+                    : _fmtDate(_date!),
+                subtitle:  _date != null && !_dateTouched
+                    ? 'Date de livraison souhaitée · 1 h après'
+                    : 'Date de livraison souhaitée',
+                onTap:     _pickDate,
+                trailing: _date == null
+                    ? null
+                    : IconButton(
+                        icon: Icon(Icons.close_rounded,
+                            size: 16, color: AppColors.textSecondary),
+                        tooltip: 'Effacer la date de livraison',
+                        // Effacer est aussi un choix explicite : sans ça,
+                        // modifier la date de commande reremplirait le
+                        // champ que l'utilisateur vient de vider.
+                        onPressed: () => setState(() {
+                          _date        = null;
+                          _dateTouched = true;
+                        }),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                            minWidth: 28, minHeight: 28),
+                      ),
+              ),
+            ]),
+
+            // Retrait en boutique → aucune section « Lieu de livraison »
+            // (pavé « aucune adresse requise » redondant, supprimé). La
+            // section n'apparaît que pour une vraie livraison, avec le
+            // choix du quartier (→ frais de livraison).
+            if (!isPickup) ...[
+              const SizedBox(height: AppSpacing.lg),
+              const _SectionLabel('Lieu de livraison'),
+              ..._buildDeliveryByQuartier(context),
+            ],
+
+            // ── 3. Mode de livraison : vente « à choisir sur place » ─────
+            // Le livreur emporte plusieurs articles, le client en garde
+            // certains, le reste revient. Le stock est réservé à la
+            // création puis réconcilié à la clôture de la tournée.
+            const SizedBox(height: AppSpacing.lg),
+            const _SectionLabel('Mode de livraison'),
+            _ApprovalSaleToggle(
+              value: _isApprovalSale,
+              enabled: !widget.lockApproval,
+              onChanged: (v) => setState(() => _isApprovalSale = v),
+            ),
+          ],
+        ),
+      ),
+      footer: _buildFooter(context, isPickup: isPickup),
+    );
+  }
+
+  /// Pied de page épinglé : total, mode de paiement, erreur de validation
+  /// (toujours visible, même formulaire défilé) et actions.
+  Widget _buildFooter(BuildContext context, {required bool isPickup}) {
+    final sem = Theme.of(context).semantic;
+    // Total facturé au client = articles + livraison choisie. Livraison non
+    // facturée en retrait boutique (cf. `_confirm`) : le total affiché
+    // reflète exactement ce qui sera enregistré.
+    final deliveryPrice = isPickup ? 0.0 : _deliveryPrice;
+    final total         = (widget.orderTotal ?? 0) + deliveryPrice;
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Aucun encaissement à la création (règle métier) ──────────
+          // Rien ne rentre en caisse tant que la commande n'est pas
+          // TERMINÉE : le montant se saisit à la clôture, quand la
+          // marchandise est réellement remise. Un acompte pris ici
+          // survivait à une annulation et laissait un remboursement
+          // à traiter à la main, hors de tout suivi.
+          if ((widget.orderTotal ?? 0) > 0) ...[
+            Row(children: [
+              Expanded(
+                child: Text('Total',
+                    style: AppTextStyles.bodySm
+                        .copyWith(color: AppColors.textSecondary)),
+              ),
+              Text(_fmtMoney(total),
+                  style: AppTextStyles.title.copyWith(
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.primary)),
+            ]),
+            if (deliveryPrice > 0)
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text('dont livraison — ${_fmtMoney(deliveryPrice)}',
+                    style: AppTextStyles.captionHint),
+              ),
+            const SizedBox(height: AppSpacing.xs),
+            Row(children: [
+              Expanded(
+                child: Text('Paiement', style: AppTextStyles.captionHint),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.sm, vertical: 3),
+                decoration: BoxDecoration(
+                  color: sem.info.withValues(alpha: 0.12),
+                  borderRadius:
+                      const BorderRadius.all(Radius.circular(AppRadius.xs)),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.schedule_rounded, size: 13, color: sem.info),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text('À la clôture',
+                      style: AppTextStyles.caption.copyWith(
+                          fontWeight: FontWeight.w500, color: sem.info)),
+                ]),
+              ),
+            ]),
+            const SizedBox(height: AppSpacing.md),
+          ],
+          if (_error != null) ...[
+            Text(_error!,
+                style: AppTextStyles.captionHint.copyWith(color: sem.danger)),
+            const SizedBox(height: AppSpacing.sm),
+          ],
+          ElevatedButton.icon(
+            onPressed: _confirm,
+            icon: const Icon(Icons.check_rounded, size: 18),
+            label: const Text('Enregistrer la commande'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryFill,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              minimumSize: const Size.fromHeight(48),
+              shape: const RoundedRectangleBorder(borderRadius: AppRadius.mdR),
+            ),
+          ),
+          // Annuler gardé (certains appareils n'ont pas de geste retour
+          // évident) mais en retrait visuel : simple bouton texte.
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.textSecondary,
+              minimumSize: const Size.fromHeight(40),
+            ),
+            child: const Text('Annuler'),
           ),
         ],
       ),
@@ -507,63 +887,96 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
         child: Text(label.toUpperCase(),
-            style: AppTextStyles.microBold.copyWith(
-                fontWeight: FontWeight.w800, letterSpacing: 0.5,
-                color: Theme.of(context).colorScheme.onSurface
-                    .withValues(alpha: 0.55))),
+            style: AppTextStyles.caption.copyWith(
+                letterSpacing: 0.5, color: AppColors.textHint)),
       );
 }
 
-class _PickerTile extends StatelessWidget {
+/// Carte groupant une ou plusieurs lignes, séparées par un filet de 0,5 px.
+class _FormCard extends StatelessWidget {
+  final List<Widget> children;
+  const _FormCard({required this.children});
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return Material(
+      color: AppColors.inputFill,
+      shape: RoundedRectangleBorder(
+        borderRadius: AppRadius.mdR,
+        side: BorderSide(color: sem.borderSubtle, width: 0.5),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        for (var i = 0; i < children.length; i++) ...[
+          if (i > 0)
+            Divider(height: 0.5, thickness: 0.5, color: sem.borderSubtle),
+          children[i],
+        ],
+      ]),
+    );
+  }
+}
+
+/// Pastille 32×32 teintée portant l'icône d'une ligne (couleur par type).
+class _IconBadge extends StatelessWidget {
   final IconData icon;
-  final String label;
-  final String? hint;
+  final Color color;
+  final Color background;
+  const _IconBadge({
+    required this.icon, required this.color, required this.background,
+  });
+  @override
+  Widget build(BuildContext context) => AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 32, height: 32,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: const BorderRadius.all(Radius.circular(AppRadius.sm)),
+        ),
+        child: Icon(icon, size: 18, color: color),
+      );
+}
+
+/// Ligne cliquable : pastille d'icône + titre/sous-titre + chevron (ou
+/// `trailing` personnalisé, ex. croix d'effacement).
+class _IconRow extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final Color iconBg;
+  final String title;
+  final String? subtitle;
   final VoidCallback onTap;
   final Widget? trailing;
-  final bool highlight;
-  const _PickerTile({
-    required this.icon, required this.label, this.hint,
-    required this.onTap, this.trailing, this.highlight = false,
+  const _IconRow({
+    required this.icon, required this.iconColor, required this.iconBg,
+    required this.title, this.subtitle, required this.onTap, this.trailing,
   });
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final sem   = theme.semantic;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          color: highlight ? sem.brandSurface : const Color(0xFFF9FAFB),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-              color: highlight ? sem.brand.withValues(alpha: 0.35)
-                               : sem.borderSubtle),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md, vertical: 10),
         child: Row(children: [
-          Icon(icon, size: 18,
-              color: highlight ? sem.brand : const Color(0xFF6B7280)),
-          const SizedBox(width: 10),
+          _IconBadge(icon: icon, color: iconColor, background: iconBg),
+          const SizedBox(width: AppSpacing.md),
           Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min, children: [
-            Text(label,
+            Text(title,
                 maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: AppTextStyles.body.copyWith(
-                    fontWeight: highlight ? FontWeight.w700 : FontWeight.w500,
-                    color: highlight ? sem.brandText : const Color(0xFF111827))),
-            if (hint != null && hint!.isNotEmpty) ...[
-              const SizedBox(height: 1),
-              Text(hint!,
+                    fontWeight: FontWeight.w500, color: AppColors.onSurface)),
+            if (subtitle != null && subtitle!.isNotEmpty)
+              Text(subtitle!,
                   maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.captionHint
-                      .copyWith(color: const Color(0xFF6B7280))),
-            ],
+                  style: AppTextStyles.captionHint),
           ])),
           if (trailing != null) trailing!
-          else const Icon(Icons.chevron_right_rounded,
-              size: 18, color: Color(0xFF9CA3AF)),
+          else Icon(Icons.chevron_right_rounded,
+              size: 18, color: AppColors.textHint),
         ]),
       ),
     );
@@ -573,6 +986,9 @@ class _PickerTile extends StatelessWidget {
 /// Bascule « À choisir sur place » : active la réservation de stock pour une
 /// tournée d'approbation (le livreur emporte plusieurs articles, le client en
 /// garde certains, le reste revient et est remis en stock à la clôture).
+///
+/// Carte réactive : neutre quand désactivée, ambre + badge explicatif quand
+/// activée (transition animée 200 ms).
 class _ApprovalSaleToggle extends StatelessWidget {
   final bool value;
   final ValueChanged<bool> onChanged;
@@ -585,64 +1001,114 @@ class _ApprovalSaleToggle extends StatelessWidget {
     this.enabled = true,
   });
 
+  static const _kAnim = Duration(milliseconds: 200);
+
   @override
   Widget build(BuildContext context) {
     final sem = Theme.of(context).semantic;
     return Opacity(
       opacity: enabled ? 1 : 0.65,
-      child: InkWell(
-        onTap: enabled ? () => onChanged(!value) : null,
-        borderRadius: BorderRadius.circular(10),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: value ? sem.brandSurface : const Color(0xFFF9FAFB),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-                color: value
-                    ? sem.brand.withValues(alpha: 0.35)
-                    : sem.borderSubtle),
-          ),
-          child: Row(children: [
-            Expanded(
+      child: AnimatedContainer(
+        duration: _kAnim,
+        decoration: BoxDecoration(
+          color: value ? sem.warningSurface : AppColors.inputFill,
+          borderRadius: AppRadius.mdR,
+          border: Border.all(
+              color: value ? sem.warning : sem.borderSubtle,
+              width: value ? 1 : 0.5),
+        ),
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: enabled ? () => onChanged(!value) : null,
+            borderRadius: AppRadius.mdR,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md, vertical: 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Row(children: [
-                    Flexible(
-                      child: Text('À choisir sur place',
-                          style: AppTextStyles.body.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: value
-                                  ? sem.brandText
-                                  : const Color(0xFF111827))),
+                    _IconBadge(
+                      icon: Icons.inventory_2_outlined,
+                      color: value ? sem.warningText : AppColors.textSecondary,
+                      background: value
+                          ? sem.warning.withValues(alpha: 0.3)
+                          : AppColors.surface,
                     ),
-                    if (!enabled) ...[
-                      const SizedBox(width: 6),
-                      Icon(Icons.lock_outline_rounded,
-                          size: 13, color: sem.brandText),
-                    ],
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(children: [
+                            Flexible(
+                              child: Text('À choisir sur place',
+                                  style: AppTextStyles.body.copyWith(
+                                      fontWeight: FontWeight.w500,
+                                      color: AppColors.onSurface)),
+                            ),
+                            if (!enabled) ...[
+                              const SizedBox(width: 6),
+                              Icon(Icons.lock_outline_rounded,
+                                  size: 13, color: AppColors.textSecondary),
+                            ],
+                          ]),
+                          Text(
+                            enabled
+                                ? 'Stock réservé · Clôture à la livraison'
+                                : 'Mode défini à la création — '
+                                  'non modifiable ici.',
+                            style: AppTextStyles.captionHint,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    AppSwitch(
+                      value: value,
+                      activeColor: sem.warning,
+                      onChanged: enabled ? onChanged : null,
+                    ),
                   ]),
-                  const SizedBox(height: 2),
-                  Text(
-                    enabled
-                        ? 'Le livreur apporte plusieurs articles, le client en '
-                          'garde certains, le reste revient. Le stock est '
-                          'réservé puis réconcilié à la clôture.'
-                        : 'Mode défini à la création — non modifiable ici.',
-                    style: AppTextStyles.captionHint
-                        .copyWith(color: const Color(0xFF6B7280)),
+                  AnimatedSize(
+                    duration: _kAnim,
+                    alignment: Alignment.topCenter,
+                    child: !value
+                        ? const SizedBox(width: double.infinity)
+                        : Padding(
+                            padding: const EdgeInsets.only(top: AppSpacing.sm),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: AppSpacing.sm,
+                                  vertical: AppSpacing.xs),
+                              decoration: BoxDecoration(
+                                color: sem.warning.withValues(alpha: 0.25),
+                                borderRadius: const BorderRadius.all(
+                                    Radius.circular(AppRadius.xs)),
+                              ),
+                              child: Row(children: [
+                                Icon(Icons.info_outline_rounded,
+                                    size: 14, color: sem.warningText),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    'Le stock est réservé puis réconcilié '
+                                    'à la clôture',
+                                    style: AppTextStyles.caption
+                                        .copyWith(color: sem.warningText),
+                                  ),
+                                ),
+                              ]),
+                            ),
+                          ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 10),
-            AppSwitch(
-              value: value,
-              onChanged: enabled ? onChanged : null,
-            ),
-          ]),
+          ),
         ),
       ),
     );
@@ -660,14 +1126,14 @@ class _LabeledField extends StatelessWidget {
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
-      style: AppTextStyles.body.copyWith(color: const Color(0xFF111827)),
+      style: AppTextStyles.body.copyWith(color: AppColors.onSurface),
       decoration: InputDecoration(
         labelText: label,
         labelStyle: AppTextStyles.bodySm
-            .copyWith(color: const Color(0xFF6B7280)),
+            .copyWith(color: AppColors.textSecondary),
         hintText: hint,
         hintStyle: AppTextStyles.bodySm
-            .copyWith(color: const Color(0xFFBBBBBB)),
+            .copyWith(color: AppColors.textHint),
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
             horizontal: 12, vertical: 11),
@@ -683,6 +1149,7 @@ class _LabeledField extends StatelessWidget {
     );
   }
 }
+
 
 // ─── Mini picker client (recherche + bouton créer) ─────────────────────────
 
@@ -746,7 +1213,7 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
         Container(margin: const EdgeInsets.only(top: 10, bottom: 8),
             width: 36, height: 4,
             decoration: BoxDecoration(
-                color: const Color(0xFFDDDDDD),
+                color: AppColors.divider,
                 borderRadius: BorderRadius.circular(2))),
         // Titre
         const Padding(
@@ -762,15 +1229,20 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
           child: Row(children: [
             Expanded(child: TextField(
               onChanged: (v) => setState(() => _query = v),
-              keyboardType: TextInputType.phone,
+              // Ouvre le clavier directement → −1 tap à chaque vente.
+              autofocus: true,
+              // Clavier texte (et non `phone`) : la recherche se fait par
+              // numéro OU par nom — un clavier numérique empêchait de taper
+              // le nom du client sur mobile.
+              keyboardType: TextInputType.text,
               style: AppTextStyles.body,
               decoration: InputDecoration(
                 hintText: 'Rechercher par numéro ou nom…',
                 hintStyle: AppTextStyles.bodySm
-                    .copyWith(color: const Color(0xFFBBBBBB)),
-                prefixIcon: const Icon(Icons.search_rounded,
+                    .copyWith(color: AppColors.textHint),
+                prefixIcon: Icon(Icons.search_rounded,
                     size: 16, color: AppColors.textHint),
-                filled: true, fillColor: const Color(0xFFF9FAFB),
+                filled: true, fillColor: AppColors.inputFill,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 10),
@@ -829,7 +1301,7 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
                               .where((s) => s.isNotEmpty)
                               .join(' · '),
                           style: AppTextStyles.captionHint
-                              .copyWith(color: const Color(0xFF6B7280))),
+                              .copyWith(color: AppColors.textSecondary)),
                     );
                   },
                 ),
@@ -840,93 +1312,6 @@ class _MiniClientPickerState extends State<_MiniClientPicker> {
 }
 
 
-// ─── Suivi paiement à la création (hotfix_065) ─────────────────────────────
-//
-// 3 modes mutuellement exclusifs :
-//   • none    : commande naît `unpaid`, l'opérateur encaissera plus tard
-//                via le bouton Acompte ou Sheet C de complétion.
-//   • full    : `amount_paid = total`, statut `paid` immédiat.
-//   • partial : montant saisi, statut `partial`.
-enum _PaymentChoice { none, full, partial }
-
-class _PaymentChoiceRow extends StatelessWidget {
-  final _PaymentChoice selected;
-  final ValueChanged<_PaymentChoice> onChanged;
-  const _PaymentChoiceRow({
-    required this.selected,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 6, runSpacing: 6,
-      children: [
-        _PaymentChip(
-          label: 'Aucun',
-          icon:  Icons.money_off_rounded,
-          active: selected == _PaymentChoice.none,
-          onTap: () => onChanged(_PaymentChoice.none),
-        ),
-        _PaymentChip(
-          label: 'Acompte',
-          icon:  Icons.payments_outlined,
-          active: selected == _PaymentChoice.partial,
-          onTap: () => onChanged(_PaymentChoice.partial),
-        ),
-        _PaymentChip(
-          label: 'Payé en intégralité',
-          icon:  Icons.check_circle_rounded,
-          active: selected == _PaymentChoice.full,
-          onTap: () => onChanged(_PaymentChoice.full),
-        ),
-      ],
-    );
-  }
-}
-
-class _PaymentChip extends StatelessWidget {
-  final String       label;
-  final IconData     icon;
-  final bool         active;
-  final VoidCallback onTap;
-  const _PaymentChip({
-    required this.label,
-    required this.icon,
-    required this.active,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final sem = Theme.of(context).semantic;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: active ? sem.brandSurface : const Color(0xFFF9FAFB),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-              color: active
-                  ? sem.brand.withValues(alpha: 0.4)
-                  : sem.borderSubtle),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon,
-              size: 14,
-              color: active ? sem.brandText : const Color(0xFF6B7280)),
-          const SizedBox(width: 6),
-          Text(label,
-              style: AppTextStyles.bodySm.copyWith(
-                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                  color: active ? sem.brandText : const Color(0xFF111827))),
-        ]),
-      ),
-    );
-  }
-}
 
 String _fmtMoney(double amount) {
   final fmt = NumberFormat('#,###', 'fr_FR');

@@ -268,10 +268,12 @@ extension EmployeeStatusX on EmployeeStatus {
 /// Aligné sur les UPDATEs du hotfix_024 qui backfill les memberships
 /// existantes lors de la migration de rôles.
 ///
-/// - `owner` : toutes les 22 permissions (bypass total dans `_grain`).
+/// - `owner` : toutes les permissions — `EmployeePermission.values`, 29 au
+///   25/09/2026 (bypass total dans `_grain`).
 ///   Cette liste est gardée pour cohérence mais n'est jamais consultée
 ///   en pratique pour un owner.
-/// - `admin` : tout sauf `shop.delete` et `admin.remove` (réservées owner).
+/// - `admin` : tout sauf les permissions réservées owner (`isOwnerOnly` :
+///   `shopDelete`, `adminRemove`, `shopCreate`, `shopFullEdit`).
 /// - `user`  : 4 permissions de base (consulter inventaire + encaisser
 ///   + voir clients).
 Set<EmployeePermission> defaultPermissionsForRole(MemberRole role) {
@@ -330,6 +332,57 @@ class EmployeePermissionPresets {
     EmployeePermission.inventoryStock,
     EmployeePermission.caisseAccess,
     EmployeePermission.shopLocations,
+  };
+
+  // ── RESTAURATION ────────────────────────────────────────────────────────
+  //
+  // Trois préréglages taillés pour la salle, distincts de ceux du commerce :
+  // un serveur n'est pas un « personnel polyvalent » (il ne doit pas voir le
+  // carnet clients ni les commandes des autres), et un caissier de restaurant
+  // remise une addition alors qu'il ne rembourse jamais une vente encaissée.
+  //
+  // Le fil conducteur : l'argent ne sort d'un restaurant sans qu'un plat sorte
+  // que par deux portes — la remise et l'annulation d'une vente encaissée. La
+  // première est accordée au caissier mais reste sous PIN gérant ; la seconde
+  // n'est accordée à personne d'autre que la gérance.
+
+  /// Serveur : prend les commandes, encaisse, et rien d'autre.
+  ///
+  /// Sans `caisseViewAllOrders` il ne voit QUE ses propres commandes (plus
+  /// celles déjà finalisées) — il ne peut donc pas ouvrir ni modifier
+  /// l'addition d'un collègue. Sans `inventoryWrite` il lit la carte sans
+  /// pouvoir toucher à un prix. Pas de `crmView` : le carnet d'adresses de
+  /// l'établissement n'a rien à faire entre ses mains.
+  static Set<EmployeePermission> get waiter => {
+    EmployeePermission.inventoryView,
+    EmployeePermission.caisseAccess,
+    EmployeePermission.caisseSell,
+  };
+
+  /// Caissier de restaurant : serveur + il encaisse pour toute la salle.
+  ///
+  /// `caisseViewAllOrders` parce qu'il encaisse les commandes des autres, et
+  /// `salesDiscount` parce qu'un geste commercial fait partie du poste — mais
+  /// la remise sur addition reste soumise au PIN gérant et journalisée.
+  /// Volontairement SANS `salesCancel` : annuler une vente déjà encaissée est
+  /// le geste qui permet d'empocher le comptant puis d'effacer la ligne.
+  static Set<EmployeePermission> get restaurantCashier => {
+    ...waiter,
+    EmployeePermission.caisseEditOrders,
+    EmployeePermission.caisseViewAllOrders,
+    EmployeePermission.salesDiscount,
+    EmployeePermission.crmView,
+  };
+
+  /// Cuisinier : voit tous les bons et fait avancer le service.
+  ///
+  /// La plupart des cuisiniers n'ont PAS besoin de compte — ils badgent avec
+  /// leur code à 4 chiffres dans « Personnel ». Ce préréglage ne sert qu'à
+  /// celui qui suit les commandes sur un écran. Ni vente, ni remise.
+  static Set<EmployeePermission> get cook => {
+    EmployeePermission.inventoryView,
+    EmployeePermission.caisseAccess,
+    EmployeePermission.caisseViewAllOrders,
   };
 
   /// Comptable : finances + rapports.

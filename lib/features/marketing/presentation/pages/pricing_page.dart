@@ -147,7 +147,7 @@ class _ToggleButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(
             horizontal: 18, vertical: 9),
         decoration: BoxDecoration(
-            color: active ? AppColors.primary : Colors.transparent,
+            color: active ? AppColors.primaryFill : Colors.transparent,
             borderRadius: BorderRadius.circular(7)),
         child: Text(label,
             style: AppTextStyles.body.copyWith(
@@ -182,7 +182,7 @@ class _FinalCta extends StatelessWidget {
           ElevatedButton(
             onPressed: () => context.go(RouteNames.register),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
+              backgroundColor: AppColors.primaryFill,
               foregroundColor: Colors.white,
               elevation: 0,
               padding:

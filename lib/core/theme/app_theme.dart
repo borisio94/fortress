@@ -1,10 +1,18 @@
 import 'package:flutter/material.dart';
 import 'app_colors.dart';
+import 'brand_contrast.dart';
+import '../widgets/touch_target.dart';
 import 'theme_palette.dart';
 
 /// Couleurs sémantiques exposées via `Theme.of(context).extension<...>()`.
 /// Permet aux pages d'utiliser `theme.semantic.success` plutôt que des
 /// `Color(0xFF...)` hardcodés ou des références directes à `AppColors`.
+/// Opacité du contour d'état d'une carte active (`stateOutline`).
+const double kStateOutlineAlpha = 0.40;
+
+/// Opacité de l'ombre teintée d'une carte active (`stateShadow`).
+const double kStateShadowAlpha = 0.22;
+
 @immutable
 class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
   final Color success;
@@ -57,6 +65,82 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
     required this.borderSubtle,
     required this.trackMuted,
   });
+
+  // ── LES QUATRE TOKENS DU RENDU COLORÉ (26/09/2026) ───────────────────────
+  //
+  // Pensés ENSEMBLE, pour l'écran Commandes du restaurant, et tous DÉRIVÉS de
+  // tokens existants — aucune couleur écrite en dur. Leurs formules sont au
+  // document de design (§ 3) : une formule survit à un changement de palette,
+  // une valeur non. Mesurés sur les huit palettes, dans les deux modes
+  // (`test/theme/state_tokens_test.dart`).
+
+  /// SURFACE CREUSÉE — un cran PLUS SOMBRE que la carte (`elevatedSurface`),
+  /// dans les deux modes : le bloc de contenu d'une carte active, le fond
+  /// d'une ligne terminée en liste.
+  ///
+  /// - clair : mi-chemin de la carte vers `borderSubtle` → #F2F3F5, 1,11:1 ;
+  /// - sombre : aux trois quarts de la carte vers le fond de page
+  ///   (`BrandContrast.kDarkBackground`) → #131C2E, 1,17:1.
+  ///
+  /// Getter et non champ : la valeur se DÉDUIT des autres tokens, elle ne se
+  /// règle pas à part (les constructeurs sont `const`).
+  Color get sunkenSurface => elevatedSurface.computeLuminance() > 0.5
+      ? Color.lerp(elevatedSurface, borderSubtle, 0.5)!
+      : Color.lerp(elevatedSurface, BrandContrast.kDarkBackground, 0.75)!;
+
+  /// CONTOUR D'ÉTAT — la couleur de l'état à [kStateOutlineAlpha], sur une
+  /// carte ACTIVE. 1,36 à 2,57:1 contre la carte : sous 3:1, admissible
+  /// seulement parce que le badge ÉCRIT l'état — c'est de la décoration, pas
+  /// l'information.
+  Color stateOutline(Color state) =>
+      state.withValues(alpha: kStateOutlineAlpha);
+
+  /// OMBRE TEINTÉE — la couleur de l'état à [kStateShadowAlpha], au flou et
+  /// au décalage de l'ombre de carte qu'elle remplace (12, 3). Elle ne prend
+  /// aucune place.
+  List<BoxShadow> stateShadow(Color state) => [
+        BoxShadow(
+            color: state.withValues(alpha: kStateShadowAlpha),
+            blurRadius: 12,
+            offset: const Offset(0, 3)),
+      ];
+
+  /// TEXTE SUR UN FOND PLEIN D'ÉTAT (badge, bouton) — le blanc ou l'encre
+  /// sombre du thème (`BrandContrast.kDarkBackground`), celle des deux qui
+  /// contraste le plus. Au moins 4,74:1 sur danger, warning, success, info et
+  /// la primaire, huit palettes, deux modes.
+  Color onStateFill(Color fill) {
+    const ink = BrandContrast.kDarkBackground;
+    return BrandContrast.contrast(Colors.white, fill) >=
+            BrandContrast.contrast(ink, fill)
+        ? Colors.white
+        : ink;
+  }
+
+  /// LA COULEUR DE TEXTE d'une couleur d'état : `danger` → `dangerText`,
+  /// `warning` → `warningText`, `success` → `successText` ; toute autre
+  /// couleur revient telle quelle.
+  ///
+  /// « Le token suit son fond » : les tokens de BASE sont faits pour une
+  /// icône, un trait ou un fond sombre ; posés en texte sur une surface
+  /// claire, ils échouent (mesuré sur les 8 palettes, au pire de la carte,
+  /// du fond de page et du verre : `warning` 2,01:1, `success` 2,38, `danger`
+  /// 3,53). Sur leur propre teinte (10–14 %), `danger` échoue MÊME EN SOMBRE
+  /// (4,34). Les variantes `*Text` passent partout : ≥ 6,37 en clair, ≥ 6,32
+  /// en sombre, teintes comprises.
+  ///
+  /// L'aiguillage sert là où la couleur arrive par une variable, un ternaire
+  /// ou un paramètre de composant — une même couleur y colore souvent un
+  /// texte ET une icône, et seul le texte doit changer.
+  ///
+  /// `info` n'a PAS de variante texte, et c'est voulu : une information se
+  /// dit sans couleur (`textSecondary`, document de design § 16).
+  Color textFor(Color base) {
+    if (base == danger) return dangerText;
+    if (base == warning) return warningText;
+    if (base == success) return successText;
+    return base;
+  }
 
   @override
   AppSemanticColors copyWith({
@@ -162,11 +246,18 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
   /// Dérive une instance light avec `brand` adapté à la palette utilisateur.
   /// Tous les autres tokens (success/warning/danger/etc.) restent universels
   /// — seules les 3 variantes brand suivent la palette boutique custom.
-  factory AppSemanticColors.lightForBrand(Color brand) {
+  ///
+  /// [primary] = la primaire BRUTE de la palette. `brandSurface` en est la
+  /// teinte à 10 % (son aspect ne change pas) ; `brand` et `brandText` sont
+  /// [BrandContrast.lightText] — lisibles à 4,5:1 sur la carte, le fond ET
+  /// ces teintes (lot 1 clair, 26/09/2026). Avant, ils valaient la primaire
+  /// brute : 2,31 à 3,13:1 sur `brandSurface` pour cinq palettes.
+  factory AppSemanticColors.lightForBrand(Color primary) {
     final brandSurface = Color.alphaBlend(
-      brand.withValues(alpha: 0.10),
+      primary.withValues(alpha: 0.10),
       const Color(0xFFFFFFFF),
     );
+    final brand = BrandContrast.lightText(primary);
     return AppSemanticColors(
       success:         const Color(0xFF10B981),
       warning:         const Color(0xFFF59E0B),
@@ -180,20 +271,26 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
       successText:     const Color(0xFF065F46),
       brand:           brand,
       brandSurface:    brandSurface,
-      brandText:       brand, // primary saturé est lisible sur sa surface ~10%
+      brandText:       brand,
       elevatedSurface: const Color(0xFFFFFFFF),
       borderSubtle:    const Color(0xFFE5E7EB),
       trackMuted:      const Color(0xFFF3F4F6),
     );
   }
 
-  /// Pendant dark de [lightForBrand]. brandSurface = brand mixé avec slate
-  /// sombre à ~20 % pour rester lisible sur fond dark.
-  factory AppSemanticColors.darkForBrand(Color brand) {
-    final brandSurface = Color.alphaBlend(
-      brand.withValues(alpha: 0.20),
-      const Color(0xFF1E293B),
-    );
+  /// Pendant dark de [lightForBrand]. [primary] = la primaire BRUTE de la
+  /// palette.
+  ///
+  /// `brandSurface` = la primaire brute mélangée à ~20 % sur la carte slate.
+  /// `brand` et `brandText` = sa variante TEXTE, [BrandContrast.darkBrandText] :
+  /// lisible à 4,5:1 sur la carte, le fond ET cette `brandSurface`. Avant le
+  /// 25/09/2026 ils valaient la primaire brute — 1,00:1 sur Midnight, 2,21:1
+  /// sur Violet, et le couple `brandText`/`brandSurface` échouait sur les
+  /// huit palettes.
+  factory AppSemanticColors.darkForBrand(Color primary) {
+    final brandSurface =
+        BrandContrast.darkTint(primary, BrandContrast.kBrandSurfaceAlpha);
+    final brand = BrandContrast.darkBrandText(primary);
     return AppSemanticColors(
       success:         const Color(0xFF34D399),
       warning:         const Color(0xFFFBBF24),
@@ -207,7 +304,7 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
       successText:     const Color(0xFF6EE7B7),
       brand:           brand,
       brandSurface:    brandSurface,
-      brandText:       brand, // primary saturé reste lisible sur dark surface
+      brandText:       brand, // variante texte dérivée (voir ci-dessus)
       elevatedSurface: const Color(0xFF1E293B),
       borderSubtle:    const Color(0xFF334155),
       trackMuted:      const Color(0xFF1F2937),
@@ -225,11 +322,27 @@ class AppTheme {
   /// Construit un ThemeData clair à partir d'une [ThemePalette].
   /// Si `palette` est null, utilise la palette Fortress par défaut (violet).
   static ThemeData light({ThemePalette? palette}) {
-    final p = palette ?? kDefaultPalette;
-    return _buildLight(p);
+    final raw = palette ?? kDefaultPalette;
+    // LOT 1 CLAIR (26/09/2026) — la primaire du thème clair est DÉRIVÉE, comme
+    // en sombre : [BrandContrast.lightText], assombrie jusqu'à 4,5:1 sur la
+    // carte, le fond et ses teintes. Tout le thème clair (texte, icône, trait,
+    // fond de bouton) la lit via `p.primary`. Seules la graine du schéma et la
+    // teinte `brandSurface` partent de la couleur BRUTE : leur aspect ne change
+    // pas. Ne pas « simplifier » en repassant `palette` directement.
+    final p = ThemePalette(
+      id: raw.id,
+      labelFr: raw.labelFr,
+      labelEn: raw.labelEn,
+      primary: BrandContrast.lightText(raw.primary),
+      primaryLight: raw.primaryLight,
+      primaryDark: raw.primaryDark,
+      primarySurface: raw.primarySurface,
+      previewGradient: raw.previewGradient,
+    );
+    return _buildLight(p, raw.primary);
   }
 
-  static ThemeData _buildLight(ThemePalette p) => ThemeData(
+  static ThemeData _buildLight(ThemePalette p, Color rawPrimary) => ThemeData(
     useMaterial3: true,
     // Ripple classique (cercle qui s'étend) sur TOUS les widgets à encre :
     // boutons, IconButton, ListTile, InkWell… — bien plus visible que
@@ -238,10 +351,10 @@ class AppTheme {
     // Brand dynamique : suit la palette utilisateur. Les autres tokens
     // (success/warning/danger/etc.) restent universels via la factory.
     extensions: <ThemeExtension<dynamic>>[
-      AppSemanticColors.lightForBrand(p.primary),
+      AppSemanticColors.lightForBrand(rawPrimary),
     ],
     colorScheme: ColorScheme.fromSeed(
-      seedColor: p.primary,
+      seedColor: rawPrimary,
       primary:   p.primary,
       brightness: Brightness.light,
       // Forcer surface et background blancs — empêche Material3
@@ -258,7 +371,7 @@ class AppTheme {
     fontFamily: 'Inter',
 
     // ── AppBar ─────────────────────────────────────────────────────────
-    appBarTheme: const AppBarTheme(
+    appBarTheme: AppBarTheme(
       elevation: 0,
       centerTitle: true,
       backgroundColor: Colors.white,
@@ -285,11 +398,11 @@ class AppTheme {
       surfaceTintColor: Colors.transparent,
       elevation: 8,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      titleTextStyle: const TextStyle(
+      titleTextStyle: TextStyle(
         fontSize: 16, fontWeight: FontWeight.w700,
         color: AppColors.textPrimary,
       ),
-      contentTextStyle: const TextStyle(
+      contentTextStyle: TextStyle(
         fontSize: 13, color: AppColors.textSecondary, height: 1.5,
       ),
     ),
@@ -313,7 +426,7 @@ class AppTheme {
       elevation: 6,
       shadowColor: Colors.black.withValues(alpha:0.12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      textStyle: const TextStyle(
+      textStyle: TextStyle(
         fontSize: 13, color: AppColors.textPrimary,
         fontWeight: FontWeight.w500,
       ),
@@ -380,16 +493,15 @@ class AppTheme {
     ),
 
     // ── ListTile ───────────────────────────────────────────────────────
-    listTileTheme: const ListTileThemeData(
-      titleTextStyle: TextStyle(
+    listTileTheme: ListTileThemeData(
+      titleTextStyle: const TextStyle(
         fontSize: 14, fontWeight: FontWeight.w600, height: 1.4,
-        color: AppColors.textPrimary,
-      ),
-      subtitleTextStyle: TextStyle(
-        fontSize: 12, height: 1.45, color: AppColors.textSecondary,
-      ),
+      ).copyWith(color: AppColors.textPrimary),
+      subtitleTextStyle: const TextStyle(
+        fontSize: 12, height: 1.45,
+      ).copyWith(color: AppColors.textSecondary),
       iconColor: AppColors.textSecondary,
-      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     ),
 
     // ── Drawer ─────────────────────────────────────────────────────────
@@ -409,13 +521,13 @@ class AppTheme {
           return TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
               color: p.primary);
         }
-        return const TextStyle(fontSize: 11, color: AppColors.textSecondary);
+        return TextStyle(fontSize: 11, color: AppColors.textSecondary);
       }),
       iconTheme: WidgetStateProperty.resolveWith((states) {
         if (states.contains(WidgetState.selected)) {
           return IconThemeData(color: p.primary, size: 22);
         }
-        return const IconThemeData(color: AppColors.textSecondary, size: 22);
+        return IconThemeData(color: AppColors.textSecondary, size: 22);
       }),
     ),
 
@@ -483,13 +595,22 @@ class AppTheme {
           borderSide: const BorderSide(color: AppColors.error)),
       focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: AppColors.error, width: 2)),
-      hintStyle: const TextStyle(color: AppColors.textHint, fontSize: 14),
-      labelStyle: const TextStyle(color: AppColors.textSecondary),
+      hintStyle: TextStyle(color: AppColors.textHint, fontSize: 14),
+      labelStyle: TextStyle(color: AppColors.textSecondary),
       prefixIconColor: AppColors.textSecondary,
       suffixIconColor: AppColors.textSecondary,
     ),
 
     // ── Boutons ────────────────────────────────────────────────────────
+    // Boutons : dimensionnés au CONTENU + padding compact (H10/V3) — demande
+    // utilisateur. `minimumSize: Size.zero` + `shrinkWrap` retirent le plancher
+    // pleine-largeur/52px. Les boutons VOULUS pleine largeur (connexion, footers
+    // de formulaire…) le restent car ils sont enveloppés dans un SizedBox /
+    // fixent leur propre style, qui prime sur le thème.
+    //
+    // `tapTargetSize` ADAPTATIF (lot 2, 25/09/2026) : au DOIGT, `padded` donne
+    // à chaque bouton une zone de 48 px sans changer son dessin ; à la souris,
+    // `shrinkWrap` garde la densité de bureau. Cf. `core/widgets/touch_target.dart`.
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: p.primary,
@@ -498,7 +619,9 @@ class AppTheme {
         overlayColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        minimumSize: const Size(double.infinity, 52),
+        minimumSize: Size.zero,
+        tapTargetSize: adaptiveTapTargetSize,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600,
             letterSpacing: 0.3),
@@ -509,7 +632,9 @@ class AppTheme {
       style: OutlinedButton.styleFrom(
         foregroundColor: AppColors.textPrimary,
         overlayColor: p.primary,
-        minimumSize: const Size(double.infinity, 52),
+        minimumSize: Size.zero,
+        tapTargetSize: adaptiveTapTargetSize,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
         side: BorderSide(color: AppColors.inputBorder),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
@@ -520,13 +645,24 @@ class AppTheme {
       style: TextButton.styleFrom(
         foregroundColor: p.primary,
         overlayColor: p.primary,
+        minimumSize: Size.zero,
+        tapTargetSize: adaptiveTapTargetSize,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
         textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
       ),
     ),
 
     // FilledButton (sheets, dialogues) — ripple blanc sur fond plein.
     filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(overlayColor: Colors.white),
+      style: FilledButton.styleFrom(
+        overlayColor: Colors.white,
+        minimumSize: Size.zero,
+        tapTargetSize: adaptiveTapTargetSize,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+        // Coins arrondis modérés (cohérent elevated/outlined) au lieu de la
+        // forme « pilule » (StadiumBorder) par défaut de M3 pour FilledButton.
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
     ),
 
     // IconButton (app bars, toolbars) — ripple primary visible.
@@ -540,9 +676,9 @@ class AppTheme {
     // l'échelle (cohérence par défaut, avant même migration des pages).
     //   bodyLarge = échelon `label` (14) → défaut du texte SAISI M3.
     //   bodyMedium = échelon `body` (13) → défaut de Text().
-    textTheme: const TextTheme(
-      headlineLarge:  TextStyle(fontSize: 24, fontWeight: FontWeight.w800,
-          color: AppColors.textPrimary, height: 1.2),     // display
+    textTheme: TextTheme(
+      headlineLarge:  const TextStyle(fontSize: 24, fontWeight: FontWeight.w800,
+          height: 1.2).copyWith(color: AppColors.textPrimary),     // display
       headlineMedium: TextStyle(fontSize: 24, fontWeight: FontWeight.w800,
           color: AppColors.textPrimary, height: 1.2),     // display
       headlineSmall:  TextStyle(fontSize: 18, fontWeight: FontWeight.w700,
@@ -580,10 +716,23 @@ class AppTheme {
   static const Color _dInputFill = Color(0xFF334155);
   static const Color _dTextPrimary   = Color(0xFFF1F5F9); // slate 100
   static const Color _dTextSecondary = Color(0xFF94A3B8); // slate 400
-  static const Color _dTextHint      = Color(0xFF64748B); // slate 500
+  // = AppColors.textHint en sombre : lerp(slate 500, _dTextSecondary, 0,60),
+  // dérivée pour tenir 4,5:1 sur la carte (voir app_colors.dart).
+  static const Color _dTextHint      = Color(0xFF8190A6);
 
   static ThemeData dark({ThemePalette? palette}) {
     final p = palette ?? kDefaultPalette;
+    // LA PRIMAIRE EN SOMBRE A DEUX VALEURS, DÉRIVÉES (cf. `brand_contrast.dart`) :
+    // une couleur ne peut pas être à la fois lisible SUR la carte sombre et
+    // porter du blanc. `onDark` pour tout ce qui se LIT (texte, icône, trait,
+    // indicateur) ; `fill` pour le fond des boutons pleins, sous du blanc.
+    // Avant le 25/09/2026, les deux valaient `primaryLight` : 1,93:1 sur la
+    // carte pour Midnight, et du blanc à moins de 2,7:1 sur six palettes.
+    final onDark = BrandContrast.darkText(p.primary);
+    final fill   = BrandContrast.fillUnderWhite(p.primaryLight);
+    // L'action d'un snack se lit sur SON fond (`#334155`, plus clair que la
+    // carte) : même règle, autre surface.
+    final snackAction = BrandContrast.readableOn(p.primary, const [_dInputFill]);
     return ThemeData(
       useMaterial3: true,
       fontFamily: 'Inter',
@@ -595,9 +744,13 @@ class AppTheme {
       colorScheme: ColorScheme.fromSeed(
         seedColor: p.primary,
         brightness: Brightness.dark,
-        // primaryLight reste lisible sur fond sombre (le primary brut
-        // peut être trop foncé pour certaines palettes : Midnight, Indigo).
-        primary:   p.primaryLight,
+        // Variante TEXTE dérivée : 4,5:1 sur la carte et le fond pour toute
+        // palette, y compris celles issues d'un logo. `primaryLight` ne
+        // suffisait pas (Midnight 1,93:1, Indigo 3,27:1, Violet 3,45:1).
+        primary:   onDark,
+        // Sur une primaire claire, le contenu est SOMBRE (modèle Material 3
+        // en sombre) : le fond du thème, ≥ 4,5:1 par construction.
+        onPrimary: _dScaffold,
         surface:   _dSurface,
         onSurface: _dTextPrimary,
         // Force les conteneurs M3 sur la surface slate plutôt que les
@@ -670,7 +823,7 @@ class AppTheme {
         contentTextStyle: const TextStyle(
           color: _dTextPrimary, fontSize: 13, fontWeight: FontWeight.w500,
         ),
-        actionTextColor: p.primaryLight,
+        actionTextColor: snackAction,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         elevation: 4,
@@ -698,7 +851,7 @@ class AppTheme {
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: _dBorder)),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: p.primaryLight, width: 2)),
+            borderSide: BorderSide(color: onDark, width: 2)),
         errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: AppColors.error)),
         focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
@@ -711,12 +864,15 @@ class AppTheme {
 
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: p.primaryLight,
+          // Fond dérivé sous le blanc (≥ 4,5:1) — cf. `fill` plus haut.
+          backgroundColor: fill,
           foregroundColor: Colors.white,
           overlayColor: Colors.white,
           surfaceTintColor: Colors.transparent,
           elevation: 0,
-          minimumSize: const Size(double.infinity, 52),
+          minimumSize: Size.zero,
+          tapTargetSize: adaptiveTapTargetSize,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600,
               letterSpacing: 0.3),
@@ -727,7 +883,9 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: _dTextPrimary,
           overlayColor: p.primaryLight,
-          minimumSize: const Size(double.infinity, 52),
+          minimumSize: Size.zero,
+          tapTargetSize: adaptiveTapTargetSize,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
           side: const BorderSide(color: _dBorder),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
@@ -736,14 +894,28 @@ class AppTheme {
 
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: p.primaryLight,
+          foregroundColor: onDark,
           overlayColor: p.primaryLight,
+          minimumSize: Size.zero,
+          tapTargetSize: adaptiveTapTargetSize,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
         ),
       ),
 
       filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(overlayColor: Colors.white),
+        style: FilledButton.styleFrom(
+          // Même fond que l'ElevatedButton : sans lui, le FilledButton
+          // prendrait la primaire du schéma — désormais CLAIRE en sombre.
+          backgroundColor: fill,
+          foregroundColor: Colors.white,
+          overlayColor: Colors.white,
+          minimumSize: Size.zero,
+          tapTargetSize: adaptiveTapTargetSize,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+          // Coins arrondis modérés au lieu de la « pilule » M3 par défaut.
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
       ),
 
       iconButtonTheme: IconButtonThemeData(
@@ -775,13 +947,13 @@ class AppTheme {
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
             return TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                color: p.primaryLight);
+                color: onDark);
           }
           return const TextStyle(fontSize: 11, color: _dTextSecondary);
         }),
         iconTheme: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return IconThemeData(color: p.primaryLight, size: 22);
+            return IconThemeData(color: onDark, size: 22);
           }
           return const IconThemeData(color: _dTextSecondary, size: 22);
         }),

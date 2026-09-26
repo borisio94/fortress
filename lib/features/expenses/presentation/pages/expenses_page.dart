@@ -6,6 +6,8 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/activity_log_service.dart';
+import '../../../../core/services/partner_ledger_service.dart';
+import '../../../parametres/domain/entities/partner_ledger_entry.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/utils/currency_formatter.dart';
@@ -22,33 +24,33 @@ import '../../domain/entities/expense.dart';
 // PAGE DÉPENSES — vue centralisée de toutes les sorties d'argent de la boutique.
 // Deux sources fusionnées :
 //   1. Dépenses directes (table/box `expenses`) — CRUD plein.
-//   2. Frais des commandes (orders.fees) — entrées "virtuelles", lecture seule,
-//      tap renvoie à la caisse pour modification. Pas comptées dans la KPI
-//      dashboard `operatingExpenses` (elles sont déjà intégrées au prix de
-//      revient via allocation proportionnelle), mais visibles ici pour la
-//      traçabilité.
+//   2. Frais des commandes (orders.fees + delivery_price) — entrées
+//      "virtuelles", lecture seule, tap renvoie à la caisse pour modification.
+//
+//      ⚠ Ces frais SONT comptés dans la KPI dashboard `operatingExpenses`
+//      (dashboard_providers.dart : `operatingExpenses += orderFees` puis
+//      `+= delivPrice`). Le commentaire qui tenait ici affirmait le contraire
+//      — « déjà intégrées au prix de revient via allocation proportionnelle »
+//      — ce que le code du tableau de bord dément.
+//
+//      Les deux écrans n'appliquent pas la même règle de statut, et c'est
+//      assumé : ici tout sauf `cancelled`/`refused` (la livraison a eu lieu,
+//      la charge est engagée), au tableau de bord `completed` seul (ne pas
+//      gonfler les dépenses d'une vente non encaissée). Les totaux des deux
+//      écrans diffèrent donc légitimement.
 // ═════════════════════════════════════════════════════════════════════════════
 
-enum _Period { week, month, year, all }
-
-extension _PeriodX on _Period {
-  String get label => switch (this) {
-    _Period.week  => '7 jours',
-    _Period.month => '30 jours',
-    _Period.year  => '12 mois',
-    _Period.all   => 'Tout',
-  };
-
-  DateTime? get from {
-    final now = DateTime.now();
-    return switch (this) {
-      _Period.week  => DateTime(now.year, now.month, now.day).subtract(const Duration(days: 6)),
-      _Period.month => DateTime(now.year, now.month, now.day).subtract(const Duration(days: 29)),
-      _Period.year  => DateTime(now.year - 1, now.month + 1, 1),
-      _Period.all   => null,
-    };
-  }
-}
+// L'enum `_Period` et sa barre `_PeriodBar` vivaient ici. Ils dupliquaient
+// `DashPeriod` — mêmes fenêtres glissantes, mêmes formules, écrites deux
+// fois — tout en laissant le sélecteur de période de la page Finances sans
+// effet sur cet onglet. Cet onglet lit désormais `dashPeriodProvider`, comme
+// Chiffre d'affaires, Pertes et Bilan.
+//
+// CE QUI DISPARAÎT : l'option « Tout » (aucune borne), sans équivalent parmi
+// les chips. « Personnalisé » ne la remplace pas — il exige deux dates.
+// CE QUI APPARAÎT : « Aujourd'hui », « Hier », « Personnalisé ».
+// Les trois autres (7 jours / 30 jours / 12 mois) avaient déjà des formules
+// rigoureusement identiques : pour elles, les chiffres ne bougent pas.
 
 /// Ligne affichable, source unifiée pour le ListView.
 /// Si [orderId] est renseigné → c'est un frais de commande (virtuel,
@@ -67,6 +69,9 @@ class _ExpenseRow {
   /// Dépense directe → Expense.locationId. Frais de commande →
   /// deliveryLocationId de la commande (partenaire-livreur) si présent.
   final String? locationId;
+  /// Non-null pour une CHARGE du livre partenaire (stockage, commission…),
+  /// gérée dans Finances → Partenaires (pas une dépense « directe »).
+  final String? ledgerEntryId;
 
   const _ExpenseRow({
     required this.id,
@@ -78,9 +83,28 @@ class _ExpenseRow {
     this.orderId,
     this.feeIndex,
     this.locationId,
+    this.ledgerEntryId,
   });
 
   bool get isVirtual => orderId != null;
+  bool get isPartnerCharge => ledgerEntryId != null;
+
+  factory _ExpenseRow.fromPartnerCharge({
+    required String entryId,
+    required double amount,
+    required ExpenseCategory category,
+    required String label,
+    required DateTime paidAt,
+    required String? partnerLocationId,
+  }) => _ExpenseRow(
+    id:           'pcharge_$entryId',
+    amount:       amount,
+    category:     category,
+    label:        label,
+    paidAt:       paidAt,
+    ledgerEntryId: entryId,
+    locationId:   partnerLocationId,
+  );
 
   factory _ExpenseRow.fromExpense(Expense e) => _ExpenseRow(
     id:       e.id,
@@ -92,6 +116,12 @@ class _ExpenseRow {
     locationId: e.locationId,
   );
 
+  /// ⚠ La catégorie est FORCÉE à `shipping` pour tout frais de commande,
+  /// quel que soit le libellé réel du frais (emballage, manutention…). Sur
+  /// une liste filtrée sur « Expédition », toutes ces lignes portent donc la
+  /// même icône et la même couleur, qui ne distinguent alors plus rien.
+  /// Constat laissé tel quel — le corriger demanderait de classer les frais
+  /// de commande, ce qui n'est pas un travail de présentation.
   factory _ExpenseRow.fromOrderFee({
     required String orderId,
     required int feeIndex,
@@ -122,9 +152,14 @@ class ExpensesView extends ConsumerStatefulWidget {
   ConsumerState<ExpensesView> createState() => _ExpensesViewState();
 }
 
+/// ⚠ AUCUN TEST NE COUVRE CET ÉCRAN. Les 715 tests de la suite passent au
+/// vert quoi qu'on fasse ici : ils ne protègent pas cette zone, et un rendu
+/// faux ne les ferait pas tomber. Le test minimal qui manque : vérifier
+/// qu'une ligne hors période disparaît du total ET du compteur, et que
+/// « Hors commandes + Frais de commandes = Total » tient sur les trois types
+/// de ligne (dépense directe, frais de commande, charge partenaire).
 class _ExpensesViewState extends ConsumerState<ExpensesView> {
   List<_ExpenseRow> _rows = [];
-  _Period _period = _Period.month;
   ExpenseCategory? _categoryFilter;
   bool _syncing = false;
 
@@ -169,8 +204,6 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
         if (o['shop_id'] != widget.shopId) continue;
         final status = (o['status'] as String?) ?? 'completed';
         if (status == 'cancelled' || status == 'refused') continue;
-        final fees = o['fees'] as List?;
-        if (fees == null || fees.isEmpty) continue;
         final orderId = o['id']?.toString();
         if (orderId == null) continue;
         // Date effective : complétion si stampée, sinon création.
@@ -178,6 +211,28 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
         final effectiveAt = DateTime.tryParse(effectiveStr ?? '')?.toLocal()
             ?? DateTime.now();
         final orderLabel = (o['client_name'] as String?) ?? orderId;
+        final deliveryLocId = o['delivery_location_id'] as String?;
+
+        // Frais de LIVRAISON (nouveau modèle) : `deliveryPrice` payé à un
+        // partenaire / une agence = dépense de livraison réelle. (Retrait et
+        // livraison par l'équipe interne = pas de coût externe → non compté.)
+        final mode = o['delivery_mode'] as String?;
+        final deliveryPrice = (o['delivery_price'] as num?)?.toDouble() ?? 0;
+        if (deliveryPrice > 0 && (mode == 'partner' || mode == 'shipment')) {
+          rows.add(_ExpenseRow.fromOrderFee(
+            orderId:    orderId,
+            feeIndex:   -1, // marqueur : deliveryPrice (pas un index de fees[])
+            feeLabel:   'Frais de livraison',
+            amount:     deliveryPrice,
+            paidAt:     effectiveAt,
+            orderLabel: orderLabel,
+            deliveryLocationId: deliveryLocId,
+          ));
+        }
+
+        // Autres frais engagés sur la commande (emballage…).
+        final fees = o['fees'] as List?;
+        if (fees == null || fees.isEmpty) continue;
         for (var i = 0; i < fees.length; i++) {
           final f = fees[i];
           if (f is! Map) continue;
@@ -190,15 +245,45 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
             amount:     amount,
             paidAt:     effectiveAt,
             orderLabel: orderLabel,
-            deliveryLocationId: o['delivery_location_id'] as String?,
+            deliveryLocationId: deliveryLocId,
           ));
         }
+      }
+    } catch (_) {}
+
+    // Charges du LIVRE PARTENAIRE (stockage, commission…) — vraies sorties
+    // d'argent, gérées dans Finances → Partenaires. On NE reprend PAS
+    // `deliveryOwed` (la livraison est déjà comptée via `deliveryPrice`).
+    try {
+      for (final e in PartnerLedgerService.entriesForShop(widget.shopId)) {
+        if (e.type != PartnerLedgerEntryType.partnerCharge) continue;
+        final amount = e.amount.abs();
+        if (amount <= 0) continue;
+        rows.add(_ExpenseRow.fromPartnerCharge(
+          entryId:  e.id,
+          amount:   amount,
+          category: _chargeToExpenseCategory(e.category),
+          label:    (e.note != null && e.note!.trim().isNotEmpty)
+              ? e.note!.trim()
+              : (e.category?.labelFr ?? 'Charge partenaire'),
+          paidAt:   e.createdAt.toLocal(),
+          partnerLocationId: e.partnerLocationId,
+        ));
       }
     } catch (_) {}
 
     rows.sort((a, b) => b.paidAt.compareTo(a.paidAt));
     if (!mounted) return;
     setState(() => _rows = rows);
+  }
+
+  /// Mappe une sous-catégorie de charge partenaire vers une [ExpenseCategory].
+  ExpenseCategory _chargeToExpenseCategory(PartnerChargeCategory? c) {
+    switch (c) {
+      case PartnerChargeCategory.storage:        return ExpenseCategory.storage;
+      case PartnerChargeCategory.failedDelivery: return ExpenseCategory.shipping;
+      default:                                   return ExpenseCategory.other;
+    }
   }
 
   Future<void> _syncInBackground() async {
@@ -217,17 +302,41 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
   ///   • <id>    (Partenaire) → locationId == <id> strictement
   bool _matchesLocationView(_ExpenseRow r, String? view) {
     if (view == null) return true;
-    if (view == '_base') {
-      return r.locationId == null || r.locationId == '_base';
-    }
+    // Vue Boutique : toutes les dépenses de la boutique — les siennes ET celles
+    // liées à ses partenaires (livraison, stockage). Le détail par partenaire
+    // reste accessible en sélectionnant ce partenaire.
+    if (view == '_base') return true;
     return r.locationId == view;
   }
 
+  /// Plage active — celle du sélecteur de période de la page Finances, le
+  /// MÊME que les onglets Chiffre d'affaires, Pertes et Bilan.
+  ///
+  /// Cet onglet avait sa propre barre de période (`_PeriodBar`, supprimée),
+  /// pilotant un second enum aux formules identiques. Le sélecteur du haut
+  /// restait donc affiché au-dessus des dépenses sans avoir le moindre effet
+  /// sur elles : un filtre fantôme, qu'on pouvait mettre sur « Aujourd'hui »
+  /// pendant que les montants du dessous couvraient trente jours.
+  ///
+  /// ⚠ La borne HAUTE (`range.to`) est désormais appliquée. L'ancien filtre
+  /// n'avait qu'une borne basse : une dépense datée dans le FUTUR — loyer du
+  /// mois prochain, abonnement prépayé, tous saisissables au date picker —
+  /// entrait dans un total qui prétendait couvrir « les 30 derniers jours ».
+  /// Elle en est maintenant exclue, et disparaît donc de l'écran.
+  DashRange get _range {
+    final custom = ref.watch(dashCustomRangeProvider);
+    return rangeFor(
+      ref.watch(dashPeriodProvider),
+      customFrom: custom?.from,
+      customTo:   custom?.to,
+    );
+  }
+
   List<_ExpenseRow> get _filtered {
-    final from = _period.from;
+    final range = _range;
     final view = ref.read(dashViewFilterProvider);
     return _rows.where((r) {
-      if (from != null && r.paidAt.isBefore(from)) return false;
+      if (!range.contains(r.paidAt)) return false;
       if (_categoryFilter != null && r.category != _categoryFilter) return false;
       if (!_matchesLocationView(r, view)) return false;
       return true;
@@ -269,7 +378,6 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
             directTotal:   _totalDirect,
             feesTotal:     _totalOrderFees,
             count:         filtered.length,
-            period:        _period,
           ),
           _Toolbar(
             syncing: _syncing,
@@ -278,8 +386,8 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
           ),
           // Filtre emplacement piloté globalement par la page Finances
           // (ViewFilterChipBar au niveau _FinancesBody).
-          _PeriodBar(current: _period,
-              onChange: (p) => setState(() => _period = p)),
+          // La période vient du sélecteur de la page Finances — plus de
+          // barre locale ici.
           if (_byCategory.isNotEmpty)
             _CategoryChips(
               byCategory: _byCategory,
@@ -316,6 +424,12 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
   }
 
   void _onTapRow(_ExpenseRow row) {
+    if (row.isPartnerCharge) {
+      // Charge du livre partenaire → gérée dans Finances → Partenaires.
+      AppSnack.success(context,
+          'Charge partenaire — modifiable dans Finances → Partenaires.');
+      return;
+    }
     if (row.isVirtual) {
       // Frais de commande → ouvrir la commande source pour édition
       context.push('/shop/${widget.shopId}/caisse?edit=${row.orderId}');
@@ -340,6 +454,34 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
   }
 
   Future<void> _confirmDelete(_ExpenseRow row) async {
+    // Charge du livre partenaire (stockage…) : on supprime l'écriture dans le
+    // livre partenaire (source de vérité). Le solde du partenaire se recalcule.
+    if (row.isPartnerCharge) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Supprimer cette charge partenaire ?'),
+          content: Text(
+              '${row.label} — ${CurrencyFormatter.format(row.amount)}\n\n'
+              'L\'écriture sera retirée du livre partenaire et le solde du '
+              'partenaire recalculé.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Annuler')),
+            FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.error),
+                child: const Text('Supprimer')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+      await PartnerLedgerService.deleteEntry(row.ledgerEntryId!, widget.shopId);
+      if (mounted) AppSnack.success(context, 'Charge supprimée');
+      return;
+    }
     // Frais de commande (virtuel) : on supprime l'entrée correspondante
     // dans `orders.fees` de la commande source. La ligne disparaît au
     // prochain _refresh (listener `orders`).
@@ -359,7 +501,7 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
             FilledButton(
                 onPressed: () => Navigator.of(ctx).pop(true),
                 style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFFEF4444)),
+                    backgroundColor: AppColors.error),
                 child: const Text('Supprimer')),
           ],
         ),
@@ -368,7 +510,12 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
       final orderId  = row.orderId;
       final feeIndex = row.feeIndex;
       if (orderId == null || feeIndex == null) return;
-      await SaleLocalDatasource().deleteOrderFee(orderId, feeIndex);
+      if (feeIndex < 0) {
+        // Ligne « frais de livraison » (deliveryPrice) → retirer la livraison.
+        await SaleLocalDatasource().setDeliveryPrice(orderId, 0);
+      } else {
+        await SaleLocalDatasource().deleteOrderFee(orderId, feeIndex);
+      }
       await ActivityLogService.log(
         action:      'order_fee_deleted',
         targetType:  'order',
@@ -396,7 +543,7 @@ class _ExpensesViewState extends ConsumerState<ExpensesView> {
           FilledButton(
               onPressed: () => Navigator.of(ctx).pop(true),
               style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFEF4444)),
+                  backgroundColor: AppColors.error),
               child: const Text('Supprimer')),
         ],
       ),
@@ -422,9 +569,8 @@ class _KpiHeader extends StatelessWidget {
   final double directTotal;
   final double feesTotal;
   final int count;
-  final _Period period;
   const _KpiHeader({required this.total, required this.directTotal,
-      required this.feesTotal, required this.count, required this.period});
+      required this.feesTotal, required this.count});
 
   @override
   Widget build(BuildContext context) => Container(
@@ -451,36 +597,33 @@ class _KpiHeader extends StatelessWidget {
         Expanded(child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Total — ${period.label}',
+            // Plus de période dans ce titre : le sélecteur de la page
+            // Finances l'affiche déjà quelques pixels au-dessus, et c'est
+            // lui qui la pilote désormais. La répéter ici, c'était deux
+            // sources pour la même information.
+            Text('Total des dépenses',
                 style: AppTextStyles.caption.copyWith(color: Colors.white70)),
             const SizedBox(height: 2),
             Text(CurrencyFormatter.format(total),
                 style: AppTextStyles.display.copyWith(color: Colors.white)),
             const SizedBox(height: 2),
-            Text('$count ligne${count > 1 ? 's' : ''}',
-                style: AppTextStyles.micro.copyWith(color: Colors.white70)),
+            // Répartition ramenée sur la ligne du compteur : le total reste
+            // seul en gros, le détail devient secondaire. « Hors commandes »
+            // et non « Direct » — ce bloc contient AUSSI les charges du
+            // livre partenaire, qui ne sont pas des dépenses saisies à la
+            // main ; « Direct » les décrivait mal. Le nom dit maintenant ce
+            // qui les sépare des frais de commandes, ce qui est exact et se
+            // lit par symétrie.
+            Text(
+              feesTotal > 0
+                  ? '$count ligne${count > 1 ? 's' : ''}'
+                      ' · Hors commandes ${CurrencyFormatter.format(directTotal)}'
+                      ' · Frais commandes ${CurrencyFormatter.format(feesTotal)}'
+                  : '$count ligne${count > 1 ? 's' : ''}',
+              style: AppTextStyles.micro.copyWith(color: Colors.white70),
+            ),
           ])),
       ]),
-      if (feesTotal > 0) ...[
-        const SizedBox(height: 10),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha:0.12),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(children: [
-            const Icon(Icons.info_outline_rounded,
-                color: Colors.white70, size: 13),
-            const SizedBox(width: 6),
-            Expanded(child: Text(
-              'Direct : ${CurrencyFormatter.format(directTotal)} · '
-              'Frais commandes : ${CurrencyFormatter.format(feesTotal)}',
-              style: AppTextStyles.micro.copyWith(color: Colors.white),
-            )),
-          ]),
-        ),
-      ],
     ]),
   );
 }
@@ -517,45 +660,6 @@ class _Toolbar extends StatelessWidget {
         ),
       ],
     ),
-  );
-}
-
-// ─── Barre de période ───────────────────────────────────────────────────────
-
-class _PeriodBar extends StatelessWidget {
-  final _Period current;
-  final ValueChanged<_Period> onChange;
-  const _PeriodBar({required this.current, required this.onChange});
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-    child: Row(children: _Period.values.map((p) {
-      final active = p == current;
-      return Expanded(child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 3),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () => onChange(p),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 7),
-            decoration: BoxDecoration(
-              color: active
-                  ? AppColors.primary
-                  : Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: active
-                  ? AppColors.primary
-                  : Theme.of(context).semantic.borderSubtle),
-            ),
-            child: Text(p.label,
-                textAlign: TextAlign.center,
-                style: AppTextStyles.captionBold.copyWith(
-                    color: active ? Colors.white : const Color(0xFF374151))),
-          ),
-        ),
-      ));
-    }).toList()),
   );
 }
 
@@ -605,6 +709,15 @@ class _CategoryChips extends StatelessWidget {
                 Text(CurrencyFormatter.format(e.value),
                     style: AppTextStyles.microBold.copyWith(
                         color: active ? Colors.white70 : cat.color.withValues(alpha:0.8))),
+                // Le second appui désélectionnait déjà la catégorie, mais
+                // rien ne le disait : la croix rend visible une sortie qui
+                // existait sans être découvrable. Aucune logique ajoutée —
+                // c'est le `onSelect` en place qui bascule.
+                if (active) ...[
+                  const SizedBox(width: 5),
+                  const Icon(Icons.close_rounded,
+                      size: 13, color: Colors.white),
+                ],
               ]),
             ),
           );
@@ -645,11 +758,15 @@ class _ExpenseTile extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Flexible(child: Text(row.label,
-                  maxLines: 1, overflow: TextOverflow.ellipsis,
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // `Expanded` et non `Flexible`, et deux lignes : le libellé
+              // était coupé dès qu'il côtoyait le badge, alors que c'est
+              // la seule chose qui distingue deux dépenses de même
+              // catégorie et de même date.
+              Expanded(child: Text(row.label,
+                  maxLines: 2, overflow: TextOverflow.ellipsis,
                   style: AppTextStyles.bodyBold.copyWith(
-                      color: const Color(0xFF0F172A)))),
+                      color: AppColors.onSurface))),
               if (row.isVirtual) ...[
                 const SizedBox(width: 6),
                 Container(
@@ -671,42 +788,45 @@ class _ExpenseTile extends StatelessWidget {
                   style: AppTextStyles.microBold.copyWith(color: cat.color)),
               const SizedBox(width: 6),
               Text('•', style: AppTextStyles.micro.copyWith(
-                  color: const Color(0xFF9CA3AF))),
+                  color: AppColors.textHint)),
               const SizedBox(width: 6),
               Text(_fmtDate(row.paidAt),
                   style: AppTextStyles.microSecondary),
             ]),
           ])),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(CurrencyFormatter.format(row.amount),
-                  style: AppTextStyles.label.copyWith(
-                      color: const Color(0xFFEF4444))),
-              ...[
-                const SizedBox(height: 6),
-                InkWell(
-                  onTap: onDelete,
-                  borderRadius: BorderRadius.circular(7),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEF4444).withValues(alpha:0.10),
-                      borderRadius: BorderRadius.circular(7),
-                    ),
-                    child: Row(mainAxisSize: MainAxisSize.min,
-                        children: [
-                      const Icon(Icons.delete_outline_rounded, size: 14,
-                          color: Color(0xFFEF4444)),
-                      const SizedBox(width: 4),
-                      Text('Supprimer',
-                          style: AppTextStyles.captionBold.copyWith(
-                              color: const Color(0xFFEF4444))),
-                    ]),
-                  ),
-                ),
-              ],
+          // Montant en couleur de texte normale : toutes les lignes de cet
+          // écran sont des sorties d'argent, le rouge n'y distinguait donc
+          // rien — il signalait une alerte là où il n'y en a aucune. Le
+          // rouge reste réservé à l'action destructrice, dans le menu.
+          Text(CurrencyFormatter.format(row.amount),
+              style: AppTextStyles.label.copyWith(
+                  color: AppColors.onSurface)),
+          const SizedBox(width: 2),
+          PopupMenuButton<String>(
+            tooltip: 'Options',
+            icon: Icon(Icons.more_vert_rounded,
+                size: 18, color: AppColors.textHint),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            onSelected: (_) => onDelete(),
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'delete',
+                child: Row(children: [
+                  const Icon(Icons.delete_outline_rounded,
+                      size: 16, color: AppColors.error),
+                  const SizedBox(width: 8),
+                  // Sur une ligne « Commande », rien n'est supprimé : le
+                  // frais est retiré de la commande, dont le prix de
+                  // revient est recalculé. Le mot « Supprimer » y était
+                  // un contresens.
+                  Text(row.isVirtual
+                          ? 'Retirer de la commande'
+                          : 'Supprimer',
+                      style: AppTextStyles.body
+                          .copyWith(color: AppColors.error)),
+                ]),
+              ),
             ],
           ),
         ]),
@@ -723,7 +843,7 @@ class _ExpenseTile extends StatelessWidget {
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
         decoration: BoxDecoration(
-            color: const Color(0xFFEF4444),
+            color: AppColors.error,
             borderRadius: BorderRadius.circular(10)),
         child: const Icon(Icons.delete_outline_rounded, color: Colors.white),
       ),
@@ -889,7 +1009,7 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
             const SizedBox(height: 12),
 
             // Catégorie — grid
-            const Text('Catégorie',
+            Text('Catégorie',
                 style: AppTextStyles.captionBold),
             const SizedBox(height: 6),
             Wrap(spacing: 6, runSpacing: 6,
@@ -933,16 +1053,16 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(children: [
-                  const Icon(Icons.calendar_today_rounded,
-                      size: 16, color: Color(0xFF6B7280)),
+                  Icon(Icons.calendar_today_rounded,
+                      size: 16, color: AppColors.textSecondary),
                   const SizedBox(width: 10),
                   Expanded(child: Text(
                     'Payée le ${_paidAt.day.toString().padLeft(2, '0')}/'
                     '${_paidAt.month.toString().padLeft(2, '0')}/${_paidAt.year}',
                     style: AppTextStyles.body.copyWith(
-                        color: const Color(0xFF0F172A)))),
-                  const Icon(Icons.chevron_right_rounded,
-                      size: 16, color: Color(0xFF9CA3AF)),
+                        color: AppColors.onSurface))),
+                  Icon(Icons.chevron_right_rounded,
+                      size: 16, color: AppColors.textHint),
                 ]),
               ),
             ),
@@ -998,7 +1118,7 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
             SizedBox(width: double.infinity, child: ElevatedButton(
               onPressed: _saving ? null : _save,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
@@ -1026,13 +1146,13 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
     isDense: true,
     labelStyle: AppTextStyles.bodySm,
     hintStyle: AppTextStyles.bodySm.copyWith(
-        color: const Color(0xFFD1D5DB)),
+        color: AppColors.textHint),
     border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+        borderSide: BorderSide(color: AppColors.divider)),
     enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: Color(0xFFE5E7EB))),
+        borderSide: BorderSide(color: AppColors.divider)),
     focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
         borderSide: BorderSide(color: AppColors.primary, width: 1.5)),

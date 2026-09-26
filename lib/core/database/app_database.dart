@@ -3,12 +3,16 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart' hide User;
+import '../config/starter_units.dart';
 import '../config/supabase_config.dart';
 import '../services/notification_service.dart';
 import '../storage/hive_boxes.dart';
 import '../storage/local_storage_service.dart';
 import '../storage/schema_migrator.dart';
+import 'sync_error_verdict.dart';
+import 'sync_protected_tables.dart';
 import '../../features/auth/domain/entities/user.dart';
 import '../../features/shop_selector/domain/entities/shop_summary.dart';
 import '../../features/inventaire/domain/entities/product.dart';
@@ -341,16 +345,17 @@ class AppDatabase {
     final results = await Connectivity().checkConnectivity();
     _i._isOnline = _hasNetInterface(results);
     _i._listenConnectivity();
-    // Filet de sécurité : flush périodique de la file offline. Sans ça,
-    // un flush n'a lieu QUE sur une transition offline→online de
-    // connectivity_plus (rare sur web/connexion stable) → des écritures
-    // pouvaient rester en file plusieurs minutes. 20 s borne le délai.
+    // Sonde de JOIGNABILITÉ RÉELLE périodique. connectivity_plus est peu
+    // fiable sur web (transitions offline→online souvent manquées → l'app ne
+    // se re-synchronisait pas et l'utilisateur devait actualiser). Toutes les
+    // 15 s : on teste réellement le backend, on corrige `_isOnline`, et sur une
+    // VRAIE reconnexion on déclenche la re-synchro complète (`_onNetworkRestored`)
+    // + le flush de la file. Filet fiable qui complète `_listenConnectivity`
+    // (réaction rapide mais approximative).
     _i._queueFlushTimer?.cancel();
     _i._queueFlushTimer = Timer.periodic(
-      const Duration(seconds: 20),
-      (_) {
-        if (_i._isOnline) unawaited(flushOfflineQueue());
-      },
+      const Duration(seconds: 15),
+      (_) => unawaited(_i._reachabilityTick()),
     );
     // Purge unique des entrées notifications au format historique
     // (id aléatoire pré-déterministe). Cf. NotificationService.notify
@@ -360,6 +365,18 @@ class AppDatabase {
     // Recharger les marqueurs anti-stale persistants (survivent au reload)
     // et purger ceux trop vieux pour rester pertinents.
     await _bootstrapAntiStaleMarkers();
+    // Purge des brouillons périmés. Volontairement APRÈS les marqueurs
+    // anti-écho, et dans sa propre méthode : `_bootstrapAntiStaleMarkers`
+    // ne touche que `settingsBox`, pas la boîte produits.
+    await _purgeExpiredDrafts();
+    // NB : l'ancien correctif `_revertErroneousRemittances` (2026-06-21) a été
+    // RETIRÉ — il soft-deletait toute écriture `remittance` dont la note valait
+    // « Versement reçu du partenaire », c.-à-d. la note PAR DÉFAUT de chaque
+    // marquage légitime « Marquer reçu ». Son drapeau de garde vivant dans le
+    // settingsBox local (non synchronisé), il se re-déclenchait sur chaque
+    // nouveau navigateur/appareil/redéploiement et effaçait les versements
+    // reçus valides (puis propageait le soft-delete + tombstone à tous les
+    // appareils) → le bandeau « versement en attente » réapparaissait seul.
     // Purge opportuniste des `sync_errors` au démarrage : si la queue
     // est vide et qu'aucune op critique n'est bloquée, les erreurs
     // journalisées sont par définition résolues — pas la peine de
@@ -375,6 +392,38 @@ class AppDatabase {
     // de l'upload Supabase. Au prochain boot, on retente automatiquement.
     unawaited(PendingImageUploadService.flush());
     debugPrint('[DB] Init — online: ${_i._isOnline}');
+  }
+
+  /// Supprime les brouillons dont l'échéance est passée (cf. `draftExpiresAt`).
+  ///
+  /// Suppression SÈCHE et purement locale : un brouillon n'a jamais été
+  /// publié, il n'a ni vente ni mouvement de stock rattaché, et la RPC
+  /// `delete_product` (soft-delete, motif obligatoire, archivage) serait
+  /// hors de propos. La ligne distante part par la file d'écriture normale.
+  static Future<void> _purgeExpiredDrafts() async {
+    try {
+      final now = DateTime.now();
+      final expired = <String>[];
+      for (final raw in HiveBoxes.productsBox.values) {
+        final m = Map<String, dynamic>.from(raw);
+        if (m['status'] != 'draft') continue;
+        final rawExp = m['draft_expires_at'];
+        final exp = rawExp is String ? DateTime.tryParse(rawExp) : null;
+        if (exp != null && exp.isBefore(now) && m['id'] is String) {
+          expired.add(m['id'] as String);
+        }
+      }
+      if (expired.isEmpty) return;
+      LocalStorageService.invalidateProductsCache();
+      for (final id in expired) {
+        await HiveBoxes.productsBox.delete(id);
+        _bgWrite({'table': 'products', 'op': 'delete',
+                  'col': 'id', 'val': id, 'data': {'id': id}});
+      }
+      debugPrint('[DB] Brouillons périmés purgés : ${expired.length}');
+    } catch (e) {
+      debugPrint('[DB] _purgeExpiredDrafts error: $e');
+    }
   }
 
   /// Charge les tombstones de produits supprimés et les échos
@@ -583,12 +632,40 @@ class AppDatabase {
         await syncPurchaseOrders(shopId);
         await syncStockArrivals(shopId);
         await syncDeliveryTransfers(shopId);
+        await syncDeliveryZones(shopId);
+        await syncDeliveryQuartiers(shopId);
+        await syncRestaurantTables(shopId);
+        await syncIngredients(shopId);
+        await syncRecipeIngredients(shopId);
+        await syncRestaurantActivities(shopId);
+        await syncStockItems(shopId);
+        await syncFixedCharges(shopId);
+        await syncLosses(shopId);
+        await syncPayments(shopId);
+        await syncBottleDeposits(shopId);
+        await syncCashClosures(shopId);
+        await syncStaff(shopId);
+        await syncTimeRecords(shopId);
+        await syncSalaryAdvances(shopId);
+        await syncPayroll(shopId);
+        await syncStaffPenalties(shopId);
+        await syncStaffRatings(shopId);
+        await syncStaffContests(shopId);
+        await syncStaffAbsences(shopId);
+        await syncStaffSettings(shopId);
+        await syncDailyExpenses(shopId);
         await syncPartnerLedger(shopId);
         await syncStockLocations();
         await syncStockLevels(shopId);
         _notify('products',     shopId);
         _notify('clients',      shopId);
         _notify('stock_levels', shopId);
+        // LES DROITS AUSSI ONT PU CHANGER PENDANT LA COUPURE, et rien ne les
+        // relisait : `shop_memberships` n'est pas une table synchronisée, elle
+        // est lue à la demande par `currentUserShopPermissionsProvider`. Cette
+        // notification n'annonce pas une donnée reçue — elle dit « relis », ce
+        // qui est exactement ce qu'on sait après un retour de réseau.
+        _notify('shop_memberships', shopId);
         // Rejoue les alertes stock après resync — les changements survenus
         // pendant l'offline arrivent en bloc via syncProducts (pas via
         // Realtime), donc _emitStockNotification ne s'est pas déclenché.
@@ -597,6 +674,38 @@ class AppDatabase {
       } catch (e) {
         debugPrint('[DB] Re-sync erreur: $e');
       }
+    }
+  }
+
+  /// Sonde de joignabilité réelle (fiable sur web, contrairement à
+  /// connectivity_plus). Corrige `_isOnline` et, sur une VRAIE transition
+  /// hors-ligne→en-ligne, déclenche la re-synchro complète
+  /// (`_onNetworkRestored`) — sans quoi l'utilisateur devait actualiser (F5)
+  /// pour voir les changements distants après une coupure. Sinon (déjà en
+  /// ligne) : simple flush de la file d'attente.
+  Future<void> _reachabilityTick() async {
+    final reachable = await _probeReachable();
+    final wasOnline = _isOnline;
+    _isOnline = reachable;
+    if (reachable && !wasOnline) {
+      debugPrint('[DB] ✅ Reconnexion (sonde) — re-synchro complète');
+      await _onNetworkRestored();
+    } else if (reachable) {
+      unawaited(flushOfflineQueue());
+    }
+  }
+
+  /// GET léger sur le health-check Supabase (CORS OK, ~100 octets). Toute
+  /// réponse HTTP = serveur joignable ; erreur réseau/timeout/DNS = hors ligne.
+  static Future<bool> _probeReachable() async {
+    try {
+      final res = await http
+          .get(Uri.parse('${SupabaseConfig.url}/auth/v1/health'),
+              headers: {'apikey': SupabaseConfig.anonKey})
+          .timeout(const Duration(seconds: 5));
+      return res.statusCode > 0;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -658,6 +767,18 @@ class AppDatabase {
         callback: (_) async {
           await syncMetadata(shopId);
           _notify('units', shopId);
+        })
+        // Postes de l'établissement (hotfix_160) : la liste modifiée sur un
+        // appareil doit apparaître sur les autres sans redémarrage.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'job_titles',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (_) async {
+          await syncMetadata(shopId);
+          _notify('job_titles', shopId);
         })
         .onPostgresChanges(
         event: PostgresChangeEvent.insert,
@@ -745,6 +866,197 @@ class AppDatabase {
         callback: (p) => _i._onTablePassthroughChange(
             p, HiveBoxes.partnerLedgerBox,
             'partner_ledger_entries', shopId))
+        // ── Frais de livraison par quartier (zones + quartiers) ────────
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'delivery_zones',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.deliveryZonesBox, 'delivery_zones', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'delivery_quartiers',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.deliveryQuartiersBox, 'delivery_quartiers', shopId))
+        // ── Plan de salle restaurant (tablette salle ↔ tel serveur) ────
+        // Realtime INDISPENSABLE ici : deux appareils manipulent le même
+        // plan de salle simultanément, un pull périodique ne suffirait pas.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'restaurant_tables',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.restaurantTablesBox, 'restaurant_tables', shopId))
+        // ── Finances restaurant (PR-A) : ingrédients + lignes de recette ──
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'ingredients',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.ingredientsBox, 'ingredients', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'recipe_ingredients',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.recipeIngredientsBox, 'recipe_ingredients', shopId))
+        // ── Finances restaurant (PR-B) : activités + articles stock ──────
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'restaurant_activities',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.restaurantActivitiesBox, 'restaurant_activities',
+            shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'stock_items',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.stockItemsBox, 'stock_items', shopId))
+        // ── Finances restaurant (PR-C) : charges fixes + pertes ──────────
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'fixed_charges',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.fixedChargesBox, 'fixed_charges', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'losses',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.lossesBox, 'losses', shopId))
+        // ── Règlements d'addition (Lot A) : la caisse et la tablette de
+        //    salle doivent voir le même reste dû, sinon on encaisse deux fois.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'payments',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.paymentsBox, 'payments', shopId))
+        // ── Consignes d'emballages (Lot B) : le comptoir enregistre, la
+        //    caisse voit le retour.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'bottle_deposits',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.bottleDepositsBox, 'bottle_deposits', shopId))
+        // ── Clôtures de caisse (Lot C) : le gérant voit l'écart depuis son
+        //    téléphone, sans attendre de repasser à la boutique.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'cash_closures',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.cashClosuresBox, 'cash_closures', shopId))
+        // ── Personnel : fiches, pointage, avances, paie (Lot D). La badgeuse
+        //    est un appareil, la paie s'ouvre sur un autre.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'employees',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.employeesBox, 'employees', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'time_records',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.timeRecordsBox, 'time_records', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'salary_advances',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.salaryAdvancesBox, 'salary_advances', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'payroll',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.payrollBox, 'payroll', shopId))
+        // ── Tenue de l'équipe (hotfix_165). Realtime indispensable : l'excuse
+        //    d'un départ anticipé se saisit sur la badgeuse, et c'est le
+        //    téléphone du gérant qui doit la voir arriver pour la trancher.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'staff_penalties',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.staffPenaltiesBox, 'staff_penalties', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'staff_ratings',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.staffRatingsBox, 'staff_ratings', shopId))
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'staff_contests',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.staffContestsBox, 'staff_contests', shopId))
+        // Une mise à pied prononcée depuis le téléphone du gérant doit
+        // atteindre la badgeuse AVANT que l'intéressé n'y tape son code.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'staff_absences',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.staffAbsencesBox, 'staff_absences', shopId))
+        // ── Dépenses quotidiennes (Lot E) : saisies au marché, lues à la
+        //    caisse (elles sortent du tiroir) et au bilan.
+        .onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public', table: 'daily_expenses',
+        filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'shop_id', value: shopId),
+        callback: (p) => _i._onTablePassthroughChange(
+            p, HiveBoxes.dailyExpensesBox, 'daily_expenses', shopId))
         // ── Tickets de messagerie (phase 4 + notifs cloche) ────────────
         .onPostgresChanges(
         event: PostgresChangeEvent.all,
@@ -769,12 +1081,49 @@ class AppDatabase {
     _i._channels.remove(shopId)?.unsubscribe();
   }
 
+  /// Coupe TOUS les abonnements Realtime de boutique. À appeler au LOGOUT.
+  ///
+  /// Sans ça, après la purge Hive du logout le websocket de l'ancienne
+  /// boutique restait ouvert (AdaptiveScaffold ne se désabonne pas au dispose)
+  /// et pouvait RE-REMPLIR les box vidées → fuite des données du compte
+  /// précédent vers le suivant sur un appareil partagé.
+  ///
+  /// Contrairement à [dispose] (réservé à l'arrêt complet de l'app), on
+  /// PRÉSERVE le monitoring de connectivité et le timer de flush de la file :
+  /// ils sont initialisés UNE FOIS au boot dans [init] et ne sont PAS recréés
+  /// au login — les tuer ici casserait la synchro offline du prochain compte.
+  /// Les canaux, eux, sont recréés au prochain login via
+  /// `AdaptiveScaffold.initState → subscribeToShop`.
+  static void unsubscribeAllShops() {
+    for (final ch in List.of(_i._channels.values)) {
+      try { ch.unsubscribe(); } catch (_) {}
+    }
+    _i._channels.clear();
+  }
+
   /// Pull complet déclenchable depuis l'UI (pull-to-refresh) — variante
   /// publique de `_initialPullForShop`. À utiliser depuis un
   /// `RefreshIndicator.onRefresh`. Awaitable, pour que le spinner
   /// natif disparaisse à la fin.
   static Future<void> pullAllForShop(String shopId) =>
       _initialPullForShop(shopId);
+
+  /// Actualisation MANUELLE d'une boutique (geste « tirer vers le bas »,
+  /// bouton Actualiser) : vide la file hors ligne PUIS tire toutes les tables.
+  ///
+  /// L'ordre n'est pas négociable (cf. `onAppResumed`) : `syncOrders` purge
+  /// les commandes locales absentes du serveur, et une commande créée hors
+  /// ligne pas encore poussée en fait partie. Tirer d'abord la ferait
+  /// disparaître.
+  ///
+  /// Retourne `false` si le backend est injoignable : rien n'est tiré, les
+  /// données locales restent affichées telles quelles.
+  static Future<bool> refreshShopData(String shopId) async {
+    if (!await isOnline()) return false;
+    await flushOfflineQueue();
+    await pullAllForShop(shopId);
+    return true;
+  }
 
   /// Re-sync rapide déclenché au RETOUR de l'app au premier plan (cf.
   /// observateur de cycle de vie dans `app.dart`).
@@ -791,6 +1140,19 @@ class AppDatabase {
   /// `syncOrders` détecte les transitions par diff du statut Hive et émet
   /// les notifications manquées (dédup → pas de double avec le realtime).
   static Future<void> onAppResumed() async {
+    // VIDER LA FILE AVANT DE TIRER — ordre non négociable.
+    //
+    // `syncOrders` purge les commandes locales absentes du serveur. Une
+    // commande créée hors ligne et pas encore poussée est absente du serveur
+    // sans être périmée : tirer avant d'avoir poussé la ferait disparaître
+    // définitivement. `_onNetworkRestored` respecte déjà cet ordre (flush
+    // puis sync) ; ce hook, lui, tirait directement.
+    //
+    // LIMITE ASSUMÉE : `flushOfflineQueue` sort immédiatement si un flush est
+    // déjà en cours (`_syncing`). Dans ce cas on tire quand même. La fenêtre
+    // est fortement réduite, pas refermée — la garde anti-purge de
+    // `syncOrders` est la seconde ligne de défense.
+    await flushOfflineQueue();
     for (final shopId in List.of(_i._channels.keys)) {
       try {
         await syncOrders(shopId);
@@ -843,6 +1205,10 @@ class AppDatabase {
         // Rejoue les alertes stock pour les produits déjà bas/épuisés
         // (le Realtime ne notifie que les changements futurs).
         scanStockNotifications(shopId);
+        // Réconciliation UNIQUE : réaligne les StockLevel boutique sur les
+        // variantes (corrige les ventes PASSÉES où la garde anti-écho avait
+        // bloqué la synchro → stock « figé » dans l'inventaire/grille).
+        await _reconcileShopStockLevelsOnce(shopId);
       }),
       task('syncOrders', () async {
         await syncOrders(shopId);
@@ -860,6 +1226,28 @@ class AppDatabase {
       task('syncPurchaseOrders', () => syncPurchaseOrders(shopId)),
       task('syncStockArrivals', () => syncStockArrivals(shopId)),
       task('syncDeliveryTransfers', () => syncDeliveryTransfers(shopId)),
+      task('syncDeliveryZones', () => syncDeliveryZones(shopId)),
+      task('syncDeliveryQuartiers', () => syncDeliveryQuartiers(shopId)),
+      task('syncRestaurantTables', () => syncRestaurantTables(shopId)),
+      task('syncIngredients', () => syncIngredients(shopId)),
+      task('syncRecipeIngredients', () => syncRecipeIngredients(shopId)),
+      task('syncRestaurantActivities', () => syncRestaurantActivities(shopId)),
+      task('syncStockItems', () => syncStockItems(shopId)),
+      task('syncFixedCharges', () => syncFixedCharges(shopId)),
+      task('syncLosses', () => syncLosses(shopId)),
+      task('syncPayments', () => syncPayments(shopId)),
+      task('syncBottleDeposits', () => syncBottleDeposits(shopId)),
+      task('syncCashClosures', () => syncCashClosures(shopId)),
+      task('syncStaff', () => syncStaff(shopId)),
+      task('syncTimeRecords', () => syncTimeRecords(shopId)),
+      task('syncSalaryAdvances', () => syncSalaryAdvances(shopId)),
+      task('syncPayroll', () => syncPayroll(shopId)),
+      task('syncStaffPenalties', () => syncStaffPenalties(shopId)),
+      task('syncStaffRatings', () => syncStaffRatings(shopId)),
+      task('syncStaffContests', () => syncStaffContests(shopId)),
+      task('syncStaffAbsences', () => syncStaffAbsences(shopId)),
+      task('syncStaffSettings', () => syncStaffSettings(shopId)),
+      task('syncDailyExpenses', () => syncDailyExpenses(shopId)),
       task('syncActivityLogs', () async {
         await syncActivityLogs(shopId);
         _notify('activity_logs', shopId);
@@ -1020,6 +1408,50 @@ class AppDatabase {
     debugPrint('[DB] 📦 Enqueued: ${op["table"]} ${op["op"]}');
   }
 
+  /// Identifiants dont une écriture est ENCORE EN FILE pour [table].
+  ///
+  /// Garde anti-purge : une ligne locale absente du serveur mais dont le push
+  /// n'est pas confirmé n'est PAS un résidu à supprimer — c'est une écriture
+  /// en vol. La purger perd définitivement une commande ou une dépense créée
+  /// hors ligne.
+  ///
+  /// Diffère VOLONTAIREMENT de la garde interne à `_syncTablePassthrough` sur
+  /// deux points, et c'est tout l'intérêt :
+  ///   • `update` est accepté — `bgUpdateOrder` enfile ce type pour les
+  ///     mutations partielles (paiement, livraison, frais), c'est-à-dire
+  ///     précisément celles qui portent l'argent ;
+  ///   • l'identifiant est lu dans `data['id']` OU `match['id']`, ce dernier
+  ///     étant l'emplacement qu'utilisent les ops `update`.
+  /// Ne filtrer que `insert`/`upsert` sur `data['id']` laisserait ces
+  /// écritures sans protection tout en donnant l'illusion du contraire.
+  ///
+  /// `delete` est exclu à dessein : une suppression en file signifie que la
+  /// ligne DOIT partir — l'épargner irait contre l'intention.
+  static Set<String> _pendingIdsFor(String table) {
+    final ids = <String>{};
+    try {
+      for (final raw in HiveBoxes.offlineQueueBox.values) {
+        // PAS de `if (raw is! Map)` ici : la boîte est déclarée `Box<Map>`
+        // (hive_boxes.dart), donc `.values` produit des `Map` NON nullables
+        // et le test serait du code mort — l'analyseur le signale.
+        //
+        // Les purges voisines gardent le leur à juste titre : elles passent
+        // par `box.get(key)`, qui retourne `Map?`. La symétrie n'est
+        // qu'apparente, ne pas « rétablir » celui-ci.
+        if (raw['table']?.toString() != table) continue;
+        final opType = raw['op']?.toString();
+        if (opType != 'insert' && opType != 'upsert' && opType != 'update') {
+          continue;
+        }
+        final d = raw['data'];
+        final m = raw['match'];
+        final id = (d is Map ? d['id'] : null) ?? (m is Map ? m['id'] : null);
+        if (id != null) ids.add(id.toString());
+      }
+    } catch (_) {/* best effort — en cas de doute on ne purge pas */}
+    return ids;
+  }
+
   static Future<void> flushOfflineQueue() async {
     if (_i._syncing || _userId == null) return;
     _i._syncing = true;
@@ -1054,8 +1486,11 @@ class AppDatabase {
         // cash perdu. On les garde indéfiniment dans la queue et on alerte
         // l'utilisateur (badge + son) pour qu'il sache qu'une action manuelle
         // est requise (resync ou contact support).
-        const criticalTables = {'orders', 'sales', 'expenses'};
-        final isCritical = criticalTables.contains(table);
+        //
+        // La liste vivait ici, en dur, et deux autres copies vivaient plus bas.
+        // Elles avaient divergé. Elle est désormais dans
+        // `sync_protected_tables.dart`, unique et testée.
+        final isCritical = survivesRetryCap(table);
 
         // Pour les tables non-critiques : abandon après 10 essais (sinon
         // on garde une queue qui grossit à l'infini sur des erreurs réelles).
@@ -1236,8 +1671,22 @@ class AppDatabase {
           } else {
             await _db.from(table).upsert(data);
           }
-        case 'delete': await _db.from(table).delete()
-            .eq(op['col'] as String, op['val']);
+        // DELETE — un filtre d'égalité par défaut (`col`/`val`), ou plusieurs
+        // via `match`. Le second est indispensable dès que la colonne filtrée
+        // n'est pas unique à l'échelle de la base : supprimer le poste
+        // « Serveur » par son seul nom l'effacerait dans TOUTES les boutiques
+        // de l'utilisateur, pas seulement la sienne.
+        case 'delete':
+          final dmatch = (op['match'] as Map?)?.cast<String, dynamic>();
+          if (dmatch != null && dmatch.isNotEmpty) {
+            var dq = _db.from(table).delete();
+            for (final e in dmatch.entries) {
+              dq = dq.eq(e.key, e.value);
+            }
+            await dq;
+          } else {
+            await _db.from(table).delete().eq(op['col'] as String, op['val']);
+          }
         case 'insert': await _db.from(table).insert(data);
         // UPDATE ciblé par filtres d'égalité (op['match']). Un seul ordre
         // serveur met à jour toutes les lignes correspondantes — utilisé
@@ -1273,8 +1722,12 @@ class AppDatabase {
       op['_last_error'] = err;
       debugPrint('[DB] ✗ Op failed table=${op['table']} op=${op['op']} err=$err');
 
+      // Lu AVANT le verdict : depuis que la clé étrangère manquante est
+      // temporaire sur une table protégée, le verdict dépend de la table.
+      final failedTable = op['table'] as String? ?? '';
+
       // ── Erreurs PERMANENTES → supprimer de la queue (réessayer ne sert à rien)
-      if (_isPermanentError(err)) {
+      if (isDefinitiveSyncError(err, failedTable)) {
         // Duplicate key (23505) = idempotence normale (rejeu offline d'une op
         // déjà appliquée par realtime, double-tap UI, etc.). On avale
         // silencieusement, sinon la bannière "Synchro incomplète" reste
@@ -1294,7 +1747,6 @@ class AppDatabase {
         // de DROPPER l'op locale (la rejouer ne marchera jamais). Pas de
         // bannière critique pour ce cas — c'est une réconciliation
         // normale, pas une perte d'écriture.
-        final failedTable = op['table'] as String? ?? '';
         if (failedTable == 'orders'
             && err.contains('P0001')
             && err.contains('transition_interdite')) {
@@ -1321,10 +1773,7 @@ class AppDatabase {
         // file (réessai + bannière "Synchro incomplète" visible) et on
         // journalise. Le garde-fou anti-purge protège la ligne locale tant
         // que l'op est en file → le solde ne peut plus revenir en arrière.
-        const neverDropTables = {
-          'partner_ledger_entries', 'orders', 'sales', 'expenses',
-        };
-        if (neverDropTables.contains(failedTable)) {
+        if (survivesPermanentError(failedTable)) {
           debugPrint('[DB] Erreur permanente sur table critique '
               '"$failedTable" → GARDÉE en file (pas d\'abandon silencieux)');
           _logSyncError(op, err);
@@ -1337,7 +1786,18 @@ class AppDatabase {
       }
 
       // ── Table inexistante (42P01) → afficher le SQL de création
-      if (err.contains('42P01') || err.contains('does not exist')) {
+      //
+      // `does not exist` a été RETIRÉ de ce test : une colonne absente produit
+      // elle aussi ce libellé (`column "x" ... does not exist`), et retombait
+      // donc ici — où on lui proposait de créer la TABLE, ce qui n'a aucun
+      // sens quand la table existe et qu'il ne manque qu'une colonne. Ce cas
+      // est désormais traité plus haut comme une dérive de schéma permanente.
+      //
+      // Aucune donnée ne peut être perdue par ce retrait : une erreur de table
+      // manquante sans le code `42P01` retombe en fin de fonction sur
+      // `return false` — l'op reste en file, exactement comme avant. Seul
+      // l'affichage du SQL de création lui échappe.
+      if (err.contains('42P01')) {
         final tbl = op['table'] as String? ?? '?';
         final sql = getSqlForTable(tbl);
         debugPrint('[DB] ⚠️ Table "$tbl" inexistante → op gardée en queue');
@@ -1351,20 +1811,6 @@ class AppDatabase {
       return false;
     }
   }
-
-  /// Erreurs qui ne peuvent pas être résolues en réessayant
-  static bool _isPermanentError(String err) =>
-      err.contains('23505') || // duplicate key
-          err.contains('23503') || // FK violation
-          err.contains('42501') || // permission denied
-          err.contains('42502') || // insufficient privilege
-          err.contains('23502') || // not null violation
-          // RAISE EXCEPTION métier (PL/pgSQL) — codes émis intentionnellement
-          // par les RPC pour signaler une règle de domaine violée
-          // (delete_sale → suppression_statut_invalide, motif_required, …).
-          // Réessayer la même charge utile ne changera jamais la réponse.
-          err.contains('P0001') || // raise_exception
-          err.contains('P0002');   // no_data_found
 
   /// Émet un bip + vibration pour signaler une erreur de sync à l'utilisateur
   /// (sans UI). Best-effort : si la plateforme ne supporte pas, on ignore.
@@ -1422,18 +1868,87 @@ class AppDatabase {
   /// Nombre total d'opérations en attente de sync (toutes tables).
   static int get pendingOpsCount => HiveBoxes.offlineQueueBox.length;
 
-  /// Nombre de ventes / commandes en échec de sync depuis ≥ 10 tentatives.
-  /// Utilisé par la bannière offline pour alerter l'utilisateur qu'il y a
-  /// des transactions financières qui n'ont pas atteint Supabase.
+  /// LES OPÉRATIONS EN FILE, une par une, pour l'écran de synchronisation.
+  ///
+  /// [pendingOpsCount] et [syncQueueStats] ne rendent que des nombres, et
+  /// `getSyncErrors` ne rend que ce qui a été JOURNALISÉ — une op qui échoue
+  /// sans journal n'apparaissait donc nulle part. On pouvait tout vider, jamais
+  /// regarder.
+  ///
+  /// La clé Hive est rendue avec chaque op : c'est elle qui permet d'en
+  /// abandonner une seule (cf. [discardOp]).
+  ///
+  /// Triées par nombre de tentatives DÉCROISSANT : celles qui bloquent depuis
+  /// le plus longtemps sont celles qu'on cherche.
+  static List<({dynamic key, String table, String op, int retries,
+      String? lastError, String? lastRetry})> get pendingOps {
+    final out = <({dynamic key, String table, String op, int retries,
+        String? lastError, String? lastRetry})>[];
+    try {
+      final box = HiveBoxes.offlineQueueBox;
+      for (final key in box.keys) {
+        final raw = box.get(key);
+        if (raw == null) continue;
+        try {
+          final m = Map<String, dynamic>.from(raw);
+          out.add((
+            key: key,
+            table: m['table']?.toString() ?? '?',
+            op: m['op']?.toString() ?? '?',
+            retries: (m['_retries'] as int?) ?? 0,
+            lastError: m['_last_error']?.toString(),
+            lastRetry: m['_last_retry']?.toString(),
+          ));
+        } catch (_) {/* ligne corrompue : ignorée */}
+      }
+    } catch (e) {
+      debugPrint('[DB] pendingOps err: $e');
+    }
+    out.sort((a, b) => b.retries.compareTo(a.retries));
+    return out;
+  }
+
+  /// Abandonne UNE opération, par sa clé.
+  ///
+  /// C'est une perte d'écriture DÉFINITIVE, et c'est tout l'intérêt : sans
+  /// elle, la seule issue devant une op définitivement invalide était « Vider
+  /// la queue », qui les perd toutes. Protéger une table de l'abandon
+  /// automatique sans offrir l'abandon choisi revenait à concentrer la perte au
+  /// lieu de l'étaler — et à la rendre volontaire.
+  ///
+  /// Journalisé avant suppression : une fois l'op partie, plus rien ne dit ce
+  /// qui a été abandonné ni par qui.
+  static Future<void> discardOp(dynamic key) async {
+    try {
+      final box = HiveBoxes.offlineQueueBox;
+      final raw = box.get(key);
+      if (raw == null) return;
+      try {
+        _logSyncError(Map<String, dynamic>.from(raw),
+            'Abandonnée manuellement depuis l\'écran de synchronisation');
+      } catch (_) {/* le journal ne doit pas empêcher l'abandon */}
+      await box.delete(key);
+      debugPrint('[DB] 🗑️ Op abandonnée manuellement: $key');
+    } catch (e) {
+      debugPrint('[DB] discardOp err: $e');
+    }
+  }
+
+  /// Nombre d'écritures protégées bloquées depuis ≥ 10 tentatives.
+  ///
+  /// C'est ce compteur qui allume la bannière « Synchro incomplète ». Il était
+  /// la TROISIÈME liste, la plus courte des trois : `restaurant_tables` était
+  /// protégée des deux abandons mais ne comptait pas ici, donc survivait sans
+  /// que personne ne l'apprenne. Une op gardée dont on ne dit rien est une op
+  /// perdue avec un délai.
   static int get stuckCriticalOpsCount {
-    const criticalTables = {'orders', 'sales', 'expenses'};
     var n = 0;
     for (final raw in HiveBoxes.offlineQueueBox.values) {
       try {
         final m = Map<String, dynamic>.from(raw);
         final table = m['table'] as String? ?? '';
         final retries = (m['_retries'] as int?) ?? 0;
-        if (criticalTables.contains(table) && retries >= 10) n++;
+        if (countsAsStuck(table) && retries >= 10) n++;
       } catch (_) {}
     }
     return n;
@@ -1480,6 +1995,22 @@ class AppDatabase {
               'data': const {}});
   }
 
+  /// UPDATE ciblé par filtres d'égalité, via la file offline.
+  ///
+  /// UN SEUL ORDRE SERVEUR pour toutes les lignes qui correspondent — y
+  /// compris celles que cet appareil ne connaît pas encore (créées ailleurs,
+  /// pas encore synchronisées). C'est ce qui le distingue d'une boucle
+  /// d'upserts, qui ne toucherait que les lignes présentes dans Hive.
+  ///
+  /// [match] vide est REFUSÉ : un UPDATE sans filtre réécrirait toute la
+  /// table, pour toutes les boutiques que la RLS laisse voir.
+  static void bgUpdateWhere(String table,
+      {required Map<String, dynamic> match,
+      required Map<String, dynamic> data}) {
+    if (match.isEmpty || data.isEmpty) return;
+    _bgWrite({'table': table, 'op': 'update', 'match': match, 'data': data});
+  }
+
 
   // ══ DÉFINITIONS SQL DES TABLES ════════════════════════════════════════════════
   // Exécuter dans Supabase → SQL Editor si la table n'existe pas encore
@@ -1504,7 +2035,16 @@ create table if not exists public.orders (
   scheduled_at     timestamptz,
   created_at       timestamptz      not null default now(),
   completed_at     timestamptz,
-  synced_to_cloud  boolean          not null default false
+  synced_to_cloud  boolean          not null default false,
+  table_id         text,
+  covers           integer,
+  order_type       text             not null default 'takeaway',
+  sent_to_kitchen  boolean          not null default false,
+  kitchen_ready    boolean          not null default false,
+  served           boolean          not null default false,
+  finished         boolean          not null default false,
+  -- hotfix_183 : instant d'entrée dans l'état de service courant.
+  service_state_at timestamptz
 );
 create index if not exists orders_shop_id_idx on public.orders(shop_id);
 create index if not exists orders_status_idx  on public.orders(status);
@@ -1551,6 +2091,7 @@ create table if not exists public.products (
   price_buy   double precision default 0,
   stock       integer default 0,
   is_active   boolean default true,
+  track_stock boolean not null default true,
   created_at  timestamptz not null default now(),
   data        jsonb default '{}'
 );
@@ -1656,6 +2197,42 @@ end \$\$;""",
     }
   }
 
+  /// Les unités proposées à une boutique neuve — voir `starter_units.dart`.
+  ///
+  /// Une boutique neuve n'en recevait aucune : le premier produit saisi butait
+  /// sur un champ « unité » sans le moindre choix, et il fallait deviner qu'on
+  /// pouvait en créer, dans un écran de paramètres qu'on ne cherche pas quand
+  /// on remplit une fiche produit.
+  ///
+  /// PAS PAR `saveUnit`, et c'est délibéré : elle journalise un
+  /// `unit_created` par appel. Six lignes « untel a créé une unité » au
+  /// journal d'activité d'une boutique de trente secondes attribueraient au
+  /// propriétaire une saisie qu'il n'a jamais faite. On écrit la liste d'un
+  /// coup et on pousse chaque ligne.
+  ///
+  /// Idempotent par construction : `onConflict` côté Supabase, et la clé Hive
+  /// est écrite en une fois.
+  static Future<void> _seedStarterUnits({
+    required String shopId,
+    required String sector,
+  }) async {
+    final units = starterUnitsFor(sector);
+    if (units.isEmpty) return;
+    try {
+      await HiveBoxes.settingsBox.put('units_$shopId', units);
+    } catch (e) {
+      debugPrint('[DB] unités d\'amorçage Hive err: $e');
+    }
+    for (final name in units) {
+      _bgWrite({
+        'table': 'units', 'op': 'upsert',
+        'data': {'shop_id': shopId, 'name': name},
+        'onConflict': 'shop_id,name',
+      });
+    }
+    _notify('units', shopId);
+  }
+
   static Future<ShopSummary> createShop({
     required String name, required String sector,
     required String currency, required String country,
@@ -1686,6 +2263,8 @@ end \$\$;""",
         userId: userId, shopId: shop.id,
         shopName: shop.name, role: UserRole.admin);
 
+    await _seedStarterUnits(shopId: shop.id, sector: sector);
+
     // Amorce la liste des membres avec le créateur pour qu'il apparaisse
     // immédiatement dans l'onglet Membres, même avant le 1er fetch Supabase.
     final profile = LocalStorageService.getCurrentUser();
@@ -1710,9 +2289,19 @@ end \$\$;""",
   /// Les champs à null sont ignorés (pas écrasés).
   static Future<ShopSummary> updateShop({
     required String shopId,
-    String? name, String? sector,
+    // Pas de `sector` : le type d'établissement est FIGÉ à la création
+    // (cf. kCreationSectors). Le basculer sur une boutique en exploitation
+    // laisserait des données orphelines — commandes rattachées à des tables
+    // sur une boutique devenue e-commerce, plan de salle inaccessible.
+    // `createShop` reste le seul chemin d'écriture du secteur.
+    String? name,
     String? currency, String? country,
     String? phone, String? whatsappPhone, String? email,
+    String? facebookPixelId,
+    int? partnerDebtAlertDays,
+    int? serviceLateSendMin,
+    int? serviceLateKitchenMin,
+    int? serviceLatePassMin,
   }) async {
     _assertNotFrozen();
     final userId = _userId;
@@ -1728,7 +2317,6 @@ end \$\$;""",
     // 2. Payload sans les nulls
     final payload = <String, dynamic>{};
     if (name     != null) payload['name']     = name.trim();
-    if (sector   != null) payload['sector']   = sector;
     if (currency != null) payload['currency'] = currency;
     if (country  != null) payload['country']  = country;
     if (phone    != null) payload['phone']    = phone.trim().isEmpty ? null : phone.trim();
@@ -1737,6 +2325,31 @@ end \$\$;""",
           whatsappPhone.trim().isEmpty ? null : whatsappPhone.trim();
     }
     if (email    != null) payload['email']    = email.trim().isEmpty ? null : email.trim();
+    // facebook_pixel_id : chaîne vide → null (déconnexion du pixel).
+    if (facebookPixelId != null) {
+      payload['facebook_pixel_id'] =
+          facebookPixelId.trim().isEmpty ? null : facebookPixelId.trim();
+    }
+    // Seuil d'alerte d'ancienneté des dettes partenaires. Borné ici AUSSI,
+    // et pas seulement par le CHECK SQL (hotfix_178) : une valeur hors
+    // bornes partirait sinon jusqu'au serveur pour revenir en 23514, que
+    // `isDefinitiveSyncError` classe comme définitif.
+    if (partnerDebtAlertDays != null) {
+      payload['partner_debt_alert_days'] =
+          partnerDebtAlertDays.clamp(1, 365);
+    }
+    // Seuils de retard du service (hotfix_183) — bornés ici comme par le
+    // CHECK SQL (1 à 240 min), pour la même raison.
+    if (serviceLateSendMin != null) {
+      payload['service_late_send_min'] = serviceLateSendMin.clamp(1, 240);
+    }
+    if (serviceLateKitchenMin != null) {
+      payload['service_late_kitchen_min'] =
+          serviceLateKitchenMin.clamp(1, 240);
+    }
+    if (serviceLatePassMin != null) {
+      payload['service_late_pass_min'] = serviceLatePassMin.clamp(1, 240);
+    }
     if (payload.isEmpty) {
       final cached = LocalStorageService.getShop(shopId);
       if (cached != null) return cached;
@@ -1863,6 +2476,48 @@ end \$\$;""",
     return res == null ? null : DateTime.tryParse(res.toString());
   }
 
+  /// DÉMARRE (ou relance) un essai pour le propriétaire de [shopId] — RPC
+  /// super-admin `sa_start_trial` (hotfix_135). Marche même sans abonnement
+  /// (nouvel essai) ou pour réactiver un essai expiré ; débloque le compte.
+  /// Retourne la nouvelle date d'expiration.
+  static Future<DateTime?> startTrial(String shopId, int days) async {
+    final res = await _db.rpc('sa_start_trial', params: {
+      'p_shop_id': shopId,
+      'p_days':    days,
+    });
+    return res == null ? null : DateTime.tryParse(res.toString());
+  }
+
+  /// État du MODE GRATUIT GLOBAL (config plateforme, hotfix_136).
+  /// `{enabled: bool, until: DateTime?}`. `null` si lecture impossible.
+  static Future<({bool enabled, DateTime? until})?> getFreeMode() async {
+    try {
+      final res = await _db.from('platform_config')
+          .select('free_mode_enabled, free_mode_until')
+          .eq('id', 1).maybeSingle();
+      if (res == null) return null;
+      return (
+        enabled: res['free_mode_enabled'] == true,
+        until: res['free_mode_until'] != null
+            ? DateTime.tryParse(res['free_mode_until'].toString())
+            : null,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// SA : active/désactive le MODE GRATUIT GLOBAL — RPC `sa_set_free_mode`.
+  /// Quand actif, TOUS les comptes passent en accès Business. Retourne l'état
+  /// effectif (true = actif).
+  static Future<bool> setFreeMode(bool enabled, {DateTime? until}) async {
+    final res = await _db.rpc('sa_set_free_mode', params: {
+      'p_enabled': enabled,
+      'p_until':   until?.toUtc().toIso8601String(),
+    });
+    return res == true;
+  }
+
   /// Subscription courante (active/trial) du propriétaire de [shopId].
   /// Lecture directe Supabase (RLS super-admin / owner). `null` si aucune.
   static Future<Map<String, dynamic>?> getShopSubscription(
@@ -1979,6 +2634,55 @@ end \$\$;""",
       debugPrint('[DB] getAllIncidents: $e');
       return const [];
     }
+  }
+
+  // ── Observabilité (Phase 1) — rapports de bugs vers le SA ──────────────────
+
+  /// Pousse un rapport d'erreur via la RPC `report_error` (dédupliquée côté
+  /// serveur). Offline-first : online direct, sinon enqueue dans la file RPC
+  /// existante (rejoué au retour réseau). Ne throw jamais.
+  static Future<void> reportError(Map<String, dynamic> params) async {
+    try {
+      if (_i._isOnline) {
+        try {
+          await _db.rpc('report_error', params: params);
+        } catch (_) {
+          // Transitoire (réseau) → réessai différé via la file RPC.
+          _enqueue({'table': 'rpc', 'op': 'rpc', 'name': 'report_error',
+                    'data': params});
+        }
+      } else {
+        _enqueue({'table': 'rpc', 'op': 'rpc', 'name': 'report_error',
+                  'data': params});
+      }
+    } catch (_) {
+      // L'observabilité ne doit jamais faire échouer l'appelant.
+    }
+  }
+
+  /// Lecture des rapports de bugs (réservée super-admin par la policy
+  /// `error_reports_sa_read`). Dédupliqués (1 ligne/bug), triés par dernière
+  /// occurrence. Exclut les bugs « ignorés ».
+  static Future<List<Map<String, dynamic>>> getErrorReports() async {
+    try {
+      final rows = await _db.from('error_reports')
+          .select('id, severity, error_type, message, route, action, '
+                  'shop_id, platform, app_version, count, status, '
+                  'first_seen_at, last_seen_at, sentry_event_id, stack')
+          .neq('status', 'ignored')
+          .order('last_seen_at', ascending: false)
+          .limit(500);
+      return List<Map<String, dynamic>>.from(rows);
+    } catch (e) {
+      debugPrint('[DB] getErrorReports: $e');
+      return const [];
+    }
+  }
+
+  /// Met à jour le statut d'un rapport (résolu / ignoré / en cours). Gardé
+  /// côté serveur par la policy `error_reports_sa_update` (super-admin).
+  static Future<void> setErrorReportStatus(String id, String status) async {
+    await _db.from('error_reports').update({'status': status}).eq('id', id);
   }
 
   /// SA-6 — statistiques plateforme (super-admin). Agrégations directes
@@ -2428,6 +3132,35 @@ end \$\$;""",
   /// correspondant à la boutique (location type=shop).
   /// Crée le StockLevel s'il n'existe pas. Silencieux si la boutique
   /// n'a pas encore de shopLocation (cas d'une boutique créée hors migration).
+  /// Préfixe du flag « réconciliation StockLevel déjà faite » (par boutique).
+  static const String _kStockReconcileFlag = '_stocklevel_reconciled_v1_';
+
+  /// Réaligne UNE FOIS (par appareil et par boutique) le StockLevel de la
+  /// boutique sur `variant.stockAvailable` pour chaque produit. Corrige les
+  /// mouvements PASSÉS (ventes, etc.) où la garde anti-écho avait bloqué la
+  /// propagation variante→StockLevel → l'inventaire/grille restaient sur une
+  /// valeur périmée. N'écrit QUE les StockLevel réellement divergents (le
+  /// `force:true` bypass l'anti-écho, la comparaison interne saute les
+  /// identiques) et ne touche JAMAIS les emplacements partenaire/entrepôt.
+  /// Cf. project_stocklevel_sync_after_sale.
+  static Future<void> _reconcileShopStockLevelsOnce(String shopId) async {
+    final key = '$_kStockReconcileFlag$shopId';
+    if (HiveBoxes.settingsBox.get(key) == true) return;
+    try {
+      final products = getProductsForShop(shopId);
+      for (final p in products) {
+        await _syncShopStockLevelsFromProduct(p, force: true);
+      }
+      await HiveBoxes.settingsBox.put(key, true);
+      _notify('stock_levels', shopId);
+      _notify('products', shopId);
+      debugPrint('[DB] réconciliation StockLevel OK pour $shopId '
+          '(${products.length} produits)');
+    } catch (e) {
+      debugPrint('[DB] réconciliation StockLevel échouée $shopId: $e');
+    }
+  }
+
   static Future<void> _syncShopStockLevelsFromProduct(Product p,
       {bool force = false}) async {
     final shopId = p.storeId;
@@ -2734,6 +3467,72 @@ end \$\$;""",
   static List<Product> getProductsForShop(String shopId) =>
       LocalStorageService.getProductsForShop(shopId)
           .where((p) => p.id != null).toList();
+
+  /// Recherche un produit par SKU de variante — **cache Hive uniquement**,
+  /// jamais de requête réseau : appelée pendant la frappe (contrôle
+  /// d'unicité en direct dans la fiche produit).
+  ///
+  /// Portée à la BOUTIQUE : la boîte Hive est partagée par toutes les
+  /// boutiques du device, et un SKU identique ailleurs n'est pas un conflit.
+  /// Sans ce filtre, on signalerait de faux doublons.
+  ///
+  /// Les produits supprimés (soft-delete) sont ignorés : leur SKU est
+  /// réutilisable. On lit les Maps brutes et on ne désérialise qu'au match,
+  /// pour ne pas reconstruire tout le catalogue à chaque caractère.
+  static Future<Product?> findProductBySku(String shopId, String sku) async {
+    final needle = sku.trim().toLowerCase();
+    if (needle.isEmpty) return null;
+    for (final raw in HiveBoxes.productsBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw);
+        if (m['store_id'] != shopId) continue;
+        if (m['deleted_at'] != null) continue;
+        for (final v in (m['variants'] as List? ?? [])) {
+          final s = ((v as Map)['sku'] as String?)?.trim().toLowerCase();
+          if (s != null && s == needle) {
+            final id = m['id'] as String?;
+            return id == null ? null : LocalStorageService.getProduct(id);
+          }
+        }
+      } catch (_) {
+        // Ligne illisible (format hérité) : ignorée — elle ne doit pas
+        // faire échouer un simple contrôle de saisie.
+      }
+    }
+    return null;
+  }
+
+  /// Produits de la boutique dont le nom contient [query] — **cache Hive
+  /// uniquement**, jamais le réseau : appelée pendant la frappe.
+  ///
+  /// Sert à prévenir les doublons au moment de nommer un produit. Portée à
+  /// la boutique pour la même raison que [findProductBySku] : la boîte est
+  /// partagée par toutes les boutiques de l'appareil. Les produits
+  /// supprimés sont ignorés.
+  static Future<List<Product>> searchProductsByName(
+      String shopId, String query, {int limit = 5}) async {
+    final needle = query.trim().toLowerCase();
+    if (needle.isEmpty) return const [];
+    final out = <Product>[];
+    for (final raw in HiveBoxes.productsBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw);
+        if (m['store_id'] != shopId) continue;
+        if (m['deleted_at'] != null) continue;
+        final name = (m['name'] as String?) ?? '';
+        if (!name.toLowerCase().contains(needle)) continue;
+        final id = m['id'] as String?;
+        if (id == null) continue;
+        final p = LocalStorageService.getProduct(id);
+        if (p != null) out.add(p);
+        if (out.length >= limit) break;
+      } catch (_) {
+        // Ligne illisible (format hérité) : ignorée — elle ne doit pas
+        // faire échouer une simple suggestion de saisie.
+      }
+    }
+    return out;
+  }
 
   static Future<void> syncProducts(String shopId) async {
     try {
@@ -3460,12 +4259,17 @@ end \$\$;""",
       }
       // Diff purge : supprimer les dépenses locales de ce shop
       // qui n'existent plus distant (reset / suppression depuis autre appareil).
+      // Même garde que pour les commandes : une dépense créée hors ligne est
+      // absente du serveur sans être périmée. La purger la perd sans trace.
+      final pendingExpenseIds = _pendingIdsFor('expenses');
       final staleKeys = <dynamic>[];
       for (final key in HiveBoxes.expensesBox.keys) {
         final raw = HiveBoxes.expensesBox.get(key);
         if (raw is! Map) continue;
         if (raw['shop_id']?.toString() != shopId) continue;
-        if (!remoteIds.contains(key.toString())) staleKeys.add(key);
+        final ks = key.toString();
+        if (pendingExpenseIds.contains(ks)) continue;
+        if (!remoteIds.contains(ks)) staleKeys.add(key);
       }
       for (final k in staleKeys) {
         await HiveBoxes.expensesBox.delete(k);
@@ -3520,6 +4324,15 @@ end \$\$;""",
       // confirmée côté Supabase (push async lent, rechargement web avant
       // flush, reconnexion) serait effacée définitivement → perte de
       // données financière silencieuse (bug solde partenaire qui revient).
+      // ⚠ ANGLE MORT CONNU, non traité ici (périmètre : ~25 tables passent par
+      // cette fonction). Ce filtre ignore les ops `update` et ne lit que
+      // `data['id']` — or une op `update` porte son identifiant dans
+      // `match['id']`. Une mutation partielle en vol n'est donc PAS protégée
+      // de la purge sur ces tables.
+      //
+      // `_pendingIdsFor` (plus haut) couvre les deux cas et sert déjà
+      // `syncOrders` / `syncExpenses`. Le généraliser ici toucherait toutes
+      // les tables passthrough d'un coup → reporté en vague 4.
       final pendingIds = <String>{};
       try {
         for (final raw in HiveBoxes.offlineQueueBox.values) {
@@ -3638,6 +4451,115 @@ end \$\$;""",
   static Future<void> syncStockArrivals(String shopId) =>
       _syncTablePassthrough(tableName: 'stock_arrivals',
           shopId: shopId, box: HiveBoxes.stockArrivalsBox);
+  /// Sync des zones + quartiers de livraison (frais par quartier). Passthrough
+  /// simple filtré par `shop_id` (offline-first : dispos en Hive sans réseau).
+  static Future<void> syncDeliveryZones(String shopId) =>
+      _syncTablePassthrough(tableName: 'delivery_zones',
+          shopId: shopId, box: HiveBoxes.deliveryZonesBox);
+  static Future<void> syncDeliveryQuartiers(String shopId) =>
+      _syncTablePassthrough(tableName: 'delivery_quartiers',
+          shopId: shopId, box: HiveBoxes.deliveryQuartiersBox);
+  /// Sync du plan de salle restaurant (hotfix_137). Passthrough filtré par
+  /// `shop_id`. Trié par `number` et non `created_at` : le plan de salle est
+  /// ordonné par numéro de table, et la limite de 500 doit donc conserver les
+  /// premières tables si une boutique en déclarait un très grand nombre.
+  static Future<void> syncRestaurantTables(String shopId) =>
+      _syncTablePassthrough(tableName: 'restaurant_tables',
+          shopId: shopId, box: HiveBoxes.restaurantTablesBox,
+          orderBy: 'number');
+  // ── Module finances restaurant (PR-A) ──────────────────────────────────
+  static Future<void> syncIngredients(String shopId) =>
+      _syncTablePassthrough(tableName: 'ingredients',
+          shopId: shopId, box: HiveBoxes.ingredientsBox);
+
+  static Future<void> syncRecipeIngredients(String shopId) =>
+      _syncTablePassthrough(tableName: 'recipe_ingredients',
+          shopId: shopId, box: HiveBoxes.recipeIngredientsBox);
+
+  // ── Finances restaurant (PR-B) ─────────────────────────────────────────
+  static Future<void> syncRestaurantActivities(String shopId) =>
+      _syncTablePassthrough(tableName: 'restaurant_activities',
+          shopId: shopId, box: HiveBoxes.restaurantActivitiesBox);
+
+  static Future<void> syncStockItems(String shopId) =>
+      _syncTablePassthrough(tableName: 'stock_items',
+          shopId: shopId, box: HiveBoxes.stockItemsBox);
+
+  // ── Finances restaurant (PR-C) ─────────────────────────────────────────
+  static Future<void> syncFixedCharges(String shopId) =>
+      _syncTablePassthrough(tableName: 'fixed_charges',
+          shopId: shopId, box: HiveBoxes.fixedChargesBox);
+
+  static Future<void> syncLosses(String shopId) =>
+      _syncTablePassthrough(tableName: 'losses',
+          shopId: shopId, box: HiveBoxes.lossesBox);
+
+  // ── Règlements d'addition (Lot A restaurant — hotfix_145) ──────────────
+  static Future<void> syncPayments(String shopId) =>
+      _syncTablePassthrough(tableName: 'payments',
+          shopId: shopId, box: HiveBoxes.paymentsBox);
+
+  // ── Consignes d'emballages (Lot B restaurant — hotfix_146) ─────────────
+  static Future<void> syncBottleDeposits(String shopId) =>
+      _syncTablePassthrough(tableName: 'bottle_deposits',
+          shopId: shopId, box: HiveBoxes.bottleDepositsBox);
+
+  // ── Clôtures de caisse X/Z (Lot C restaurant — hotfix_147) ─────────────
+  static Future<void> syncCashClosures(String shopId) =>
+      _syncTablePassthrough(tableName: 'cash_closures',
+          shopId: shopId, box: HiveBoxes.cashClosuresBox,
+          orderBy: 'closed_at');
+
+  // ── Personnel restaurant (Lot D — hotfix_148) ──────────────────────────
+  static Future<void> syncStaff(String shopId) =>
+      _syncTablePassthrough(tableName: 'employees',
+          shopId: shopId, box: HiveBoxes.employeesBox);
+
+  static Future<void> syncTimeRecords(String shopId) =>
+      _syncTablePassthrough(tableName: 'time_records',
+          shopId: shopId, box: HiveBoxes.timeRecordsBox,
+          orderBy: 'clock_in');
+
+  static Future<void> syncSalaryAdvances(String shopId) =>
+      _syncTablePassthrough(tableName: 'salary_advances',
+          shopId: shopId, box: HiveBoxes.salaryAdvancesBox);
+
+  static Future<void> syncPayroll(String shopId) =>
+      _syncTablePassthrough(tableName: 'payroll',
+          shopId: shopId, box: HiveBoxes.payrollBox);
+
+  // ── Tenue de l'équipe (hotfix_165) ─────────────────────────────────────
+  //
+  // Casse, notation et primes spéciales. Chacune est isolée : tant que le SQL
+  // n'est pas appliqué, la table n'existe pas (42P01) et sa synchro échoue —
+  // elle ne doit pas emporter avec elle le personnel et la paie, qui eux
+  // fonctionnent depuis hotfix_148.
+
+  static Future<void> syncStaffPenalties(String shopId) =>
+      _syncTablePassthrough(tableName: 'staff_penalties',
+          shopId: shopId, box: HiveBoxes.staffPenaltiesBox,
+          orderBy: 'incident_date');
+
+  static Future<void> syncStaffRatings(String shopId) =>
+      _syncTablePassthrough(tableName: 'staff_ratings',
+          shopId: shopId, box: HiveBoxes.staffRatingsBox);
+
+  static Future<void> syncStaffContests(String shopId) =>
+      _syncTablePassthrough(tableName: 'staff_contests',
+          shopId: shopId, box: HiveBoxes.staffContestsBox,
+          orderBy: 'end_date');
+
+  // ── Absences décidées : mise à pied, congé payé (hotfix_166) ───────────
+  static Future<void> syncStaffAbsences(String shopId) =>
+      _syncTablePassthrough(tableName: 'staff_absences',
+          shopId: shopId, box: HiveBoxes.staffAbsencesBox,
+          orderBy: 'start_date');
+
+  // ── Dépenses quotidiennes (Lot E restaurant — hotfix_149) ──────────────
+  static Future<void> syncDailyExpenses(String shopId) =>
+      _syncTablePassthrough(tableName: 'daily_expenses',
+          shopId: shopId, box: HiveBoxes.dailyExpensesBox,
+          orderBy: 'expense_date');
   /// Sync des transferts de commandes vers livreurs/partenaires (hotfix_049).
   /// Utilisé par le filtre dashboard / commandes / finances pour scoper aux
   /// commandes assignées à un partenaire spécifique.
@@ -3759,6 +4681,11 @@ end \$\$;""",
             'shop_id':        row['shop_id'],
             'status':         row['status'] ?? 'scheduled',
             'discount_amount': row['discount_amount'] ?? 0,
+            // Le motif suit le montant. `syncOrders` et `_onOrderChange`
+            // reconstruisent cette carte À LA MAIN : un champ ajouté dans un
+            // seul des deux revient à chaque resync dans un état, et dans
+            // l'autre au suivant.
+            'discount_reason': row['discount_reason'],
             'tax_rate':       row['tax_rate'] ?? 0,
             'payment_method': row['payment_method'] ?? 'cash',
             'client_id':      row['client_id'],
@@ -3773,6 +4700,9 @@ end \$\$;""",
             'delivery_person_name': row['delivery_person_name'],
             'delivery_city':        row['delivery_city'],
             'delivery_address':     row['delivery_address'],
+            'delivery_quartier':    row['delivery_quartier'],
+            'delivery_zone':        row['delivery_zone'],
+            'delivery_price':       row['delivery_price'],
             'shipment_city':        row['shipment_city'],
             'shipment_agency':      row['shipment_agency'],
             'shipment_handler':     row['shipment_handler'],
@@ -3792,6 +4722,33 @@ end \$\$;""",
             // le badge « À choisir » disparaissait après synchronisation.
             'is_approval_sale': row['is_approval_sale'] ?? false,
             'stock_reserved':   row['stock_reserved'] ?? false,
+            // GF-1 (hotfix_080) — cf. syncOrders : préserver la clé sur les
+            // events realtime, sinon un update distant l'efface en Hive.
+            'idempotency_key': row['idempotency_key'],
+            // Jeton de suivi (hotfix_171) — MEME RAISON : généré côté serveur,
+            // il n'existe en local que par ce pull. L'omettre ici le remettrait
+            // à null au premier event realtime, et le lien WhatsApp retomberait
+            // sur l'identifiant, c'est-à-dire sur la fuite qu'on vient de fermer.
+            'tracking_token':  row['tracking_token'],
+            // Module restaurant (hotfix_137) — MEME RAISON que les 2 blocs
+            // ci-dessus : ce hiveMap REMPLACE integralement la ligne locale
+            // (put, pas de merge). Sans ces cles, chaque pull/push realtime
+            // remettrait la table a libre et viderait l'ecran Cuisine.
+            'table_id':        row['table_id'],
+            'tab_label':       row['tab_label'],
+            'covers':          row['covers'],
+            'order_type':      row['order_type'] ?? 'takeaway',
+            'sent_to_kitchen': row['sent_to_kitchen'] ?? false,
+            'kitchen_ready':   row['kitchen_ready'] ?? false,
+            'served':          row['served'] ?? false,
+            'finished':        row['finished'] ?? false,
+            // hotfix_183 — DANS LES DEUX reconstructions (celle-ci et
+            // `_onOrderChange`), sinon la date se perd à la synchronisation.
+            'service_state_at': row['service_state_at'],
+            // Soft-delete (hotfix_084) — symétrie avec _mapToSaleWithStatus.
+            'deleted_at':    row['deleted_at'],
+            'deleted_by':    row['deleted_by'],
+            'delete_reason': row['delete_reason'],
           };
           await HiveBoxes.ordersBox.put(id, hiveMap);
           _emitOrderNotification(p, shopId, id, row);
@@ -4253,6 +5210,8 @@ end \$\$;""",
           'shop_id':        row['shop_id'],
           'status':         row['status'] ?? 'scheduled',
           'discount_amount': row['discount_amount'] ?? 0,
+          // Le second des deux chemins — voir `syncOrders`.
+          'discount_reason': row['discount_reason'],
           'tax_rate':       row['tax_rate'] ?? 0,
           'payment_method': row['payment_method'] ?? 'cash',
           'client_id':      row['client_id'],
@@ -4267,6 +5226,9 @@ end \$\$;""",
           'delivery_person_name': row['delivery_person_name'],
           'delivery_city':        row['delivery_city'],
           'delivery_address':     row['delivery_address'],
+          'delivery_quartier':    row['delivery_quartier'],
+          'delivery_zone':        row['delivery_zone'],
+          'delivery_price':       row['delivery_price'],
           'shipment_city':        row['shipment_city'],
           'shipment_agency':      row['shipment_agency'],
           'shipment_handler':     row['shipment_handler'],
@@ -4287,6 +5249,36 @@ end \$\$;""",
           // comptage stock (stock_reserved) était perdu.
           'is_approval_sale': row['is_approval_sale'] ?? false,
           'stock_reserved':   row['stock_reserved'] ?? false,
+          // GF-1 (hotfix_080). saveOrder écrit déjà idempotency_key en Hive,
+          // mais sans cette ligne le pull Supabase l'écrasait à null à chaque
+          // refresh → garde-fou anti-doublon perdu après synchronisation.
+          'idempotency_key': row['idempotency_key'],
+          // Jeton de suivi (hotfix_171). Généré par le SERVEUR : ce pull est le
+          // seul chemin par lequel il arrive en local. Sans cette ligne, il
+          // serait écrasé à null à chaque synchronisation et le lien WhatsApp
+          // retomberait sur l'identifiant — la fuite qu'on vient de fermer.
+          'tracking_token':  row['tracking_token'],
+          // Module restaurant (hotfix_137) — MEME RAISON que les 2 blocs
+          // ci-dessus : ce hiveMap REMPLACE integralement la ligne locale
+          // (put, pas de merge). Sans ces cles, chaque pull/push realtime
+          // remettrait la table a libre et viderait l'ecran Cuisine.
+          'table_id':        row['table_id'],
+          'tab_label':       row['tab_label'],
+          'covers':          row['covers'],
+          'order_type':      row['order_type'] ?? 'takeaway',
+          'sent_to_kitchen': row['sent_to_kitchen'] ?? false,
+          'kitchen_ready':   row['kitchen_ready'] ?? false,
+          'served':          row['served'] ?? false,
+          'finished':        row['finished'] ?? false,
+          // hotfix_183 — cf. `syncOrders`, même clé.
+          'service_state_at': row['service_state_at'],
+          // Soft-delete (hotfix_084) — symétrie avec _mapToSaleWithStatus.
+          // NB : une commande deleted_at != null est déjà retirée du Hive plus
+          // haut, donc ces 3 champs sont en pratique toujours null ici ;
+          // explicites pour aligner le format d'écriture sur celui de lecture.
+          'deleted_at':    row['deleted_at'],
+          'deleted_by':    row['deleted_by'],
+          'delete_reason': row['delete_reason'],
         };
         await HiveBoxes.ordersBox.put(id, hiveMap);
         // Notif de rattrapage si le statut a changé depuis le dernier état
@@ -4304,12 +5296,20 @@ end \$\$;""",
       }
       // Diff purge : supprimer les commandes locales de ce shop
       // qui ne sont plus distantes.
+      // Garde anti-perte : on ne purge JAMAIS une commande dont l'écriture
+      // est encore en file. Absente du serveur ≠ périmée — elle peut n'avoir
+      // simplement pas encore été poussée (création hors ligne, push en vol,
+      // rechargement web avant flush). Sans cette garde, `onAppResumed`
+      // pouvait effacer une vente jamais parvenue au serveur.
+      final pendingOrderIds = _pendingIdsFor('orders');
       final staleKeys = <dynamic>[];
       for (final key in HiveBoxes.ordersBox.keys) {
         final raw = HiveBoxes.ordersBox.get(key);
         if (raw is! Map) continue;
         if (raw['shop_id']?.toString() != shopId) continue;
-        if (!remoteIds.contains(key.toString())) staleKeys.add(key);
+        final ks = key.toString();
+        if (pendingOrderIds.contains(ks)) continue;
+        if (!remoteIds.contains(ks)) staleKeys.add(key);
       }
       for (final k in staleKeys) {
         await HiveBoxes.ordersBox.delete(k);
@@ -4543,6 +5543,224 @@ end \$\$;""",
     );
   }
 
+  // ══ POSTES DE L'ÉTABLISSEMENT (hotfix_160) ════════════════════════
+  //
+  // Serveur, Cuisinier, Livreur… La liste appartient à la boutique : chaque
+  // établissement a ses propres postes, et doit pouvoir en ajouter, en
+  // renommer et en supprimer. Même mécanique que les marques et les unités —
+  // (shop_id, name), écriture Hive immédiate puis push en arrière-plan.
+
+  static const String _jobTitlesTable = 'job_titles';
+
+  static String _jobTitlesKey(String shopId) => 'job_titles_$shopId';
+
+  static Future<void> _putJobTitles(String shopId, List<String> list) =>
+      HiveBoxes.settingsBox.put(_jobTitlesKey(shopId), list);
+
+  static String _jobPermsKey(String shopId) => 'job_title_perms_$shopId';
+
+  static Future<void> _putJobPerms(
+          String shopId, Map<String, String> perms) =>
+      HiveBoxes.settingsBox.put(_jobPermsKey(shopId), perms);
+
+  /// Taux horaire des heures supplémentaires, par poste (hotfix_165).
+  static String _jobRatesKey(String shopId) => 'job_title_rates_$shopId';
+
+  static Future<void> _putJobRates(String shopId, Map<String, int> rates) =>
+      HiveBoxes.settingsBox.put(_jobRatesKey(shopId), rates);
+
+  /// Ajoute un poste, avec ou sans profil de droits.
+  ///
+  /// Sans effet sur le libellé s'il existe déjà (comparaison insensible à la
+  /// casse : « serveur » et « Serveur » sont le même poste). [permissions] —
+  /// clés `EmployeePermission.key` ; `null` laisse le profil INCHANGÉ, une
+  /// liste vide efface les droits du poste.
+  static Future<void> saveJobTitle(String shopId, String name,
+      {List<String>? permissions, int? overtimeRate}) async {
+    _assertNotFrozen();
+    final clean = name.trim();
+    if (clean.isEmpty) return;
+    final list = LocalStorageService.getJobTitles(shopId);
+    final isNew =
+        !list.any((t) => t.toLowerCase() == clean.toLowerCase());
+    if (isNew) {
+      list.add(clean);
+      await _putJobTitles(shopId, list);
+    }
+    if (permissions != null) {
+      final perms = LocalStorageService.getJobTitlePerms(shopId)
+        ..[clean] = permissions.join(',');
+      await _putJobPerms(shopId, perms);
+    }
+    if (overtimeRate != null) {
+      final rates = LocalStorageService.getJobTitleRates(shopId)
+        ..[clean] = overtimeRate;
+      await _putJobRates(shopId, rates);
+    }
+    _bgWrite({'table': _jobTitlesTable, 'op': 'upsert',
+      'data': {
+        'shop_id': shopId,
+        'name': clean,
+        // Colonne ajoutée par hotfix_161 : omise tant qu'aucun profil n'est
+        // défini, pour qu'un poste simple continue de se synchroniser même
+        // si le SQL n'a pas encore été appliqué.
+        if (permissions != null) 'permissions': permissions.join(','),
+        // Idem pour le taux horaire des heures supplémentaires (hotfix_165).
+        if (overtimeRate != null) 'overtime_rate': overtimeRate,
+      },
+      'onConflict': 'shop_id,name'});
+    if (isNew) {
+      await ActivityLogService.log(
+        action: 'job_title_created', targetType: 'job_title',
+        targetId: clean, targetLabel: clean, shopId: shopId,
+      );
+    }
+  }
+
+  /// Retire un poste de la liste proposée.
+  ///
+  /// Ne débaptise personne : la fonction d'un employé vit sur son compte
+  /// (`shop_memberships.job_title`). C'est l'écran appelant qui refuse la
+  /// suppression tant que quelqu'un porte le poste — le faire ici obligerait
+  /// cette couche à connaître les comptes.
+  static Future<void> deleteJobTitle(String shopId, String name) async {
+    _assertNotFrozen();
+    final list = LocalStorageService.getJobTitles(shopId)
+      ..removeWhere((t) => t.toLowerCase() == name.toLowerCase());
+    await _putJobTitles(shopId, list);
+    final perms = LocalStorageService.getJobTitlePerms(shopId)
+      ..removeWhere((k, _) => k.toLowerCase() == name.toLowerCase());
+    await _putJobPerms(shopId, perms);
+    final rates = LocalStorageService.getJobTitleRates(shopId)
+      ..removeWhere((k, _) => k.toLowerCase() == name.toLowerCase());
+    await _putJobRates(shopId, rates);
+    // Suppression filtrée sur (shop_id, name) : sans le shop_id, l'ordre
+    // effacerait le poste dans TOUTES les boutiques de l'utilisateur.
+    _bgWrite({'table': _jobTitlesTable, 'op': 'delete',
+      'match': {'shop_id': shopId, 'name': name},
+      'data': {'shop_id': shopId, 'name': name}});
+    await ActivityLogService.log(
+      action: 'job_title_deleted', targetType: 'job_title',
+      targetId: name, targetLabel: name, shopId: shopId,
+    );
+  }
+
+  /// Renomme un poste, EN CONSERVANT son profil de droits. La propagation
+  /// vers les comptes qui le portent est du ressort de l'appelant (il a le
+  /// notifier employés sous la main) — ici on ne touche qu'à la liste.
+  static Future<void> renameJobTitle(
+      String shopId, String old, String neo) async {
+    final clean = neo.trim();
+    if (clean.isEmpty || old == clean) return;
+    final carried = LocalStorageService.getJobTitlePerms(shopId)[old];
+    final carriedRate = LocalStorageService.getJobTitleRates(shopId)[old];
+    await saveJobTitle(shopId, clean,
+        permissions: carried == null
+            ? null
+            : carried.split(',').where((k) => k.isNotEmpty).toList(),
+        overtimeRate: carriedRate);
+    await deleteJobTitle(shopId, old);
+    await ActivityLogService.log(
+      action: 'job_title_updated', targetType: 'job_title',
+      targetId: clean, targetLabel: clean, shopId: shopId,
+      details: {'old_name': old},
+    );
+  }
+
+  /// Amorce la liste des postes d'une boutique qui n'en a encore aucun.
+  ///
+  /// Trois sources fusionnées, dans cet ordre : le socle métier livré avec
+  /// l'app, les ajouts manuels rangés sur CET appareil avant hotfix_160, et
+  /// les libellés déjà portés par des comptes. Sans cet amorçage, une liste
+  /// vide s'afficherait vide — et un poste du socle ne serait pas supprimable,
+  /// puisqu'il ne serait écrit nulle part.
+  ///
+  /// N'a lieu QU'UNE FOIS par appareil et par boutique (drapeau
+  /// `job_titles_seeded_<shopId>`). Sans ce drapeau, l'amorçage ne pourrait se
+  /// déclencher que sur une liste vide — et les postes ajoutés à la main avant
+  /// hotfix_160, qui occupent déjà cette clé, l'empêcheraient à jamais.
+  ///
+  /// Limite assumée : un appareil qui découvre la boutique APRÈS que le socle
+  /// y a été élagué réintroduira les postes supprimés. Le drapeau est local,
+  /// et une liste de métiers ne mérite pas la table de tombstones qu'il
+  /// faudrait pour faire mieux.
+  static Future<void> ensureJobTitlesSeeded(
+      String shopId, List<String> seed) async {
+    try {
+      final flag = 'job_titles_seeded_$shopId';
+      if (HiveBoxes.settingsBox.get(flag) == true) return;
+      final out = <String>[];
+      for (final raw in [
+        ...LocalStorageService.getJobTitles(shopId), // ajouts déjà présents
+        ...seed,
+      ]) {
+        final t = raw.trim();
+        if (t.isEmpty) continue;
+        if (out.any((e) => e.toLowerCase() == t.toLowerCase())) continue;
+        out.add(t);
+      }
+      await HiveBoxes.settingsBox.put(flag, true);
+      if (out.isEmpty) return;
+      await _putJobTitles(shopId, out);
+      for (final t in out) {
+        _bgWrite({'table': _jobTitlesTable, 'op': 'upsert',
+          'data': {'shop_id': shopId, 'name': t},
+          'onConflict': 'shop_id,name'});
+      }
+      debugPrint('[DB] postes amorcés (${out.length}) pour $shopId');
+    } catch (e) {
+      debugPrint('[DB] ensureJobTitlesSeeded: $e');
+    }
+  }
+
+  // ══ RÉGLAGES DU PERSONNEL (hotfix_165) ═══════════════════════════════
+  //
+  // L'heure de fermeture de l'établissement — la référence qui décide si un
+  // départ est anticipé ou s'il vaut des heures supplémentaires.
+  //
+  // SYNCHRONISÉE, et non rangée dans les préférences de l'appareil : la leçon
+  // du fond de caisse (hotfix_147). La tablette de la salle réglée sur 22 h et
+  // le téléphone du gérant sur 23 h jugeraient différemment le même pointage,
+  // et l'employé se verrait reprocher un départ anticipé selon l'écran ouvert.
+
+  static String _staffClosingKey(String shopId) =>
+      'staff_closing_time_$shopId';
+
+  /// Règle l'heure de fermeture de la boutique. `null` ou vide la retire —
+  /// plus rien n'est alors jugé, ce qui est le comportement d'avant la règle.
+  static Future<void> setShopClosingTime(String shopId, String? hhmm) async {
+    _assertNotFrozen();
+    final clean = (hhmm ?? '').trim();
+    await HiveBoxes.settingsBox.put(_staffClosingKey(shopId), clean);
+    _bgWrite({'table': 'staff_settings', 'op': 'upsert',
+      'data': {
+        'shop_id': shopId,
+        'closing_time': clean.isEmpty ? null : clean,
+      },
+      'onConflict': 'shop_id'});
+    _notify('staff_settings', shopId);
+  }
+
+  static Future<void> syncStaffSettings(String shopId) async {
+    try {
+      final rows = await _db
+          .from('staff_settings')
+          .select('closing_time')
+          .eq('shop_id', shopId)
+          .limit(1) as List;
+      // Boutique sans ligne : aucun horaire réglé. On écrit tout de même la
+      // valeur vide, sinon un horaire supprimé sur un autre appareil
+      // resterait éternellement en place sur celui-ci.
+      final t = rows.isEmpty
+          ? ''
+          : (rows.first['closing_time']?.toString() ?? '');
+      await HiveBoxes.settingsBox.put(_staffClosingKey(shopId), t);
+      _notify('staff_settings', shopId);
+    } catch (e) {
+      debugPrint('[DB] syncStaffSettings: $e');
+    }
+  }
+
   static Future<void> syncMetadata(String shopId) async {
     try {
       final cats   = await _db.from('categories').select('name').eq('shop_id', shopId);
@@ -4555,6 +5773,42 @@ end \$\$;""",
       await HiveBoxes.settingsBox.put('categories_$shopId', cl);
       await HiveBoxes.settingsBox.put('brands_$shopId', bl);
       await HiveBoxes.settingsBox.put('units_$shopId', ul);
+      // POSTES — table ajoutée par hotfix_160. Sa lecture est isolée : tant
+      // que le SQL n'est pas appliqué, elle échoue (42P01) et ne doit pas
+      // emporter avec elle les catégories, marques et unités déjà écrites.
+      try {
+        // `permissions` (hotfix_161) demandée à part : si la colonne manque
+        // encore, la requête entière échouerait et la boutique n'aurait plus
+        // aucun poste. On retombe alors sur les seuls libellés.
+        List rows;
+        try {
+          rows = await _db.from(_jobTitlesTable)
+              .select('name,permissions,overtime_rate')
+              .eq('shop_id', shopId) as List;
+        } catch (_) {
+          try {
+            rows = await _db.from(_jobTitlesTable)
+                .select('name,permissions').eq('shop_id', shopId) as List;
+          } catch (_) {
+            rows = await _db.from(_jobTitlesTable)
+                .select('name').eq('shop_id', shopId) as List;
+          }
+        }
+        await _putJobTitles(
+            shopId, rows.map((r) => r['name'] as String).toList());
+        final perms = <String, String>{};
+        final rates = <String, int>{};
+        for (final r in rows) {
+          final p = (r as Map)['permissions']?.toString() ?? '';
+          if (p.isNotEmpty) perms[r['name'] as String] = p;
+          final rate = (r['overtime_rate'] as num?)?.toInt() ?? 0;
+          if (rate > 0) rates[r['name'] as String] = rate;
+        }
+        await _putJobPerms(shopId, perms);
+        await _putJobRates(shopId, rates);
+      } catch (e) {
+        debugPrint('[DB] syncMetadata postes: $e');
+      }
     } catch (e) { debugPrint('[DB] syncMetadata: $e'); }
   }
 
@@ -4631,6 +5885,7 @@ end \$\$;""",
       _executeOp({'table': 'categories',     'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
       _executeOp({'table': 'brands',         'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
       _executeOp({'table': 'units',          'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
+      _executeOp({'table': 'job_titles',     'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
       _executeOp({'table': 'suppliers',      'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
       _executeOp({'table': 'incidents',      'op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
       _executeOp({'table': 'stock_movements','op': 'delete', 'col': 'shop_id',  'val': shopId, 'data': {}});
@@ -4860,6 +6115,15 @@ end \$\$;""",
       'categories_$shopId',
       'brands_$shopId',
       'units_$shopId',
+      // Les postes de l'établissement sont de la configuration, au même titre
+      // que les unités : une remise à zéro qui garde le catalogue n'a aucune
+      // raison de faire oublier qu'on emploie un chawarmier.
+      'job_titles_$shopId',
+      'job_title_perms_$shopId',
+      // Le taux des heures supplémentaires et l'heure de fermeture sont de la
+      // même nature : des règles de l'établissement, pas des données d'activité.
+      'job_title_rates_$shopId',
+      'staff_closing_time_$shopId',
     };
     final settingsKeys = HiveBoxes.settingsBox.keys
         .where((k) {
@@ -5177,6 +6441,20 @@ end \$\$;""",
     }
   }
 
+  /// Le membre [userId] de la boutique, tel que le CACHE local le connaît.
+  ///
+  /// Lecture SYNCHRONE et hors ligne : elle sert à mettre un nom sur l'auteur
+  /// d'une commande au moment de rendre une addition, et un rendu n'attend pas
+  /// le réseau. `null` si le cache ne le connaît pas — un membre parti, ou une
+  /// boutique dont la liste n'a jamais été tirée.
+  static Map<String, dynamic>? cachedMember(String shopId, String userId) {
+    if (shopId.isEmpty || userId.isEmpty) return null;
+    for (final m in _getShopMembersLocal(shopId)) {
+      if (m['user_id'] == userId) return m;
+    }
+    return null;
+  }
+
   static List<Map<String, dynamic>> _getShopMembersLocal(String shopId) {
     final raw = HiveBoxes.settingsBox.get('members_$shopId');
     if (raw == null) return [];
@@ -5324,6 +6602,18 @@ end \$\$;""",
     phone: r['phone'] as String?,
     whatsappPhone: r['whatsapp_phone'] as String?,
     email: r['email'] as String?,
+    facebookPixelId: r['facebook_pixel_id'] as String?,
+    // Colonne ajoutée par hotfix_178 : absente sur une base pas encore
+    // migrée → on retombe sur le défaut plutôt que de casser le mapping.
+    partnerDebtAlertDays:
+        (r['partner_debt_alert_days'] as num?)?.toInt() ?? 30,
+    // Colonnes ajoutées par hotfix_183 : même défaut défensif.
+    serviceLateSendMin: (r['service_late_send_min'] as num?)?.toInt() ??
+        kServiceLateSendDefault,
+    serviceLateKitchenMin: (r['service_late_kitchen_min'] as num?)?.toInt() ??
+        kServiceLateKitchenDefault,
+    serviceLatePassMin: (r['service_late_pass_min'] as num?)?.toInt() ??
+        kServiceLatePassDefault,
     createdAt: r['created_at'] != null
         ? DateTime.tryParse(r['created_at'] as String) : null,
     kind:         ShopKindX.fromKey(r['kind'] as String?),
@@ -5350,7 +6640,11 @@ end \$\$;""",
     'stock_qty': p.stockQty, 'stock_min_alert': p.stockMinAlert,
     'status': p.status.key,
     'is_active': p.isActive, 'is_visible_web': p.isVisibleWeb,
+    'track_stock': p.trackStock,
+    'activity_id': p.activityId,
     'image_url': p.imageUrl, 'rating': p.rating,
+    'draft_expires_at': p.draftExpiresAt?.toIso8601String(),
+    'unit': p.unit, 'internal_notes': p.internalNotes,
     'variants': p.variants.map(LocalStorageService.variantToMap).toList(),
     // expenses est List<Map> en local — Supabase stocke la somme en double
     'expenses': p.expenses.fold<double>(
@@ -5375,9 +6669,21 @@ end \$\$;""",
       stockQty: r['stock_qty'] as int? ?? 0,
       stockMinAlert: r['stock_min_alert'] as int? ?? 5,
       status: ProductStatusX.fromString(r['status'] as String?),
+      // Colonne absente sur une base pas encore migrée (hotfix_168) → null.
+      draftExpiresAt: r['draft_expires_at'] is String
+          ? DateTime.tryParse(r['draft_expires_at'] as String) : null,
       isActive: r['is_active'] as bool? ?? true,
       isVisibleWeb: r['is_visible_web'] as bool? ?? false,
+      // Défaut true : colonne absente sur une base pas encore migrée
+      // (hotfix_138) → suivi de stock historique conservé.
+      trackStock:   r['track_stock'] as bool? ?? true,
+      // Secteur restaurant (hotfix_141). Colonne absente sur une base pas
+      // encore migrée → null, le plat reste simplement non rattaché.
+      activityId:   r['activity_id'] as String?,
       imageUrl: r['image_url'], rating: r['rating'] as int? ?? 0,
+      // Colonnes absentes sur une base pas encore migrée (hotfix_169).
+      unit:          r['unit'] as String?,
+      internalNotes: r['internal_notes'] as String?,
       createdAt: createdRaw is String
           ? DateTime.tryParse(createdRaw)
           : (createdRaw is DateTime ? createdRaw : null),
@@ -5578,6 +6884,25 @@ end \$\$;""",
     _bgWrite({'table': 'orders', 'op': 'upsert', 'data': orderMap});
   }
 
+  /// Update CIBLÉ d'une commande : ne met à jour QUE les colonnes de [fields]
+  /// (sémantique SQL `UPDATE ... SET`), sans toucher aux autres (ni `status`).
+  ///
+  /// À utiliser pour les mutations PARTIELLES (paiement, livraison, frais…) au
+  /// lieu de [bgWriteOrder] (qui pousse la map complète). Raison : lors d'un
+  /// changement de statut (ex. scheduled → processing), plusieurs push
+  /// fire-and-forget de la map complète se faisaient la course ; un push
+  /// portant l'ANCIEN statut, s'il atterrissait après le push du nouveau
+  /// statut, faisait RÉGRESSER le statut (le trigger autorise
+  /// processing → scheduled). En n'envoyant que les champs réellement
+  /// modifiés, ces écritures ne touchent plus jamais `status` → plus de course.
+  static void bgUpdateOrder(String orderId, Map<String, dynamic> fields) {
+    if (orderId.isEmpty || fields.isEmpty) return;
+    _i._recentLocalOrderWrites[orderId] =
+        DateTime.now().millisecondsSinceEpoch;
+    _bgWrite({'table': 'orders', 'op': 'update',
+              'match': {'id': orderId}, 'data': fields});
+  }
+
   /// Soft-delete d'une commande via la RPC `delete_sale` (hotfix_084).
   ///
   /// Comportement :
@@ -5765,6 +7090,12 @@ end \$\$;""",
       }
       // Diff purge : supprimer les clients locaux de ce shop
       // qui n'existent plus distant.
+      // TODO P1-B-suite : syncClients présente le même angle mort que
+      // syncOrders/syncExpenses avant leur correctif — cette purge ne
+      // consulte pas la file d'attente, donc un client créé hors ligne et
+      // pas encore poussé peut être effacé. Non traité dans ce commit
+      // (périmètre financier), le correctif tient en un appel à
+      // `_pendingIdsFor('clients')`.
       final staleKeys = <dynamic>[];
       for (final key in HiveBoxes.clientsBox.keys) {
         final raw = HiveBoxes.clientsBox.get(key);

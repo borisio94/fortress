@@ -126,7 +126,7 @@ class _DeliveryModeSheetState extends State<_DeliveryModeSheet> {
             children: [
               Center(child: Container(width: 36, height: 4,
                   decoration: BoxDecoration(
-                      color: const Color(0xFFE5E7EB),
+                      color: AppColors.inputBorder,
                       borderRadius: BorderRadius.circular(2)))),
               const SizedBox(height: 12),
               Row(children: [
@@ -144,14 +144,14 @@ class _DeliveryModeSheetState extends State<_DeliveryModeSheet> {
                   child: Text('Comment la commande est-elle livrée ?',
                       style: AppTextStyles.label.copyWith(
                           fontWeight: FontWeight.w700,
-                          color: const Color(0xFF0F172A))),
+                          color: AppColors.onSurface)),
                 ),
               ]),
               const SizedBox(height: 6),
               Text(
                   'Le stock sera déduit de la bonne source selon votre choix.',
                   style: AppTextStyles.captionHint
-                      .copyWith(color: const Color(0xFF6B7280))),
+                      .copyWith(color: AppColors.textSecondary)),
               const SizedBox(height: 16),
 
               Expanded(
@@ -235,7 +235,7 @@ class _DeliveryModeSheetState extends State<_DeliveryModeSheet> {
                       icon: const Icon(Icons.check_rounded, size: 16),
                       label: const Text('Confirmer'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: AppColors.primaryFill,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8)),
@@ -272,7 +272,7 @@ class _DeliveryModeSheetState extends State<_DeliveryModeSheet> {
       onChanged: (id) => setState(() => _locationId = id),
       isDense: true, isExpanded: true,
       decoration: InputDecoration(
-        filled: true, fillColor: const Color(0xFFF9FAFB),
+        filled: true, fillColor: AppColors.inputFill,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(
             horizontal: 12, vertical: 10),
@@ -296,9 +296,9 @@ class _DeliveryModeSheetState extends State<_DeliveryModeSheet> {
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: AppTextStyles.bodySm
-            .copyWith(color: const Color(0xFFBBBBBB)),
-        prefixIcon: Icon(icon, size: 15, color: const Color(0xFFAAAAAA)),
-        filled: true, fillColor: const Color(0xFFF9FAFB), isDense: true,
+            .copyWith(color: AppColors.textHint),
+        prefixIcon: Icon(icon, size: 15, color: AppColors.textHint),
+        filled: true, fillColor: AppColors.inputFill, isDense: true,
         contentPadding: const EdgeInsets.symmetric(
             horizontal: 12, vertical: 10),
         border: OutlineInputBorder(
@@ -358,11 +358,11 @@ class _Tile extends StatelessWidget {
                   style: AppTextStyles.bodyBold.copyWith(
                       color: onTap == null
                           ? AppColors.textHint
-                          : (selected ? color : const Color(0xFF0F172A)))),
+                          : (selected ? color : AppColors.onSurface))),
               const SizedBox(height: 2),
               Text(subtitle,
                   style: AppTextStyles.captionHint
-                      .copyWith(color: const Color(0xFF9CA3AF))),
+                      .copyWith(color: AppColors.textHint)),
             ],
           ),
         ),
@@ -370,7 +370,7 @@ class _Tile extends StatelessWidget {
             selected ? Icons.radio_button_checked
                      : Icons.radio_button_off_rounded,
             size: 16,
-            color: selected ? color : const Color(0xFFBBBBBB)),
+            color: selected ? color : AppColors.textHint),
       ]),
     ),
   );

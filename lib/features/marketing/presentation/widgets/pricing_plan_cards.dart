@@ -156,7 +156,7 @@ class _PlanCard extends StatelessWidget {
               padding:
                   const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                  color: AppColors.primary,
+                  color: AppColors.primaryFill,
                   borderRadius: BorderRadius.circular(4)),
               child: Text('POPULAIRE',
                   style: AppTextStyles.micro.copyWith(

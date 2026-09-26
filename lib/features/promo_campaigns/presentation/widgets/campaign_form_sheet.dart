@@ -448,7 +448,7 @@ class _CampaignFormSheetState extends ConsumerState<CampaignFormSheet> {
                   style: AppTextStyles.body.copyWith(
                       fontWeight: FontWeight.w700, color: Colors.white)),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
                 elevation: 0,
                 shape: RoundedRectangleBorder(

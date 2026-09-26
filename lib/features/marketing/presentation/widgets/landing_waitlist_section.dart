@@ -87,7 +87,7 @@ class _LandingWaitlistSectionState extends State<LandingWaitlistSection> {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                      color: AppColors.primary,
+                      color: AppColors.primaryFill,
                       borderRadius: BorderRadius.circular(4)),
                   child: Text('BIENTÔT — Q3 2026',
                       style: AppTextStyles.micro.copyWith(
@@ -146,7 +146,7 @@ class _LandingWaitlistSectionState extends State<LandingWaitlistSection> {
                     ElevatedButton(
                       onPressed: _submitting ? null : _submit,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: AppColors.primaryFill,
                         foregroundColor: Colors.white,
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(

@@ -4,12 +4,15 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/config/app_modes.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/i18n/app_localizations.dart';
+import '../../../../core/permisions/subscription_provider.dart';
+import '../../../../core/permisions/user_plan.dart';
 import '../../../../core/router/route_names.dart';
 import '../../../../core/router/registration_flag.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/utils/country_currency.dart';
 import '../../../../core/utils/country_phone_data.dart';
 import '../../../../core/validators/input_validators.dart';
 import '../../../../core/validators/password_policy.dart';
@@ -20,8 +23,11 @@ import '../../../../shared/widgets/app_snack.dart';
 import '../../../../shared/widgets/auth_fields.dart';
 import '../../../../shared/widgets/language_switcher.dart';
 import '../../../../shared/widgets/phone_field.dart';
+import '../../../../shared/providers/current_shop_provider.dart';
+import '../../../shop_selector/domain/entities/shop_summary.dart';
 import '../../../shop_selector/domain/usecases/create_shop_usecase.dart';
 import '../../../shop_selector/presentation/bloc/shop_selector_bloc.dart';
+import '../../domain/post_signup_entry.dart';
 import '../bloc/auth_bloc.dart';
 import '../bloc/auth_event.dart';
 import '../bloc/auth_state.dart';
@@ -52,23 +58,13 @@ part '../widgets/register_step_recap.dart';
 // avec `_countryFromPhone` de CreateShopPage). Pas de champ explicite.
 // ═════════════════════════════════════════════════════════════════════════════
 
+// Choix DÉFINITIF, non modifiable après création (cf. kCreationSectors).
+// Les secteurs legacy restent valides en base mais ne sont plus proposés.
 const _kSectors = <_SectorOption>[
-  _SectorOption('retail',      'Commerce'),
-  _SectorOption('restaurant',  'Restaurant'),
-  _SectorOption('supermarche', 'Supermarché'),
-  _SectorOption('pharmacie',   'Pharmacie'),
   _SectorOption('ecommerce',   'E-commerce'),
-  _SectorOption('autre',       'Autre'),
+  _SectorOption('restaurant',  'Restaurant / Café'),
+  _SectorOption('fastfood',    'Fast-food'),
 ];
-
-const _countryCurrency = <String, String>{
-  'CM': 'XAF', 'TD': 'XAF', 'CF': 'XAF', 'CG': 'XAF', 'GA': 'XAF', 'GQ': 'XAF',
-  'SN': 'XOF', 'CI': 'XOF', 'BF': 'XOF', 'ML': 'XOF', 'NE': 'XOF', 'TG': 'XOF',
-  'BJ': 'XOF', 'GW': 'XOF',
-  'NG': 'NGN', 'GH': 'GHS', 'MA': 'MAD', 'TN': 'TND',
-  'FR': 'EUR', 'BE': 'EUR', 'DE': 'EUR', 'IT': 'EUR', 'ES': 'EUR',
-  'US': 'USD', 'CA': 'CAD', 'GB': 'GBP',
-};
 
 String _countryFromPhone(String? phone) {
   if (phone == null || phone.isEmpty) return 'CM';
@@ -102,10 +98,8 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   // ── Step 2 — Boutique ─────────────────────────────────────────────────
   final _shopNameCtrl    = TextEditingController();
-  final _shopAddressCtrl = TextEditingController();
-  String  _sector        = kEcommerceOnlyMode ? 'ecommerce' : 'retail';
+  String  _sector        = kDefaultSector;
   String? _shopNameError;
-  String? _shopAddressError;
 
   bool   _isOnline = true;
 
@@ -142,12 +136,6 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
               ? 'Minimum 2 caractères'
               : v.length > 60 ? 'Maximum 60 caractères' : null;
     }));
-    _shopAddressCtrl.addListener(() => setState(() {
-      final v = _shopAddressCtrl.text.trim();
-      _shopAddressError = v.isEmpty
-          ? null
-          : v.length < 2 ? 'Minimum 2 caractères' : null;
-    }));
   }
 
   Future<void> _checkConnectivity() async {
@@ -163,7 +151,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
   @override
   void dispose() {
     for (final c in [_namCtrl, _mailCtrl, _telCtrl, _passCtrl, _confCtrl,
-                     _shopNameCtrl, _shopAddressCtrl]) {
+                     _shopNameCtrl]) {
       c.dispose();
     }
     _pageCtrl.dispose();
@@ -185,9 +173,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   bool get _step2Valid =>
       _shopNameError == null &&
-      _shopNameCtrl.text.trim().length >= 2 &&
-      _shopAddressError == null &&
-      _shopAddressCtrl.text.trim().length >= 2;
+      _shopNameCtrl.text.trim().length >= 2;
 
   void _next() {
     if (_step == 0) {
@@ -203,8 +189,6 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
       setState(() {
         _shopNameError = _shopNameCtrl.text.trim().isEmpty
             ? 'Nom de boutique requis' : _shopNameError;
-        _shopAddressError = _shopAddressCtrl.text.trim().isEmpty
-            ? 'Adresse / ville requise' : _shopAddressError;
       });
       if (!_step2Valid) return;
     }
@@ -241,7 +225,7 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
 
   void _createShopAfterSignUp() {
     final country  = _countryFromPhone(_phoneFull);
-    final currency = _countryCurrency[country] ?? 'XAF';
+    final currency = currencyForCountry(country);
     context.read<ShopSelectorBloc>().add(CreateShopRequested(
       CreateShopParams(
         name:     _shopNameCtrl.text.trim(),
@@ -250,10 +234,69 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
         country:  country,
         phone:    null,
         email:    null,
-        address:  _shopAddressCtrl.text.trim().isNotEmpty
-            ? _shopAddressCtrl.text.trim() : null,
       ),
     ));
+  }
+
+  /// Vrai dès que l'attente du plan commence — voir le garde du listener.
+  bool _entering = false;
+
+  /// ON N'INTERROMPT PLUS LE PARCOURS PAR UNE DÉCONNEXION.
+  ///
+  /// Jusqu'au 22/09/2026, la création de la boutique se terminait par
+  /// `AuthLogoutRequested` et « Connectez-vous pour commencer » : l'utilisateur
+  /// ressaisissait les identifiants qu'il venait de choisir, trente secondes
+  /// plus tôt, pour son premier contact avec l'application.
+  ///
+  /// La raison était bonne. L'essai de 14 jours est créé par le déclencheur
+  /// SQL `create_trial_subscription` à l'insertion de la ligne `shops`, et
+  /// enchaîner appelait parfois `get_user_plan` AVANT qu'il y soit visible —
+  /// le compte neuf tombait alors sur un paywall « Expiré ». Le remède était
+  /// trop large : la session était valide, on la jetait par précaution.
+  ///
+  /// On REDEMANDE, cinq fois, avec un délai croissant plafonné à deux
+  /// secondes. La course se résout en quelques centaines de millisecondes. Un
+  /// essai qui n'arrive jamais signale autre chose — une table `plans` sans
+  /// ligne `trial` — et là, l'ancien chemin reprend : déconnexion et retour au
+  /// login, qui relit le plan depuis zéro.
+  ///
+  /// `registrationInProgress` reste posé pendant toute l'attente : c'est lui
+  /// qui empêche le routeur de trancher sur un plan en cours de chargement.
+  Future<void> _enterAfterShopCreated(ShopSummary shop) async {
+    for (var attempt = 0;; attempt++) {
+      await ref.read(subscriptionProvider.notifier).load();
+      if (!mounted) return;
+      final plan =
+          ref.read(subscriptionProvider).valueOrNull ?? UserPlan.empty();
+      final outcome = postSignUpOutcome(
+        trialVisible:
+            trialIsVisible(hasPlan: plan.hasPlan, isActive: plan.isActive),
+        attempt: attempt,
+      );
+
+      if (outcome == PostSignUpOutcome.retry) {
+        await Future<void>.delayed(trialLookupDelay(attempt));
+        if (!mounted) return;
+        continue;
+      }
+
+      registrationInProgress = false;
+      if (outcome == PostSignUpOutcome.enter) {
+        ref.read(currentShopProvider.notifier).setShop(shop);
+        ref.read(myShopsProvider.notifier).addShop(shop);
+        AppSnack.success(
+            context, 'Bienvenue ! Votre essai de 14 jours est activé.');
+        context.go(shopLandingRoute(shop.id));
+      } else {
+        context.read<AuthBloc>().add(AuthLogoutRequested());
+        AppSnack.success(
+            context,
+            'Compte créé ! Votre essai de 14 jours est activé. '
+            'Connectez-vous pour commencer.');
+        context.go(RouteNames.login);
+      }
+      return;
+    }
   }
 
   @override
@@ -277,19 +320,13 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
           ),
           BlocListener<ShopSelectorBloc, ShopSelectorState>(
             listener: (ctx, state) {
-              if (state is ShopCreated && _submitting) {
-                // Nouveau flux (2026-06-06) : l'essai 14 jours est DÉJÀ activé
-                // en base par le trigger create_trial_subscription. Plutôt que
-                // d'enchaîner en auto-login (où get_user_plan pouvait être
-                // appelé AVANT que le trial soit visible → paywall « Expiré »),
-                // on déconnecte et on renvoie vers l'écran de connexion. Au
-                // login suivant, le trial existe → aucun paywall.
-                context.read<AuthBloc>().add(AuthLogoutRequested());
-                AppSnack.success(ctx,
-                    'Compte créé ! Votre essai de 14 jours est activé. '
-                    'Connectez-vous pour commencer.');
-                ctx.go(RouteNames.login);
-                registrationInProgress = false;
+              if (state is ShopCreated && _submitting && !_entering) {
+                // L'attente du plan dure plusieurs secondes dans le pire cas.
+                // Un second passage y lancerait une deuxième boucle, et deux
+                // navigations concurrentes à l'arrivée.
+                _entering = true;
+                // ignore: discarded_futures
+                _enterAfterShopCreated(state.shop);
               } else if (state is ShopSelectorError && _submitting) {
                 // Compte créé OK mais shop KO → on envoie l'utilisateur sur
                 // le formulaire create-shop classique pour qu'il retente
@@ -415,19 +452,17 @@ class _BottomBar extends StatelessWidget {
               style: AppTextStyles.bodySecondary
                   .copyWith(fontWeight: FontWeight.w700)),
         ),
-        const SizedBox(width: 12),
-        // `Expanded` (au lieu d'une largeur fixe 200) : le bouton occupe la
-        // place restante et le label long « Démarrer mon essai 14 jours »
-        // n'est plus tronqué/comprimé.
-        Expanded(
-          child: AppPrimaryButton(
-            isLoading: state._submitting,
-            enabled: canForward && !state._submitting,
-            onTap: isLast ? state._submit : state._next,
-            label: isLast
-                ? 'Démarrer mon essai 14 jours'
-                : 'Continuer',
-          ),
+        const Spacer(),
+        // Bouton dimensionné au CONTENU, collé à l'angle droit, texte centré
+        // (demande utilisateur). `AppPrimaryButton` est content-sized par
+        // défaut (fullWidth:false) → la largeur épouse le label.
+        AppPrimaryButton(
+          isLoading: state._submitting,
+          enabled: canForward && !state._submitting,
+          onTap: isLast ? state._submit : state._next,
+          label: isLast
+              ? 'Démarrer mon essai 14 jours'
+              : 'Continuer',
         ),
       ]),
     );

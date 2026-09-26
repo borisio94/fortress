@@ -191,6 +191,49 @@ class TicketRepository {
     }
   }
 
+  // ── Super-admin : vision transversale (toutes boutiques) ─────────────────
+
+  /// Liste TOUS les tickets de TOUTES les boutiques (réservé super-admin via
+  /// la RPC `sa_list_tickets`, gardée serveur par `_is_super_admin()`).
+  /// Enrichi : `shop_name`, `opener_label`, `message_count`, `last_message_at`.
+  /// Filtres optionnels (null = pas de filtre). Ne throw jamais.
+  Future<List<Map<String, dynamic>>> saListTickets({
+    String? status,
+    String? level,
+    String? shopId,
+  }) async {
+    try {
+      final res = await _db.rpc('sa_list_tickets', params: {
+        'p_status':  status,
+        'p_level':   level,
+        'p_shop_id': shopId,
+      });
+      return [
+        for (final r in (res as List? ?? const []))
+          Map<String, dynamic>.from(r as Map),
+      ];
+    } catch (e) {
+      debugPrint('[Tickets] saListTickets error: $e');
+      return const [];
+    }
+  }
+
+  /// Compteurs pour le badge SA : `open_total` + `escalated_open` (tickets
+  /// ouverts remontés à super_admin). Retourne `null` en cas d'échec.
+  Future<Map<String, dynamic>?> saTicketCounters() async {
+    try {
+      final res = await _db.rpc('sa_ticket_counters');
+      if (res is List && res.isNotEmpty) {
+        return Map<String, dynamic>.from(res.first as Map);
+      }
+      if (res is Map) return Map<String, dynamic>.from(res);
+      return null;
+    } catch (e) {
+      debugPrint('[Tickets] saTicketCounters error: $e');
+      return null;
+    }
+  }
+
   /// Ajoute un message au ticket.
   Future<ShopTicketMessage?> postMessage({
     required String ticketId,

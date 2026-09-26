@@ -10,8 +10,9 @@ import '../../../../core/router/route_names.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/database/app_database.dart';
+import '../../../../core/services/account_access_policy.dart';
 import '../../../../core/storage/local_storage_service.dart';
-import '../../../../core/storage/hive_boxes.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../../../shared/widgets/app_snack.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../../../core/widgets/fortress_logo.dart';
@@ -40,37 +41,14 @@ class _ShopListPageState extends ConsumerState<ShopListPage> {
   /// True si l'utilisateur courant peut entamer le flow de création
   /// d'une boutique.
   ///
-  /// Règles :
-  ///   - Owner d'au moins une boutique en local → autorisé (cas multi-shop).
-  ///   - 0 membership en local pour cet uid → nouvel inscrit qui crée sa
-  ///     première boutique → autorisé. Sans cette branche, le check ci-dessus
-  ///     refusait à tort le tout premier compte (catch-22 : pour créer la
-  ///     1ʳᵉ boutique, il fallait déjà en posséder une).
-  ///   - Au moins un membership mais aucun shop possédé → employé/admin
-  ///     invité dans une autre boutique → bloqué.
+  /// LA RÈGLE N'EST PLUS ÉCRITE ICI. Elle l'était, et le garde de
+  /// `RouteNames.createShop` en tenait une seconde copie, à la main, avec un
+  /// commentaire qui demandait de les maintenir en miroir. Elles avaient
+  /// divergé : sans session, ce bouton refusait et le garde autorisait.
   ///
   /// Voir AppPermissions.canStartCreateShop pour le cas où un owner délègue
   /// la permission à un admin précis (granulaire serveur).
-  bool _canCreateShop() {
-    final uid = Supabase.instance.client.auth.currentUser?.id;
-    if (uid == null) return false;
-
-    final ownsAShop = HiveBoxes.shopsBox.values.any((raw) {
-      try {
-        final m = Map<String, dynamic>.from(raw);
-        return m['owner_id'] == uid;
-      } catch (_) { return false; }
-    });
-    if (ownsAShop) return true;
-
-    final hasAnyMembership = HiveBoxes.membershipsBox.values.any((raw) {
-      try {
-        final m = Map<String, dynamic>.from(raw);
-        return m['user_id'] == uid;
-      } catch (_) { return false; }
-    });
-    return !hasAnyMembership;
-  }
+  bool _canCreateShop() => currentUserMayCreateShop();
 
   /// Helper : check la permission + le quota multi-shop avant de naviguer
   /// vers la création. Si limite atteinte → UpgradeSheet, si pas autorisé
@@ -137,7 +115,7 @@ class _ShopListPageState extends ConsumerState<ShopListPage> {
                         .setShop(state.shops.first);
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (!context.mounted) return;
-                      context.go('/shop/${state.shops.first.id}/dashboard');
+                      context.go(shopLandingRoute(state.shops.first.id));
                     });
                   }
                 }
@@ -287,7 +265,7 @@ class _ShopListPageState extends ConsumerState<ShopListPage> {
                                     AppDatabase.syncMetadata(shop.id)
                                         .catchError((e) => debugPrint(
                                             '[ShopList] syncMetadata bg: $e'));
-                                    context.go('/shop/${shop.id}/dashboard');
+                                    context.go(shopLandingRoute(shop.id));
                                     return;
                                   }
 
@@ -302,7 +280,7 @@ class _ShopListPageState extends ConsumerState<ShopListPage> {
                                   }
                                   if (!mounted) return;
                                   setState(() => _loadingShopId = null);
-                                  context.go('/shop/${shop.id}/dashboard');
+                                  context.go(shopLandingRoute(shop.id));
                                 },
                               ),
                               childCount: state.shops.length,
@@ -374,7 +352,7 @@ class _ShopCardState extends State<_ShopCard> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: _hovered ? color.withValues(alpha:0.4) : AppColors.divider,
@@ -414,7 +392,7 @@ class _ShopCardState extends State<_ShopCard> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFECFDF5),
+                                color: AppColors.secondary.withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Row(
@@ -541,7 +519,7 @@ class _EmptyOrLoadingStateState extends State<_EmptyOrLoadingState> {
   Widget build(BuildContext context) {
     if (!_showEmpty) {
       // Pendant 3s : spinner discret
-      return const Center(
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -585,7 +563,7 @@ class _NewShopBtnState extends State<_NewShopBtn> {
               ? const EdgeInsets.symmetric(horizontal: 24, vertical: 12)
               : const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
           decoration: BoxDecoration(
-            color: _h ? AppColors.primary : AppColors.textPrimary,
+            color: _h ? AppColors.primaryFill : AppColors.textPrimary,
             borderRadius: BorderRadius.circular(10),
           ),
           child: Row(
@@ -883,7 +861,7 @@ class _UserTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isBlocked
@@ -898,7 +876,7 @@ class _UserTile extends StatelessWidget {
           decoration: BoxDecoration(
             color: isBlocked
                 ? const Color(0xFFFEE2E2)
-                : const Color(0xFFEEEDFE),
+                : AppColors.inputFill,
             shape: BoxShape.circle,
           ),
           child: Center(child: Text(initials,
@@ -922,7 +900,7 @@ class _UserTile extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                   decoration: BoxDecoration(
-                      color: const Color(0xFFEEEDFE),
+                      color: AppColors.inputFill,
                       borderRadius: BorderRadius.circular(4)),
                   child: Text('SA',
                       style: AppTextStyles.microBold
@@ -941,8 +919,8 @@ class _UserTile extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
                 color: isActive
-                    ? const Color(0xFFEEEDFE)
-                    : const Color(0xFFF3F4F6),
+                    ? AppColors.inputFill
+                    : AppColors.inputFill,
                 borderRadius: BorderRadius.circular(5),
               ),
               child: Text(planLabel,
@@ -952,7 +930,7 @@ class _UserTile extends StatelessWidget {
                           : AppColors.textHint)),
             )
           else
-            const Text('Sans plan', style: AppTextStyles.micro),
+            Text('Sans plan', style: AppTextStyles.micro),
           if (isBlocked)
             Text('Bloqué',
                 style: AppTextStyles.microBold

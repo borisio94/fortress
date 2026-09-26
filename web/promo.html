@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Promotion</title>
+<meta name="description" content="Découvrez notre promotion — paiement à la livraison." />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Promotion en cours" />
+<meta property="og:description" content="Profitez de notre promotion — commandez en quelques clics, paiement à la livraison." />
+<link rel="preconnect" href="https://hyxvussnlnvbkalqzovb.supabase.co" crossorigin />
+<style>
+  /* Thème sombre — aligné sur l'application (cf. catalogue.html). */
+  :root{ --brand:#8B5CF6; --brand-l:#A78BFA; --ink2:#A8B3C4; --line:#334155;
+         --soft:#0F172A; }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--soft);color:var(--ink2);-webkit-font-smoothing:antialiased}
+  .center{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:16px;text-align:center;padding:28px}
+  .spin{width:36px;height:36px;border:3px solid var(--line);border-top-color:var(--brand);
+    border-radius:50%;animation:r .8s linear infinite}
+  @keyframes r{to{transform:rotate(360deg)}}
+  .lbl{font-size:14px;font-weight:600}
+</style>
+</head>
+<body>
+
+<!--
+  Purge d'un éventuel service worker hérité (cohérent avec catalogue.html /
+  track.html / index.html). No-op si aucun SW. La page redirige de toute façon
+  vers le catalogue, qui purge aussi — ceci n'est qu'une ceinture de sécurité.
+-->
+<script>
+  (function () {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.getRegistrations().then(function (regs) {
+      if (!regs || !regs.length) return;
+      Promise.all(regs.map(function (r) { return r.unregister(); }))
+        .then(function () {
+          if (window.caches && caches.keys) {
+            return caches.keys().then(function (keys) {
+              return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+            });
+          }
+        }).catch(function () {});
+    });
+  })();
+</script>
+
+<div class="center"><div class="spin"></div><div class="lbl">Ouverture de la promotion…</div></div>
+
+<script>
+"use strict";
+(function(){
+  var SUPA = "https://hyxvussnlnvbkalqzovb.supabase.co";
+  var ANON = "sb_publishable_R7Jg-Tx4WRMkVI5TMC4jpQ_p8NHq4bd";
+
+  // ───────── Parse /promo/<shopId>/<campaignId> ─────────
+  var path = location.pathname.replace(/\/+$/,"");
+  var rest = (path.split("/promo/")[1] || "").split("/");
+  var SHOP = decodeURIComponent(rest[0] || "");
+  var CAMP = decodeURIComponent(rest[1] || "");
+
+  // Cible de repli : catalogue complet de la boutique (toujours valable).
+  var fallback = SHOP ? "/catalogue/" + encodeURIComponent(SHOP) : "/";
+
+  function go(url){ location.replace(url); }
+
+  if(!SHOP || !CAMP){ go(fallback); return; }
+
+  // RPC publique : incrémente view_count + renvoie {shop_id, product_ids[]}.
+  fetch(SUPA + "/rest/v1/rpc/get_public_promo_campaign",{
+    method:"POST",
+    headers:{ "apikey":ANON, "Authorization":"Bearer "+ANON, "Content-Type":"application/json" },
+    body: JSON.stringify({ p_campaign_id: CAMP })
+  }).then(function(r){
+    if(!r.ok) throw new Error("rpc " + r.status);
+    return r.text().then(function(t){ return t ? JSON.parse(t) : null; });
+  }).then(function(data){
+    // Campagne introuvable / autre boutique → catalogue complet.
+    if(!data || !data.shop_id || String(data.shop_id) !== SHOP){ go(fallback); return; }
+    var ids = Array.isArray(data.product_ids)
+      ? data.product_ids.filter(Boolean) : [];
+    // Catalogue filtré sur les produits de la campagne (page rapide).
+    go(ids.length
+      ? "/catalogue/" + encodeURIComponent(SHOP) + "?ids=" + ids.map(encodeURIComponent).join(",")
+      : fallback);
+  }).catch(function(){
+    // Réseau / RPC absente → ne jamais bloquer le client : catalogue complet.
+    go(fallback);
+  });
+})();
+</script>
+</body>
+</html>

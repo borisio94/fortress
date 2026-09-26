@@ -139,7 +139,7 @@ class _RecordAcompteDialogState extends State<RecordAcompteDialog> {
               suffixText: sym,
               isDense: true,
               filled: true,
-              fillColor: const Color(0xFFF9FAFB),
+              fillColor: AppColors.inputFill,
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide:
@@ -185,7 +185,7 @@ class _RecordAcompteDialogState extends State<RecordAcompteDialog> {
                 child: ElevatedButton(
                   onPressed: _due > 0 ? _validate : null,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     elevation: 0,
                     minimumSize: const Size(0, 44),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../../core/i18n/app_localizations.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
@@ -15,6 +16,7 @@ class AppSelectField extends StatelessWidget {
   final bool hasError;
   final VoidCallback onTap;
   final bool enabled;
+  final bool focused;
 
   const AppSelectField({
     super.key,
@@ -25,6 +27,7 @@ class AppSelectField extends StatelessWidget {
     this.hasError = false,
     required this.onTap,
     this.enabled = true,
+    this.focused = false,
   });
 
   @override
@@ -37,14 +40,16 @@ class AppSelectField extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: enabled
-              ? const Color(0xFFF9FAFB)
-              : const Color(0xFFF3F4F6),
+              ? AppColors.inputFill
+              : AppColors.divider,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: hasError
                 ? AppColors.error
-                : Theme.of(context).semantic.borderSubtle,
-            width: hasError ? 1.5 : 1,
+                : focused
+                    ? AppColors.primary
+                    : Theme.of(context).semantic.borderSubtle,
+            width: (hasError || focused) ? 1.5 : 1,
           ),
         ),
         child: Row(children: [
@@ -60,8 +65,8 @@ class AppSelectField extends StatelessWidget {
               hasValue ? value! : placeholder,
               style: AppTextStyles.body.copyWith(
                 color: hasValue
-                    ? const Color(0xFF1A1D2E)
-                    : const Color(0xFFBBBBBB),
+                    ? Theme.of(context).colorScheme.onSurface
+                    : AppColors.textHint,
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -71,8 +76,8 @@ class AppSelectField extends StatelessWidget {
             Icons.keyboard_arrow_down_rounded,
             size: 18,
             color: hasValue
-                ? const Color(0xFF6B7280)
-                : const Color(0xFFBBBBBB),
+                ? AppColors.textSecondary
+                : AppColors.textHint,
           ),
         ]),
       ),
@@ -185,6 +190,31 @@ class _MenuContainer extends StatefulWidget {
 
 class _MenuContainerState extends State<_MenuContainer> {
   late Set<String> _sel;
+  int _hi = 0;                          // index survolé au clavier
+  final Map<int, GlobalKey> _keys = {}; // pour ensureVisible
+
+  bool get _hasAdd => widget.onAdd != null;
+
+  /// Recherche affichée seulement au-delà de ce nombre d'entrées. En
+  /// dessous, un champ de filtre ne rend aucun service et capterait le
+  /// focus au détriment de la navigation au clavier.
+  static const int _searchThreshold = 8;
+
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _query = '';
+
+  bool get _showSearch => widget.items.length >= _searchThreshold;
+
+  /// Entrées réellement affichées. TOUTE la navigation clavier porte sur
+  /// cette liste et jamais sur `widget.items` : sinon la touche Entrée
+  /// validerait une entrée filtrée, donc invisible.
+  List<String> get _visible {
+    if (_query.trim().isEmpty) return widget.items;
+    final q = _query.trim().toLowerCase();
+    return widget.items.where((i) => i.toLowerCase().contains(q)).toList();
+  }
+
+  int  get _count  => _visible.length + (_hasAdd ? 1 : 0);
 
   @override
   void initState() {
@@ -193,116 +223,225 @@ class _MenuContainerState extends State<_MenuContainer> {
     if (widget.selected != null && widget.selected!.isNotEmpty) {
       _sel.add(widget.selected!);
     }
+    // Départ du surlignage = item sélectionné, sinon le 1er élément.
+    final selIdx = widget.selected == null
+        ? -1 : widget.items.indexOf(widget.selected!);
+    _hi = selIdx >= 0 ? selIdx : 0;
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  GlobalKey _keyFor(int i) => _keys.putIfAbsent(i, () => GlobalKey());
+
+  void _move(int d) {
+    if (_count == 0) return;
+    setState(() => _hi = (_hi + d).clamp(0, _count - 1));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _keys[_hi]?.currentContext;
+      if (ctx != null && Scrollable.maybeOf(ctx) != null) {
+        Scrollable.ensureVisible(ctx,
+            alignment: 0.5, duration: const Duration(milliseconds: 120));
+      }
+    });
+  }
+
+  void _activate() {
+    if (_count == 0) return;
+    final visible = _visible;
+    if (_hi < visible.length) {
+      final item = visible[_hi];
+      if (widget.multi) {
+        setState(() {
+          if (_sel.contains(item)) _sel.remove(item); else _sel.add(item);
+        });
+      }
+      widget.onSelect(item);
+    } else if (_hasAdd) {
+      Navigator.of(context).pop('__add__');
+    }
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent e) {
+    if (e is! KeyDownEvent) return KeyEventResult.ignored;
+    final k = e.logicalKey;
+    if (k == LogicalKeyboardKey.arrowDown) { _move(1);  return KeyEventResult.handled; }
+    if (k == LogicalKeyboardKey.arrowUp)   { _move(-1); return KeyEventResult.handled; }
+    if (k == LogicalKeyboardKey.enter ||
+        k == LogicalKeyboardKey.numpadEnter ||
+        k == LogicalKeyboardKey.space) { _activate(); return KeyEventResult.handled; }
+    if (k == LogicalKeyboardKey.escape) {
+      Navigator.of(context).maybePop();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha:0.10),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (widget.items.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 14),
-                child: Row(children: [
-                  Icon(Icons.info_outline_rounded,
-                      size: 15, color: AppColors.textSecondary),
-                  const SizedBox(width: 8),
-                  Text(context.l10n.invNoResult,
-                      style: AppTextStyles.bodySmSecondary),
-                ]),
-              )
-            else
-              ...widget.items.asMap().entries.map((e) {
-                final idx = e.key;
-                final item = e.value;
-                final isSelected = widget.multi
-                    ? _sel.contains(item)
-                    : (widget.selected == item);
-                // Alternance de fond : pair = blanc, impair = très léger violet
-                final bg = idx.isEven
-                    ? Theme.of(context).colorScheme.surface
-                    : AppColors.primarySurface.withValues(alpha:0.5);
-                return _MenuItem(
-                  label: item,
-                  isSelected: isSelected,
-                  background: bg,
-                  multi: widget.multi,
-                  canEdit: widget.onDelete != null || widget.onRename != null,
-                  onDelete: widget.onDelete != null
-                      ? () async {
-                    Navigator.of(context).pop('__deleted__');
-                    await widget.onDelete!(item);
-                  }
-                      : null,
-                  onRename: widget.onRename != null
-                      ? () async {
-                    Navigator.of(context).pop('__renamed__');
-                    await widget.onRename!(item);
-                  }
-                      : null,
-                  onTap: () {
-                    if (widget.multi) {
-                      setState(() {
-                        if (_sel.contains(item)) _sel.remove(item);
-                        else _sel.add(item);
-                      });
-                      widget.onSelect(item);
-                    } else {
-                      widget.onSelect(item);
-                    }
-                  },
-                );
-              }),
-
-            // Bouton Ajouter
-            if (widget.onAdd != null) ...[
-              Divider(
-                  height: 1, color: Theme.of(context).semantic.borderSubtle),
-              InkWell(
-                onTap: () async {
-                  // Pop le menu d'abord
-                  Navigator.of(context).pop('__add__');
-                },
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
-                  color: Theme.of(context).colorScheme.surface,
-                  child: Row(children: [
-                    Container(
-                      width: 20, height: 20,
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(5),
-                      ),
-                      child: const Icon(Icons.add_rounded,
-                          size: 14, color: Colors.white),
-                    ),
-                    const SizedBox(width: 10),
-                    Text(widget.addLabel ?? 'Ajouter',
-                        style: AppTextStyles.bodySm.copyWith(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w600)),
-                  ]),
-                ),
-              ),
-            ],
+    final visible  = _visible;
+    final addIndex = visible.length;
+    return Focus(
+      autofocus: true,
+      onKeyEvent: _onKey,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha:0.10),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
           ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_showSearch) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                  child: TextField(
+                    controller: _searchCtrl,
+                    autofocus: true,
+                    style: AppTextStyles.input,
+                    decoration: InputDecoration(
+                      hintText: 'Rechercher…',
+                      hintStyle: AppTextStyles.inputHint,
+                      prefixIcon: Icon(Icons.search_rounded,
+                          size: 18, color: AppColors.textHint),
+                      isDense: true,
+                      filled: true,
+                      fillColor: AppColors.inputFill,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none),
+                    ),
+                    // Le surlignage repart en tête : l'entrée visée avant
+                    // le filtre n'est probablement plus à l'écran.
+                    onChanged: (v) => setState(() { _query = v; _hi = 0; }),
+                  ),
+                ),
+                Divider(
+                    height: 1, color: Theme.of(context).semantic.borderSubtle),
+              ],
+              if (visible.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 14),
+                  child: Row(children: [
+                    Icon(Icons.info_outline_rounded,
+                        size: 15, color: AppColors.textSecondary),
+                    const SizedBox(width: 8),
+                    Text(context.l10n.invNoResult,
+                        style: AppTextStyles.bodySmSecondary),
+                  ]),
+                )
+              else
+                ...visible.asMap().entries.map((e) {
+                  final idx = e.key;
+                  final item = e.value;
+                  final isSelected = widget.multi
+                      ? _sel.contains(item)
+                      : (widget.selected == item);
+                  // Alternance de fond, DÉRIVÉE DU THÈME et non d'une teinte
+                  // fixe : `primarySurface` est un violet pâle conçu pour le
+                  // mode clair, il produisait en sombre des bandes claires qui
+                  // écrasaient le texte. Un voile de 4 % de la couleur de
+                  // texte se lit comme une rayure discrète dans les deux modes.
+                  final cs = Theme.of(context).colorScheme;
+                  final bg = idx.isEven
+                      ? cs.surface
+                      : Color.alphaBlend(
+                          cs.onSurface.withValues(alpha: 0.04), cs.surface);
+                  return _MenuItem(
+                    key: _keyFor(idx),
+                    label: item,
+                    isSelected: isSelected,
+                    highlighted: idx == _hi,
+                    background: bg,
+                    multi: widget.multi,
+                    canEdit: widget.onDelete != null || widget.onRename != null,
+                    onDelete: widget.onDelete != null
+                        ? () async {
+                      Navigator.of(context).pop('__deleted__');
+                      await widget.onDelete!(item);
+                    }
+                        : null,
+                    onRename: widget.onRename != null
+                        ? () async {
+                      Navigator.of(context).pop('__renamed__');
+                      await widget.onRename!(item);
+                    }
+                        : null,
+                    onTap: () {
+                      if (widget.multi) {
+                        setState(() {
+                          if (_sel.contains(item)) _sel.remove(item);
+                          else _sel.add(item);
+                        });
+                        widget.onSelect(item);
+                      } else {
+                        widget.onSelect(item);
+                      }
+                    },
+                  );
+                }),
+
+              // Bouton Ajouter
+              if (_hasAdd) ...[
+                Divider(
+                    height: 1, color: Theme.of(context).semantic.borderSubtle),
+                InkWell(
+                  key: _keyFor(addIndex),
+                  onTap: () async {
+                    Navigator.of(context).pop('__add__');
+                  },
+                  child: Container(
+                    width: double.infinity,
+                    margin: _hi == addIndex
+                        ? const EdgeInsets.all(4) : EdgeInsets.zero,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: _hi == addIndex
+                          ? AppColors.primarySurface.withValues(alpha:0.6)
+                          : Theme.of(context).colorScheme.surface,
+                      borderRadius: _hi == addIndex
+                          ? BorderRadius.circular(8) : null,
+                      border: _hi == addIndex
+                          ? Border.all(color: AppColors.primary, width: 1.5)
+                          : null,
+                    ),
+                    child: Row(children: [
+                      Container(
+                        width: 20, height: 20,
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryFill,
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: const Icon(Icons.add_rounded,
+                            size: 14, color: Colors.white),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(widget.addLabel ?? 'Ajouter',
+                          style: AppTextStyles.bodySm.copyWith(
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.w600)),
+                    ]),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );
@@ -312,6 +451,7 @@ class _MenuContainerState extends State<_MenuContainer> {
 class _MenuItem extends StatelessWidget {
   final String label;
   final bool isSelected;
+  final bool highlighted;
   final Color background;
   final bool multi;
   final bool canEdit;
@@ -320,8 +460,10 @@ class _MenuItem extends StatelessWidget {
   final VoidCallback? onRename;
 
   const _MenuItem({
+    super.key,
     required this.label,
     required this.isSelected,
+    this.highlighted = false,
     required this.background,
     required this.multi,
     this.canEdit = false,
@@ -332,11 +474,25 @@ class _MenuItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return InkWell(
       onTap: onTap,
       child: Container(
         width: double.infinity,
-        color: background,
+        margin: highlighted ? const EdgeInsets.all(4) : EdgeInsets.zero,
+        decoration: BoxDecoration(
+          // Surlignage composé SUR la surface plutôt qu'une teinte claire
+          // fixe : en sombre, `primarySurface` donnait une bande pâle sur
+          // laquelle le texte disparaissait.
+          color: highlighted
+              ? Color.alphaBlend(
+                  AppColors.primary.withValues(alpha: 0.16),
+                  theme.colorScheme.surface)
+              : background,
+          borderRadius: highlighted ? BorderRadius.circular(8) : null,
+          border: highlighted
+              ? Border.all(color: AppColors.primary, width: 1.5) : null,
+        ),
         padding: const EdgeInsets.only(left: 14, right: 4, top: 8, bottom: 8),
         child: Row(children: [
           if (multi) ...[
@@ -350,7 +506,7 @@ class _MenuItem extends StatelessWidget {
                 border: Border.all(
                   color: isSelected
                       ? AppColors.primary
-                      : const Color(0xFFD1D5DB),
+                      : Theme.of(context).semantic.borderSubtle,
                   width: 1.5,
                 ),
               ),
@@ -369,7 +525,7 @@ class _MenuItem extends StatelessWidget {
                     ? FontWeight.w600 : FontWeight.w400,
                 color: isSelected
                     ? AppColors.primary
-                    : const Color(0xFF1A1D2E),
+                    : Theme.of(context).colorScheme.onSurface,
               ),
             ),
           ),
@@ -381,7 +537,7 @@ class _MenuItem extends StatelessWidget {
             if (onRename != null)
               _IconAction(
                 icon: Icons.edit_outlined,
-                color: const Color(0xFF6B7280),
+                color: AppColors.textSecondary,
                 onTap: onRename!,
               ),
             if (onDelete != null)
@@ -429,6 +585,13 @@ class AppSelectWidget extends StatefulWidget {
   /// Callback appelé quand l'utilisateur renomme un item
   final Future<void> Function(String oldName, String newName)? onRename;
 
+  /// Active la navigation clavier : le champ devient focusable, s'ouvre
+  /// automatiquement quand le focus y arrive au clavier (Entrée/→/Tab depuis
+  /// le champ précédent), affiche un anneau de focus, et — après un choix —
+  /// avance le focus au champ suivant. Laisser `false` ailleurs (ouverture au
+  /// clic uniquement, comportement historique).
+  final bool keyboardFlow;
+
   const AppSelectWidget({
     super.key,
     required this.label,
@@ -441,6 +604,7 @@ class AppSelectWidget extends StatefulWidget {
     this.onAdd,
     this.onDelete,
     this.onRename,
+    this.keyboardFlow = false,
   });
 
   @override
@@ -450,7 +614,55 @@ class AppSelectWidget extends StatefulWidget {
 class _AppSelectWidgetState extends State<AppSelectWidget> {
   final _key = GlobalKey();
 
-  Future<void> _open() async {
+  // Navigation clavier (uniquement si widget.keyboardFlow).
+  FocusNode? _focus;
+  bool _menuOpen = false;        // menu actuellement ouvert
+  bool _menuJustClosed = false;  // évite la réouverture immédiate au retour focus
+  bool _pointerDown = false;     // distingue clic (onTap gère) vs focus clavier
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.keyboardFlow) {
+      _focus = FocusNode(debugLabel: 'select:${widget.label}');
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus?.dispose();
+    super.dispose();
+  }
+
+  // Focus gagné : au clavier → ouvre le menu ; au clic → onTap s'en charge.
+  void _onFocusChange(bool has) {
+    if (mounted) setState(() {}); // redessine l'anneau de focus
+    if (!has) { _pointerDown = false; _menuJustClosed = false; return; }
+    if (_pointerDown) { _pointerDown = false; return; }       // arrivé par clic
+    if (_menuJustClosed) { _menuJustClosed = false; return; } // retour post-menu
+    if (_menuOpen) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && (_focus?.hasFocus ?? false) && !_menuOpen) {
+        _open(byKeyboard: true);
+      }
+    });
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent e) {
+    if (_menuOpen || e is! KeyDownEvent) return KeyEventResult.ignored;
+    if (e.logicalKey == LogicalKeyboardKey.enter ||
+        e.logicalKey == LogicalKeyboardKey.numpadEnter ||
+        e.logicalKey == LogicalKeyboardKey.arrowDown ||
+        e.logicalKey == LogicalKeyboardKey.space) {
+      _open(byKeyboard: true);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  Future<void> _open({bool byKeyboard = false}) async {
+    if (_menuOpen) return;
+    if (mounted) setState(() => _menuOpen = true);
     final result = await AppSelectMenu.show(
       context: context,
       anchorKey: _key,
@@ -463,14 +675,32 @@ class _AppSelectWidgetState extends State<AppSelectWidget> {
           ? (item) => _showRenameDialog(item) : null,
     );
 
+    _menuOpen = false;
+    _menuJustClosed = true;
     if (!mounted) return;
 
+    var chose = false;
     if (result == '__add__' && widget.onAdd != null) {
       final newVal = await widget.onAdd!(context);
-      if (newVal != null && mounted) widget.onChanged(newVal);
+      if (newVal != null && mounted) { widget.onChanged(newVal); chose = true; }
     } else if (result != null && result != '__container__'
         && !result.startsWith('__')) {
       widget.onChanged(result);
+      chose = true;
+    }
+
+    // Flux clavier UNIQUEMENT (pas au clic souris) : après un choix, avancer AU
+    // champ suivant (qui s'ouvrira à son tour). nextFocus() sur _focus part de
+    // CE champ → robuste même si showMenu a restauré le focus. Post-frame pour
+    // passer après la restauration de focus du menu.
+    if (widget.keyboardFlow && byKeyboard && mounted) {
+      if (chose) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _focus?.nextFocus();
+        });
+      } else {
+        _focus?.requestFocus();
+      }
     }
   }
 
@@ -501,12 +731,12 @@ class _AppSelectWidgetState extends State<AppSelectWidget> {
                     controller: ctrl,
                     autofocus: true,
                     style: AppTextStyles.body.copyWith(
-                        color: const Color(0xFF1A1D2E)),
+                        color: Theme.of(context).colorScheme.onSurface),
                     decoration: InputDecoration(
                       hintStyle: AppTextStyles.bodySm.copyWith(
-                          color: const Color(0xFFBBBBBB)),
+                          color: AppColors.textHint),
                       filled: true,
-                      fillColor: const Color(0xFFF9FAFB),
+                      fillColor: AppColors.inputFill,
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 11),
@@ -533,7 +763,7 @@ class _AppSelectWidgetState extends State<AppSelectWidget> {
                         onPressed: () => Navigator.of(dc).pop(null),
                         style: OutlinedButton.styleFrom(
                           minimumSize: const Size(0, 44),
-                          foregroundColor: const Color(0xFF6B7280),
+                          foregroundColor: AppColors.textSecondary,
                         ),
                         child: const Text('Annuler'),
                       ),
@@ -542,7 +772,7 @@ class _AppSelectWidgetState extends State<AppSelectWidget> {
                     Expanded(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
+                          backgroundColor: AppColors.primaryFill,
                           foregroundColor: Colors.white,
                           elevation: 0,
                           minimumSize: const Size(0, 44),
@@ -571,29 +801,49 @@ class _AppSelectWidgetState extends State<AppSelectWidget> {
 
   @override
   Widget build(BuildContext context) {
+    Widget field = AppSelectField(
+      key: _key,
+      value: widget.value,
+      placeholder: 'Sélectionner…',
+      prefixIcon: widget.icon,
+      focused: widget.keyboardFlow && (_focus?.hasFocus ?? false),
+      onTap: () {
+        _pointerDown = true; // origine clic → _onFocusChange n'ouvre pas 2×
+        _open();
+      },
+    );
+    if (widget.keyboardFlow) {
+      field = Listener(
+        onPointerDown: (_) => _pointerDown = true,
+        child: Focus(
+          focusNode: _focus,
+          onFocusChange: _onFocusChange,
+          onKeyEvent: _onKey,
+          child: field,
+        ),
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        RichText(text: TextSpan(
-          style: AppTextStyles.caption.copyWith(
-              color: const Color(0xFF6B7280)),
-          children: [
-            TextSpan(text: widget.label),
-            if (widget.required)
-              const TextSpan(text: ' *',
-                  style: TextStyle(
-                      color: Color(0xFFEF4444),
-                      fontWeight: FontWeight.w700)),
-          ],
-        )),
-        const SizedBox(height: 4),
-        AppSelectField(
-          key: _key,
-          value: widget.value,
-          placeholder: 'Sélectionner…',
-          prefixIcon: widget.icon,
-          onTap: _open,
-        ),
+        // Label interne rendu UNIQUEMENT s'il est non vide — évite une ligne
+        // fantôme quand le widget est déjà coiffé d'un label externe (_LF).
+        if (widget.label.isNotEmpty) ...[
+          RichText(text: TextSpan(
+            style: AppTextStyles.caption.copyWith(
+                color: AppColors.textSecondary),
+            children: [
+              TextSpan(text: widget.label),
+              if (widget.required)
+                const TextSpan(text: ' *',
+                    style: TextStyle(
+                        color: Color(0xFFEF4444),
+                        fontWeight: FontWeight.w700)),
+            ],
+          )),
+          const SizedBox(height: 4),
+        ],
+        field,
       ],
     );
   }
@@ -685,7 +935,7 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
                           border: Border.all(
                             color: sel
                                 ? AppColors.primary
-                                : const Color(0xFFD1D5DB),
+                                : Theme.of(context).semantic.borderSubtle,
                             width: 1.5,
                           ),
                         ),
@@ -702,7 +952,7 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
                                   : FontWeight.w400,
                               color: sel
                                   ? AppColors.primary
-                                  : const Color(0xFF1A1D2E))),
+                                  : Theme.of(context).colorScheme.onSurface)),
                     ]),
                   ),
                 );
@@ -719,7 +969,7 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
             ElevatedButton(
               onPressed: () => Navigator.of(dc).pop(temp),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
                 minimumSize: Size.zero,
                 padding: const EdgeInsets.symmetric(
@@ -765,20 +1015,20 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
           if (widget.icon != null) ...[
             Icon(widget.icon, size: 14,
                 color: count > 0
-                    ? AppColors.primary : const Color(0xFF6B7280)),
+                    ? AppColors.primary : AppColors.textSecondary),
             const SizedBox(width: 4),
           ],
           Text(display,
               style: AppTextStyles.caption.copyWith(
                   color: count > 0
-                      ? AppColors.primary : const Color(0xFF374151))),
+                      ? AppColors.primary : AppColors.onSurface)),
           if (count > 1) ...[
             const SizedBox(width: 4),
             Container(
               padding: const EdgeInsets.symmetric(
                   horizontal: 5, vertical: 1),
               decoration: BoxDecoration(
-                  color: AppColors.primary,
+                  color: AppColors.primaryFill,
                   borderRadius: BorderRadius.circular(10)),
               child: Text('$count',
                   style: AppTextStyles.micro.copyWith(

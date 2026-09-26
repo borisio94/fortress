@@ -22,6 +22,14 @@ import '../../domain/models/member_role.dart';
 import 'employee_form_sheet.dart';
 import '../widgets/owner_approval_banner.dart';
 import '../../../../shared/widgets/form_sheet.dart';
+import '../../../restaurant/presentation/widgets/resto_surfaces.dart';
+import '../../../restaurant/presentation/widgets/resto_section_header.dart';
+import '../../../restaurant/presentation/widgets/resto_tab_kit.dart'
+    show RestoInlineTag;
+import '../../../restaurant/presentation/widgets/resto_underline_tabs.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../../../shared/providers/cart_pane_provider.dart'
+    show kCartPaneFullWidthBelow;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // EmployeesPage — Ressources humaines.
@@ -96,6 +104,19 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
 
     final myRole          = perms.effectiveRole;
     final currentUserId   = _currentUserId();
+
+    // RESTAURATION : sa propre mise en page (épuration du 24/09/2026). Cet
+    // écran est partagé avec l'e-commerce — qui garde, lui, la mise en page
+    // ci-dessous, inchangée. Seule la présentation diffère : filtres,
+    // recherche, gardes et actions sont les mêmes méthodes.
+    if (restoDecorActive) {
+      return _buildResto(
+        asyncList:     asyncList,
+        myRole:        myRole,
+        currentUserId: currentUserId,
+        isOwner:       perms.isOwner,
+      );
+    }
 
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -182,6 +203,138 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
     );
 
     return body;
+  }
+
+  // ─── Restauration ─────────────────────────────────────────────────────────
+
+  /// Les onglets, dans l'ordre : l'index de [RestoUnderlineTabs] y lit le
+  /// filtre que [_applyFilters] connaît déjà.
+  static const _kFilters = ['all', 'active', 'suspended', 'archived'];
+
+  /// Le champ de recherche est-il déplié ? Replié, il n'est qu'une icône.
+  bool _searchOpen = false;
+
+  void _toggleSearch() => setState(() {
+        _searchOpen = !_searchOpen;
+        // Refermer, c'est renoncer à la recherche : une requête invisible qui
+        // filtrerait encore la liste la ferait paraître incomplète.
+        if (!_searchOpen) _query = '';
+      });
+
+  Widget _buildResto({
+    required AsyncValue<List<Employee>> asyncList,
+    required MemberRole?                myRole,
+    required String?                    currentUserId,
+    required bool                       isOwner,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final l  = context.l10n;
+    // Les compteurs lisent la liste TOTALE, pas la liste filtrée — comme les
+    // anciennes cartes de chiffres. Vide pendant le premier chargement.
+    final all     = asyncList.valueOrNull ?? const <Employee>[];
+    final compact =
+        MediaQuery.sizeOf(context).width < kCartPaneFullWidthBelow;
+    int count(bool Function(Employee) test) => all.where(test).length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Les trois cartes de chiffres deviennent le sous-titre.
+        // Le NOM DU MENU (« Accès à l'app »), pas « Membres » : la barre et le
+        // corps ne doivent pas nommer la même page de deux façons.
+        RestoSectionHeader(
+          title:    'Accès à l\'app',
+          subtitle: _restoSubtitle(all, compact: compact),
+          trailing: _AddMemberButton(onTap: _openCreateSheet),
+        ),
+
+        OwnerApprovalBanner(shopId: widget.shopId, isOwner: isOwner),
+
+        // Onglets soulignés + la recherche, repliée en icône au bout.
+        Row(children: [
+          Expanded(child: RestoUnderlineTabs(
+            items: [
+              RestoUnderlineTab(label: l.hrFilterAll,
+                  count: all.length, mutedWhenEmpty: false),
+              RestoUnderlineTab(label: l.hrFilterActive,
+                  count: count((e) => e.isActive)),
+              RestoUnderlineTab(label: l.hrFilterSuspended,
+                  count: count((e) => e.isSuspended)),
+              RestoUnderlineTab(label: l.hrFilterArchived,
+                  count: count((e) => e.isArchived)),
+            ],
+            selected: _kFilters.indexOf(_filter),
+            onSelect: (i) => setState(() => _filter = _kFilters[i]),
+          )),
+          IconButton(
+            tooltip:   _searchOpen ? 'Fermer la recherche'
+                                   : l.hrSearchPlaceholder,
+            onPressed: _toggleSearch,
+            icon: Icon(
+                _searchOpen ? Icons.close_rounded : Icons.search_rounded,
+                size: 18, color: AppColors.textSecondary),
+          ),
+          const SizedBox(width: 8),
+        ]),
+        if (_searchOpen)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: _MembersSearchBar(
+              hint:      l.hrSearchPlaceholder,
+              autofocus: true,
+              onChange:  (v) => setState(() => _query = v),
+            ),
+          ),
+
+        Expanded(child: asyncList.when(
+          loading: () => Center(child: CircularProgressIndicator(
+              color: cs.primary)),
+          error:   (e, _) => _ErrorView(message: e.toString()),
+          data: (list) {
+            final filtered = _applyFilters(list);
+            return RefreshIndicator(
+              color: cs.primary,
+              onRefresh: () => ref
+                  .read(employeesProvider(widget.shopId).notifier)
+                  .refresh(),
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                child: filtered.isEmpty
+                    ? _EmptyView(
+                        hasNoEmployees: list.isEmpty,
+                        onCreate: _openCreateSheet,
+                      )
+                    : _RestoMembersSections(
+                        filtered:      filtered,
+                        compact:       compact,
+                        myRole:        myRole,
+                        currentUserId: currentUserId,
+                        onEdit:        _openEditSheet,
+                        onAction:      _handleAction,
+                      ),
+              ),
+            );
+          },
+        )),
+      ],
+    );
+  }
+
+  /// « 4 membres · 3 actifs · 2 admins sur 3 possibles ». Sur téléphone, le
+  /// quota tombe : il ne sert qu'à qui s'apprête à nommer un admin.
+  ///
+  /// Le quota compte le PROPRIÉTAIRE, comme [_kMaxAdmins] et le déclencheur
+  /// `trg_enforce_max_admins` qu'il reflète : trois places, lui compris.
+  static String _restoSubtitle(List<Employee> all, {required bool compact}) {
+    String n(int k, String word) => '$k $word${k > 1 ? 's' : ''}';
+    final members = all.length;
+    final active  = all.where((e) => e.isActive).length;
+    final admins  = all.where(
+        (e) => e.role == MemberRole.admin || e.isOwner).length;
+    final base = '${n(members, 'membre')} · ${n(active, 'actif')}';
+    if (compact) return base;
+    return '$base · ${n(admins, 'admin')} sur $_kMaxAdmins possibles';
   }
 
   List<Employee> _applyFilters(List<Employee> list) {
@@ -501,22 +654,36 @@ class _MembersTopbar extends StatelessWidget {
                 color: cs.onSurface,
               )),
         ),
-        Material(
-          color: cs.primary,
-          borderRadius: BorderRadius.circular(12),
-          elevation: 0,
-          child: InkWell(
-            onTap: onCreate,
-            borderRadius: BorderRadius.circular(12),
-            child: SizedBox(
-              width: 42,
-              height: 42,
-              child: Icon(Icons.person_add_rounded,
-                  size: 22, color: cs.onPrimary),
-            ),
-          ),
-        ),
+        _AddMemberButton(onTap: onCreate),
       ]),
+    );
+  }
+}
+
+/// Le bouton « + » d'invitation — partagé par les deux mises en page
+/// (e-commerce et restauration), pour que le flux d'invitation n'ait qu'une
+/// porte, identique partout.
+class _AddMemberButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _AddMemberButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Material(
+      color: cs.primary,
+      borderRadius: BorderRadius.circular(12),
+      elevation: 0,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(
+          width: 42,
+          height: 42,
+          child: Icon(Icons.person_add_rounded,
+              size: 22, color: cs.onPrimary),
+        ),
+      ),
     );
   }
 }
@@ -580,7 +747,7 @@ class _StatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
       decoration: BoxDecoration(
-        color: sem.elevatedSurface,
+        color: (restoDecorActive ? restoGlassFill(context) : sem.elevatedSurface),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: sem.borderSubtle),
       ),
@@ -746,7 +913,7 @@ class _MembersFilterPopupBtn extends StatelessWidget {
         )).toList(),
         child: Container(
           decoration: BoxDecoration(
-            color: isActive ? cs.primary.withValues(alpha: 0.10) : sem.elevatedSurface,
+            color: isActive ? cs.primary.withValues(alpha: 0.10) : (restoDecorActive ? restoGlassFill(context) : sem.elevatedSurface),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
                 color: isActive
@@ -786,7 +953,14 @@ class _MembersFilterPopupBtn extends StatelessWidget {
 class _MembersSearchBar extends StatelessWidget {
   final String              hint;
   final ValueChanged<String> onChange;
-  const _MembersSearchBar({required this.hint, required this.onChange});
+  /// Restauration : le champ s'ouvre depuis l'icône — on veut y taper tout
+  /// de suite. `false` (e-commerce) : le champ est toujours là, inchangé.
+  final bool autofocus;
+  const _MembersSearchBar({
+    required this.hint,
+    required this.onChange,
+    this.autofocus = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -794,6 +968,7 @@ class _MembersSearchBar extends StatelessWidget {
     final cs    = theme.colorScheme;
     final sem   = theme.semantic;
     return TextField(
+      autofocus: autofocus,
       onChanged: onChange,
       style: AppTextStyles.body.copyWith(color: cs.onSurface),
       decoration: InputDecoration(
@@ -806,7 +981,7 @@ class _MembersSearchBar extends StatelessWidget {
         contentPadding: const EdgeInsets.symmetric(
             horizontal: 12, vertical: 12),
         filled: true,
-        fillColor: sem.elevatedSurface,
+        fillColor: (restoDecorActive ? restoGlassFill(context) : sem.elevatedSurface),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(color: sem.borderSubtle),
@@ -914,19 +1089,29 @@ class _MembersSections extends StatelessWidget {
     );
   }
 
-  bool _canEdit(Employee target) {
-    if (target.userId == currentUserId) return false;
-    if (myRole == null) return false;
-    return myRole!.canManage(target.role);
-  }
+  bool _canEdit(Employee target) =>
+      _canEditMember(target, myRole: myRole, currentUserId: currentUserId);
 
-  bool _canDelete(Employee target) {
-    if (target.isOwner) return false;
-    if (target.role == MemberRole.user) {
-      return myRole == MemberRole.owner || myRole == MemberRole.admin;
-    }
-    return myRole == MemberRole.owner;
+  bool _canDelete(Employee target) =>
+      _canDeleteMember(target, myRole: myRole);
+}
+
+// Les deux gardes de ligne, partagées par les deux mises en page (e-commerce
+// et restauration) : une seule définition, pour qu'elles ne divergent jamais.
+// Reflets côté client des déclencheurs SQL — corps inchangés.
+bool _canEditMember(Employee target,
+    {required MemberRole? myRole, required String? currentUserId}) {
+  if (target.userId == currentUserId) return false;
+  if (myRole == null) return false;
+  return myRole.canManage(target.role);
+}
+
+bool _canDeleteMember(Employee target, {required MemberRole? myRole}) {
+  if (target.isOwner) return false;
+  if (target.role == MemberRole.user) {
+    return myRole == MemberRole.owner || myRole == MemberRole.admin;
   }
+  return myRole == MemberRole.owner;
 }
 
 class _SectionCard extends StatelessWidget {
@@ -949,7 +1134,7 @@ class _SectionCard extends StatelessWidget {
     final sem   = theme.semantic;
     return Container(
       decoration: BoxDecoration(
-        color: sem.elevatedSurface,
+        color: (restoDecorActive ? restoGlassFill(context) : sem.elevatedSurface),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: sem.borderSubtle),
         boxShadow: accentEdge
@@ -1148,74 +1333,105 @@ class _MemberRow extends StatelessWidget {
 
       // Menu actions (jamais pour owner — règle UI)
       if (!employee.isOwner) const SizedBox(width: 6),
-      if (!employee.isOwner) Builder(builder: (_) {
-        final hasAny = canEdit || canDelete;
-        return PopupMenuButton<_RowAction>(
-          enabled: hasAny,
-          icon: Icon(Icons.more_vert_rounded,
-              size: 18, color: hasAny
-                  ? cs.onSurface.withValues(alpha: 0.65)
-                  : cs.onSurface.withValues(alpha: 0.25)),
-          onSelected: onAction,
-          itemBuilder: (_) => [
-            if (canEdit)
-              PopupMenuItem(
-                onTap: onEdit,
-                child: Row(children: [
-                  Icon(Icons.edit_outlined, size: 16,
-                      color: cs.onSurface.withValues(alpha: 0.7)),
-                  const SizedBox(width: 8),
-                  Text(l.hrActionEdit),
-                ]),
-              ),
-            if (canEdit && employee.isActive)
-              PopupMenuItem(
-                value: _RowAction.suspend,
-                child: Row(children: [
-                  Icon(Icons.pause_circle_outline_rounded,
-                      size: 16, color: sem.warning),
-                  const SizedBox(width: 8),
-                  Text(l.hrActionSuspend),
-                ]),
-              ),
-            if (canEdit && employee.isSuspended)
-              PopupMenuItem(
-                value: _RowAction.reactivate,
-                child: Row(children: [
-                  Icon(Icons.play_circle_outline_rounded,
-                      size: 16, color: sem.success),
-                  const SizedBox(width: 8),
-                  Text(l.hrActionReactivate),
-                ]),
-              ),
-            if (canEdit && !employee.isArchived)
-              PopupMenuItem(
-                value: _RowAction.archive,
-                child: Row(children: [
-                  Icon(Icons.archive_outlined, size: 16,
-                      color: cs.onSurface.withValues(alpha: 0.7)),
-                  const SizedBox(width: 8),
-                  Text(l.hrActionArchive),
-                ]),
-              ),
-            if (canDelete)
-              PopupMenuItem(
-                value: _RowAction.delete,
-                child: Row(children: [
-                  Icon(Icons.delete_outline_rounded,
-                      size: 16, color: sem.danger),
-                  const SizedBox(width: 8),
-                  Text(l.hrActionDelete,
-                      style: TextStyle(color: sem.danger)),
-                ]),
-              ),
-          ],
-        );
-      }),
+      if (!employee.isOwner) _MemberActionsMenu(
+        employee:  employee,
+        canEdit:   canEdit,
+        canDelete: canDelete,
+        onEdit:    onEdit,
+        onAction:  onAction,
+      ),
     ]);
   }
 
   static String _fmtDate(DateTime d) => DateFormatter.dayMonthYear(d);
+}
+
+/// Le menu ⋮ d'une ligne de membre — extrait TEL QUEL de [_MemberRow] pour
+/// que la ligne restauration appelle exactement les mêmes actions, sous les
+/// mêmes gardes. Jamais construit pour un propriétaire (règle UI, à l'appel).
+class _MemberActionsMenu extends StatelessWidget {
+  final Employee                  employee;
+  final bool                      canEdit;
+  final bool                      canDelete;
+  final VoidCallback              onEdit;
+  final Future<void> Function(_RowAction) onAction;
+  const _MemberActionsMenu({
+    required this.employee,
+    required this.canEdit,
+    required this.canDelete,
+    required this.onEdit,
+    required this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs    = theme.colorScheme;
+    final sem   = theme.semantic;
+    final l     = context.l10n;
+    final hasAny = canEdit || canDelete;
+    return PopupMenuButton<_RowAction>(
+      enabled: hasAny,
+      icon: Icon(Icons.more_vert_rounded,
+          size: 18, color: hasAny
+              ? cs.onSurface.withValues(alpha: 0.65)
+              : cs.onSurface.withValues(alpha: 0.25)),
+      onSelected: onAction,
+      itemBuilder: (_) => [
+        if (canEdit)
+          PopupMenuItem(
+            onTap: onEdit,
+            child: Row(children: [
+              Icon(Icons.edit_outlined, size: 16,
+                  color: cs.onSurface.withValues(alpha: 0.7)),
+              const SizedBox(width: 8),
+              Text(l.hrActionEdit),
+            ]),
+          ),
+        if (canEdit && employee.isActive)
+          PopupMenuItem(
+            value: _RowAction.suspend,
+            child: Row(children: [
+              Icon(Icons.pause_circle_outline_rounded,
+                  size: 16, color: sem.warning),
+              const SizedBox(width: 8),
+              Text(l.hrActionSuspend),
+            ]),
+          ),
+        if (canEdit && employee.isSuspended)
+          PopupMenuItem(
+            value: _RowAction.reactivate,
+            child: Row(children: [
+              Icon(Icons.play_circle_outline_rounded,
+                  size: 16, color: sem.success),
+              const SizedBox(width: 8),
+              Text(l.hrActionReactivate),
+            ]),
+          ),
+        if (canEdit && !employee.isArchived)
+          PopupMenuItem(
+            value: _RowAction.archive,
+            child: Row(children: [
+              Icon(Icons.archive_outlined, size: 16,
+                  color: cs.onSurface.withValues(alpha: 0.7)),
+              const SizedBox(width: 8),
+              Text(l.hrActionArchive),
+            ]),
+          ),
+        if (canDelete)
+          PopupMenuItem(
+            value: _RowAction.delete,
+            child: Row(children: [
+              Icon(Icons.delete_outline_rounded,
+                  size: 16, color: sem.danger),
+              const SizedBox(width: 8),
+              Text(l.hrActionDelete,
+                  style: TextStyle(color: sem.danger)),
+            ]),
+          ),
+      ],
+    );
+  }
 }
 
 class _RoleBadge extends StatelessWidget {
@@ -1275,6 +1491,329 @@ class _PermBar extends StatelessWidget {
           style: AppTextStyles.micro.copyWith(
               color: cs.onSurface.withValues(alpha: 0.55),
               fontWeight: FontWeight.w600)),
+    ]);
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// RESTAURATION — sections, lignes, jauge (épuration du 24/09/2026)
+//
+// L'e-commerce garde `_MembersSections` / `_MemberRow` ci-dessus, inchangés.
+// Ici : deux sections au lieu de trois (les administrateurs rejoignent
+// l'équipe — le rôle reste lisible sur chaque ligne, et le quota passe dans
+// le sous-titre), des lignes posées dans UN panneau par section comme sur le
+// Stock, et plus aucune couleur par rôle.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Droits EFFECTIFS d'un membre : défauts du rôle ∪ droits accordés \ refus.
+/// Même calcul que [_MemberRow] et `employee_form_sheet.dart`.
+Set<EmployeePermission> _effectivePerms(Employee e) => <EmployeePermission>{
+      ...defaultPermissionsForRole(e.role),
+      ...e.permissions,
+    }..removeAll(e.denies);
+
+class _RestoMembersSections extends StatelessWidget {
+  final List<Employee>            filtered;
+  final bool                      compact;
+  final MemberRole?               myRole;
+  final String?                   currentUserId;
+  final void Function(Employee)   onEdit;
+  final Future<void> Function(Employee, _RowAction) onAction;
+
+  const _RestoMembersSections({
+    required this.filtered,
+    required this.compact,
+    required this.myRole,
+    required this.currentUserId,
+    required this.onEdit,
+    required this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final l = context.l10n;
+    // Même partition que `_MembersSections` : le propriétaire à part — le code
+    // le distingue déjà (`isOwner`) —, puis les administrateurs, puis le
+    // personnel, dans cet ordre, sous un seul titre.
+    final owners = filtered.where((e) => e.isOwner).toList();
+    final team   = [
+      ...filtered.where((e) => !e.isOwner && e.role == MemberRole.admin),
+      ...filtered.where((e) => e.role == MemberRole.user),
+    ];
+
+    Widget row(Employee e) => _RestoMemberRow(
+          employee:  e,
+          compact:   compact,
+          // Le propriétaire : ni modifiable ni supprimable, comme avant.
+          canEdit:   !e.isOwner && _canEditMember(e,
+              myRole: myRole, currentUserId: currentUserId),
+          canDelete: _canDeleteMember(e, myRole: myRole),
+          onEdit:    () => onEdit(e),
+          onAction:  (a) => onAction(e, a),
+        );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (owners.isNotEmpty) ...[
+          _RestoSectionTitle(l.hrSectionOwner),
+          _RestoLines(children: owners.map(row).toList()),
+        ],
+        if (owners.isNotEmpty && team.isNotEmpty)
+          const SizedBox(height: 20),
+        if (team.isNotEmpty) ...[
+          const _RestoSectionTitle('Équipe'),
+          _RestoLines(children: team.map(row).toList()),
+        ],
+      ],
+    );
+  }
+}
+
+/// Titre de section en capitales espacées. Le brief demandait 9 px : l'échelle
+/// n'en a pas — `micro` (10) est son plus petit échelon. Même traitement que
+/// les titres de la feuille de période (`resto_period_sheet.dart`).
+class _RestoSectionTitle extends StatelessWidget {
+  final String text;
+  const _RestoSectionTitle(this.text);
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(left: 2, bottom: 8),
+        child: Text(text.toUpperCase(),
+            style: AppTextStyles.microBold.copyWith(letterSpacing: 0.8)),
+      );
+}
+
+/// Les lignes d'une section, dans un seul panneau — comme `_StockLines`.
+class _RestoLines extends StatelessWidget {
+  final List<Widget> children;
+  const _RestoLines({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return RestoGlassPanel(
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      radius: 14,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0)
+              Divider(height: 1, thickness: 1, color: sem.borderSubtle),
+            children[i],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Une ligne de membre.
+///
+/// Large (≥ [kCartPaneFullWidthBelow]) : UNE ligne — avatar · nom, état,
+/// e-mail et date · rôle et jauge dans une colonne de 96 px · ⋮.
+/// Étroit : trois lignes — nom et état / e-mail / rôle et jauge ; la date
+/// tombe.
+///
+/// UN MEMBRE SUSPENDU OU ARCHIVÉ S'EFFACE par la couleur de son texte, jamais
+/// par une opacité de groupe : le nom passe en `textSecondary`, et « accès
+/// suspendu » ou « archivé » remplace la jauge — des droits qu'il ne peut pas
+/// exercer n'ont pas à être comptés.
+class _RestoMemberRow extends StatelessWidget {
+  final Employee                  employee;
+  final bool                      compact;
+  final bool                      canEdit;
+  final bool                      canDelete;
+  final VoidCallback              onEdit;
+  final Future<void> Function(_RowAction) onAction;
+
+  const _RestoMemberRow({
+    required this.employee,
+    required this.compact,
+    required this.canEdit,
+    required this.canDelete,
+    required this.onEdit,
+    required this.onAction,
+  });
+
+  /// Largeur du ⋮ (cible tactile d'un `IconButton`). La ligne du
+  /// propriétaire, qui n'a pas de menu, réserve la même place : sans elle,
+  /// sa colonne de rôle se décalerait par rapport à celles de l'équipe.
+  static const double _kMenuWidth = kMinInteractiveDimension;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs  = Theme.of(context).colorScheme;
+    final sem = Theme.of(context).semantic;
+    final l   = context.l10n;
+    final e   = employee;
+
+    // Suspendu OU archivé : aucun droit actif. Afficher « 22/29 » pour
+    // quelqu'un qui n'entre plus serait faux — la jauge laisse sa place à
+    // l'état.
+    final receded   = e.isSuspended || e.isArchived;
+    final nameColor = receded ? AppColors.textSecondary : cs.onSurface;
+    final name      = e.fullName.isEmpty ? e.email : e.fullName;
+
+    // L'état, en texte. Seule la suspension est une ALERTE (quelqu'un a été
+    // coupé) : elle garde sa couleur, en variante texte. Actif et archivé
+    // sont des informations (cf. `RestoInlineTag`).
+    final state = switch (e.status) {
+      EmployeeStatus.active    =>
+          RestoInlineTag.info(l.hrStatusActive.toLowerCase()),
+      EmployeeStatus.suspended =>
+          RestoInlineTag.alert(l.hrStatusSuspended.toLowerCase(),
+              sem.warningText),
+      EmployeeStatus.archived  =>
+          RestoInlineTag.info(l.hrStatusArchived.toLowerCase()),
+    };
+
+    final avatar = Container(
+      width: 38, height: 38,
+      decoration: BoxDecoration(
+        color: sem.trackMuted,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      alignment: Alignment.center,
+      child: Text(_initialsOf(name),
+          style: AppTextStyles.bodySmBold.copyWith(color: nameColor)),
+    );
+
+    final nameLine = Row(children: [
+      Flexible(child: Text(name,
+          maxLines: 1, overflow: TextOverflow.ellipsis,
+          style: AppTextStyles.bodyBold.copyWith(color: nameColor))),
+      const SizedBox(width: 8),
+      state,
+    ]);
+
+    final email = Text(e.email,
+        maxLines: 1, overflow: TextOverflow.ellipsis,
+        style: AppTextStyles.caption);
+
+    final role = Text(_employeeRoleLabel(l, e),
+        maxLines: 1, overflow: TextOverflow.ellipsis,
+        style: AppTextStyles.caption.copyWith(color: nameColor));
+
+    final Widget access;
+    if (e.isOwner) {
+      access = Text('tous les droits', style: AppTextStyles.microSecondary);
+    } else if (receded) {
+      access = Text(e.isArchived ? 'archivé' : 'accès suspendu',
+          style: AppTextStyles.microSecondary);
+    } else {
+      access = _RestoPermGauge(
+        count: _effectivePerms(e).length,
+        total: EmployeePermission.values.length,
+      );
+    }
+
+    // Jamais de ⋮ pour le propriétaire (règle UI, inchangée).
+    final Widget? menu = e.isOwner
+        ? null
+        : _MemberActionsMenu(
+            employee:  e,
+            canEdit:   canEdit,
+            canDelete: canDelete,
+            onEdit:    onEdit,
+            onAction:  onAction,
+          );
+
+    if (compact) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          avatar,
+          const SizedBox(width: 12),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              nameLine,
+              const SizedBox(height: 2),
+              email,
+              const SizedBox(height: 6),
+              Row(children: [
+                Flexible(child: role),
+                const SizedBox(width: 8),
+                access,
+              ]),
+            ],
+          )),
+          if (menu != null) menu,
+        ]),
+      );
+    }
+
+    final since = e.createdAt == null
+        ? null
+        : l.hrSinceDate(DateFormatter.dayMonthYear(e.createdAt!));
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(children: [
+        avatar,
+        const SizedBox(width: 12),
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            nameLine,
+            const SizedBox(height: 2),
+            Row(children: [
+              Flexible(child: email),
+              if (since != null)
+                Text('  ·  $since', maxLines: 1,
+                    style: AppTextStyles.caption),
+            ]),
+          ],
+        )),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 96,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [role, const SizedBox(height: 4), access],
+          ),
+        ),
+        menu ?? const SizedBox(width: _kMenuWidth),
+      ]),
+    );
+  }
+}
+
+/// JAUGE DE DROITS : 44 × 3 px, grise et neutre, suivie de « 22/29 ».
+///
+/// Le total est `EmployeePermission.values.length` (29 aujourd'hui, dont 4
+/// réservés au propriétaire) ; le compte, les droits EFFECTIFS du membre.
+/// Plus de couleur par rôle : la jauge dit « combien », le libellé au-dessus
+/// dit « qui ».
+class _RestoPermGauge extends StatelessWidget {
+  final int count;
+  final int total;
+  const _RestoPermGauge({required this.count, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    final sem   = Theme.of(context).semantic;
+    final ratio = total == 0 ? 0.0 : (count / total).clamp(0.0, 1.0);
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      ClipRRect(
+        borderRadius: BorderRadius.circular(2),
+        child: SizedBox(
+          width: 44, height: 3,
+          child: Stack(children: [
+            Positioned.fill(child: ColoredBox(color: sem.trackMuted)),
+            FractionallySizedBox(
+              widthFactor: ratio,
+              heightFactor: 1,
+              child: ColoredBox(color: AppColors.textSecondary),
+            ),
+          ]),
+        ),
+      ),
+      const SizedBox(width: 6),
+      Text('$count/$total', style: AppTextStyles.microSecondary),
     ]);
   }
 }

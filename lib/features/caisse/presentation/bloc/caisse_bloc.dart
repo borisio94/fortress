@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -10,6 +11,8 @@ import '../../../../core/services/activity_log_service.dart';
 import '../../../inventaire/domain/entities/product.dart';
 import '../../../../core/services/stock_service.dart';
 import '../../../../core/services/delivery_reminder_service.dart';
+import '../../../../core/services/daily_menu_service.dart';
+import '../../../../core/config/restaurant_mode.dart';
 import '../../../../core/utils/uuid.dart';
 
 // ─── Frais de commande (livraison, expédition…) ───────────────────────────────
@@ -101,6 +104,42 @@ class UpdateOrderFee extends CaisseEvent {
 class ProcessSale extends CaisseEvent {}
 class ClearCart  extends CaisseEvent {}
 
+/// Remet dans le panier ce qu'un rechargement de page en avait chassé.
+///
+/// Sur le web, un F5 vidait le panier : rien ne le persistait. C'est le seul
+/// évènement qui REMPLACE les lignes au lieu d'en ajouter — il ne se déclenche
+/// que sur un panier vide, à l'ouverture de la carte.
+class RestoreCart extends CaisseEvent {
+  final List<SaleItem> items;
+  RestoreCart(this.items);
+  @override List<Object?> get props => [items];
+}
+
+/// Compte (addition) du panier, reporté sur `Sale.tabLabel`.
+class SetOrderTab extends CaisseEvent {
+  final String? label;
+  SetOrderTab(this.label);
+  @override List<Object?> get props => [label];
+}
+
+/// Note libre du panier, reportée sur `Sale.notes` à l'enregistrement.
+class SetOrderNote extends CaisseEvent {
+  final String? note;
+  SetOrderNote(this.note);
+  @override List<Object?> get props => [note];
+}
+
+/// Rattache le panier à un LIEU (boutique OU partenaire) SANS toucher au mode
+/// de livraison. Garantit `deliveryLocationId` non vide → le bouton
+/// « Enregistrer la commande » n'est plus grisé pour une vente boutique par
+/// défaut (le mode/ville se choisissent ensuite dans la sheet de création).
+class SetCartLocation extends CaisseEvent {
+  final String locationId;
+  SetCartLocation(this.locationId);
+  @override
+  List<Object?> get props => [locationId];
+}
+
 /// Encaisser une vente (statut: completed) — sauvegarde Hive + Supabase
 class CompleteSale extends CaisseEvent {
   final String shopId;
@@ -127,7 +166,10 @@ class SaveOrder extends CaisseEvent {
   final double amountPaid;
   /// Vente « à choisir sur place » : le livreur emporte plusieurs articles,
   /// le client en garde certains, le reste revient. Si `true`, le stock est
-  /// RÉSERVÉ à la création (et la commande naît `processing`, isApprovalSale).
+  /// RÉSERVÉ à la création et la commande naît `scheduled` — « Programmée »,
+  /// comme une commande e-commerce ordinaire, mais avec `isApprovalSale` et
+  /// `stockReserved` à vrai (cf. `reserveApprovalOrder`, qui écrit
+  /// explicitement `SaleStatus.scheduled`).
   final bool isApprovalSale;
   SaveOrder(this.shopId,
       {this.createdAt, this.amountPaid = 0, this.isApprovalSale = false});
@@ -183,6 +225,9 @@ class SetDeliveryDetails extends CaisseEvent {
   final String?       shipmentCity;
   final String?       shipmentAgency;
   final String?       shipmentHandler;
+  final String?       deliveryQuartier;
+  final String?       deliveryZone;
+  final double?       deliveryPrice;
   final DateTime?     date;
   final bool          clear;
   SetDeliveryDetails({
@@ -194,6 +239,9 @@ class SetDeliveryDetails extends CaisseEvent {
     this.shipmentCity,
     this.shipmentAgency,
     this.shipmentHandler,
+    this.deliveryQuartier,
+    this.deliveryZone,
+    this.deliveryPrice,
     this.date,
     this.clear = false,
   });
@@ -201,6 +249,7 @@ class SetDeliveryDetails extends CaisseEvent {
     mode, locationId, personName,
     deliveryCity, deliveryAddress,
     shipmentCity, shipmentAgency, shipmentHandler,
+    deliveryQuartier, deliveryZone, deliveryPrice,
     date, clear,
   ];
 }
@@ -255,6 +304,12 @@ class CaisseState extends Equatable {
   final String?        shipmentAgency;
   final String?        shipmentHandler;
 
+  /// Livraison par quartier (PR-2) : quartier + zone + prix. Le prix MAJORE
+  /// le total facturé au client (cf. [total]).
+  final String?        deliveryQuartier;
+  final String?        deliveryZone;
+  final double         deliveryPrice;
+
   /// Clé d'idempotence (UUID v4) du panier en cours — garde-fou GF-1.
   /// Générée à l'ouverture du panier ET à chaque `ClearCart`. Propagée
   /// sur `Sale.idempotencyKey` à `CompleteSale`/`SaveOrder`. Côté Supabase,
@@ -262,6 +317,15 @@ class CaisseState extends Equatable {
   /// doublons si le sync queue rejoue le même panier (double-tap caisse,
   /// reconnexion réseau).
   final String         idempotencyKey;
+
+  /// Compte (addition) du panier — libellé libre, sans fiche client.
+  /// Reporté sur `Sale.tabLabel`. Permet plusieurs additions sur une table,
+  /// et existe aussi hors table (plats à emporter).
+  final String?        tabLabel;
+
+  /// Note libre saisie dans le panier (« sans piment », « table 4 », …).
+  /// Reportée sur `Sale.notes` à l'enregistrement comme à l'encaissement.
+  final String?        note;
 
   CaisseState({
     this.items          = const [],
@@ -286,6 +350,11 @@ class CaisseState extends Equatable {
     this.shipmentCity,
     this.shipmentAgency,
     this.shipmentHandler,
+    this.deliveryQuartier,
+    this.deliveryZone,
+    this.deliveryPrice = 0,
+    this.note,
+    this.tabLabel,
     String? idempotencyKey,
   }) : idempotencyKey = idempotencyKey ?? Uuid.v4();
 
@@ -294,10 +363,11 @@ class CaisseState extends Equatable {
   /// ne sont PAS ajoutés au total facturé au client.
   double get totalFees   => fees.fold(0.0, (s, f) => s + f.amount);
   double get taxAmount   => (subtotal - discountAmount) * taxRate / 100;
-  /// Total facturé au client = articles (après remise) + TVA.
-  /// Les frais sont des dépenses internes (répartis sur le prix de revient
-  /// dans le dashboard), pas une ligne ajoutée à la facture.
-  double get total       => subtotal - discountAmount + taxAmount;
+  /// Total facturé au client = prix de vente (articles − remise + TVA) +
+  /// livraison + TOUTES les autres dépenses ([totalFees]) qui s'ajoutent
+  /// par-dessus le prix de vente (plus aucun frais absorbé).
+  double get total       =>
+      subtotal - discountAmount + taxAmount + deliveryPrice + totalFees;
   int    get itemCount   => items.fold(0, (s, i) => s + i.quantity);
 
   /// Articles avec alerte prix
@@ -329,6 +399,13 @@ class CaisseState extends Equatable {
     String? shipmentCity,
     String? shipmentAgency,
     String? shipmentHandler,
+    String? deliveryQuartier,
+    String? deliveryZone,
+    double? deliveryPrice,
+    String? note,
+    bool clearNote = false,
+    String? tabLabel,
+    bool clearTabLabel = false,
     bool clearDelivery = false,
     bool clearDeliveryDate = false,
   }) => CaisseState(
@@ -374,6 +451,14 @@ class CaisseState extends Equatable {
                         : (shipmentAgency ?? this.shipmentAgency),
     shipmentHandler:    clearDelivery ? null
                         : (shipmentHandler ?? this.shipmentHandler),
+    deliveryQuartier:   clearDelivery ? null
+                        : (deliveryQuartier ?? this.deliveryQuartier),
+    deliveryZone:       clearDelivery ? null
+                        : (deliveryZone ?? this.deliveryZone),
+    deliveryPrice:      clearDelivery ? 0
+                        : (deliveryPrice ?? this.deliveryPrice),
+    note:               clearNote ? null : (note ?? this.note),
+    tabLabel:           clearTabLabel ? null : (tabLabel ?? this.tabLabel),
   );
 
   @override
@@ -383,7 +468,8 @@ class CaisseState extends Equatable {
        lastCompletedSale, isApprovalSale, idempotencyKey,
        deliveryMode, deliveryLocationId, deliveryPersonName, deliveryDate,
        deliveryCity, deliveryAddress,
-       shipmentCity, shipmentAgency, shipmentHandler];
+       shipmentCity, shipmentAgency, shipmentHandler,
+       deliveryQuartier, deliveryZone, deliveryPrice, note, tabLabel];
 }
 
 // ─── Bloc ─────────────────────────────────────────────────────────────────────
@@ -400,7 +486,11 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
     on<SelectPaymentMethod>(_onPayment);
     on<ProcessSale>(_onProcess);
     on<ClearCart>(_onClear);
+    on<SetCartLocation>((event, emit) =>
+        emit(state.copyWith(deliveryLocationId: event.locationId)));
     on<SetTaxRate>(_onSetTaxRate);
+    on<SetOrderNote>(_onSetOrderNote);
+    on<SetOrderTab>(_onSetOrderTab);
     on<SetSelectedClient>(_onSetClient);
     on<SaveOrder>(_onSaveOrder);
     on<UpdateOrderStatus>(_onUpdateOrderStatus);
@@ -441,6 +531,9 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
         // le flux dédié `SetDeliveryDetails` les gère séparément.
         deliveryCity:       state.deliveryCity,
         deliveryAddress:    state.deliveryAddress,
+        deliveryQuartier:   state.deliveryQuartier,
+        deliveryZone:       state.deliveryZone,
+        deliveryPrice:      state.deliveryPrice,
         shipmentCity:       state.shipmentCity,
         shipmentAgency:     state.shipmentAgency,
         shipmentHandler:    state.shipmentHandler,
@@ -504,11 +597,31 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
         shipmentHandler: isShipment
             ? (event.shipmentHandler ?? state.shipmentHandler)
             : null,
+        // Livraison par quartier (PR-2) : nulle en retrait boutique, sinon
+        // event ?? état (préserve le quartier/prix déjà choisi).
+        deliveryQuartier: isPickup ? null
+            : (event.deliveryQuartier ?? state.deliveryQuartier),
+        deliveryZone:     isPickup ? null
+            : (event.deliveryZone ?? state.deliveryZone),
+        deliveryPrice:    isPickup ? 0
+            : (event.deliveryPrice ?? state.deliveryPrice),
         deliveryDate:    event.date ?? state.deliveryDate,
       ));
     });
     on<LoadOrderForEdit>(_onLoadOrderForEdit);
     on<CompleteSale>(_onCompleteSale);
+    on<RestoreCart>(_onRestoreCart);
+  }
+
+  /// Ne restaure QUE sur un panier vide.
+  ///
+  /// La garde est ici et pas seulement chez l'appelant : une restauration qui
+  /// arriverait pendant que le serveur compose une commande écraserait sa
+  /// saisie par un panier d'hier — et c'est précisément le genre de perte que
+  /// ce lot existe pour empêcher.
+  void _onRestoreCart(RestoreCart event, Emitter<CaisseState> emit) {
+    if (state.items.isNotEmpty || event.items.isEmpty) return;
+    emit(state.copyWith(items: List<SaleItem>.from(event.items)));
   }
 
   void _onAdd(AddItemToCart event, Emitter<CaisseState> emit) {
@@ -555,14 +668,20 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
   }
 
   void _onUpdatePrice(UpdateItemPrice event, Emitter<CaisseState> emit) {
-    final items = state.items
-        .map((i) => _matchesItem(i, event.productId, event.variantName)
-        ? i.copyWith(
-      customPrice: event.customPrice,
-      clearCustomPrice: event.customPrice == null,
-    )
-        : i)
-        .toList();
+    final items = state.items.map((i) {
+      if (!_matchesItem(i, event.productId, event.variantName)) return i;
+      // Si le prix saisi est identique au prix de base (à l'arrondi près),
+      // ce n'est PAS une modification : on réinitialise customPrice à null
+      // pour ne pas marquer l'article « prix modifié » ni déclencher
+      // l'alerte de marge. Epsilon car les prix sont des doubles.
+      final sameAsBase = event.customPrice != null
+          && (event.customPrice! - i.unitPrice).abs() < 0.001;
+      final reset = event.customPrice == null || sameAsBase;
+      return i.copyWith(
+        customPrice: reset ? null : event.customPrice,
+        clearCustomPrice: reset,
+      );
+    }).toList();
     emit(state.copyWith(items: items));
   }
 
@@ -632,7 +751,10 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
       // Vente directe à la caisse → encaissement complet à la création.
       // amountPaid = total + paymentStatus = paid (cf. hotfix_065).
       final sale = Sale(
-        id:             'sale_${DateTime.now().millisecondsSinceEpoch}',
+        // UUID v4 (Random.secure()) et non un horodatage : deux ventes dans
+        // la même milliseconde portaient la même clé et s'écrasaient
+        // silencieusement à l'écriture Hive (put sans vérification).
+        id:             Uuid.v4(),
         shopId:         event.shopId,
         items:          state.items,
         discountAmount: state.discountAmount,
@@ -653,6 +775,9 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
         deliveryPersonName: state.deliveryPersonName,
         deliveryCity:       state.deliveryCity,
         deliveryAddress:    state.deliveryAddress,
+        deliveryQuartier:   state.deliveryQuartier,
+        deliveryZone:       state.deliveryZone,
+        deliveryPrice:      state.deliveryPrice,
         shipmentCity:       state.shipmentCity,
         shipmentAgency:     state.shipmentAgency,
         shipmentHandler:    state.shipmentHandler,
@@ -662,8 +787,25 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
         // GF-1 : clé d'idempotence du panier — protège contre les doublons
         // de vente côté Supabase (UNIQUE constraint sur orders.idempotency_key).
         idempotencyKey: state.idempotencyKey,
+        notes:          state.note,
+        tabLabel:       state.tabLabel,
       );
       await ds.saveOrder(sale);
+
+      // Restaurant : décrémente le stock du jour des plats commandés
+      // (disponibilités du jour). No-op pour un plat sans limite ou hors
+      // restauration. JAMAIS bloquant pour la vente — toute erreur de
+      // bookkeeping dispo est avalée (la vente est déjà enregistrée).
+      try {
+        if (isRestaurantShop(event.shopId)) {
+          await DailyMenuService.consumeForOrder(event.shopId, sale.items);
+          // Le stock des INGRÉDIENTS n'est plus décrémenté ici : sans quantité
+          // par plat, l'app ignore combien de grammes part dans une assiette.
+          // Il ne bouge qu'à la réception et au comptage d'inventaire.
+        }
+      } catch (e) {
+        debugPrint('[Restaurant] décrément vente err: $e');
+      }
 
       // Mise à jour silencieuse de la fiche client si l'opérateur a saisi
       // une adresse de livraison différente de celle enregistrée. Le client
@@ -837,6 +979,23 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
     return null;
   }
 
+  /// True si le produit [pid] est suivi en stock (hotfix_138).
+  ///
+  /// Miroir de `SaleLocalDatasource._isStockTracked` : la vente DIRECTE
+  /// (encaissement immédiat) passe par ce bloc et non par le datasource,
+  /// qui gère la clôture des commandes. Les deux chemins doivent appliquer
+  /// la même règle, sinon vendre un plat au comptoir décrémenterait un stock
+  /// que la même vente en commande laisserait intact.
+  ///
+  /// Produit introuvable → `true` (comportement historique) : ce cas est
+  /// déjà tracé par l'appelant.
+  static bool _isStockTracked(List<dynamic> products, String pid) {
+    for (final p in products) {
+      if (p.id == pid) return p.trackStock as bool;
+    }
+    return true;
+  }
+
   /// Décrémente le stock pour chaque article vendu.
   /// - Si [deliveryLocationId] est fourni (mode partenaire) → décrément depuis
   ///   cette location via `StockService.saleFromLocation` (stockLevel seul).
@@ -861,25 +1020,60 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
           break;
         }
       }
-      if (resolvedProductId == null) continue;
+      if (resolvedProductId == null) {
+        // JAMAIS silencieux : une vente qui ne peut pas sortir son stock est
+        // tracée (visible dans l'Historique) pour correction et diagnostic.
+        debugPrint('[Stock] ⚠️ vente directe — item ${item.productId} '
+            '"${item.productName}" introuvable : STOCK NON DÉCRÉMENTÉ');
+        // ignore: discarded_futures
+        ActivityLogService.log(
+          action: 'stock_decrement_failed', targetType: 'sale',
+          targetId: orderId, targetLabel: item.productName, shopId: shopId,
+          details: {
+            'context': 'vente directe caisse — produit/variante introuvable',
+            'item_id': item.productId, 'quantity': item.quantity,
+          });
+        continue;
+      }
 
-      if (deliveryLocationId != null && deliveryLocationId.isNotEmpty) {
-        await StockService.saleFromLocation(
-          locationId: deliveryLocationId,
-          variantId:  variantId,
-          quantity:   item.quantity,
-          shopId:     shopId,
-          productId:  resolvedProductId,
-          orderId:    orderId,
-        );
-      } else {
-        await StockService.sale(
-          shopId:    shopId,
-          productId: resolvedProductId,
-          variantId: variantId,
-          quantity:  item.quantity,
-          orderId:   orderId,
-        );
+      // Article non suivi en stock (hotfix_138) : plat cuisiné, service,
+      // prestation. Sortie SILENCIEUSE et volontaire — contrairement au cas
+      // « introuvable » ci-dessus, ce n'est pas une anomalie à tracer mais
+      // un choix de configuration du produit.
+      if (!_isStockTracked(products, resolvedProductId)) continue;
+
+      try {
+        if (deliveryLocationId != null && deliveryLocationId.isNotEmpty) {
+          await StockService.saleFromLocation(
+            locationId: deliveryLocationId,
+            variantId:  variantId,
+            quantity:   item.quantity,
+            shopId:     shopId,
+            productId:  resolvedProductId,
+            orderId:    orderId,
+          );
+        } else {
+          await StockService.sale(
+            shopId:    shopId,
+            productId: resolvedProductId,
+            variantId: variantId,
+            quantity:  item.quantity,
+            orderId:   orderId,
+          );
+        }
+      } catch (e) {
+        // Stock insuffisant, variante disparue, erreur d'écriture… — tracé,
+        // jamais avalé, sans interrompre les autres articles.
+        debugPrint('[Stock] ⚠️ décrément vente directe échoué '
+            '(${item.productName}) : $e');
+        // ignore: discarded_futures
+        ActivityLogService.log(
+          action: 'stock_decrement_failed', targetType: 'sale',
+          targetId: orderId, targetLabel: item.productName, shopId: shopId,
+          details: {
+            'context': 'vente directe caisse — échec décrément : $e',
+            'item_id': item.productId, 'quantity': item.quantity,
+          });
       }
     }
   }
@@ -906,6 +1100,10 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
         }
       }
       if (resolvedProductId == null) continue;
+      // Symétrie OBLIGATOIRE avec `decrementStock` : un article dont la vente
+      // n'a rien décrémenté ne doit rien recréditer, sinon chaque cycle
+      // vente→annulation créerait du stock ex nihilo.
+      if (!_isStockTracked(products, resolvedProductId)) continue;
 
       if (deliveryLocationId != null && deliveryLocationId.isNotEmpty) {
         await StockService.reverseSaleFromLocation(
@@ -936,6 +1134,23 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
 
   void _onSetTaxRate(SetTaxRate event, Emitter<CaisseState> emit) =>
       emit(state.copyWith(taxRate: event.rate));
+
+  /// Note du panier. Une note vidée par l'utilisateur est stockée `null` et
+  /// non `''` : `Sale.notes` doit rester absent plutôt que vide.
+  /// Compte du panier. Même normalisation que la note : vidé → `null`, pour
+  /// que `Sale.tabLabel` reste absent plutôt que vide.
+  void _onSetOrderTab(SetOrderTab event, Emitter<CaisseState> emit) {
+    final t = event.label?.trim();
+    final empty = t == null || t.isEmpty;
+    emit(state.copyWith(tabLabel: empty ? null : t, clearTabLabel: empty));
+  }
+
+  void _onSetOrderNote(SetOrderNote event, Emitter<CaisseState> emit) {
+    final trimmed = event.note?.trim();
+    emit(state.copyWith(
+        note: (trimmed == null || trimmed.isEmpty) ? null : trimmed,
+        clearNote: trimmed == null || trimmed.isEmpty));
+  }
 
   void _onSetClient(SetSelectedClient event, Emitter<CaisseState> emit) =>
       emit(event.client == null
@@ -1000,6 +1215,10 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
         createdAt: o.createdAt,
       )
           : null,
+      // Compte et note de la commande : sans ça, rouvrir une commande pour la
+      // modifier puis l'enregistrer les effacerait toutes les deux.
+      tabLabel:           o.tabLabel,
+      note:               o.notes,
       // Restaurer la date de livraison + le mode pour pré-remplir l'UI.
       deliveryDate:       o.scheduledAt,
       deliveryMode:       o.deliveryMode,
@@ -1007,6 +1226,9 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
       deliveryPersonName: o.deliveryPersonName,
       deliveryCity:       o.deliveryCity,
       deliveryAddress:    o.deliveryAddress,
+      deliveryQuartier:   o.deliveryQuartier,
+      deliveryZone:       o.deliveryZone,
+      deliveryPrice:      o.deliveryPrice ?? 0,
       shipmentCity:       o.shipmentCity,
       shipmentAgency:     o.shipmentAgency,
       shipmentHandler:    o.shipmentHandler,
@@ -1123,6 +1345,9 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
               ?? existing.deliveryPersonName,
           deliveryCity:       state.deliveryCity    ?? existing.deliveryCity,
           deliveryAddress:    state.deliveryAddress ?? existing.deliveryAddress,
+          deliveryQuartier:   state.deliveryQuartier ?? existing.deliveryQuartier,
+          deliveryZone:       state.deliveryZone     ?? existing.deliveryZone,
+          deliveryPrice:      state.deliveryPrice,
           shipmentCity:       state.shipmentCity    ?? existing.shipmentCity,
           shipmentAgency:     state.shipmentAgency  ?? existing.shipmentAgency,
           shipmentHandler:    state.shipmentHandler ?? existing.shipmentHandler,
@@ -1149,7 +1374,11 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
                 ? PaymentStatus.paid
                 : PaymentStatus.partial);
         final order = Sale(
-          id:             'order_${DateTime.now().millisecondsSinceEpoch}',
+          // UUID v4 : l'identifiant horodaté était devinable par énumération,
+          // et il servait de seul secret au lien de suivi public. Il ouvrait
+          // aussi la porte à l'écrasement silencieux de deux commandes créées
+          // dans la même milliseconde.
+          id:             Uuid.v4(),
           shopId:         event.shopId,
           items:          state.items,
           discountAmount: state.discountAmount,
@@ -1174,6 +1403,9 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
           deliveryPersonName: state.deliveryPersonName,
           deliveryCity:       state.deliveryCity,
           deliveryAddress:    state.deliveryAddress,
+          deliveryQuartier:   state.deliveryQuartier,
+          deliveryZone:       state.deliveryZone,
+          deliveryPrice:      state.deliveryPrice,
           shipmentCity:       state.shipmentCity,
           shipmentAgency:     state.shipmentAgency,
           shipmentHandler:    state.shipmentHandler,
@@ -1183,12 +1415,17 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
           // côté Supabase (UNIQUE constraint sur orders.idempotency_key).
           idempotencyKey: state.idempotencyKey,
           // Vente « à choisir sur place » : le moteur réservera le stock et
-          // passera la commande en `processing` (cf. reserveApprovalOrder).
+          // persistera la commande en `scheduled` (cf. reserveApprovalOrder,
+          // qui écrit explicitement `SaleStatus.scheduled`). Ce commentaire
+          // annonçait `processing` — la commande naît « Programmée », avec le
+          // drapeau et le stock déjà sortis.
           isApprovalSale: event.isApprovalSale,
+          notes:          state.note,
+          tabLabel:       state.tabLabel,
         );
         if (event.isApprovalSale) {
           // Réserve (décrémente) tous les articles + persiste la commande en
-          // `processing, stockReserved=true`. Peut throw si stock insuffisant
+          // `scheduled, stockReserved=true`. Peut throw si stock insuffisant
           // → dans ce cas on n'enregistre PAS la commande et on signale.
           try {
             await ds.reserveApprovalOrder(order);
@@ -1200,6 +1437,16 @@ class CaisseBloc extends Bloc<CaisseEvent, CaisseState> {
           }
         } else {
           await ds.saveOrder(order);
+        }
+        // Restaurant : décrémente le stock du jour des plats (disponibilités).
+        // Les ingrédients ne sont plus décrémentés — cf. commentaire dans
+        // `_onCompleteSale`. Jamais bloquant.
+        try {
+          if (isRestaurantShop(event.shopId)) {
+            await DailyMenuService.consumeForOrder(event.shopId, order.items);
+          }
+        } catch (e) {
+          debugPrint('[Restaurant] décrément commande err: $e');
         }
         // Programmer la notification de rappel à la date de livraison
         await DeliveryReminderService.scheduleFor(order);

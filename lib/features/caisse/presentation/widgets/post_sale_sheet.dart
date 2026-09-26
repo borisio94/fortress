@@ -66,7 +66,7 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
 
           // Poignée
           Center(child: Container(width: 36, height: 4,
-              decoration: BoxDecoration(color: const Color(0xFFE5E7EB),
+              decoration: BoxDecoration(color: AppColors.inputBorder,
                   borderRadius: BorderRadius.circular(2)))),
           const SizedBox(height: 16),
 
@@ -75,10 +75,10 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
             Container(
               width: 40, height: 40,
               decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withValues(alpha:0.12),
+                  color: AppColors.secondary.withValues(alpha:0.12),
                   borderRadius: BorderRadius.circular(10)),
               child: const Icon(Icons.receipt_long_rounded,
-                  size: 20, color: Color(0xFF10B981)),
+                  size: 20, color: AppColors.secondary),
             ),
             const SizedBox(width: 12),
             Expanded(child: Column(
@@ -86,7 +86,7 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
               Text('Envoyer le reçu',
                   style: AppTextStyles.subtitleBold.copyWith(
                       fontWeight: FontWeight.w800,
-                      color: const Color(0xFF0F172A))),
+                      color: AppColors.onSurface)),
               Text(CurrencyFormatter.format(sale.total),
                   style: AppTextStyles.bodyBold
                       .copyWith(color: AppColors.primary)),
@@ -109,7 +109,7 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
             alignment: Alignment.centerLeft,
             child: Text('Format du reçu',
                 style: AppTextStyles.bodySmBold
-                    .copyWith(color: const Color(0xFF6B7280))),
+                    .copyWith(color: AppColors.textSecondary)),
           ),
           const SizedBox(height: 8),
           Row(children: List.generate(_formats.length, (i) {
@@ -123,19 +123,19 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
                   duration: const Duration(milliseconds: 150),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   decoration: BoxDecoration(
-                    color: sel ? AppColors.primary : const Color(0xFFF9FAFB),
+                    color: sel ? AppColors.primaryFill : AppColors.inputFill,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
                         color: sel
-                            ? AppColors.primary
+                            ? AppColors.primaryFill
                             : Theme.of(context).semantic.borderSubtle),
                   ),
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
                     Icon(f.$3, size: 20,
-                        color: sel ? Colors.white : const Color(0xFF9CA3AF)),
+                        color: sel ? Colors.white : AppColors.textHint),
                     const SizedBox(height: 4),
                     Text(f.$1, style: AppTextStyles.captionBold.copyWith(
-                        color: sel ? Colors.white : const Color(0xFF6B7280))),
+                        color: sel ? Colors.white : AppColors.textSecondary)),
                   ]),
                 ),
               ),
@@ -148,7 +148,7 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
             Expanded(child: _SheetBtn(
               icon: Icons.print_rounded,
               label: 'Imprimer',
-              color: const Color(0xFF374151),
+              color: AppColors.textSecondary,
               busy: _busy,
               onTap: () => _run(() =>
                   DocumentService.printInvoice(sale, format: _format)),
@@ -157,7 +157,7 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
             Expanded(child: _SheetBtn(
               icon: Icons.picture_as_pdf_rounded,
               label: 'Aperçu PDF',
-              color: const Color(0xFF3B82F6),
+              color: AppColors.info,
               busy: _busy,
               onTap: () => _run(() =>
                   DocumentService.previewInvoice(sale, context, format: _format)),
@@ -180,7 +180,7 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
                   : const Icon(Icons.share_rounded, size: 18),
               label: const Text('Partager le reçu'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
                 elevation: 0,
                 shape: RoundedRectangleBorder(

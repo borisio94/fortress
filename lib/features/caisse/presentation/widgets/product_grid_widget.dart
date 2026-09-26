@@ -30,6 +30,21 @@ int _stockForVariant(ProductVariant v, String? deliveryLocationId) {
   return lvl?.stockAvailable ?? 0;
 }
 
+/// Lieu à UTILISER pour lire le stock dans la caisse : `null` (→ stock
+/// variante de la boutique, source de vérité, jamais désynchronisé) si aucun
+/// lieu OU si le lieu est CELUI de la boutique active ; sinon le lieu
+/// PARTENAIRE (→ StockLevel). Sans ça, un produit tout neuf paraissait à 0
+/// (son StockLevel au lieu boutique pas encore synchronisé) → grille caisse
+/// vide + bouton d'enregistrement grisé jusqu'à F5.
+String? _effectiveStockLoc(String? shopId, String? deliveryLocationId) {
+  if (deliveryLocationId == null || deliveryLocationId.isEmpty) return null;
+  if (shopId != null) {
+    final shopLoc = AppDatabase.getShopLocation(shopId);
+    if (shopLoc != null && shopLoc.id == deliveryLocationId) return null;
+  }
+  return deliveryLocationId; // lieu partenaire
+}
+
 /// Stock à afficher pour un produit selon la source active.
 /// - Pas de source partenaire → `product.totalStock` (cumul historique).
 /// - Source = partenaire → somme des `stock_levels` des variantes à cette
@@ -143,12 +158,38 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
   String _query = '';
   String _filter = 'Tous'; // Tous | Stock faible | Actifs
 
+  // Rafraîchit la grille dès qu'un produit / stock de la boutique change
+  // (nouvel enregistrement, sync) → plus besoin d'actualiser (F5) pour voir
+  // les produits fraîchement créés.
+  void _onData(String table, String shopId) {
+    if (!mounted) return;
+    if (shopId == widget.shopId &&
+        (table == 'products' || table == 'stock_levels')) {
+      setState(() {});
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    AppDatabase.addListener(_onData);
+  }
+
+  @override
+  void dispose() {
+    AppDatabase.removeListener(_onData);
+    super.dispose();
+  }
+
   /// Liste filtrée. Quand [deliveryLocationId] est non null (vente livrée
   /// par un partenaire), on masque les produits absents chez ce partenaire
   /// pour rester cohérent avec la grille principale.
   List<Product> _productsFor(String? deliveryLocationId) {
     var list = AppDatabase.getProductsForShop(widget.shopId)
-        .where((p) => p.isActive)
+        // `isActive` suffit en théorie (un brouillon est écrit inactif),
+        // mais rien n'empêcherait un brouillon actif en base : on ne vend
+        // pas une fiche jamais terminée.
+        .where((p) => p.isActive && !p.isDraft)
         .toList();
     if (deliveryLocationId != null && deliveryLocationId.isNotEmpty) {
       list = list
@@ -172,10 +213,15 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final deliveryLocId = context.select<CaisseBloc, String?>(
-        (b) => b.state.deliveryLocationId);
+    // La boutique ACTIVE utilise son stock variante (source de vérité). Seul un
+    // lieu PARTENAIRE filtre par StockLevel → évite grille vide / bouton grisé
+    // pour un produit neuf dont le StockLevel boutique n'est pas encore synchro.
+    final deliveryLocId = _effectiveStockLoc(
+        widget.shopId,
+        context.select<CaisseBloc, String?>((b) => b.state.deliveryLocationId));
     final products = _productsFor(deliveryLocId);
-    final all      = AppDatabase.getProductsForShop(widget.shopId).where((p) => p.isActive).toList();
+    final all      = AppDatabase.getProductsForShop(widget.shopId)
+        .where((p) => p.isActive && !p.isDraft).toList();
 
     return Column(children: [
       // ── Poignée + titre ──────────────────────────────────────────────
@@ -190,17 +236,17 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
           style: AppTextStyles.input,
           decoration: InputDecoration(
             hintText: 'Rechercher par nom, SKU, code-barres…',
-            prefixIcon: const Icon(Icons.search_rounded,
-                size: 18, color: Color(0xFF9CA3AF)),
+            prefixIcon: Icon(Icons.search_rounded,
+                size: 18, color: AppColors.textHint),
             suffixIcon: _query.isNotEmpty
                 ? IconButton(
-              icon: const Icon(Icons.clear_rounded,
-                  size: 16, color: Color(0xFF9CA3AF)),
+              icon: Icon(Icons.clear_rounded,
+                  size: 16, color: AppColors.textHint),
               onPressed: () => setState(() => _query = ''),
             )
                 : null,
             filled: true,
-            fillColor: const Color(0xFFF3F4F6),
+            fillColor: AppColors.inputFill,
             isDense: true,
             contentPadding: const EdgeInsets.symmetric(
                 horizontal: 14, vertical: 10),
@@ -240,7 +286,7 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
           Text(
             '${products.length} produit${products.length > 1 ? 's' : ''}',
             style: AppTextStyles.caption
-                .copyWith(color: const Color(0xFF9CA3AF)),
+                .copyWith(color: AppColors.textHint),
           ),
         ]),
       ),
@@ -284,7 +330,10 @@ class _ProductPickerSheetState extends State<ProductPickerSheet> {
     // Pas de variantes → ajouter directement au panier
     if (product.variants.isEmpty || product.variants.length == 1) {
       final v = product.variants.isNotEmpty ? product.variants.first : null;
-      final price = v?.priceSellPos ?? product.priceSellPos;
+      // PRIX PROMOTIONNEL APPLIQUÉ. La carte produit affichait la promotion
+      // et le panier facturait `priceSellPos` : le client voyait une remise
+      // et payait le plein tarif.
+      final price = v?.effectiveSellPrice ?? product.priceSellPos;
       final id = v?.id ?? (product.id ?? product.name);
       final stock = v != null
           ? _stockForVariant(v, deliveryLocId)
@@ -359,7 +408,7 @@ class _SheetHeader extends StatelessWidget {
       Container(
         width: 36, height: 4,
         decoration: BoxDecoration(
-          color: const Color(0xFFE5E7EB),
+          color: AppColors.inputBorder,
           borderRadius: BorderRadius.circular(2),
         ),
       ),
@@ -368,7 +417,7 @@ class _SheetHeader extends StatelessWidget {
         child: Row(children: [
           Text('Ajouter des produits',
               style: AppTextStyles.subtitleBold
-                  .copyWith(color: const Color(0xFF0F172A))),
+                  .copyWith(color: AppColors.onSurface)),
           const Spacer(),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -402,9 +451,9 @@ class _ProductCard extends StatelessWidget {
     final outOfStockAt = stockAt <= 0;
     final lowStockAt   = stockAt > 0 && stockAt <= product.stockMinAlert;
     final stockColor = outOfStockAt
-        ? const Color(0xFFEF4444)
+        ? AppColors.error
         : lowStockAt
-        ? const Color(0xFFF59E0B)
+        ? AppColors.warning
         : AppColors.secondary;
     final hasVariants = product.variants.length > 1;
     // Bug : avant on désactivait le clic dès que le total stock était à 0,
@@ -466,7 +515,7 @@ class _ProductCard extends StatelessWidget {
                           child: Text(
                             product.name,
                             style: AppTextStyles.captionBold
-                                .copyWith(color: const Color(0xFF0F172A)),
+                                .copyWith(color: AppColors.onSurface),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -523,8 +572,11 @@ class _ProductCard extends StatelessWidget {
 
   String _displayPrice() {
     if (product.variants.isNotEmpty) {
+      // Prix EFFECTIFS : la fourchette affichée doit être celle qui sera
+      // facturée. Bâtie sur `priceSellPos`, elle annonçait le plein tarif
+      // d'un article vendu en promotion.
       final prices = product.variants
-          .map((v) => v.priceSellPos)
+          .map((v) => v.effectiveSellPrice)
           .where((p) => p > 0)
           .toList();
       if (prices.isEmpty) return 'N/D';
@@ -565,7 +617,7 @@ class _VariantPickerSheet extends StatelessWidget {
             child: Container(
               width: 36, height: 4,
               decoration: BoxDecoration(
-                color: const Color(0xFFE5E7EB),
+                color: AppColors.inputBorder,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -588,10 +640,10 @@ class _VariantPickerSheet extends StatelessWidget {
                   children: [
                     Text(product.name,
                         style: AppTextStyles.subtitleBold
-                            .copyWith(color: const Color(0xFF0F172A))),
+                            .copyWith(color: AppColors.onSurface)),
                     Text('${product.variants.length} variantes disponibles',
                         style: AppTextStyles.bodySm
-                            .copyWith(color: const Color(0xFF9CA3AF))),
+                            .copyWith(color: AppColors.textHint)),
                   ])),
             ]),
           ),
@@ -600,7 +652,7 @@ class _VariantPickerSheet extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Text('Choisissez une variante',
                 style: AppTextStyles.bodySmBold
-                    .copyWith(color: const Color(0xFF6B7280))),
+                    .copyWith(color: AppColors.textSecondary)),
           ),
           const SizedBox(height: 8),
 
@@ -614,7 +666,7 @@ class _VariantPickerSheet extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               itemCount: product.variants.length,
               separatorBuilder: (_, __) =>
-              const Divider(height: 1, color: Color(0xFFF3F4F6)),
+              Divider(height: 1, color: AppColors.inputFill),
               itemBuilder: (ctx, i) {
                 final v = product.variants[i];
                 // Stock à afficher / valider selon la source active
@@ -640,7 +692,8 @@ class _VariantPickerSheet extends StatelessWidget {
                         productName: product.name,
                         variantName: product.variants.length > 1 ? v.name : null,
                         imageUrl:    v.imageUrl ?? product.mainImageUrl,
-                        unitPrice:   v.priceSellPos,
+                        // Promotion appliquée (cf. `effectiveSellPrice`).
+                        unitPrice:   v.effectiveSellPrice,
                         priceBuy:    v.priceBuy,
                         quantity:    1,
                       ),
@@ -675,7 +728,7 @@ class _VariantPickerSheet extends StatelessWidget {
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                       style: AppTextStyles.bodyBold
-                                          .copyWith(color: const Color(0xFF0F172A))),
+                                          .copyWith(color: AppColors.onSurface)),
                                 ),
                                 if (v.isMain) ...[
                                   const SizedBox(width: 6),
@@ -697,7 +750,7 @@ class _VariantPickerSheet extends StatelessWidget {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: AppTextStyles.micro
-                                        .copyWith(color: const Color(0xFF9CA3AF))),
+                                        .copyWith(color: AppColors.textHint)),
                             ])),
 
                         // Prix + stock
@@ -705,8 +758,10 @@ class _VariantPickerSheet extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               Text(
-                                v.priceSellPos > 0
-                                    ? CurrencyFormatter.format(v.priceSellPos)
+                                // Prix effectif : ce que le client paiera.
+                                v.effectiveSellPrice > 0
+                                    ? CurrencyFormatter.format(
+                                        v.effectiveSellPrice)
                                     : 'N/D',
                                 style: AppTextStyles.bodyBold.copyWith(
                                     fontWeight: FontWeight.w800,
@@ -718,9 +773,9 @@ class _VariantPickerSheet extends StatelessWidget {
                                   width: 5, height: 5,
                                   decoration: BoxDecoration(
                                     color: outOfStock
-                                        ? const Color(0xFFEF4444)
+                                        ? AppColors.error
                                         : lowStock
-                                        ? const Color(0xFFF59E0B)
+                                        ? AppColors.warning
                                         : AppColors.secondary,
                                     shape: BoxShape.circle,
                                   ),
@@ -732,9 +787,9 @@ class _VariantPickerSheet extends StatelessWidget {
                                       : '$stockAt dispo',
                                   style: AppTextStyles.micro.copyWith(
                                       color: outOfStock
-                                          ? const Color(0xFFEF4444)
+                                          ? AppColors.error
                                           : lowStock
-                                          ? const Color(0xFFF59E0B)
+                                          ? AppColors.warning
                                           : AppColors.secondary),
                                 ),
                               ]),
@@ -785,7 +840,7 @@ class _Chip extends StatelessWidget {
       child: Text(label,
           style: AppTextStyles.captionBold.copyWith(
               color:
-              selected ? Colors.white : const Color(0xFF6B7280))),
+              selected ? Colors.white : AppColors.textSecondary)),
     ),
   );
 }
@@ -801,14 +856,14 @@ class _EmptyProducts extends StatelessWidget {
         query.isNotEmpty
             ? Icons.search_off_rounded
             : Icons.inventory_2_outlined,
-        size: 48, color: const Color(0xFFD1D5DB),
+        size: 48, color: AppColors.inputBorder,
       ),
       const SizedBox(height: 12),
       Text(
         query.isNotEmpty
             ? 'Aucun résultat pour "$query"'
             : 'Aucun produit actif dans cette boutique',
-        style: AppTextStyles.body.copyWith(color: const Color(0xFF6B7280)),
+        style: AppTextStyles.body.copyWith(color: AppColors.textSecondary),
         textAlign: TextAlign.center,
       ),
     ]),
@@ -892,7 +947,7 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
   /// disponible chez ce partenaire, jamais celui de la boutique de base.
   List<Product> _productsFor(String? deliveryLocationId) {
     var all = AppDatabase.getProductsForShop(widget.shopId)
-        .where((p) => p.isActive)
+        .where((p) => p.isActive && !p.isDraft)
         .toList();
 
     // Vue Partenaire : on n'affiche que les produits qui existent (stock > 0)
@@ -1012,8 +1067,12 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
     // Lit la source active (boutique cumul vs partenaire) — la liste de
     // produits en dépend : on masque les produits absents chez le
     // partenaire pour éviter les ajouts panier impossibles.
-    final deliveryLocId = context.select<CaisseBloc, String?>(
-        (b) => b.state.deliveryLocationId);
+    // La boutique ACTIVE utilise son stock variante (source de vérité). Seul un
+    // lieu PARTENAIRE filtre par StockLevel → évite grille vide / bouton grisé
+    // pour un produit neuf dont le StockLevel boutique n'est pas encore synchro.
+    final deliveryLocId = _effectiveStockLoc(
+        widget.shopId,
+        context.select<CaisseBloc, String?>((b) => b.state.deliveryLocationId));
     final products = _productsFor(deliveryLocId);
     final isCompact = MediaQuery.of(context).size.width < 900;
     final searchField = SizedBox(
@@ -1025,11 +1084,11 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
           hintText: l.boutiqueSearchHint,
           hintStyle: AppTextStyles.body
               .copyWith(color: AppColors.textHint),
-          prefixIcon: const Icon(Icons.search_rounded,
+          prefixIcon: Icon(Icons.search_rounded,
               size: 18, color: AppColors.textHint),
           suffixIcon: _query.isNotEmpty
               ? IconButton(
-            icon: const Icon(Icons.clear_rounded,
+            icon: Icon(Icons.clear_rounded,
                 size: 16, color: AppColors.textHint),
             onPressed: () => setState(() => _query = ''),
             padding: EdgeInsets.zero,
@@ -1226,7 +1285,8 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
     final deliveryLocId = bloc.state.deliveryLocationId;
     if (product.variants.isEmpty || product.variants.length == 1) {
       final v = product.variants.isNotEmpty ? product.variants.first : null;
-      final price = v?.priceSellPos ?? product.priceSellPos;
+      // Promotion appliquée (cf. `effectiveSellPrice`).
+      final price = v?.effectiveSellPrice ?? product.priceSellPos;
       final id = v?.id ?? (product.id ?? product.name);
       final stock = v != null
           ? _stockForVariant(v, deliveryLocId)
@@ -1425,7 +1485,8 @@ class _PosProductPanelState extends ConsumerState<PosProductPanel> {
       SaleItem(
         productId:   id,
         productName: name,
-        unitPrice:   v.priceSellPos,
+        // Promotion appliquée (cf. `effectiveSellPrice`).
+        unitPrice:   v.effectiveSellPrice,
         priceBuy:    v.priceBuy,
         imageUrl:    v.imageUrl ?? p.mainImageUrl,
         quantity:    1,
@@ -1580,7 +1641,7 @@ class _PosProductListTileState extends State<_PosProductListTile> {
                     (sel?.sku ?? p.sku)!.isNotEmpty)
                   Text(sel?.sku ?? p.sku!,
                       maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 10,
+                      style: TextStyle(fontSize: 10,
                           fontFamily: 'monospace',
                           color: AppColors.textHint)),
                 if (hasVariants) ...[
@@ -1738,7 +1799,7 @@ class _ToolbarButton extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(
-                  color: AppColors.primary,
+                  color: AppColors.primaryFill,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text('$badge',

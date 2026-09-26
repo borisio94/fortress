@@ -101,11 +101,11 @@ class _TicketsPageState extends ConsumerState<TicketsPage> {
               child: visible.isEmpty
                   ? ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      children: const [
-                        SizedBox(height: 80),
+                      children: [
+                        const SizedBox(height: 80),
                         Icon(Icons.forum_outlined,
-                            size: 40, color: Color(0xFFD1D5DB)),
-                        SizedBox(height: 12),
+                            size: 40, color: AppColors.textHint),
+                        const SizedBox(height: 12),
                         Center(child: Text(
                             'Aucun ticket pour le moment.',
                             style: AppTextStyles.bodySecondary)),
@@ -224,7 +224,7 @@ class _TicketTile extends StatelessWidget {
                 minimumSize: const Size(0, 28),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              child: const Text('Marquer résolu',
+              child: Text('Marquer résolu',
                   style: AppTextStyles.captionBold),
             ),
         ]),
@@ -342,10 +342,10 @@ class _CreateTicketSheetState extends State<_CreateTicketSheet> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: active ? AppColors.primary : theme.colorScheme.surface,
+                color: active ? AppColors.primaryFill : theme.colorScheme.surface,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                    color: active ? AppColors.primary : sem.borderSubtle),
+                    color: active ? AppColors.primaryFill : sem.borderSubtle),
               ),
               child: Text(TicketCategory.labelFr(c),
                   style: AppTextStyles.captionBold.copyWith(
@@ -365,7 +365,7 @@ class _CreateTicketSheetState extends State<_CreateTicketSheet> {
           final active = p == _priority;
           final col = switch (p) {
             TicketPriority.low    => sem.borderSubtle,
-            TicketPriority.normal => AppColors.primary,
+            TicketPriority.normal => AppColors.primaryFill,
             TicketPriority.high   => sem.danger,
           };
           return Padding(
@@ -400,7 +400,7 @@ class _CreateTicketSheetState extends State<_CreateTicketSheet> {
           Expanded(child: FilledButton(
             onPressed: _submitting ? null : _submit,
             style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 padding: const EdgeInsets.symmetric(vertical: 12)),
             child: Text(_submitting ? 'Envoi…' : 'Envoyer',
                 style: const TextStyle(

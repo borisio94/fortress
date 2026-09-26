@@ -245,7 +245,7 @@ class _ExportScopeSelectorState extends State<ExportScopeSelector> {
                       ? () => Navigator.of(context).pop(_buildConfig())
                       : null,
                   style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
                   icon: const Icon(Icons.file_download_rounded),

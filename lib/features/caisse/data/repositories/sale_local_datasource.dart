@@ -5,10 +5,14 @@ import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/services/stock_service.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../../../core/services/delivery_reminder_service.dart';
+import '../../../../core/services/partner_ledger_service.dart';
 import '../../../../core/database/app_database.dart';
+import '../../../../core/utils/uuid.dart';
 import '../../domain/entities/sale.dart';
 import '../../domain/entities/sale_item.dart';
 import '../../domain/approval_closure.dart';
+import '../../domain/cart_codec.dart';
+import '../../domain/stock_engagement.dart';
 
 /// Datasource local Hive pour les ventes offline et le panier persistant.
 /// Nommé SaleLocalDatasource (pas de conflit avec l'entité Sale).
@@ -37,26 +41,46 @@ class SaleLocalDatasource {
 
   Future<void> removePendingSale(String key) => _box.delete(key);
 
-  Future<void> saveCart(List<SaleItem> items) async {
-    await HiveBoxes.cartBox
-        .put('cart', jsonEncode(items.map(_itemToMap).toList()));
+  /// Écrit le panier d'UNE boutique.
+  ///
+  /// Ces trois méthodes n'avaient AUCUN appelant, et les deux premières ne se
+  /// parlaient même pas : l'écriture posait dix clés, la lecture en cherchait
+  /// quatre sous d'autres noms, et `e['name'] as String` sur un `null` levait
+  /// une erreur de type. La correspondance vit désormais dans `cart_codec.dart`,
+  /// en un seul endroit, avec un test qui exige l'aller-retour à l'identique.
+  ///
+  /// La clé était `'cart'`, littérale et unique pour tout l'appareil : un
+  /// propriétaire à deux boutiques aurait restauré le panier de l'autre.
+  Future<void> saveCart(String shopId, List<SaleItem> items) async {
+    await HiveBoxes.cartBox.put(
+        cartKeyFor(shopId), jsonEncode(items.map(cartItemToMap).toList()));
   }
 
-  Future<List<SaleItem>> loadCart() async {
-    final raw = HiveBoxes.cartBox.get('cart');
-    if (raw == null) return [];
-    final list = jsonDecode(raw as String) as List;
-    return list
-        .map((e) => SaleItem(
-      productId: e['product_id'] as String,
-      productName: e['name'] as String,
-      unitPrice: (e['price'] as num).toDouble(),
-      quantity: e['qty'] as int,
-    ))
-        .toList();
+  /// Relit le panier d'UNE boutique.
+  ///
+  /// Une ligne illisible est ÉCARTÉE, pas fatale : mieux vaut restituer neuf
+  /// articles sur dix que rien du tout, et une exception ici viderait
+  /// l'écran d'accueil du restaurant.
+  Future<List<SaleItem>> loadCart(String shopId) async {
+    final raw = HiveBoxes.cartBox.get(cartKeyFor(shopId));
+    if (raw is! String || raw.isEmpty) return [];
+    try {
+      final list = jsonDecode(raw) as List;
+      return [
+        for (final e in list)
+          if (e is Map)
+            if (cartItemFromMap(Map<String, dynamic>.from(e))
+                case final item?)
+              item,
+      ];
+    } catch (e) {
+      debugPrint('[Cart] panier illisible pour $shopId : $e');
+      return [];
+    }
   }
 
-  Future<void> clearCart() => HiveBoxes.cartBox.delete('cart');
+  Future<void> clearCart(String shopId) =>
+      HiveBoxes.cartBox.delete(cartKeyFor(shopId));
 
   Future<void> enqueueOfflineAction(Map<String, dynamic> action) async {
     await HiveBoxes.offlineQueueBox.add(action);
@@ -67,7 +91,11 @@ class SaleLocalDatasource {
   /// Sauvegarder une commande avec son statut
   Future<void> saveOrder(Sale order) async {
     if (!Hive.isBoxOpen(HiveBoxes.orders)) return;
-    final id = order.id ?? 'order_${DateTime.now().millisecondsSinceEpoch}';
+    // UUID v4 (Random.secure()) : l'identifiant horodaté était devinable par
+    // énumération — il servait de seul secret au lien de suivi public — et
+    // deux commandes de la même milliseconde s'écrasaient au `put` ci-dessous,
+    // qui ne vérifie aucune existence préalable.
+    final id = order.id ?? Uuid.v4();
 
     // Date de complétion stampée uniquement si la commande est créée "completed"
     final completedAt = order.status == SaleStatus.completed
@@ -80,6 +108,7 @@ class SaleLocalDatasource {
       'shop_id':        order.shopId,
       'status':         order.status.name,
       'discount_amount': order.discountAmount,
+      'discount_reason': order.discountReason,
       'tax_rate':       order.taxRate,
       'payment_method': order.paymentMethod.name,
       'client_id':      order.clientId,
@@ -93,6 +122,9 @@ class SaleLocalDatasource {
       'created_by_user_id':   order.createdByUserId,
       'delivery_city':        order.deliveryCity,
       'delivery_address':     order.deliveryAddress,
+      'delivery_quartier':    order.deliveryQuartier,
+      'delivery_zone':        order.deliveryZone,
+      'delivery_price':       order.deliveryPrice?.round(),
       'shipment_city':        order.shipmentCity,
       'shipment_agency':      order.shipmentAgency,
       'shipment_handler':     order.shipmentHandler,
@@ -104,10 +136,28 @@ class SaleLocalDatasource {
       'completed_at':   completedAt,
       'is_approval_sale': order.isApprovalSale,
       'stock_reserved':   order.stockReserved,
+      // Module restaurant (hotfix_137). Doit figurer dans les QUATRE maps
+      // (saveOrder+updateOrder x hive+supa) : updateOrder reconstruit la
+      // map depuis l'entite sans merge, donc une omission effacerait la
+      // table au premier ajout de plat a une commande en cours.
+      'table_id':         order.tableId,
+      'tab_label':        order.tabLabel,
+      'covers':           order.covers,
+      'order_type':       order.orderType,
+      'sent_to_kitchen':  order.sentToKitchen,
+      'kitchen_ready':    order.kitchenReady,
+      'served':           order.served,
+      'finished':         order.finished,
+      // Instant d'entrée dans l'état de service courant (hotfix_183).
+      'service_state_at': order.serviceStateAt?.toUtc().toIso8601String(),
       'fees':           order.fees,
       // GF-1 : clé d'idempotence du panier — persistée en Hive ET pushée
       // à Supabase pour bénéficier de l'UNIQUE constraint (hotfix_080).
       'idempotency_key': order.idempotencyKey,
+      // Jeton de suivi (hotfix_171) : présent en Hive UNIQUEMENT. La colonne
+      // appartient au serveur, qui la remplit par DEFAULT ; l'omettre de la
+      // map Supabase garantit qu'un upsert client ne l'écrase jamais.
+      'tracking_token':  order.trackingToken,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
         'product_name': i.productName,
@@ -118,6 +168,7 @@ class SaleLocalDatasource {
         'discount':     i.discount,
         'image_url':    i.imageUrl,
         'variant_name': i.variantName,
+        'modifiers':    i.modifiers,
       }).toList(),
     };
 
@@ -127,6 +178,7 @@ class SaleLocalDatasource {
       'shop_id':        order.shopId,
       'status':         order.status.name,
       'discount_amount': order.discountAmount,
+      'discount_reason': order.discountReason,
       'tax_rate':       order.taxRate,
       'payment_method': order.paymentMethod.name,
       'client_id':      order.clientId,
@@ -140,6 +192,9 @@ class SaleLocalDatasource {
       'created_by_user_id':   order.createdByUserId,
       'delivery_city':        order.deliveryCity,
       'delivery_address':     order.deliveryAddress,
+      'delivery_quartier':    order.deliveryQuartier,
+      'delivery_zone':        order.deliveryZone,
+      'delivery_price':       order.deliveryPrice?.round(),
       'shipment_city':        order.shipmentCity,
       'shipment_agency':      order.shipmentAgency,
       'shipment_handler':     order.shipmentHandler,
@@ -153,6 +208,20 @@ class SaleLocalDatasource {
       'idempotency_key': order.idempotencyKey, // GF-1
       'is_approval_sale': order.isApprovalSale,
       'stock_reserved':   order.stockReserved,
+      // Module restaurant (hotfix_137). Doit figurer dans les QUATRE maps
+      // (saveOrder+updateOrder x hive+supa) : updateOrder reconstruit la
+      // map depuis l'entite sans merge, donc une omission effacerait la
+      // table au premier ajout de plat a une commande en cours.
+      'table_id':         order.tableId,
+      'tab_label':        order.tabLabel,
+      'covers':           order.covers,
+      'order_type':       order.orderType,
+      'sent_to_kitchen':  order.sentToKitchen,
+      'kitchen_ready':    order.kitchenReady,
+      'served':           order.served,
+      'finished':         order.finished,
+      // Instant d'entrée dans l'état de service courant (hotfix_183).
+      'service_state_at': order.serviceStateAt?.toUtc().toIso8601String(),
       'fees':           order.fees,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
@@ -164,6 +233,7 @@ class SaleLocalDatasource {
         'discount':     i.discount,
         'image_url':    i.imageUrl,
         'variant_name': i.variantName,
+        'modifiers':    i.modifiers,
       }).toList(),
     };
 
@@ -220,6 +290,38 @@ class SaleLocalDatasource {
     } catch (_) { return []; }
   }
 
+  /// Créances clients regroupées par `clientId`. Une CRÉANCE = commande
+  /// COMPLÉTÉE (livrée) dont le client n'a pas tout payé (`amountDue > 0`) —
+  /// c'est le résultat d'une vente à crédit. Les commandes encore ouvertes
+  /// (programmée/en cours) ne comptent pas : leur solde n'est pas encore une
+  /// dette, juste un acompte en attente.
+  Map<String, double> clientDebtsByClient(String shopId) {
+    final res = <String, double>{};
+    for (final o in getOrders(shopId)) {
+      if (o.status != SaleStatus.completed) continue;
+      final due = o.amountDue;
+      if (due <= 0) continue;
+      final cid = o.clientId;
+      if (cid == null || cid.isEmpty) continue;
+      res[cid] = (res[cid] ?? 0) + due;
+    }
+    return res;
+  }
+
+  /// Créance d'un client donné (0 s'il n'a aucune commande à crédit).
+  double clientDebt(String shopId, String clientId) =>
+      clientDebtsByClient(shopId)[clientId] ?? 0;
+
+  /// Total des créances clients de la boutique — inclut les ventes à crédit
+  /// SANS client rattaché (créance anonyme : argent dû quand même).
+  double totalClientDebts(String shopId) {
+    double t = 0;
+    for (final o in getOrders(shopId)) {
+      if (o.status == SaleStatus.completed) t += o.amountDue;
+    }
+    return t;
+  }
+
   /// Mettre à jour le statut d'une commande
   /// Mise à jour complète d'une commande (articles, client, notes, remise, TVA)
   Future<void> updateOrder(Sale order) async {
@@ -238,9 +340,16 @@ class SaleLocalDatasource {
     // Map Hive
     final hiveMap = <String, dynamic>{
       'id':             order.id,
+      // Jeton de suivi (hotfix_171). INDISPENSABLE ici : cette map REMPLACE
+      // intégralement la ligne Hive (put sans merge) — c'est déjà ainsi que
+      // `source` et `idempotency_key` se perdent à chaque modification de
+      // commande. Sans cette ligne, modifier une commande lui ferait perdre
+      // son jeton, donc son lien de suivi.
+      'tracking_token': order.trackingToken,
       'shop_id':        order.shopId,
       'status':         order.status.name,
       'discount_amount': order.discountAmount,
+      'discount_reason': order.discountReason,
       'tax_rate':       order.taxRate,
       'payment_method': order.paymentMethod.name,
       'client_id':      order.clientId,
@@ -254,6 +363,9 @@ class SaleLocalDatasource {
       'created_by_user_id':   order.createdByUserId,
       'delivery_city':        order.deliveryCity,
       'delivery_address':     order.deliveryAddress,
+      'delivery_quartier':    order.deliveryQuartier,
+      'delivery_zone':        order.deliveryZone,
+      'delivery_price':       order.deliveryPrice?.round(),
       'shipment_city':        order.shipmentCity,
       'shipment_agency':      order.shipmentAgency,
       'shipment_handler':     order.shipmentHandler,
@@ -265,6 +377,20 @@ class SaleLocalDatasource {
       'completed_at':   completedAt,
       'is_approval_sale': order.isApprovalSale,
       'stock_reserved':   order.stockReserved,
+      // Module restaurant (hotfix_137). Doit figurer dans les QUATRE maps
+      // (saveOrder+updateOrder x hive+supa) : updateOrder reconstruit la
+      // map depuis l'entite sans merge, donc une omission effacerait la
+      // table au premier ajout de plat a une commande en cours.
+      'table_id':         order.tableId,
+      'tab_label':        order.tabLabel,
+      'covers':           order.covers,
+      'order_type':       order.orderType,
+      'sent_to_kitchen':  order.sentToKitchen,
+      'kitchen_ready':    order.kitchenReady,
+      'served':           order.served,
+      'finished':         order.finished,
+      // Instant d'entrée dans l'état de service courant (hotfix_183).
+      'service_state_at': order.serviceStateAt?.toUtc().toIso8601String(),
       'fees':           order.fees,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
@@ -276,6 +402,7 @@ class SaleLocalDatasource {
         'discount':     i.discount,
         'image_url':    i.imageUrl,
         'variant_name': i.variantName,
+        'modifiers':    i.modifiers,
       }).toList(),
     };
     await _ordersBox.put(order.id!, hiveMap);
@@ -290,6 +417,7 @@ class SaleLocalDatasource {
       'shop_id':        order.shopId,
       'status':         order.status.name,
       'discount_amount': order.discountAmount,
+      'discount_reason': order.discountReason,
       'tax_rate':       order.taxRate,
       'payment_method': order.paymentMethod.name,
       'client_id':      order.clientId,
@@ -303,6 +431,9 @@ class SaleLocalDatasource {
       'created_by_user_id':   order.createdByUserId,
       'delivery_city':        order.deliveryCity,
       'delivery_address':     order.deliveryAddress,
+      'delivery_quartier':    order.deliveryQuartier,
+      'delivery_zone':        order.deliveryZone,
+      'delivery_price':       order.deliveryPrice?.round(),
       'shipment_city':        order.shipmentCity,
       'shipment_agency':      order.shipmentAgency,
       'shipment_handler':     order.shipmentHandler,
@@ -313,6 +444,20 @@ class SaleLocalDatasource {
       'completed_at':   completedAt,
       'is_approval_sale': order.isApprovalSale,
       'stock_reserved':   order.stockReserved,
+      // Module restaurant (hotfix_137). Doit figurer dans les QUATRE maps
+      // (saveOrder+updateOrder x hive+supa) : updateOrder reconstruit la
+      // map depuis l'entite sans merge, donc une omission effacerait la
+      // table au premier ajout de plat a une commande en cours.
+      'table_id':         order.tableId,
+      'tab_label':        order.tabLabel,
+      'covers':           order.covers,
+      'order_type':       order.orderType,
+      'sent_to_kitchen':  order.sentToKitchen,
+      'kitchen_ready':    order.kitchenReady,
+      'served':           order.served,
+      'finished':         order.finished,
+      // Instant d'entrée dans l'état de service courant (hotfix_183).
+      'service_state_at': order.serviceStateAt?.toUtc().toIso8601String(),
       'fees':           order.fees,
       'items': order.items.map((i) => {
         'product_id':   i.productId,
@@ -324,6 +469,7 @@ class SaleLocalDatasource {
         'discount':     i.discount,
         'image_url':    i.imageUrl,
         'variant_name': i.variantName,
+        'modifiers':    i.modifiers,
       }).toList(),
     };
     AppDatabase.bgWriteOrder(supaMap);
@@ -375,9 +521,75 @@ class SaleLocalDatasource {
       map['scheduled_at'] = scheduledAt.toUtc().toIso8601String();
     }
     await _ordersBox.put(orderId, map);
-    final supaMap = Map<String, dynamic>.from(map);
-    supaMap.remove('image_url');
+    // Update CIBLÉ (champs livraison/paiement uniquement) — NE touche PAS
+    // `status` : sinon ce push (portant l'ancien statut), en course avec le
+    // `updateOrderStatus` qui suit, pouvait faire régresser le statut
+    // (scheduled → processing → … → scheduled).
+    final fields = <String, dynamic>{
+      'delivery_person_name': map['delivery_person_name'],
+      'delivery_city':        map['delivery_city'],
+      'delivery_address':     map['delivery_address'],
+      'shipment_city':        map['shipment_city'],
+      'shipment_agency':      map['shipment_agency'],
+      'shipment_handler':     map['shipment_handler'],
+      if (paymentMethod != null) 'payment_method': map['payment_method'],
+      if (!committed) 'delivery_mode':        map['delivery_mode'],
+      if (!committed) 'delivery_location_id': map['delivery_location_id'],
+      if (scheduledAt != null) 'scheduled_at': map['scheduled_at'],
+    };
+    AppDatabase.bgUpdateOrder(orderId, fields);
+  }
+
+  /// Réassigne UNIQUEMENT l'emplacement + le mode de livraison d'une commande
+  /// (« transférer la commande à un partenaire »). Contrairement à
+  /// [updateOrderDelivery], ne touche QU'À `delivery_mode` +
+  /// `delivery_location_id` — préserve personne/ville/adresse/expédition.
+  /// Respecte le verrou H3 (refuse si la commande est `completed` ou une vente
+  /// à choisir déjà réservée — re-router à ce stade ferait diverger le
+  /// décrément/restitution de stock). No-op si commande absente ou engagée.
+  Future<void> reassignDelivery(String orderId,
+      {required DeliveryMode mode, required String locationId}) async {
+    final raw = _ordersBox.get(orderId);
+    if (raw == null) return;
+    final map = Map<String, dynamic>.from(raw);
+    final committed = (map['status'] as String?) == 'completed'
+        || ((map['is_approval_sale'] as bool? ?? false)
+            && (map['stock_reserved'] as bool? ?? false));
+    if (committed) return; // verrou H3 : ne pas re-router une commande engagée
+    map['delivery_mode']        = mode.key;
+    map['delivery_location_id'] = locationId;
+    await _ordersBox.put(orderId, map);
+    final shopId = map['shop_id'] as String?;
+    if (shopId != null) AppDatabase.notifyOrderChange(shopId);
+    final supaMap = Map<String, dynamic>.from(map)..remove('image_url');
     AppDatabase.bgWriteOrder(supaMap);
+  }
+
+  /// Vérifie qu'un emplacement (partenaire) a ASSEZ de stock pour TOUS les
+  /// articles d'une commande : somme des quantités par variante vs le
+  /// `StockLevel` de cette location. Retourne `(ok, missing)` où `missing`
+  /// est le nom du 1er article manquant (null si tout est couvert). Sert à
+  /// bloquer le transfert vers un partenaire qui n'a pas le stock.
+  ({bool ok, String? missing}) locationCanFulfill(
+      Sale order, String locationId) {
+    final products = AppDatabase.getProductsForShop(order.shopId);
+    final required = <String, int>{};   // variantId → quantité requise
+    final labels   = <String, String>{};
+    for (final item in order.items) {
+      final (pid, vid) = _resolveProductVariant(products, item.productId);
+      if (pid == null) return (ok: false, missing: item.productName);
+      required.update(vid, (q) => q + item.quantity,
+          ifAbsent: () => item.quantity);
+      labels[vid] = item.productName;
+    }
+    for (final entry in required.entries) {
+      final avail =
+          AppDatabase.getStockLevel(entry.key, locationId)?.stockAvailable ?? 0;
+      if (avail < entry.value) {
+        return (ok: false, missing: labels[entry.key]);
+      }
+    }
+    return (ok: true, missing: null);
   }
 
   /// Supprime un frais (`orders.fees[feeIndex]`) d'une commande existante.
@@ -418,9 +630,17 @@ class SaleLocalDatasource {
   /// automatiquement `payment_status` selon : 0 → unpaid, < total → partial,
   /// >= total → paid. Ne touche pas au statut de commande (qui reste
   /// scheduled/processing/completed selon le workflow).
-  Future<void> recordPayment(String orderId, double newAmountPaid) async {
+  ///
+  /// Renvoie `true` si l'encaissement a bien été écrit, `false` sinon.
+  ///
+  /// Ce retour existe parce que la méthode peut renoncer SANS rien signaler —
+  /// commande introuvable. L'appelant, lui, annonçait « Acompte enregistré »
+  /// dans tous les cas : l'opérateur encaissait de l'argent, lisait une
+  /// confirmation, et rien n'était écrit. Un échec muet sur un mouvement
+  /// d'argent est le pire des silences.
+  Future<bool> recordPayment(String orderId, double newAmountPaid) async {
     final raw = _ordersBox.get(orderId);
-    if (raw == null) return;
+    if (raw == null) return false;
     final map = Map<String, dynamic>.from(raw);
     final fresh = _mapToSaleWithStatus(map);
     final total = fresh.total;
@@ -434,8 +654,29 @@ class SaleLocalDatasource {
     await _ordersBox.put(orderId, map);
     final shopId = map['shop_id'] as String?;
     if (shopId != null) AppDatabase.notifyOrderChange(shopId);
-    final supaMap = Map<String, dynamic>.from(map);
-    supaMap.remove('image_url');
+    // Update CIBLÉ (paiement uniquement) — NE touche PAS `status` (sinon ce
+    // push pouvait, en course avec un changement de statut concomitant, faire
+    // régresser la commande).
+    AppDatabase.bgUpdateOrder(orderId, {
+      'amount_paid':    map['amount_paid'],
+      'payment_status': map['payment_status'],
+    });
+    return true;
+  }
+
+  /// Fixe le prix de livraison d'une commande (cas « frais à fixer » des
+  /// commandes web dont le quartier n'était pas répertorié). Met à jour
+  /// `delivery_price` (Hive + Supabase) et notifie. Le total est recalculé à
+  /// la lecture (Sale.total inclut deliveryPrice). No-op si commande absente.
+  Future<void> setDeliveryPrice(String orderId, int price) async {
+    final raw = _ordersBox.get(orderId);
+    if (raw == null) return;
+    final map = Map<String, dynamic>.from(raw);
+    map['delivery_price'] = price;
+    await _ordersBox.put(orderId, map);
+    final shopId = map['shop_id'] as String?;
+    if (shopId != null) AppDatabase.notifyOrderChange(shopId);
+    final supaMap = Map<String, dynamic>.from(map)..remove('image_url');
     AppDatabase.bgWriteOrder(supaMap);
   }
 
@@ -467,6 +708,18 @@ class SaleLocalDatasource {
     // ce drapeau, le passage à `refunded` recréditait EN PLUS la quantité
     // totale de la commande → double-crédit.
     bool skipStockCompensation = false,
+    // VENTE À CRÉDIT — montant TOTAL réellement encaissé du client à la
+    // clôture. Si fourni (non null) lors d'un passage à `completed`, on
+    // l'utilise tel quel au lieu de forcer « entièrement payé » : un montant
+    // < total laisse une créance client (payment_status partial/unpaid). Si
+    // null, comportement historique (force amount_paid = total, paid).
+    double? amountPaidOnComplete,
+    // ARG-2 — `true` quand c'est le PARTENAIRE-LIVREUR qui a encaissé le
+    // client, sans avoir encore versé à la boutique. Sans cette information,
+    // la clôture écrivait `paid` : la commande passait pour soldée côté
+    // boutique alors que l'argent était ailleurs. L'appelant la tient du
+    // sheet de clôture (`CollectedBy`), seul endroit où la question est posée.
+    bool collectedByPartner = false,
   }) async {
     final raw = _ordersBox.get(orderId);
     if (raw == null) return;
@@ -520,8 +773,29 @@ class SaleLocalDatasource {
       // Calculer le total à partir du map (les items contiennent
       // unit_price * quantity ; on respecte les arrondis Sale.total).
       final fresh = _mapToSaleWithStatus(map);
-      map['amount_paid']    = fresh.total;
-      map['payment_status'] = PaymentStatus.paid.key;
+      final total = fresh.total;
+      if (amountPaidOnComplete != null) {
+        // VENTE À CRÉDIT — on respecte le montant réellement encaissé. Un
+        // reste > 0 devient une créance client (partial/unpaid) au lieu
+        // d'être effacé. Capé à [0, total] par sécurité.
+        final paid = amountPaidOnComplete.clamp(0, total).toDouble();
+        map['amount_paid']    = paid;
+        map['payment_status'] = PaymentStatusX.fromAmount(paid, total).key;
+      } else {
+        // Aucun montant transmis = le client a tout réglé. Reste à savoir À
+        // QUI : `amountPaidOnComplete` n'est renseigné que lorsque la BOUTIQUE
+        // encaisse, si bien que ce chemin couvre AUSSI le cas « le partenaire
+        // a encaissé » — qui s'écrivait jusqu'ici `paid`, comme si la boutique
+        // avait l'argent en main.
+        //
+        // `amount_paid` reste au total dans les deux cas : la somme a bien été
+        // perçue, seul son porteur diffère. La remettre à zéro ferait
+        // réapparaître une créance CLIENT qui n'existe pas.
+        map['amount_paid']    = total;
+        map['payment_status'] = collectedByPartner
+            ? PaymentStatus.paidByPartner.key
+            : PaymentStatus.paid.key;
+      }
     } else if (status == SaleStatus.refunded) {
       map['payment_status'] = PaymentStatus.refunded.key;
     } else if (oldStatus == SaleStatus.completed) {
@@ -544,6 +818,62 @@ class SaleLocalDatasource {
     supaMap.remove('image_url'); // pas de colonne image dans Supabase
     AppDatabase.bgWriteOrder(supaMap);
 
+    // ── Remboursement → la créance partenaire disparaît avec la vente ────
+    //
+    // Une commande encaissée PAR un partenaire crée une créance
+    // `saleCollected` à la clôture. Remboursée au client, cette créance n'a
+    // plus d'objet : le partenaire était redevable du produit d'une vente qui
+    // n'existe plus. Sans ce retrait, il restait affiché comme débiteur
+    // indéfiniment — créance fantôme, jamais soldable autrement qu'à la main.
+    //
+    // `keepReceived: false` — purge TOTALE — et NON `true`, et ce n'est pas
+    // un détail. Avec `true`, un `remittance` déjà enregistré survivrait
+    // seul : partenaire encaisse 10 000 (`saleCollected` +10 000), reverse
+    // (`remittance` −10 000), solde 0. Retirer le seul `saleCollected`
+    // laisserait −10 000, soit « la boutique doit 10 000 au partenaire ».
+    // Faux : il a rendu l'argent, la boutique a remboursé le client de sa
+    // poche, le partenaire est quitte. Les deux écritures s'annulent, elles
+    // partent ensemble.
+    //
+    // La trace du versement reste lisible dans le journal d'activité et
+    // l'historique des mouvements ; le livre partenaire, lui, ne doit porter
+    // que des soldes vrais.
+    //
+    // Placé ici plutôt que dans la page Retours : `updateOrderStatus` est le
+    // SEUL site d'écriture du statut (l.773), et les deux chemins qui peuvent
+    // poser `refunded` — menu d'évènements et page Retours — y passent tous
+    // les deux. Un correctif local n'aurait couvert que l'un des deux.
+    if (status == SaleStatus.refunded
+        && oldStatus != SaleStatus.refunded
+        && shopId != null) {
+      await PartnerLedgerService.removeForOrder(shopId, orderId,
+          keepReceived: false);
+    }
+
+    // ── Frais de livraison → dette envers le partenaire livreur ──────────
+    // À la clôture (completed) d'une commande livrée par un PARTENAIRE avec
+    // des frais de livraison, on enregistre ces frais comme une dette de la
+    // boutique envers ce partenaire (écriture `deliveryOwed`). Ils sont ainsi
+    // retranchés du versement attendu du partenaire (livre partenaire) — le
+    // partenaire garde sa course. Idempotent (syncOrderDeliveryFee remplace
+    // l'écriture existante de la commande).
+    if (status == SaleStatus.completed
+        && oldStatus != SaleStatus.completed
+        && shopId != null) {
+      final ord = _mapToSaleWithStatus(map);
+      final dp = ord.deliveryPrice ?? 0;
+      if (ord.deliveryMode == DeliveryMode.partner
+          && (ord.deliveryLocationId ?? '').isNotEmpty
+          && dp > 0) {
+        await PartnerLedgerService.syncOrderDeliveryFee(
+          shopId:            ord.shopId,
+          partnerLocationId: ord.deliveryLocationId!,
+          orderId:           orderId,
+          feesTotal:         dp,
+        );
+      }
+    }
+
     // Annuler le rappel de livraison si la commande est finalisée ou
     // annulée ; le reprogrammer si elle redevient programmée/en cours.
     final isInactiveNow = status == SaleStatus.completed
@@ -561,6 +891,13 @@ class SaleLocalDatasource {
     // returnGood/returnDefective ligne-à-ligne). On saute la compensation
     // générique pour ne pas double-créditer.
     if (skipStockCompensation) return;
+
+    // NB : le filtrage des articles non suivis en stock (`track_stock`,
+    // hotfix_138) se fait par LIGNE dans `_decrementOrderStock` /
+    // `_restoreOrderStock`, et non ici par commande. Une même commande peut
+    // mélanger un plat cuisiné (non suivi) et une bouteille (suivie) — un
+    // court-circuit au niveau de la commande les traiterait à tort de la
+    // même façon. Remplace le filtre par canal `order_type = 'dine_in'`.
 
     // H1(b) — vente « à choisir sur place » ENCORE réservée passée à
     // cancelled/refused par une voie GÉNÉRIQUE (cancelOrderWithReason / menu
@@ -592,27 +929,70 @@ class SaleLocalDatasource {
     }
 
     // ── Compensation de stock selon la transition ──
-    // - completed → autre  : la vente n'est plus finalisée → restaurer le stock
-    // - autre → completed  : la vente est finalisée → décrémenter le stock
-    // - autres transitions : aucun impact stock
+    // MODÈLE « stock engagé » : le stock sort des disponibles dès que la
+    // commande est `processing` (partie en livraison) OU `completed`
+    // (encaissée), et revient quand elle régresse en deçà. Cf.
+    // `StockEngagement` (logique pure testée). Le flag persistant
+    // `stock_reserved` évite tout double-mouvement et reste rétro-compatible
+    // avec les données antérieures (jamais flaggées).
     if (oldStatus == status || shopId == null) return;
-    final wasCompleted = oldStatus == SaleStatus.completed;
-    final nowCompleted = status    == SaleStatus.completed;
-    if (wasCompleted == nowCompleted) return;
-
     final order = _mapToSaleWithStatus(map);
+    final reserved = map['stock_reserved'] == true;
+
     // Vente « à choisir sur place » : le stock est géré EXPLICITEMENT par
     // reserveApprovalOrder / closeApprovalOrder / cancelApprovalOrder. On NE
     // laisse donc PAS la logique générique agir, SAUF le remboursement d'une
-    // vente déjà complétée (completed → refunded) : là, il faut restituer le
+    // vente déjà complétée (completed → autre) : là, il faut restituer le
     // stock des articles GARDÉS (post-clôture la commande ne porte plus que
-    // ceux-ci, et `stockReserved` est déjà false), exactement comme une vente
-    // normale. H1(a).
-    if (order.isApprovalSale && !(wasCompleted && !nowCompleted)) return;
-    if (wasCompleted && !nowCompleted) {
+    // ceux-ci, et `stockReserved` est déjà false). H1(a).
+    if (order.isApprovalSale) {
+      if (oldStatus == SaleStatus.completed && status != SaleStatus.completed) {
+        await _restoreOrderStock(order);
+      }
+      return;
+    }
+
+    final decision = StockEngagement.decide(
+      oldStatus: oldStatus, newStatus: status, reserved: reserved);
+    // `decide` est PUR et le reste : il dit ce qu'il FAUDRAIT faire, sans
+    // rien savoir de ce qui se passera. C'est ici, après la tentative, que
+    // le drapeau se décide — sur un résultat, plus sur une intention.
+    var reservedToPersist = decision.reserved;
+    if (decision.action == StockAction.decrement) {
+      final moved = await _decrementOrderStock(order);
+      // STK-1 — le drapeau ne vaut `true` que si AU MOINS un article est
+      // réellement sorti. Rien n'est sorti → rien n'est engagé → une
+      // annulation ne restituera rien, au lieu de créer du stock.
+      reservedToPersist = moved.isNotEmpty;
+      if (moved.isEmpty && order.items.isNotEmpty) {
+        // Synthèse : chaque article a déjà été tracé individuellement par
+        // `_logStockDecrementMiss`, mais l'échec TOTAL mérite sa propre
+        // entrée — c'est lui qui explique qu'une commande passe à
+        // `completed` sans qu'aucun stock n'ait bougé.
+        ActivityLogService.log(
+          action:      'stock_decrement_none',
+          targetType:  'sale',
+          targetId:    order.id,
+          targetLabel: order.clientName ?? 'Commande',
+          shopId:      order.shopId,
+          details: {
+            'items':      order.items.length,
+            'new_status': status.name,
+            'reason':     'aucun article n\'a pu sortir du stock',
+          },
+        );
+      }
+    } else if (decision.action == StockAction.restore) {
       await _restoreOrderStock(order);
-    } else {
-      await _decrementOrderStock(order);
+    }
+    // Persister le flag « stock sorti » s'il change (mouvement OU simple
+    // réalignement d'idempotence), pour que les transitions ultérieures et les
+    // autres devices décident correctement.
+    if (reservedToPersist != reserved) {
+      map['stock_reserved'] = reservedToPersist;
+      await _ordersBox.put(orderId, map);
+      final supa2 = Map<String, dynamic>.from(map)..remove('image_url');
+      AppDatabase.bgWriteOrder(supa2);
     }
   }
 
@@ -645,6 +1025,16 @@ class SaleLocalDatasource {
     final products = AppDatabase.getProductsForShop(order.shopId);
     final usePartner = order.deliveryMode == DeliveryMode.partner
         && (order.deliveryLocationId ?? '').isNotEmpty;
+    // STK-1 — on ne rend QUE ce qui est réellement sorti. Depuis que le
+    // drapeau peut être posé sur un décrément PARTIEL (au moins un article),
+    // restituer aveuglément toute la commande recréerait le stock des
+    // articles qui n'étaient jamais partis.
+    //
+    // Map vide = journal inconnu (commande antérieure, ou purgée avant le
+    // correctif STK-2) → on retombe sur le comportement historique, tout
+    // restituer. Le repli est automatique, sans drapeau de version.
+    final stillOut = _stillOutByVariant(order.id);
+    final selective = stillOut.isNotEmpty;
     for (final item in order.items) {
       final (pid, vid) = _resolveProductVariant(products, item.productId);
       if (pid == null) {
@@ -652,11 +1042,29 @@ class SaleLocalDatasource {
             'restauration commande');
         continue;
       }
+      // Symétrie OBLIGATOIRE avec `_decrementOrderStock` : un article dont
+      // la vente n'a rien décrémenté ne doit rien recréditer à l'annulation,
+      // sinon chaque cycle vente→annulation créerait du stock ex nihilo.
+      if (!_isStockTracked(products, pid)) continue;
+      var qty = item.quantity;
+      if (selective) {
+        final out = stillOut[vid] ?? 0;
+        if (out <= 0) {
+          // Jamais sorti (ou déjà restitué) — on ne rend rien, et on le dit :
+          // l'écart entre ce qui est facturé et ce qui revient en stock doit
+          // rester lisible dans le journal d'activité.
+          _logRestockMiss(order, item.productId, item.quantity,
+              'article jamais sorti du stock — aucune restitution');
+          continue;
+        }
+        if (out < qty) qty = out;
+        stillOut[vid] = out - qty;
+      }
       if (usePartner) {
         await StockService.reverseSaleFromLocation(
           locationId: order.deliveryLocationId!,
           variantId:  vid,
-          quantity:   item.quantity,
+          quantity:   qty,
           shopId:     order.shopId,
           productId:  pid,
           orderId:    order.id,
@@ -666,41 +1074,141 @@ class SaleLocalDatasource {
           shopId:    order.shopId,
           productId: pid,
           variantId: vid,
-          quantity:  item.quantity,
+          quantity:  qty,
           orderId:   order.id,
         );
       }
     }
   }
 
+  /// Une sortie de stock (vente) n'a PAS pu être appliquée. On NE l'avale
+  /// JAMAIS en silence (`continue` muet = perte de stock invisible) : on trace
+  /// dans le journal d'activité (visible par l'owner) pour correction et
+  /// diagnostic. Miroir de [_logRestockMiss] côté vente.
+  static void _logStockDecrementMiss(
+      Sale order, SaleItem item, String context) {
+    debugPrint('[Stock] ⚠️ DÉCRÉMENT IMPOSSIBLE ($context) — item '
+        '${item.productId} "${item.productName}" qty=${item.quantity} '
+        'commande ${order.id} : STOCK NON MIS À JOUR');
+    ActivityLogService.log(
+      action:      'stock_decrement_failed',
+      targetType:  'sale',
+      targetId:    order.id,
+      targetLabel: order.clientName ?? item.productName,
+      shopId:      order.shopId,
+      details: {
+        'context':      context,
+        'item_id':      item.productId,
+        'product_name': item.productName,
+        'quantity':     item.quantity,
+      },
+    );
+  }
+
   /// Décrémente le stock d'une commande qui passe à `completed`. Route vers
-  /// partenaire ou boutique selon le mode de livraison.
-  static Future<void> _decrementOrderStock(Sale order) async {
+  /// partenaire ou boutique selon le mode de livraison. Chaque article est
+  /// isolé (try/catch) : l'échec d'un article ne bloque pas les autres et
+  /// n'est JAMAIS silencieux.
+  /// Renvoie les variantes dont le stock est RÉELLEMENT sorti.
+  ///
+  /// STK-1 — ce retour est le cœur du correctif. Le drapeau `stock_reserved`
+  /// était posé d'après `StockEngagement.decide()`, une décision PURE qui
+  /// ignore tout du résultat : une commande dont aucun article n'avait pu
+  /// sortir était quand même marquée « stock engagé ». Une annulation
+  /// ultérieure restituait alors du stock jamais pris — elle en CRÉAIT.
+  static Future<Set<String>> _decrementOrderStock(Sale order) async {
     final products = AppDatabase.getProductsForShop(order.shopId);
     final usePartner = order.deliveryMode == DeliveryMode.partner
         && (order.deliveryLocationId ?? '').isNotEmpty;
+    final moved = <String>{};
     for (final item in order.items) {
       final (pid, vid) = _resolveProductVariant(products, item.productId);
-      if (pid == null) continue;
-      if (usePartner) {
-        await StockService.saleFromLocation(
-          locationId: order.deliveryLocationId!,
-          variantId:  vid,
-          quantity:   item.quantity,
-          shopId:     order.shopId,
-          productId:  pid,
-          orderId:    order.id,
-        );
-      } else {
-        await StockService.sale(
-          shopId:    order.shopId,
-          productId: pid,
-          variantId: vid,
-          quantity:  item.quantity,
-          orderId:   order.id,
-        );
+      if (pid == null) {
+        _logStockDecrementMiss(
+            order, item, 'produit/variante introuvable (vente)');
+        continue;
+      }
+      // Article non suivi en stock (hotfix_138) : sortie SILENCIEUSE et
+      // volontaire — contrairement au cas `pid == null`, ce n'est pas une
+      // anomalie à tracer mais un choix de configuration du produit.
+      if (!_isStockTracked(products, pid)) continue;
+      try {
+        if (usePartner) {
+          await StockService.saleFromLocation(
+            locationId: order.deliveryLocationId!,
+            variantId:  vid,
+            quantity:   item.quantity,
+            shopId:     order.shopId,
+            productId:  pid,
+            orderId:    order.id,
+          );
+        } else {
+          await StockService.sale(
+            shopId:    order.shopId,
+            productId: pid,
+            variantId: vid,
+            quantity:  item.quantity,
+            orderId:   order.id,
+          );
+        }
+        // Sortie CONFIRMÉE : aucune exception n'a été levée.
+        moved.add(vid);
+      } catch (e) {
+        // Stock insuffisant, variante disparue, erreur d'écriture… — tracé,
+        // jamais avalé, et sans interrompre les autres articles.
+        _logStockDecrementMiss(order, item, 'échec décrément vente : $e');
       }
     }
+    return moved;
+  }
+
+  /// Référence de commande d'un mouvement de stock, quelle que soit la clé
+  /// sous laquelle elle a été écrite.
+  ///
+  /// `StockService._log` écrivait `reference_id` — une clé qui n'existe PAS
+  /// dans la table, dont la colonne s'appelle `reference` depuis l'origine
+  /// (hotfix_010). Le client écrit désormais le bon nom, mais les lignes déjà
+  /// présentes dans Hive portent l'ancienne clé, et celles qui reviennent du
+  /// serveur portent la nouvelle : les deux cohabiteront durablement.
+  ///
+  /// Ne lire que la nouvelle rendrait l'anti-doublon de retour inopérant et
+  /// ferait retomber la restitution sélective (STK-1) sur « tout restituer »
+  /// pour tout l'historique local. On lit donc les deux, sans date de
+  /// péremption — le coût est nul, l'oubli serait silencieux.
+  static String? _movementRef(Map<String, dynamic> m) =>
+      (m['reference'] ?? m['reference_id'])?.toString();
+
+  /// Quantité encore SORTIE par variante pour cette commande, d'après le
+  /// journal des mouvements.
+  ///
+  /// Les ventes y sont écrites en quantité négative, les restitutions en
+  /// positif, sous le même `type: 'sale'` — on somme donc le net, et on ne
+  /// garde que ce qui reste effectivement dehors.
+  ///
+  /// Map VIDE = aucun mouvement connu pour cette commande : soit elle est
+  /// antérieure au correctif, soit son journal a été purgé (cf. STK-2). Dans
+  /// ce cas l'appelant retombe sur le comportement historique — tout
+  /// restituer — plutôt que de ne rien rendre : mieux vaut l'imprécision
+  /// d'hier qu'une perte de stock nouvelle.
+  static Map<String, int> _stillOutByVariant(String? orderId) {
+    final out = <String, int>{};
+    if (orderId == null || orderId.isEmpty) return out;
+    if (!Hive.isBoxOpen(HiveBoxes.stockMovements)) return out;
+    for (final raw in HiveBoxes.stockMovementsBox.values) {
+      try {
+        final m = Map<String, dynamic>.from(raw);
+        if (_movementRef(m) != orderId) continue;
+        if ((m['type'] as String? ?? '') != 'sale') continue;
+        final vid = m['variant_id'] as String?;
+        if (vid == null || vid.isEmpty) continue;
+        final q = (m['quantity'] as num?)?.toInt() ?? 0;
+        // Sortie (q < 0) → ce qui est dehors augmente ; restitution (q > 0)
+        // → il diminue. D'où le signe inversé.
+        out[vid] = (out[vid] ?? 0) - q;
+      } catch (_) {/* ligne corrompue — ignorée */}
+    }
+    out.removeWhere((_, v) => v <= 0);
+    return out;
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -742,8 +1250,14 @@ class SaleLocalDatasource {
 
   /// Remise en stock d'UN article (retour / annulation / rollback), routée de
   /// la même façon que `_approvalTakeStock`.
+  /// [cause] porte le CODE structuré du motif de refus (prix / qualité /
+  /// différent / autre) ; [reason] le texte lisible. Les deux atterrissent
+  /// dans la même ligne de `stock_movements`, seul réceptacle qui soit
+  /// nativement PAR ARTICLE et PAR QUANTITÉ retournée — donc le seul à couvrir
+  /// aussi bien le refus total que le refus partiel.
   static Future<void> _approvalReturnStock(
-      Sale order, String pid, String vid, int qty, String reason) async {
+      Sale order, String pid, String vid, int qty, String reason,
+      {String? cause}) async {
     final usePartner = order.deliveryMode == DeliveryMode.partner
         && (order.deliveryLocationId ?? '').isNotEmpty;
     if (usePartner) {
@@ -754,6 +1268,12 @@ class SaleLocalDatasource {
         shopId:     order.shopId,
         productId:  pid,
         orderId:    order.id,
+        // `reason` n'était PAS transmis ici — écart ancien, et pas anodin :
+        // une tournée « à choisir » part presque toujours d'un emplacement
+        // partenaire, si bien que la branche muette était la branche
+        // NOMINALE. Tout motif saisi se serait perdu là.
+        reason:     reason,
+        cause:      cause,
       );
     } else {
       await StockService.reverseSale(
@@ -763,6 +1283,7 @@ class SaleLocalDatasource {
         quantity:  qty,
         orderId:   order.id,
         reason:    reason,
+        cause:     cause,
       );
     }
   }
@@ -818,8 +1339,27 @@ class SaleLocalDatasource {
   /// stock ; les gardées restent sorties (déjà décrémentées à la réservation)
   /// et forment la vente finale (`completed`). Si rien n'est gardé → tout
   /// remis en stock et commande `cancelled`.
+  ///
+  /// [amountPaid] = montant TOTAL encaissé du client (cumulé, acompte inclus)
+  /// sur la vente finale, saisi au sheet de clôture. Il pilote `amount_paid` +
+  /// `payment_status` exactement comme `amountPaidOnComplete` le fait dans
+  /// [updateOrderStatus] : sans lui la commande partait en `completed` avec
+  /// `amount_paid = 0` / `unpaid` (bug « terminée mais jamais payée »), car la
+  /// clôture court-circuite volontairement `updateOrderStatus` (garde-fou
+  /// stock). `null` → comportement historique : clôture = entièrement payée.
+  /// [refusals] : motif de refus par article — `code` structuré, `detail`
+  /// libre. Renseigné pour toute ligne dont une quantité revient, refus total
+  /// ou partiel.
+  ///
+  /// [collectedBy] arrive en `String` et non sous son type d'origine :
+  /// `CollectedBy` vit dans la couche PRÉSENTATION, et la couche données ne
+  /// doit pas l'importer. On transporte sa valeur, pas son type.
   Future<void> closeApprovalOrder(
-      String orderId, Map<String, int> keptByItemId) async {
+      String orderId, Map<String, int> keptByItemId,
+      {double? amountPaid,
+       String? collectedBy,
+       Map<String, ({String code, String? detail})> refusals =
+           const {}}) async {
     final raw = _ordersBox.get(orderId);
     if (raw is! Map) return;
     final order = _mapToSaleWithStatus(Map<String, dynamic>.from(raw));
@@ -838,8 +1378,17 @@ class SaleLocalDatasource {
         _logRestockMiss(order, entry.key, entry.value, 'retour clôture à choisir');
         continue;
       }
+      // Le motif saisi remplace le libellé générique : c'est cette ligne de
+      // `stock_movements` qui portera, durablement, la raison du refus.
+      final r = refusals[entry.key];
       await _approvalReturnStock(
-          order, pid, vid, entry.value, 'retour vente à choisir');
+          order, pid, vid, entry.value,
+          r == null
+              ? 'retour vente à choisir'
+              : (r.detail == null
+                  ? 'retour vente à choisir — ${r.code}'
+                  : 'retour vente à choisir — ${r.code} : ${r.detail}'),
+          cause: r?.code);
     }
 
     // 2. Vente finale = articles gardés (qty = quantité gardée).
@@ -850,22 +1399,84 @@ class SaleLocalDatasource {
     }
 
     // 3. Persister.
-    final closed = keptItems.isEmpty
-        ? order.copyWith(
-            status:        SaleStatus.cancelled,
-            stockReserved: false, // tout a été remis en stock
-            cancellationReason: 'aucun article gardé sur place',
-          )
-        : order.copyWith(
-            items: keptItems,
-            status: SaleStatus.completed,
-            // H2 — le réservé est consommé (gardé = vendu définitif, retours
-            // déjà recrédités ci-dessus). On éteint le flag : sinon une
-            // suppression/annulation ultérieure verrait stock_reserved=true
-            // et recréditerait du stock déjà vendu (double-crédit).
-            stockReserved: false,
-          );
+    final Sale closed;
+    if (keptItems.isEmpty) {
+      // REFUS TOTAL — la commande ne porte plus aucun article.
+      //
+      // La marchandise est INTÉGRALEMENT revenue en stock (boucle ci-dessus).
+      // Conserver les lignes ferait peser la valeur complète de la commande
+      // dans les « Pertes » du tableau de bord, alors que rien n'est perdu :
+      // seul le déplacement a coûté. La perte retombe donc sur ce qui a
+      // réellement été engagé — livraison + frais annexes.
+      //
+      // La remise part AVEC les articles, et ce n'est pas cosmétique :
+      // `taxAmount` est un getter dérivé, `(subtotal - discountAmount) *
+      // taxRate / 100`. Avec un panier vide mais une remise conservée, la
+      // TVA deviendrait NÉGATIVE et contaminerait le total. Les deux champs
+      // ne peuvent pas être dissociés.
+      closed = order.copyWith(
+        status:        SaleStatus.cancelled,
+        stockReserved: false, // tout a été remis en stock
+        items:         const [],
+        discountAmount: 0,
+        cancellationReason: 'aucun article gardé sur place',
+      );
+    } else {
+      final base = order.copyWith(
+        items: keptItems,
+        status: SaleStatus.completed,
+        // H2 — le réservé est consommé (gardé = vendu définitif, retours
+        // déjà recrédités ci-dessus). On éteint le flag : sinon une
+        // suppression/annulation ultérieure verrait stock_reserved=true
+        // et recréditerait du stock déjà vendu (double-crédit).
+        stockReserved: false,
+      );
+      // Encaissement : le total de la vente finale ne porte QUE les articles
+      // gardés (+ livraison + frais), il est donc recalculé ici et non repris
+      // du montant réservé.
+      final total = base.total;
+      final paid  = (amountPaid ?? total).clamp(0, total).toDouble();
+      closed = base.copyWith(
+        amountPaid:    paid,
+        paymentStatus: PaymentStatusX.fromAmount(paid, total),
+      );
+    }
     await updateOrder(closed);
+    // JOURNAL — tenu ICI, et non chez l'appelant.
+    //
+    // Il y vivait, si bien qu'une clôture déclenchée par un autre chemin
+    // n'aurait rien laissé. Le journal suit désormais la donnée : il est écrit
+    // là où la commande change réellement d'état, et il porte enfin le DÉTAIL
+    // des refus — sans lui, l'écart entre ce qui partait et ce qui revient
+    // n'était lisible nulle part.
+    ActivityLogService.log(
+      action:      'approval_closed',
+      targetType:  'order',
+      targetId:    orderId,
+      targetLabel: order.clientName ?? 'Commande',
+      shopId:      order.shopId,
+      details: {
+        'kept_total':     recon.totalKept,
+        'returned_total': recon.totalReturned,
+        'final_status':   closed.status.name,
+        'amount_paid':    amountPaid,
+        if (collectedBy != null) 'collected_by': collectedBy,
+        if (refusals.isNotEmpty)
+          'refusals': [
+            for (final e in refusals.entries)
+              {
+                'product_id': e.key,
+                'code':       e.value.code,
+                if (e.value.detail != null) 'detail': e.value.detail,
+              },
+          ],
+      },
+    );
+    // La commande est finalisée (completed ou cancelled) : plus aucun rappel
+    // de livraison à faire sonner. `updateOrderStatus` le fait pour les
+    // transitions génériques ; la clôture ne passant pas par lui, on le fait
+    // ici (sinon notification fantôme sur une tournée déjà close).
+    await DeliveryReminderService.cancelFor(orderId);
   }
 
   /// Annule une commande « à choisir sur place » réservée : remet en stock
@@ -889,12 +1500,58 @@ class SaleLocalDatasource {
             reason ?? 'annulation vente à choisir');
       }
     }
+    // Même traitement que le refus total dans `closeApprovalOrder` : la
+    // marchandise est revenue en stock (boucle ci-dessus), la commande ne
+    // porte donc plus d'articles et la perte se limite à ce qui a été engagé
+    // — livraison + frais annexes.
+    //
+    // Sans cet alignement, le MÊME évènement métier — une tournée entièrement
+    // refusée — pèserait deux montants différents dans les « Pertes » selon
+    // le bouton pressé : valeur pleine par ici, livraison seule par la
+    // clôture. La remise part avec les articles, faute de quoi `taxAmount`,
+    // qui dérive de `(subtotal - discountAmount)`, deviendrait négatif.
     final cancelled = order.copyWith(
       status:             SaleStatus.cancelled,
       stockReserved:      false,
+      items:              const [],
+      discountAmount:     0,
       cancellationReason: reason,
     );
     await updateOrder(cancelled);
+    // Journal tenu ici plutôt que chez l'appelant — même raison que pour la
+    // clôture : l'évènement appartient à la donnée, pas à l'écran qui l'a
+    // déclenché.
+    ActivityLogService.log(
+      action:      'approval_cancelled',
+      targetType:  'order',
+      targetId:    orderId,
+      targetLabel: order.clientName ?? 'Commande',
+      shopId:      order.shopId,
+      details: {
+        'items':          order.items.length,
+        'stock_restored': order.stockReserved,
+        if (reason != null) 'reason': reason,
+      },
+    );
+    await DeliveryReminderService.cancelFor(orderId);
+  }
+
+  /// True si le produit [pid] est suivi en stock (hotfix_138).
+  ///
+  /// `track_stock = false` marque un article produit à la demande (plat
+  /// cuisiné, service, prestation) : il n'a pas de stock à décrémenter ni à
+  /// restituer. Sans ce filtre, chaque vente d'un tel article dégradait un
+  /// stock qui n'a pas de sens, ou polluait le journal d'activité d'une
+  /// entrée `stock_decrement_failed` par ligne vendue.
+  ///
+  /// Produit introuvable → `true` (comportement historique) : l'absence de
+  /// produit est déjà tracée par les `_log*Miss` appelants, ce n'est pas à
+  /// cette fonction de la masquer.
+  static bool _isStockTracked(List<dynamic> products, String pid) {
+    for (final p in products) {
+      if (p.id == pid) return p.trackStock as bool;
+    }
+    return true;
   }
 
   /// Résout (productId, variantId) à partir de l'id stocké dans l'item de
@@ -982,6 +1639,8 @@ class SaleLocalDatasource {
         // Defensive : commande `completed` standard (ne devrait pas arriver
         // — le use case bloque en amont — mais protège rejeux / legacy mal
         // sourcés). Les ventes à choisir gèrent leur stock ci-dessus.
+        // NB : `processing` (En cours) est désormais NON supprimable
+        // (DeleteSaleUseCase.allowedStatuses) → pas de restitution ici.
         await _restoreOrderStock(order);
       }
     }
@@ -1015,6 +1674,7 @@ class SaleLocalDatasource {
   Map<String, dynamic> _saleToMap(Sale sale) => {
     'shop_id':        sale.shopId,
     'discount_amount': sale.discountAmount,
+    'discount_reason': sale.discountReason,
     'payment_method': sale.paymentMethod.name,
     'client_id':      sale.clientId,
     'client_phone':   sale.clientPhone,
@@ -1033,11 +1693,28 @@ class SaleLocalDatasource {
     'discount':     i.discount,
     'image_url':    i.imageUrl,
     'variant_name': i.variantName,
+    'modifiers':    i.modifiers,
   };
+
+  /// Normalise les options de menu d'une ligne (module restaurant).
+  ///
+  /// La valeur arrive soit en `List<Map>` (Hive), soit en `List<dynamic>`
+  /// issue du JSONB Supabase, soit absente (toute commande non-restaurant,
+  /// et toutes les commandes antérieures à hotfix_137) → liste vide.
+  static List<Map<String, dynamic>> _modifiersFromRaw(dynamic raw) {
+    if (raw is! List) return const [];
+    final out = <Map<String, dynamic>>[];
+    for (final e in raw) {
+      if (e is Map) out.add(Map<String, dynamic>.from(e));
+    }
+    return out;
+  }
 
   /// GF-5 — Anti-doublon retour. Retourne `true` si au moins un mouvement
   /// `return_client_good` ou `return_defective` existe avec
-  /// `reference_id = orderId` dans `stock_movements`. Si [variantId] est
+  /// `reference = orderId` dans `stock_movements` — l'ancienne clé
+  /// `reference_id` restant lue par [_movementRef] pour l'historique local.
+  /// Si [variantId] est
   /// fourni, le check est restreint à cette variante précise (utile pour
   /// gérer les retours partiels article-par-article).
   ///
@@ -1050,7 +1727,7 @@ class SaleLocalDatasource {
     for (final raw in HiveBoxes.stockMovementsBox.values) {
       try {
         final m = Map<String, dynamic>.from(raw);
-        if (m['reference_id'] != orderId) continue;
+        if (_movementRef(m) != orderId) continue;
         if (variantId != null && m['variant_id'] != variantId) continue;
         final type = m['type'] as String? ?? '';
         if (type == 'return_client_good' || type == 'return_defective') {
@@ -1073,7 +1750,7 @@ class SaleLocalDatasource {
     for (final raw in HiveBoxes.stockMovementsBox.values) {
       try {
         final m = Map<String, dynamic>.from(raw);
-        if (m['reference_id'] != orderId) continue;
+        if (_movementRef(m) != orderId) continue;
         final type = m['type'] as String? ?? '';
         if (type != 'return_client_good' && type != 'return_defective') {
           continue;
@@ -1134,6 +1811,7 @@ class SaleLocalDatasource {
             discount:    ((map['discount'] ?? 0) as num).toDouble(),
             imageUrl:    map['image_url'] as String?,
             variantName: map['variant_name'] as String?,
+            modifiers:   _modifiersFromRaw(map['modifiers']),
           ));
         } catch (e) {
           debugPrint('[DS] item parse error: $e');
@@ -1150,6 +1828,7 @@ class SaleLocalDatasource {
     return Sale(
       shopId:        m['shop_id'] as String,
       discountAmount: discount.toDouble(),
+      discountReason: m['discount_reason'] as String?,
       paymentMethod:  payment,
       clientId:      m['client_id'] as String?,
       clientPhone:   m['client_phone'] as String?,
@@ -1160,6 +1839,9 @@ class SaleLocalDatasource {
       createdByUserId: m['created_by_user_id'] as String?,
       deliveryCity:    m['delivery_city']    as String?,
       deliveryAddress: m['delivery_address'] as String?,
+      deliveryQuartier: m['delivery_quartier'] as String?,
+      deliveryZone:     m['delivery_zone']     as String?,
+      deliveryPrice:   (m['delivery_price'] as num?)?.toDouble(),
       shipmentCity:    m['shipment_city']    as String?,
       shipmentAgency:  m['shipment_agency']  as String?,
       shipmentHandler: m['shipment_handler'] as String?,
@@ -1170,10 +1852,31 @@ class SaleLocalDatasource {
       paymentStatus:      PaymentStatusX.fromKey(
                               m['payment_status'] as String?),
       idempotencyKey:     m['idempotency_key'] as String?, // GF-1
+      // Jeton de suivi (hotfix_171) — lecture seule, jamais écrit par le client.
+      trackingToken:      m['tracking_token'] as String?,
       // Vente « à choisir sur place » (lecture tolérante : colonnes absentes
       // sur les commandes legacy → false).
       isApprovalSale:     (m['is_approval_sale'] as bool?) ?? false,
       stockReserved:      (m['stock_reserved'] as bool?) ?? false,
+      // Module restaurant (hotfix_137). Lu ICI et non dans
+      // `_mapToSaleWithStatus` : ce dernier passe par `copyWith`, qui résout
+      // les nullables par `??` — une valeur null en base y serait ignorée
+      // et la commande garderait la table de `base`.
+      tableId:            m['table_id'] as String?,
+      tabLabel:           m['tab_label'] as String?,
+      // `covers` transite en `num` via le JSON Supabase : un cast direct
+      // `as int?` lèverait sur un retour double.
+      covers:             (m['covers'] as num?)?.toInt(),
+      orderType:          (m['order_type'] as String?) ?? 'takeaway',
+      sentToKitchen:      (m['sent_to_kitchen'] as bool?) ?? false,
+      kitchenReady:       (m['kitchen_ready'] as bool?) ?? false,
+      served:             (m['served'] as bool?) ?? false,
+      finished:           (m['finished'] as bool?) ?? false,
+      // hotfix_183 — NULL sur les commandes antérieures : pas de
+      // chronomètre plutôt qu'un faux (aucun repli sur created_at).
+      serviceStateAt:     m['service_state_at'] == null
+          ? null
+          : DateTime.tryParse(m['service_state_at'].toString()),
     );
   }
 

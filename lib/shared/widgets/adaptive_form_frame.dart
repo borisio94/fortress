@@ -105,7 +105,13 @@ class AdaptiveFormFrame extends StatelessWidget {
           leading: IconButton(
             icon: Icon(Icons.arrow_back_rounded,
                 color: scheme.onSurface),
-            onPressed: () => Navigator.of(context).pop(),
+            // `maybePop` et non `pop` : un formulaire qui a quelque chose à
+            // demander avant de fermer (un `PopScope`) doit pouvoir le faire
+            // ICI aussi. `pop` force la fermeture et court-circuite la
+            // question ; sur mobile, cette flèche EST le geste de sortie.
+            // Sans `PopScope` au-dessus, les deux sont équivalents — aucun
+            // formulaire existant ne change de comportement.
+            onPressed: () => Navigator.of(context).maybePop(),
           ),
           title: Column(
             mainAxisSize: MainAxisSize.min,

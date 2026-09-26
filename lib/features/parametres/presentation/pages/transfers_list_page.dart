@@ -209,7 +209,7 @@ class _FilterBar extends StatelessWidget {
           isDense: true,
           isExpanded: true,
           decoration: InputDecoration(
-            filled: true, fillColor: const Color(0xFFF9FAFB),
+            filled: true, fillColor: AppColors.inputFill,
             isDense: true,
             contentPadding: const EdgeInsets.symmetric(
                 horizontal: 10, vertical: 8),
@@ -280,7 +280,7 @@ class _TransferCard extends StatelessWidget {
             ]),
             const SizedBox(height: 8),
             Row(children: [
-              const Icon(Icons.schedule_rounded,
+              Icon(Icons.schedule_rounded,
                   size: 11, color: AppColors.textHint),
               const SizedBox(width: 4),
               Text(dateStr,
@@ -443,7 +443,7 @@ class _TransferDetailsSheet extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF9FAFB),
+                  color: AppColors.surface,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Theme.of(context).semantic.borderSubtle),
                 ),

@@ -100,7 +100,7 @@ class _PlansPageState extends State<PlansPage> {
                         maxLines: 1, overflow: TextOverflow.ellipsis,
                         style: AppTextStyles.bodySmBold),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
+                      backgroundColor: AppColors.primaryFill,
                       foregroundColor: Colors.white,
                       elevation: 0,
                       padding: const EdgeInsets.symmetric(

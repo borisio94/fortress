@@ -54,7 +54,7 @@ Future<BlockedDeleteChoice?> showBlockedDeleteDialog(
                     const SizedBox(height: 6),
                     Text(reason,
                         style: AppTextStyles.bodySmSecondary.copyWith(
-                            color: const Color(0xFF6B7280))),
+                            color: AppColors.textSecondary)),
                     const SizedBox(height: 12),
                     Container(
                       padding: const EdgeInsets.all(10),
@@ -83,7 +83,7 @@ Future<BlockedDeleteChoice?> showBlockedDeleteDialog(
                                 const SizedBox(height: 2),
                                 Text(archiveDescription,
                                     style: AppTextStyles.caption.copyWith(
-                                        color: const Color(0xFF6B7280))),
+                                        color: AppColors.textSecondary)),
                               ],
                             ),
                           ),
@@ -115,7 +115,7 @@ Future<BlockedDeleteChoice?> showBlockedDeleteDialog(
                           const Icon(Icons.archive_outlined, size: 16),
                       label: const Text('Archiver'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: AppColors.primaryFill,
                         foregroundColor: Colors.white,
                         elevation: 0,
                         minimumSize: const Size(0, 44),

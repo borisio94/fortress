@@ -97,7 +97,7 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                       decoration: BoxDecoration(
-                          color: AppColors.primary, borderRadius: BorderRadius.circular(8)),
+                          color: AppColors.primaryFill, borderRadius: BorderRadius.circular(8)),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         const Icon(Icons.add_rounded, size: 15, color: Colors.white),
                         const SizedBox(width: 6),
@@ -164,7 +164,7 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                   value: selectedSupplier,
                   decoration: InputDecoration(
                     labelText: 'Fournisseur', isDense: true,
-                    filled: true, fillColor: const Color(0xFFF9FAFB),
+                    filled: true, fillColor: AppColors.inputFill,
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(color: Theme.of(ctx).semantic.borderSubtle)),
@@ -189,7 +189,7 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                   margin: const EdgeInsets.only(bottom: 6),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: qty > 0 ? AppColors.primarySurface : const Color(0xFFF9FAFB),
+                    color: qty > 0 ? AppColors.primarySurface : AppColors.surface,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: qty > 0
                         ? AppColors.primary.withValues(alpha:0.3) : Theme.of(ctx).semantic.borderSubtle)),
@@ -234,7 +234,7 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                      const Text('Total estimé',
+                      Text('Total estimé',
                           style: AppTextStyles.bodySmSecondary),
                       Text(CurrencyFormatter.format(
                           items.values.fold(0.0, (s, i) => s + i.qty * i.price)),
@@ -272,7 +272,7 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                     icon: const Icon(Icons.check_rounded, size: 18),
                     label: Text('Créer (${items.length} produit${items.length > 1 ? 's' : ''})'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                      backgroundColor: AppColors.primaryFill, foregroundColor: Colors.white,
                       elevation: 0, disabledBackgroundColor: AppColors.divider,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                   ),
@@ -356,10 +356,12 @@ class _POCard extends StatelessWidget {
     required this.onStatusChange, required this.onReceive,
     required this.onDelete});
 
-  static const _statusColors = {
+  // Getter (non-const) : `AppColors.textHint` est désormais adaptatif
+  // clair/sombre → la map doit être évaluée au runtime.
+  static Map<POStatus, Color> get _statusColors => {
     POStatus.draft:     AppColors.textHint,
-    POStatus.sent:      Color(0xFF3B82F6),
-    POStatus.confirmed: Color(0xFF8B5CF6),
+    POStatus.sent:      const Color(0xFF3B82F6),
+    POStatus.confirmed: const Color(0xFF8B5CF6),
     POStatus.inTransit: AppColors.warning,
     POStatus.received:  AppColors.secondary,
     POStatus.cancelled: AppColors.error,
@@ -386,7 +388,7 @@ class _POCard extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Expanded(child: Text(supplierName, style: AppTextStyles.bodySmBold
-              .copyWith(color: const Color(0xFF374151)),
+              .copyWith(color: AppColors.onSurface),
               overflow: TextOverflow.ellipsis)),
           Text(CurrencyFormatter.format(order.computedTotal),
               style: AppTextStyles.bodyBold.copyWith(

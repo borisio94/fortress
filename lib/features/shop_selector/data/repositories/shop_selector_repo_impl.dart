@@ -29,7 +29,6 @@ class ShopSelectorRepositoryImpl implements ShopSelectorRepository {
       AppDatabase.updateShop(
         shopId:   shopId,
         name:     data['name']     as String?,
-        sector:   data['sector']   as String?,
         currency: data['currency'] as String?,
         country:  data['country']  as String?,
         phone:    data['phone']    as String?,

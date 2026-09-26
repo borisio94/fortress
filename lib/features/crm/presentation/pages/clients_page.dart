@@ -10,6 +10,7 @@ import '../../../../core/utils/currency_formatter.dart';
 import '../../../../core/database/app_database.dart';
 import '../../../../core/services/activity_log_service.dart';
 import '../../domain/entities/client.dart';
+import '../../../caisse/data/repositories/sale_local_datasource.dart';
 import '../../../../shared/widgets/app_primary_button.dart';
 import '../../../../shared/widgets/phone_field.dart';
 import '../../../../shared/widgets/app_field.dart';
@@ -37,6 +38,8 @@ class _ClientsPageState extends State<ClientsPage> {
   bool         _loading     = true;
   String       _query       = '';
   String       _filter      = 'Tous';
+  /// Créances par clientId (ventes à crédit complétées non soldées).
+  Map<String, double> _debts = {};
 
   static const _filters = ['Tous', 'VIP', 'Régulier', 'Nouveau'];
 
@@ -64,6 +67,7 @@ class _ClientsPageState extends State<ClientsPage> {
   void _load() {
     setState(() {
       _clients = AppDatabase.getClientsForShop(widget.shopId);
+      _debts   = SaleLocalDatasource().clientDebtsByClient(widget.shopId);
       _loading = false;
     });
   }
@@ -139,11 +143,11 @@ class _ClientsPageState extends State<ClientsPage> {
                 style: AppTextStyles.input,
                 decoration: InputDecoration(
                   hintText: l.crmSearch,
-                  prefixIcon: const Icon(Icons.search_rounded,
+                  prefixIcon: Icon(Icons.search_rounded,
                       size: 18, color: AppColors.textHint),
                   suffixIcon: _query.isNotEmpty
                       ? IconButton(
-                    icon: const Icon(Icons.clear_rounded,
+                    icon: Icon(Icons.clear_rounded,
                         size: 16, color: AppColors.textHint),
                     onPressed: () => setState(() => _query = ''),
                   )
@@ -205,7 +209,7 @@ class _ClientsPageState extends State<ClientsPage> {
               child: SizedBox(
                 width: 42, height: 42,
                 child: Material(
-                  color: AppColors.primary,
+                  color: AppColors.primaryFill,
                   borderRadius: BorderRadius.circular(10),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(10),
@@ -262,6 +266,7 @@ class _ClientsPageState extends State<ClientsPage> {
               itemCount: filtered.length,
               itemBuilder: (_, i) => _ClientCard(
                 client: filtered[i],
+                debt: _debts[filtered[i].id] ?? 0,
                 onTap: () => context.push(
                     '/shop/${widget.shopId}/crm/client/${filtered[i].id}'),
                 onEdit: () =>
@@ -465,11 +470,13 @@ class _FilterChip extends StatelessWidget {
 // ─── Card client ──────────────────────────────────────────────────────────────
 class _ClientCard extends StatelessWidget {
   final Client client;
+  /// Créance du client (somme due sur ses ventes à crédit). 0 = à jour.
+  final double debt;
   final VoidCallback onTap;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   const _ClientCard({required this.client, required this.onTap,
-    required this.onEdit, required this.onDelete});
+    required this.onEdit, required this.onDelete, this.debt = 0});
 
   @override
   Widget build(BuildContext context) {
@@ -542,6 +549,27 @@ class _ClientCard extends StatelessWidget {
                           daysAgo == 0 ? "Auj." : daysAgo == 1 ? 'Hier' : 'Il y a ${daysAgo}j'),
                   ],
                 ),
+                // Créance (vente à crédit non soldée) — pastille warning.
+                if (debt > 0) ...[
+                  const SizedBox(height: 5),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.warning.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.account_balance_wallet_rounded,
+                          size: 11, color: AppColors.warning),
+                      const SizedBox(width: 4),
+                      Text(
+                          'Doit ${CurrencyFormatter.format(debt)}',
+                          style: AppTextStyles.microBold
+                              .copyWith(color: AppColors.warning)),
+                    ]),
+                  ),
+                ],
               ])),
 
           // Montant + actions
@@ -709,9 +737,12 @@ class _EmptyState extends StatelessWidget {
                   style: AppTextStyles.bodySmBold.copyWith(
                       color: Colors.white)),
               style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                // Bouton confortable : hauteur mini + padding généreux pour que
+                // le texte ne soit pas serré (le thème global met minimumSize 0).
+                minimumSize: const Size(0, 46),
+                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8)),
               ),
@@ -1062,7 +1093,7 @@ class ClientFormSheetState extends State<ClientFormSheet> {
                 keyboardType: TextInputType.emailAddress,
                 validator: (_) => _emailError,
                 suffixIcon: IconButton(
-                  icon: const Icon(Icons.close_rounded,
+                  icon: Icon(Icons.close_rounded,
                       size: 16, color: AppColors.textHint),
                   onPressed: () => setState(() {
                     _emailCtrl.clear();
@@ -1093,7 +1124,7 @@ class ClientFormSheetState extends State<ClientFormSheet> {
                 prefixIcon: Icons.notes_rounded,
                 maxLines: 2,
                 suffixIcon: IconButton(
-                  icon: const Icon(Icons.close_rounded,
+                  icon: Icon(Icons.close_rounded,
                       size: 16, color: AppColors.textHint),
                   onPressed: () => setState(() {
                     _notesCtrl.clear();
@@ -1144,8 +1175,8 @@ class ClientFormSheetState extends State<ClientFormSheet> {
                 ),
                 Divider(height: 1,
                     color: Theme.of(dc).semantic.borderSubtle),
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 14, 20, 0),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
                   child: Text('Cette action est irréversible.',
                       style: AppTextStyles.bodySecondary),
                 ),

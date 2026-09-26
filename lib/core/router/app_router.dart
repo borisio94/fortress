@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
+import '../observability/error_reporter.dart';
 import '../../shared/widgets/alerts/_alert_demo_page.dart';
 import '../../features/auth/presentation/bloc/auth_state.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
@@ -18,13 +20,8 @@ import '../../features/super_admin/presentation/pages/platform_stats_page.dart';
 import '../../features/super_admin/presentation/pages/platform_incidents_page.dart';
 import '../../features/super_admin/presentation/pages/platform_export_page.dart';
 import '../../features/super_admin/presentation/pages/super_admin_deleted_hub_page.dart';
-import '../../features/onboarding/presentation/pages/onboarding_slides_page.dart';
-import '../../features/onboarding/presentation/pages/auth_choice_page.dart';
-import '../../features/onboarding/presentation/pages/register_simplified_page.dart';
-import '../../features/onboarding/presentation/pages/shop_onboarding_wizard.dart';
 import '../../features/onboarding/presentation/pages/product_quick_add_page.dart';
-import '../../features/onboarding/presentation/providers/onboarding_seen_provider.dart';
-import '../../features/onboarding/data/onboarding_prefs.dart';
+import '../services/account_access_policy.dart';
 import '../../features/catalogue/presentation/pages/catalogue_page.dart';
 import '../../features/marketing/presentation/pages/landing_page.dart';
 import '../../features/promo_campaigns/presentation/pages/campaign_send_page.dart';
@@ -41,6 +38,17 @@ import '../../features/caisse/presentation/pages/caisse_page.dart';
 import '../../features/caisse/presentation/pages/orders_page.dart';
 import '../../features/caisse/presentation/pages/payment_page.dart';
 import '../../features/inventaire/presentation/pages/inventaire_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_tables_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_setup_page.dart';
+import '../../features/restaurant/presentation/pages/bill_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_dashboard_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_menu_page.dart';
+import '../../features/restaurant/presentation/pages/finances_hub_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_stock_page.dart';
+import '../../features/restaurant/presentation/pages/inventory_reconcile_page.dart';
+import '../../features/restaurant/presentation/pages/cash_closure_page.dart';
+import '../../features/restaurant/presentation/pages/restaurant_staff_page.dart';
+import '../../features/restaurant/presentation/pages/timeclock_page.dart';
 import '../../features/inventaire/presentation/pages/product_form_page.dart';
 import '../../features/inventaire/presentation/pages/reception_page.dart';
 import '../../features/inventaire/presentation/pages/incidents_page.dart';
@@ -55,6 +63,7 @@ import '../../features/finances/presentation/pages/finances_page.dart';
 import '../../features/hub_central/presentation/pages/hub_dashboard_page.dart';
 import '../../features/hub_central/presentation/pages/shop_comparison_page.dart';
 import '../../features/parametres/presentation/pages/parametres_page.dart';
+import '../../features/parametres/presentation/pages/marketing_page.dart';
 import '../../features/parametres/presentation/pages/shop_settings_page.dart';
 import '../../features/parametres/presentation/pages/stock_locations_page.dart';
 import '../../features/parametres/presentation/pages/location_contents_page.dart';
@@ -76,10 +85,13 @@ import '../../features/parametres/presentation/pages/notifications_page.dart';
 import '../../features/parametres/presentation/pages/exports_page.dart';
 import '../../features/parametres/presentation/pages/payments_page.dart';
 import '../../features/parametres/presentation/pages/delivery_templates_page.dart';
+import '../../features/parametres/presentation/pages/livraison_page.dart';
 import '../../features/parametres/presentation/pages/partner_accounts_page.dart';
+import '../../features/parametres/presentation/pages/partner_hub_detail_page.dart';
 import '../../features/parametres/presentation/pages/pin_delete_page.dart';
 import '../../features/parametres/presentation/pages/sessions_page.dart';
 import '../permisions/admin_panel_page.dart';
+import '../config/restaurant_mode.dart';
 import '../permisions/subscription_provider.dart';
 import '../database/app_database.dart';
 import '../services/presence_service.dart';
@@ -93,7 +105,6 @@ import '../../shared/widgets/blocked_account_screen.dart';
 import 'registration_flag.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
-import '../storage/hive_boxes.dart';
 import '../../shared/widgets/adaptive_scaffold.dart';
 
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
@@ -163,13 +174,6 @@ class AuthRouterNotifier extends ChangeNotifier {
     final wasAuth = _isAuthenticated;
     _isAuthenticated = state is AuthAuthenticated;
     if (!wasAuth && _isAuthenticated) {
-      // Toute authentification réussie marque les slides d'onboarding
-      // comme « vues » — y compris pour un user qui a contourné les
-      // slides (inscription directe /auth/register, lien d'invitation,
-      // import de session existante). Sinon, au logout, le redirect le
-      // renverrait sur l'onboarding au lieu de /login.
-      unawaited(OnboardingPrefs.markSlidesSeen());
-      _ref?.read(onboardingSeenCacheProvider.notifier).state = true;
       // Vient de se connecter → charger plan + memberships EN PARALLÈLE
       // avec la validation serveur de la session (compte zombie : profile
       // ou membership supprimés côté serveur sans purge auth). Si invalide,
@@ -188,8 +192,12 @@ class AuthRouterNotifier extends ChangeNotifier {
           // notifyListeners → la garde « Boutique suspendue » du shell voit le
           // bon statut dès le 1er build (même principe que le blocage/plan).
           _syncUserShops(),
-          // Flag serveur des slides d'intro (1 fois par compte, cross-device).
-          loadOnboardingSlidesSeen(ref),
+          // UN ALLER-RETOUR DE MOINS, retiré le 21/09/2026. On lisait ici
+          // `profiles.onboarding_slides_seen` à CHAQUE connexion, et le seul
+          // lecteur du résultat gardait une route que plus personne ne
+          // pouvait atteindre : les slides d'intro n'avaient plus aucun
+          // appelant. La connexion attendait une réponse dont rien ne
+          // dépendait.
         ]).whenComplete(() {
           _syncing = false;
           notifyListeners();
@@ -206,18 +214,28 @@ class AuthRouterNotifier extends ChangeNotifier {
       // Démarre le heartbeat de présence (PresenceService).
       // Permet au workflow d'approbation owner de fonctionner.
       PresenceService.start();
+      // Phase 0 — enrichissement Sentry : associe la cible exacte (qui est
+      // connecté) à tout event remonté.
+      if (state is AuthAuthenticated) {
+        final u = state.user;
+        Sentry.configureScope((scope) =>
+            scope.setUser(SentryUser(id: u.id, email: u.email)));
+      }
     } else if (wasAuth && !_isAuthenticated) {
       _ref?.read(subscriptionProvider.notifier).reset();
       _ref?.read(shopRolesMapProvider.notifier).state = {};
-      // Réinitialise le flag slides → rechargé à la prochaine connexion
-      // (un autre compte sur le même appareil doit être réévalué).
-      _ref?.read(onboardingSlidesSeenProvider.notifier).state = null;
       // Vider la boutique active et notifier le dashboard
       try {
         _ref?.read(currentShopProvider.notifier).clearShop();
       } catch (_) {}
       AppDatabase.notifyAllChanged();
       PresenceService.stop();
+      // Phase 0 — Sentry : on oublie l'utilisateur ET la boutique au logout
+      // (les events suivants ne doivent pas être attribués au compte précédent).
+      Sentry.configureScope((scope) {
+        scope.setUser(null);
+        scope.removeTag('shop_id');
+      });
     }
     if (wasAuth != _isAuthenticated || justInitialized) notifyListeners();
   }
@@ -276,12 +294,81 @@ final authRouterNotifierProvider = Provider<AuthRouterNotifier>((ref) {
 // lors de la navigation entre routes shell et routes hors-shell
 final _shellNavigatorKey = GlobalKey<NavigatorState>(debugLabel: 'shell');
 
+/// Garde des routes du module restaurant.
+///
+/// Jusqu'ici ces écrans n'étaient protégés que par la VISIBILITÉ de leur entrée
+/// de menu (`ShellNavItem.visibleIf`). Masquer un item n'empêche pas d'atteindre
+/// l'URL : n'importe quel membre connecté pouvait ouvrir `/restaurant/personnel`
+/// et y lire les salaires et les avances de toute l'équipe.
+///
+/// Deux filtres :
+///   * SECTEUR — hors restauration ces écrans n'ont pas de sens ; on renvoie au
+///     tableau de bord plutôt que d'afficher une page vide (même parti pris que
+///     la redirection de l'ancienne page Finances, plus bas).
+///   * RÔLE — [adminOnly] pour tout ce qui expose de l'argent : salaires,
+///     marges, coûts matières, écarts d'inventaire.
+///
+/// Le service courant (plan de salle, cuisine, addition, clôture de caisse)
+/// reste ouvert à tout membre : ce sont les écrans de travail de l'équipe, et
+/// c'est le caissier lui-même qui compte son tiroir.
+/// Garde de l'écran STOCK : restaurant, et droit de gérer le stock.
+///
+/// Distinct de `_restaurantGuard(adminOnly:)` parce que le droit n'est pas le
+/// même. Même précaution qu'ailleurs sur l'hydratation des rôles : on ne
+/// renvoie que si l'on SAIT que l'utilisateur est un membre sans ce droit.
+String? _restaurantStockGuard(Ref ref, GoRouterState s) {
+  final id = s.pathParameters['shopId'] ?? '';
+  if (id.isEmpty) return null;
+  if (!isRestaurantShop(id)) return '/shop/$id/dashboard';
+  final perms = ref.read(permissionsProvider(id));
+  if (perms.isMember && !perms.canManageStock) return shopLandingRoute(id);
+  return null;
+}
+
+String? _restaurantGuard(Ref ref, GoRouterState s, {bool adminOnly = false}) {
+  final id = s.pathParameters['shopId'] ?? '';
+  if (id.isEmpty) return null;
+  if (!isRestaurantShop(id)) return '/shop/$id/dashboard';
+  // AUCUNE REDIRECTION VERS LA CONFIGURATION.
+  //
+  // Une version précédente renvoyait tous les écrans du module vers
+  // `/restaurant/setup` tant que la mise en route n'était pas finie. C'était
+  // une contrainte : elle empêchait d'explorer l'application avant d'avoir
+  // saisi quoi que ce soit, et enfermait quiconque voulait simplement regarder.
+  //
+  // L'accompagnement subsiste, mais il PROPOSE au lieu d'imposer : la bannière
+  // du tableau de bord et la carte de progression de l'écran Menu mènent à la
+  // configuration tant qu'il reste quelque chose à faire. Tout le reste est
+  // accessible dès la première connexion. (Il n'y a PAS d'entrée « Configuration »
+  // au menu, contrairement à ce que disait cette note.)
+  //
+  // `/restaurant/setup` reste donc ouverte à tout membre, À DESSEIN : elle dit
+  // où en est l'établissement, ce qui est une information de service. Ce sont
+  // ses ÉTAPES qui portent les droits — `canAddProduct` pour composer la carte,
+  // `canManageExpenses` pour les achats. La garder ici en `adminOnly` aurait
+  // écarté l'employé à qui le gérant a justement délégué `inventoryWrite`.
+  if (!adminOnly) return null;
+  final perms = ref.read(permissionsProvider(id));
+  // On ne renvoie que si l'on SAIT que l'utilisateur est un membre non-admin.
+  // Au tout premier rendu après un deep-link, les rôles peuvent ne pas être
+  // encore hydratés (`isMember` faux) : rediriger un owner vers son tableau de
+  // bord parce que son rôle n'est pas encore chargé serait pire que le mal.
+  if (perms.isMember && !perms.isShopAdmin) return shopLandingRoute(id);
+  return null;
+}
+
 final appRouterProvider = Provider<GoRouter>((ref) {
   final notifier = ref.watch(authRouterNotifierProvider);
 
   return GoRouter(
     initialLocation: RouteNames.landing,
     refreshListenable: notifier, // ← le router se rafraîchit quand notifier change
+    // Phase 0 — SentryNavigatorObserver RÉACTIVÉ : pose le nom de la route
+    // courante (cible « écran ») sur chaque event + breadcrumbs de navigation.
+    // (Désactivé un temps pendant le debug du gel logout ; la cause réelle
+    // était le signOut bloquant — corrigée. La déconnexion redirige désormais
+    // en une seule navigation, l'observer ne s'emballe plus.)
+    observers: [SentryNavigatorObserver(setRouteNameAsTransaction: true)],
     redirect: (context, state) {
       // Helper : destination après login. Si l'utilisateur a EXACTEMENT
       // 1 boutique en cache (owner ou membre), on saute la page
@@ -299,13 +386,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         final shops = LocalStorageService.getShopsForUser(uid);
         if (shops.length == 1) {
           LocalStorageService.saveActiveShopId(uid, shops.first.id);
-          return '/shop/${shops.first.id}/dashboard';
+          // Restaurant → Menu ; sinon Tableau de bord (cf. shopLandingRoute).
+          return shopLandingRoute(shops.first.id);
         }
         return RouteNames.shopSelector;
       }
 
       final isLoggedIn           = notifier.isAuthenticated;
       final loc                  = state.matchedLocation;
+      // Phase 1 observabilité — cible « écran » des rapports de bugs.
+      ErrorReporter.lastRoute = loc;
       final isAuthRoute          = loc.startsWith('/auth');
       final isSubscriptionRoute  = loc.startsWith('/subscription');
       final isAcceptInviteRoute  = loc.startsWith('/accept-invite');
@@ -318,12 +408,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final isLandingRoute       = loc == RouteNames.landing;
       final isPricingRoute       = loc == RouteNames.pricing;
       final isPublicMarketing    = isLandingRoute || isPricingRoute;
-      // Onboarding routes (PR-1) : slides marketing + auth choice +
-      // register simplifié + wizard boutique. Toutes accessibles sans
-      // auth — un visiteur 1ʳᵉ ouverture est explicitement envoyé ici
-      // par le redirect ci-dessous quand `onboarding_seen` est absent.
-      final isOnboardingRoute    = loc.startsWith('/onboarding');
-
       // ── /accept-invite : page publique, jamais rediriger ───────────
       // Gère elle-même l'état (invité/connecté/mauvais compte)
       if (isAcceptInviteRoute) return null;
@@ -356,13 +440,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       // ── Non connecté ───────────────────────────────────────────────
       if (!isLoggedIn) {
-        // /onboarding/* et /auth/* sont publics par construction.
-        if (isOnboardingRoute) return null;
+        // /auth/* est public par construction.
         if (isAuthRoute)       return null;
-        // Les slides d'intro ne sont PLUS un tunnel pré-login : elles
-        // s'affichent uniquement après la 1ʳᵉ connexion d'un compte (flag
-        // serveur, cf. branche connectée + hotfix_099). Un visiteur anonyme
-        // sur une route protégée va donc directement au login.
+        // Un visiteur anonyme sur une route protégée va directement au login.
+        // Il n'y a plus rien avant : les slides d'intro et le tunnel
+        // `/onboarding/*` sont partis le 21/09/2026, faute d'appelant.
         return RouteNames.login;
       }
 
@@ -399,7 +481,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         if (loc.startsWith('${RouteNames.suspended}/')) {
           final parts = loc.split('/');
           final sid = parts.length >= 3 ? parts[2] : '';
-          return suspendedFor(sid) ? null : '/shop/$sid/dashboard';
+          return suspendedFor(sid) ? null : shopLandingRoute(sid);
         }
         if (loc.startsWith('/shop/')) {
           final parts = loc.split('/');
@@ -419,28 +501,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (!plan.isSuperAdmin &&
           (loc.startsWith('/super-admin') || loc.startsWith('/admin'))) {
         return postAuthDestination();
-      }
-
-      // ── Slides d'intro : UNE FOIS par compte, à la 1ʳᵉ connexion ────
-      // Flag serveur profiles.onboarding_slides_seen (hotfix_099), chargé au
-      // login dans AuthRouterNotifier. Le super admin n'a pas de tunnel
-      // onboarding. On N'INTERROMPT PAS le tunnel d'inscription /onboarding/*
-      // (register simplifié + wizard boutique) : les slides s'afficheront
-      // quand l'utilisateur arrive sur une vraie route applicative.
-      // `null` = en chargement → attendre (pas de flash). `false` = compte
-      // neuf → slides. `true` = déjà vu.
-      if (!plan.isSuperAdmin) {
-        final slidesSeen = ref.read(onboardingSlidesSeenProvider);
-        // Les slides d'intro s'affichent UNIQUEMENT à la fin de la création
-        // de compte : le flux d'inscription (RegisterPage / wizard onboarding)
-        // navigue EXPLICITEMENT vers `/onboarding/slides`. On ne FORCE plus
-        // les slides via le redirect — un compte existant qui se (re)connecte
-        // ne doit jamais les revoir. Seul garde-fou conservé : si on atterrit
-        // sur la page slides alors qu'elles sont déjà vues (refresh / retour
-        // arrière), on entre directement dans l'app.
-        if (loc == RouteNames.onboardingSlides && slidesSeen == true) {
-          return postAuthDestination();
-        }
       }
 
       // ── CAS 1 — Super Admin ────────────────────────────────────────
@@ -572,6 +632,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             }
             final loc = qp['loc']?.trim();
             final deliveryMode = qp['mode']?.trim() == 'delivery';
+            // Deep-link pub Facebook : `?product=<id>` ouvre le catalogue
+            // COMPLET et met en avant (ouvre la fiche) du produit ciblé. Le
+            // client peut ensuite fermer la fiche et continuer à parcourir.
+            final highlight = qp['product']?.trim();
             return CataloguePage(
               shopId: s.pathParameters['shopId']!,
               initialCategory: qp['cat'],
@@ -579,6 +643,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               stockOverride: stockOverride,
               locationId: (loc != null && loc.isNotEmpty) ? loc : null,
               deliveryMode: deliveryMode,
+              highlightProductId:
+                  (highlight != null && highlight.isNotEmpty) ? highlight : null,
             );
           }),
       // Suivi de commande publique — lien envoyé par WhatsApp dans la
@@ -604,16 +670,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             : 'Votre accès à cette boutique a été suspendu par un administrateur.';
         return SuspendedShopScreen(reason: reason);
       }),
-      // Onboarding 1ʳᵉ ouverture (PR-1).
-      GoRoute(path: RouteNames.onboardingSlides,
-          builder: (c, s) => const OnboardingSlidesPage()),
-      GoRoute(path: RouteNames.onboardingAuthChoice,
-          builder: (c, s) => const AuthChoicePage()),
-      GoRoute(path: RouteNames.onboardingRegister,
-          builder: (c, s) => const RegisterSimplifiedPage()),
-      // Wizard boutique (PR-2) — 3 étapes + sélecteur palette.
-      GoRoute(path: RouteNames.onboardingShop,
-          builder: (c, s) => const ShopOnboardingWizard()),
       GoRoute(path: RouteNames.adminPanel,      builder: (c, s) => const AdminPanelPage()),
       GoRoute(path: RouteNames.superAdminHome,  builder: (c, s) => const SuperAdminPage()),
       GoRoute(path: RouteNames.adminSubscriptions,
@@ -664,45 +720,51 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         // attribuée par le owner) peut créer une boutique. Les employés
         // qui tentent l'URL directement sont renvoyés au shop-selector.
         //
-        // ⚠ Cette logique DOIT rester en miroir avec
-        // `_ShopListPageState._canCreateShop()` dans shop_list_page.dart.
-        // Sinon le bouton "Nouvelle boutique" pousserait vers /create
-        // qui redirigerait immédiatement → boucle perçue par l'user
-        // comme "l'app cherche à charger une boutique".
+        // La règle vit dans `account_access_policy.dart`, avec celle qui dit
+        // ce qu'est un compte révoqué. Les deux lisaient le même état — « ni
+        // membership ni boutique » — et en tiraient des conclusions
+        // contraires : ce garde y voyait un nouvel inscrit, `SessionValidator`
+        // un compte zombie à purger. Un test vérifie désormais qu'elles
+        // s'accordent.
         //
-        // 3 cas :
-        //   1. Owner d'au moins une boutique en local → autorisé.
-        //   2. 0 membership en local pour cet uid → nouvel inscrit qui
-        //      crée sa première boutique → autorisé. Sans cette branche,
-        //      on rejette à tort le tout premier compte.
-        //   3. Au moins un membership mais aucun shop possédé → employé
-        //      invité dans une autre boutique → bloqué.
-        redirect: (ctx, state) {
-          final uid = Supabase.instance.client.auth.currentUser?.id;
-          if (uid == null) return null;
-
-          final ownsAShop = HiveBoxes.shopsBox.values.any((raw) {
-            try {
-              final m = Map<String, dynamic>.from(raw);
-              return m['owner_id'] == uid;
-            } catch (_) { return false; }
-          });
-          if (ownsAShop) return null;
-
-          final hasAnyMembership = HiveBoxes.membershipsBox.values.any((raw) {
-            try {
-              final m = Map<String, dynamic>.from(raw);
-              return m['user_id'] == uid;
-            } catch (_) { return false; }
-          });
-          return hasAnyMembership ? RouteNames.shopSelector : null;
-        },
+        // LA LECTURE EST PARTAGÉE avec le bouton « Nouvelle boutique » de
+        // `shop_list_page.dart`. Il y avait ici un « ⚠ Reste à tenir en miroir
+        // à la main », et le miroir était déjà brisé : ce garde autorisait
+        // quand personne n'était authentifié, le bouton refusait. Sinon le
+        // bouton pousserait vers /create qui redirigerait aussitôt — une
+        // boucle que l'utilisateur lit comme une application qui n'arrive pas
+        // à charger sa boutique.
+        redirect: (ctx, state) =>
+            currentUserMayCreateShop() ? null : RouteNames.shopSelector,
         builder: (c, s) => const CreateShopPage(),
       ),
       GoRoute(path: RouteNames.editShop,
           builder: (c, s) => EditShopPage(shopId: s.pathParameters['shopId']!)),
       GoRoute(path: RouteNames.hub,             builder: (c, s) => const HubDashboardPage()),
       GoRoute(path: RouteNames.shopComparison,  builder: (c, s) => const ShopComparisonPage()),
+
+      // ── BADGEUSE — HORS DU SHELL, pour de vrai (25/09/2026) ───────────────
+      //
+      // Posée en libre-service à l'entrée du personnel, sur le compte connecté
+      // du gérant : elle ne doit donner accès à AUCUNE autre page. Déclarée
+      // dans le `ShellRoute` depuis sa création (`45e517a`), sous un
+      // commentaire qui affirmait le contraire, elle portait la barre latérale
+      // (ordinateur) ou l'AppBar avec le menu du compte (mobile).
+      //
+      // Hors du shell, elle perdrait les deux gardes de `ShopShell` (boutique
+      // suspendue, membre suspendu) : `ShopAccessGuard` les lui rend. Sa seule
+      // sortie est la croix, sous PIN gérant (cf. `TimeclockPage._exit`).
+      //
+      // LIMITE : sur le web, la barre d'adresse et le bouton Précédent du
+      // navigateur restent disponibles. On retire la navigation de l'app, pas
+      // celle du navigateur.
+      GoRoute(path: '/shop/:shopId/restaurant/pointage',
+          redirect: (c, st) => _restaurantGuard(ref, st),
+          builder: (c, s) {
+            final id = s.pathParameters['shopId']!;
+            return ShopAccessGuard(
+                shopId: id, child: TimeclockPage(shopId: id));
+          }),
 
       ShellRoute(
         // navigatorKey unique — isole le ShellRoute du navigator racine
@@ -719,9 +781,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           return ShopShell(key: ValueKey(shopId), child: child, shopId: shopId);
         },
         routes: [
+          // Tableau de bord : deux écrans distincts selon le secteur. Le
+          // restaurant a ses propres indicateurs (canaux de service, tables
+          // occupées, bons en cuisine) qui n'ont aucun sens en e-commerce,
+          // et réciproquement. Route unique pour que la redirection après
+          // login et le lien « Accueil » restent inchangés.
           GoRoute(path: '/shop/:shopId/dashboard',
-              pageBuilder: (c, s) => _shellPage(s,
-                  DashboardPage(shopId: s.pathParameters['shopId']!))),
+              pageBuilder: (c, s) {
+                final id = s.pathParameters['shopId']!;
+                return _shellPage(s, isRestaurantShop(id)
+                    ? RestaurantDashboardPage(shopId: id)
+                    : DashboardPage(shopId: id));
+              }),
           GoRoute(path: '/shop/:shopId/caisse',
               pageBuilder: (c, s) => _shellPage(s, CaissePage(
                 shopId: s.pathParameters['shopId']!,
@@ -733,9 +804,100 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/caisse/orders',
               pageBuilder: (c, s) => _shellPage(s,
                   OrdersPage(shopId: s.pathParameters['shopId']!))),
-          GoRoute(path: '/shop/:shopId/inventaire',
+          // Module restaurant — plan de salle. L'onglet de nav n'apparaît que
+          // pour les secteurs de restauration, mais la route reste atteignable
+          // par deeplink : la page se contente d'afficher un plan vide si la
+          // boutique n'est pas un établissement de restauration (aucune donnée
+          // sensible exposée).
+          // L'écran de SERVICE a été SUPPRIMÉ (2026-08-03). La prise de
+          // commande passe par le Menu (panier → « Type de commande » →
+          // cuisine), le cycle de vie des tables par le Plan de salle, et
+          // l'avancement du service par la page Commandes. Le garder aurait
+          // laissé un troisième chemin de prise de commande, divergeant en
+          // silence des deux autres.
+          // Mise en route — la seule route restaurant que la garde laisse
+          // toujours passer (elle s'exclut elle-même de la redirection).
+          GoRoute(path: '/shop/:shopId/restaurant/setup',
+              redirect: (c, st) => _restaurantGuard(ref, st),
               pageBuilder: (c, s) => _shellPage(s,
-                  InventairePage(shopId: s.pathParameters['shopId']!))),
+                  RestaurantSetupPage(shopId: s.pathParameters['shopId']!))),
+          GoRoute(path: '/shop/:shopId/restaurant/tables',
+              redirect: (c, st) => _restaurantGuard(ref, st),
+              pageBuilder: (c, s) => _shellPage(s,
+                  RestaurantTablesPage(shopId: s.pathParameters['shopId']!))),
+          // Route « Préparation » supprimée avec son entrée de menu
+          // (2026-08-05) : le cuisinier annonce à voix haute, l'opérateur
+          // fait avancer le bon depuis Commandes, qui porte déjà toute la
+          // chronologie du service.
+          // Route « À emporter » supprimée avec son entrée de menu : les
+          // commandes de comptoir se suivent depuis Commandes.
+          // STOCK — ingrédients et fournitures, sortis du hub Finances le
+          // 21/09/2026.
+          //
+          // Gardé par `canManageStock` et NON par `adminOnly` : la séparation
+          // n'a de sens que si quelqu'un peut compter la réserve sans lire les
+          // marges. Le grain existait déjà (`inventory.stock`), le gérant
+          // l'accorde depuis « Accès à l'app » → groupe Inventaire → « Gérer le
+          // stock ». Nul n'y perd : ceux qui voyaient Finances sont admins, et
+          // `canManageStock` retombe sur `isShopAdmin` par défaut.
+          GoRoute(path: '/shop/:shopId/restaurant/stock',
+              redirect: (c, st) => _restaurantStockGuard(ref, st),
+              pageBuilder: (c, s) => _shellPage(s,
+                  RestaurantStockPage(shopId: s.pathParameters['shopId']!))),
+          // Finances restaurant — Dépenses · Charges · Pertes · Activités.
+          GoRoute(path: '/shop/:shopId/restaurant/finances',
+              redirect: (c, st) => _restaurantGuard(ref, st, adminOnly: true),
+              pageBuilder: (c, s) => _shellPage(s,
+                  FinancesHubPage(shopId: s.pathParameters['shopId']!))),
+          // Réconciliation d'inventaire (Lot 2) — comptage de fin de service.
+          GoRoute(path: '/shop/:shopId/restaurant/inventory/reconcile',
+              redirect: (c, st) => _restaurantGuard(ref, st, adminOnly: true),
+              pageBuilder: (c, s) => _shellPage(s,
+                  InventoryReconcilePage(
+                      shopId: s.pathParameters['shopId']!))),
+          // Clôture de caisse aveugle X/Z (Lot C) — accessible à tout membre
+          // qui encaisse : c'est LE caissier qui compte. Seul l'historique des
+          // écarts est filtré, à l'intérieur de la page.
+          GoRoute(path: '/shop/:shopId/restaurant/caisse/cloture',
+              redirect: (c, st) => _restaurantGuard(ref, st),
+              pageBuilder: (c, s) => _shellPage(s,
+                  CashClosurePage(shopId: s.pathParameters['shopId']!))),
+          // Personnel du restaurant (Lot D) : équipe, heures, paie.
+          GoRoute(path: '/shop/:shopId/restaurant/personnel',
+              redirect: (c, st) => _restaurantGuard(ref, st, adminOnly: true),
+              pageBuilder: (c, s) => _shellPage(s,
+                  RestaurantStaffPage(shopId: s.pathParameters['shopId']!))),
+          // SUPPRIMES (2026-08-03) : la page « Modificateurs de menu » et la
+          // prise de commande par table. Les accompagnements n'existent plus
+          // — chaque combinaison est un plat entier de la carte — et toute
+          // commande passe par le Menu.
+          //
+          // L'ADDITION VIT DANS LE SHELL (décision du 25/09/2026) : c'est un
+          // écran de service, elle a besoin de la navigation et des deux
+          // gardes de `ShopShell`. Le commentaire qui la disait « hors du
+          // shell » mentait depuis sa création (`90a46db`), et la route lui
+          // remontait un `RestoBackdrop` — un SECOND décor, opaque, dessiné à
+          // l'intérieur du bloc de contenu. Le shell pose déjà le sien.
+          GoRoute(path: '/shop/:shopId/restaurant/addition/:tableId',
+              redirect: (c, st) => _restaurantGuard(ref, st),
+              builder: (c, s) => BillPage(
+                    shopId:  s.pathParameters['shopId']!,
+                    tableId: s.pathParameters['tableId']!,
+                  )),
+          // La BADGEUSE n'est plus ici : elle vit hors du shell, voir la route
+          // `/shop/:shopId/restaurant/pointage` au-dessus du `ShellRoute`.
+          // Carte / inventaire : deux écrans selon le secteur. En
+          // restauration c'est « Menu » — grille de plats avec photo, note
+          // et ajout au panier à emporter. Route unique pour que les liens
+          // internes (« Voir la carte », tuiles du tableau de bord) marchent
+          // dans les deux cas.
+          GoRoute(path: '/shop/:shopId/inventaire',
+              pageBuilder: (c, s) {
+                final id = s.pathParameters['shopId']!;
+                return _shellPage(s, isRestaurantShop(id)
+                    ? RestaurantMenuPage(shopId: id)
+                    : InventairePage(shopId: id));
+              }),
           GoRoute(path: '/shop/:shopId/employees',
               pageBuilder: (c, s) => _shellPage(s, EmployeesPage(
                   shopId: s.pathParameters['shopId']!))),
@@ -778,6 +940,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/crm/notify',
               builder: (c, s) => SendNotificationPage(shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/finances',
+              // La page comptable (CA / dépenses / pertes / bilan) est
+              // e-commerce uniquement. En restaurant, la gestion financière
+              // gastronomique passe exclusivement par le hub Finances dédié :
+              // toute tentative d'atteindre cette page (deeplink, ancien lien)
+              // est redirigée pour ne jamais exposer l'ancienne logique.
+              redirect: (c, s) {
+                final id = s.pathParameters['shopId']!;
+                return isRestaurantShop(id)
+                    ? '/shop/$id/restaurant/finances'
+                    : null;
+              },
               pageBuilder: (c, s) {
                 final tab = s.uri.queryParameters['tab'];
                 // ValueKey dépendante du `tab` : state.pageKey est basée
@@ -803,6 +976,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/parametres',
               pageBuilder: (c, s) => _shellPage(s,
                   ParametresPage(shopId: s.pathParameters['shopId']!))),
+          // Page dédiée d'UNE section de Paramètres (sommaire désencombré) :
+          // /parametres/section/<boutique|compte|securite|preferences|
+          //  abonnement|integrations|administration|danger>
+          GoRoute(path: '/shop/:shopId/parametres/section/:key',
+              builder: (c, s) => ParametresSectionPage(
+                  shopId: s.pathParameters['shopId']!,
+                  sectionKey: s.pathParameters['key']!)),
           GoRoute(path: '/shop/:shopId/parametres/shop',
               builder: (c, s) {
                 final showOverview =
@@ -885,12 +1065,26 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/shop/:shopId/parametres/payments',
               builder: (c, s) => PaymentsPage(
                   shopId: s.pathParameters['shopId']!)),
+          GoRoute(path: '/shop/:shopId/parametres/marketing',
+              builder: (c, s) => MarketingPage(
+                  shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/delivery-templates',
               builder: (c, s) => DeliveryTemplatesPage(
+                  shopId: s.pathParameters['shopId']!)),
+          GoRoute(path: '/shop/:shopId/parametres/livraison',
+              builder: (c, s) => LivraisonPage(
                   shopId: s.pathParameters['shopId']!)),
           GoRoute(path: '/shop/:shopId/parametres/partner-accounts',
               builder: (c, s) => PartnerAccountsPage(
                   shopId: s.pathParameters['shopId']!)),
+          // Hub partenaire unifié (Solde + Stock déposé). `?tab=stock` ouvre
+          // directement l'onglet Stock (depuis la page Emplacements).
+          GoRoute(path: '/shop/:shopId/parametres/partner/:partnerId',
+              builder: (c, s) => PartnerHubDetailPage(
+                  shopId: s.pathParameters['shopId']!,
+                  partnerLocationId: s.pathParameters['partnerId']!,
+                  initialTab:
+                      s.uri.queryParameters['tab'] == 'stock' ? 1 : 0)),
           GoRoute(path: '/shop/:shopId/parametres/pin/delete',
               builder: (c, s) => PinDeletePage(
                   shopId: s.pathParameters['shopId']!)),
@@ -952,6 +1146,42 @@ final membershipSuspendedProvider =
   return AppDatabase.getMembershipStatus(uid, shopId) == 'suspended';
 });
 
+/// LES DEUX GARDES D'ACCÈS À UNE BOUTIQUE — extraites de `ShopShell`
+/// (25/09/2026), à l'identique, pour les routes qui vivent HORS du shell
+/// (la badgeuse). Une route qui sort du shell sans elle perdrait :
+///
+///   • BOUTIQUE SUSPENDUE (SA-1) : si le super-admin a suspendu la boutique,
+///     tout le contenu est bloqué derrière « Compte suspendu ». Réactif :
+///     rebuild dès que le statut change (sync / realtime), refresh serveur à
+///     l'entrée.
+///   • MEMBRE SUSPENDU : l'employé suspendu de cette boutique n'y entre plus.
+///
+/// Les super-admins passent (ils doivent pouvoir gérer la suspension).
+class ShopAccessGuard extends ConsumerWidget {
+  final String shopId;
+  final Widget child;
+
+  const ShopAccessGuard({super.key, required this.shopId, required this.child});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(shopSuspendedProvider(shopId));
+    final shop    = LocalStorageService.getShop(shopId);
+    final isSuper = LocalStorageService.getCurrentUser()?.isSuperAdmin ?? false;
+    if (shop != null && shop.isSuspended && !isSuper) {
+      return SuspendedShopScreen(reason: shop.suspendedReason);
+    }
+    final memberSuspended =
+        ref.watch(membershipSuspendedProvider(shopId)).valueOrNull ?? false;
+    if (memberSuspended && !isSuper) {
+      return const SuspendedShopScreen(
+          reason:
+              'Votre accès à cette boutique a été suspendu par un administrateur.');
+    }
+    return child;
+  }
+}
+
 class ShopShell extends ConsumerWidget {
   final Widget child;
   final String shopId;
@@ -974,35 +1204,20 @@ class ShopShell extends ConsumerWidget {
     // CTAs topbar : calculés en fonction de la route active (spec round 9).
     // Stock/Clients exposent un bouton « + » dans la topbar shell, déplaçant
     // les CTAs précédemment inline dans le body.
-    // ── Guard suspension (SA-1) ───────────────────────────────────────
-    // Si la boutique courante a été suspendue par le super-admin, on
-    // bloque TOUT le contenu derrière un écran « Compte suspendu ». Les
-    // super-admins passent (ils doivent pouvoir gérer la suspension).
-    // Réactif : rebuild dès que le statut de la boutique change (suspension SA
-    // poussée par sync/realtime), et force un refresh serveur à l'entrée.
-    ref.watch(shopSuspendedProvider(shopId));
-    final shop    = LocalStorageService.getShop(shopId);
-    final isSuper = LocalStorageService.getCurrentUser()?.isSuperAdmin ?? false;
-    if (shop != null && shop.isSuspended && !isSuper) {
-      return SuspendedShopScreen(reason: shop.suspendedReason);
-    }
-    // Membre (employé) suspendu de cette boutique → accès bloqué.
-    final memberSuspended =
-        ref.watch(membershipSuspendedProvider(shopId)).valueOrNull ?? false;
-    if (memberSuspended && !isSuper) {
-      return const SuspendedShopScreen(
-          reason:
-              'Votre accès à cette boutique a été suspendu par un administrateur.');
-    }
-
+    // ── Gardes (boutique suspendue, membre suspendu) ──────────────────
+    // Extraites dans `ShopAccessGuard` (25/09/2026), à l'identique : la
+    // badgeuse, qui vit hors du shell, en a besoin aussi.
     final goState = GoRouterState.of(context);
     final loc      = goState.matchedLocation;
     final tabQuery = goState.uri.queryParameters['tab'];
     final extraActions = _topbarActionsFor(context, loc, shopId, tabQuery);
-    return AdaptiveScaffold(
+    return ShopAccessGuard(
       shopId: shopId,
-      body: child,
-      extraActions: extraActions,
+      child: AdaptiveScaffold(
+        shopId: shopId,
+        body: child,
+        extraActions: extraActions,
+      ),
     );
   }
 

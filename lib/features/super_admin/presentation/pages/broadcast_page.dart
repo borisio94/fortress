@@ -204,7 +204,7 @@ class _BroadcastPageState extends State<BroadcastPage> {
             child: ElevatedButton.icon(
               onPressed: _sending ? null : _send,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
@@ -265,8 +265,8 @@ class _BroadcastPageState extends State<BroadcastPage> {
         }
         final items = snap.data ?? const [];
         if (items.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 24),
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
             child: Center(
               child: Text('Aucun message envoyé.',
                   style: AppTextStyles.bodySecondary),
@@ -315,7 +315,7 @@ class _BroadcastPageState extends State<BroadcastPage> {
           const SizedBox(height: 6),
           Row(
             children: [
-              const Icon(Icons.adjust_rounded,
+              Icon(Icons.adjust_rounded,
                   size: 12, color: AppColors.textSecondary),
               const SizedBox(width: 4),
               Expanded(

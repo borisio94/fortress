@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/config/restaurant_mode.dart';
 import '../../core/i18n/app_localizations.dart';
 
 /// Mappe une route GoRouter (`/shop/<id>/...`) vers le **titre exact** à
@@ -43,6 +44,7 @@ String? titleForLocation({
   if (path.startsWith('/crm/client/'))            return 'Détail client';
   if (path.startsWith('/inventaire/product/'))    return 'Modifier le produit';
   if (path.startsWith('/parametres/locations/'))  return 'Emplacement';
+  if (path.startsWith('/restaurant/addition/'))   return 'Addition';
 
   // ── Routes statiques exactes ─────────────────────────────────────────
   switch (path) {
@@ -50,7 +52,9 @@ String? titleForLocation({
     case '/':                              return l.navDashboard;
     case '/dashboard':                     return l.navDashboard;
     case '/caisse':                        return l.navCaisse;
-    case '/inventaire':                    return l.navInventaire;
+    // « Carte » en restauration — cohérent avec le libellé de navigation.
+    case '/inventaire':
+      return isCurrentShopRestaurant() ? 'Menu' : l.navInventaire;
     case '/crm':                           return l.navClients;
     case '/finances':                      return l.navFinances;
     case '/historique':                    return l.navHistorique;
@@ -64,6 +68,15 @@ String? titleForLocation({
     case '/inventaire/arrivals':           return 'Arrivages';
     case '/inventaire/locations':          return 'Emplacements de stock';
     case '/inventaire/suppliers':          return 'Fournisseurs';
+
+    // Restaurant — sous-pages. Sans elles, le repli dérivait le titre de
+    // l'URL : « Cloture », « Reconcile », « Setup » — de l'anglais et des
+    // accents manquants, affichés à l'utilisateur (lot Shell, 25/09/2026).
+    // Chaque titre reprend celui que la page se donne elle-même.
+    case '/restaurant/caisse/cloture':     return 'Clôture de caisse';
+    case '/restaurant/inventory/reconcile': return 'Inventaire';
+    case '/restaurant/setup':              return 'Configuration';
+    case '/restaurant/pointage':           return 'Badgeuse';
 
     // Paramètres — racine + sous-pages
     case '/parametres':                    return l.navSettings;

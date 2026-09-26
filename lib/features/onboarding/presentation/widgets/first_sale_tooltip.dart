@@ -145,7 +145,7 @@ class _FirstSaleTooltipBannerState extends State<FirstSaleTooltipBanner> {
             children: [
               IconButton(
                 tooltip: 'Passer',
-                icon: const Icon(Icons.close_rounded,
+                icon: Icon(Icons.close_rounded,
                     color: AppColors.textSecondary, size: 18),
                 onPressed: _dismiss,
                 visualDensity: VisualDensity.compact,
@@ -153,7 +153,7 @@ class _FirstSaleTooltipBannerState extends State<FirstSaleTooltipBanner> {
               ElevatedButton(
                 onPressed: _next,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
+                  backgroundColor: AppColors.primaryFill,
                   foregroundColor: Colors.white,
                   elevation: 0,
                   padding: const EdgeInsets.symmetric(

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -12,7 +14,6 @@ import '../../core/i18n/app_localizations.dart';
 import '../../core/utils/currency_formatter.dart';
 import '../../features/caisse/presentation/bloc/caisse_bloc.dart';
 import 'adaptive_scaffold.dart';
-import 'app_drawer.dart';
 import 'offline_banner_widget.dart';
 import 'pin_lock_banner.dart';
 import 'sync_status_banner.dart';
@@ -26,6 +27,10 @@ class AppScaffold extends ConsumerStatefulWidget {
   final Widget? floatingActionButton;
   final Widget? bottomNavigationBar;
   final bool isRootPage;
+  /// Interception du bouton retour de l'AppBar. `null` (défaut) = retour
+  /// immédiat, comportement inchangé pour toutes les pages existantes.
+  /// Renvoyer `false` annule la sortie.
+  final Future<bool> Function()? onBeforeBack;
 
   const AppScaffold({
     super.key,
@@ -36,6 +41,7 @@ class AppScaffold extends ConsumerStatefulWidget {
     this.floatingActionButton,
     this.bottomNavigationBar,
     this.isRootPage = true,
+    this.onBeforeBack,
   });
 
   @override
@@ -43,7 +49,6 @@ class AppScaffold extends ConsumerStatefulWidget {
 }
 
 class _AppScaffoldState extends ConsumerState<AppScaffold> {
-  bool _railExpanded = true;
   static const double _kDesktop = 900;
 
   @override
@@ -98,6 +103,7 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
     final inAdaptive =
         context.findAncestorWidgetOfExactType<AdaptiveScaffold>() != null;
     if (inAdaptive) {
+      // (le décor restaurant est déjà géré par AdaptiveScaffold plus haut)
       if (widget.floatingActionButton == null
           && widget.bottomNavigationBar == null) {
         return widget.body;
@@ -119,55 +125,67 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
     return _buildMobile(context);
   }
 
+  /// Couleur de fond du Scaffold.
+  ///
+  /// TRANSPARENTE quand un [RestoBackdrop] est monté au-dessus — celui que
+  /// pose le shell du restaurant (`adaptive_scaffold.dart`) : toute page du
+  /// restaurant DANS le shell, l'Addition comprise. Un fond opaque y
+  /// masquerait entièrement le décor, et la page jurerait avec le reste du
+  /// mode restaurant.
+  ///
+  /// Détection par ancêtre, comme `inAdaptive` juste au-dessus : le décor ne
+  /// change pas pendant la vie de la page, aucune dépendance de rebuild n'est
+  /// nécessaire.
+  Color _scaffoldBg(BuildContext context) =>
+      context.findAncestorWidgetOfExactType<RestoBackdrop>() != null
+          ? Colors.transparent
+          : Theme.of(context).scaffoldBackgroundColor;
+
   Widget _buildDesktop(BuildContext context) {
+    // PLUS DE RAIL DE NAVIGATION ICI, et c'est le point de ce lot.
+    //
+    // `AppDrawerRail` occupait cette colonne avec la liste de navigation
+    // e-commerce de `app_drawer.dart` — Tableau de bord · Boutique ·
+    // Inventaire · Clients · Finances · Partenaires · Historique.
+    //
+    // Cette branche n'est atteinte que HORS du `ShellRoute` : dès qu'un
+    // `AdaptiveScaffold` est au-dessus, `build` se court-circuite bien avant.
+    // Or les seules pages hors shell qui passent ici sont les cinq écrans
+    // super-admin (`/super-admin/plans`, `broadcast`, `stats`, `incidents`,
+    // `export`), que le routeur construit en `const PlansPage()` — donc avec
+    // `shopId: ''`. Le rail fabriquait donc `/shop//dashboard` et six autres
+    // liens du même genre : SEPT LIENS MORTS, tous affichés, parce que
+    // `_canAccess` recevait un rôle nul sur une boutique vide et laissait tout
+    // passer.
+    //
+    // On ne retire donc pas une navigation, on retire une colonne de liens qui
+    // ne menaient nulle part. Ces cinq pages gardent leur barre de titre et
+    // leur flèche de retour — elles sont toutes en `isRootPage: false`.
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: Row(children: [
-        ClipRect(
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeInOut,
-            width: _railExpanded ? 220 : 64,
-            child: AppDrawerRail(
-              shopId: widget.shopId,
-              expanded: _railExpanded,
-              onToggle: () => setState(() => _railExpanded = !_railExpanded),
-            ),
-          ),
+      backgroundColor: _scaffoldBg(context),
+      appBar: _buildAppBar(context, isDesktop: true) as PreferredSizeWidget,
+      body: OfflineBlockGuard(
+        child: Column(
+          children: [
+            const PinLockBanner(),
+            const SyncStatusBanner(),
+            const SubscriptionBanner(),
+            Expanded(child: widget.body),
+          ],
         ),
-        Container(width: 1, color: Theme.of(context).semantic.borderSubtle),
-        Expanded(
-          child: Scaffold(
-            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-            appBar: _buildAppBar(context, isDesktop: true) as PreferredSizeWidget,
-            body: OfflineBlockGuard(
-              child: Column(
-                children: [
-                  const PinLockBanner(),
-                  const OfflineBanner(),
-                  const SyncStatusBanner(),
-                  const SubscriptionBanner(),
-                  Expanded(child: widget.body),
-                ],
-              ),
-            ),
-            floatingActionButton: widget.floatingActionButton,
-          ),
-        ),
-      ]),
+      ),
+      floatingActionButton: widget.floatingActionButton,
     );
   }
 
   Widget _buildMobile(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      drawer: widget.isRootPage ? AppDrawer(shopId: widget.shopId) : null,
+      backgroundColor: _scaffoldBg(context),
       appBar: _buildAppBar(context, isDesktop: false) as PreferredSizeWidget,
       body: OfflineBlockGuard(
         child: Column(
           children: [
             const PinLockBanner(),
-            const OfflineBanner(),
             const SyncStatusBanner(),
             const SubscriptionBanner(),
             Expanded(child: widget.body),
@@ -185,13 +203,20 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
       backgroundColor: theme.colorScheme.surface,
       elevation: 0,
       scrolledUnderElevation: 0,
-      leading: _buildLeading(context, isDesktop: isDesktop),
+      leading: _buildLeading(context),
+      // EXPLICITE, parce que `leading` peut désormais valoir `null` : sans ce
+      // faux, Material irait chercher un bouton retour dans le Navigator. Il
+      // n'y en a pas — GoRouter ne pousse pas dessus — mais s'en remettre à
+      // une absence est exactement ce qui fait réapparaître une flèche le jour
+      // où la navigation change.
+      automaticallyImplyLeading: false,
       title: Text(
         widget.title,
         style: AppTextStyles.subtitleBold,
       ),
       centerTitle: isDesktop ? false : true,
       actions: [
+        const OfflineChip(),
         ...?widget.actions,
         // Badge panier
         _CartBadgeBtn(shopId: widget.shopId),
@@ -206,37 +231,47 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
     );
   }
 
-  Widget _buildLeading(BuildContext context, {required bool isDesktop}) {
+  /// Le bouton de gauche de la barre : une flèche de retour, ou rien.
+  ///
+  /// IL Y AVAIT TROIS BRANCHES. Les deux autres servaient une page « racine »
+  /// et offraient la navigation du châssis : un bouton qui repliait
+  /// `AppDrawerRail` sur desktop, un hamburger qui ouvrait `AppDrawer` sur
+  /// mobile. Les deux sont parties avec `app_drawer.dart`, et le hamburger
+  /// aurait désormais appelé `openDrawer()` sur un Scaffold SANS TIROIR —
+  /// c'est-à-dire levé une exception.
+  ///
+  /// ELLES ÉTAIENT DE TOUTE FAÇON INATTEIGNABLES, et le restent : ce corps de
+  /// méthode n'est exécuté que HORS du `ShellRoute` — `build` se court-circuite
+  /// dès qu'un `AdaptiveScaffold` est au-dessus — et les seules pages hors
+  /// shell sont les cinq écrans super-admin, toutes en `isRootPage: false`.
+  ///
+  /// `null` PLUTÔT QU'UN BOUTON MUET pour le cas racine : un châssis qui n'a
+  /// plus aucune navigation à offrir ne doit pas prétendre le contraire. Si
+  /// une page racine était un jour routée hors du shell, elle s'afficherait
+  /// sans bouton de gauche — visible, silencieux, et corrigible — au lieu de
+  /// lever une exception au premier tap.
+  Widget? _buildLeading(BuildContext context) {
     if (!widget.isRootPage) {
       return IconButton(
         icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
         color: Theme.of(context).colorScheme.onSurface,
-        onPressed: () {
+        onPressed: () async {
+          // `PopScope` n'intercepte PAS un `context.pop()` programmatique :
+          // sans ce point d'accroche, la flèche de l'AppBar contournerait
+          // tout garde-fou de saisie non enregistrée.
+          final guard = widget.onBeforeBack;
+          if (guard != null && !await guard()) {
+            return;
+          }
+          if (!context.mounted) {
+            return;
+          }
           if (context.canPop()) context.pop();
           else context.go('/shop/${widget.shopId}/dashboard');
         },
       );
     }
-    if (isDesktop) {
-      return IconButton(
-        icon: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          child: Icon(
-            _railExpanded ? Icons.menu_open_rounded : Icons.menu_rounded,
-            key: ValueKey(_railExpanded), size: 22,
-          ),
-        ),
-        color: AppColors.textPrimary,
-        onPressed: () => setState(() => _railExpanded = !_railExpanded),
-      );
-    }
-    return Builder(
-      builder: (ctx) => IconButton(
-        icon: const Icon(Icons.menu_rounded, size: 22),
-        color: AppColors.textPrimary,
-        onPressed: () => Scaffold.of(ctx).openDrawer(),
-      ),
-    );
+    return null;
   }
 }
 
@@ -288,26 +323,26 @@ class _NotifBtn extends StatelessWidget {
     final l = context.l10n;
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => Padding(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(width: 36, height: 4,
-              decoration: BoxDecoration(color: const Color(0xFFE5E7EB),
+              decoration: BoxDecoration(color: AppColors.divider,
                   borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 16),
           Text(l.notificationsTitle,
               style: AppTextStyles.subtitleBold),
           const SizedBox(height: 32),
-          const Icon(Icons.notifications_off_outlined,
-              size: 40, color: Color(0xFFD1D5DB)),
+          Icon(Icons.notifications_off_outlined,
+              size: 40, color: AppColors.textHint),
           const SizedBox(height: 12),
           Text('Aucune notification',
               style: AppTextStyles.bodySecondary.copyWith(
                   fontWeight: FontWeight.w600,
-                  color: const Color(0xFF6B7280))),
+                  color: AppColors.textSecondary)),
           const SizedBox(height: 4),
           Text(
             'Les alertes liées à vos ventes et à votre stock\n'

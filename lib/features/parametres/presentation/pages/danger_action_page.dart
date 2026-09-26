@@ -266,7 +266,7 @@ class _DangerActionPageState extends State<DangerActionPage> {
       const Text('Avant de continuer',
           style: AppTextStyles.label),
       const SizedBox(height: 4),
-      const Text('Confirmez chaque point pour passer à la dernière étape.',
+      Text('Confirmez chaque point pour passer à la dernière étape.',
           style: AppTextStyles.bodySmSecondary),
       const SizedBox(height: 16),
       for (var i = 0; i < widget.acknowledgments.length; i++) ...[
@@ -323,7 +323,7 @@ class _DangerActionPageState extends State<DangerActionPage> {
         const SizedBox(height: 16),
         Text('Mot de passe actuel',
             style: AppTextStyles.bodySmBold.copyWith(
-                color: const Color(0xFF374151))),
+                color: AppColors.onSurface)),
         const SizedBox(height: 6),
         TextField(
           controller: _pwdCtrl,
@@ -450,7 +450,7 @@ class _Footer extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10))),
-            child: const Text('Retour',
+            child: Text('Retour',
                 style: TextStyle(color: AppColors.textSecondary,
                     fontWeight: FontWeight.w600)),
           )),
@@ -459,7 +459,7 @@ class _Footer extends StatelessWidget {
             ? ElevatedButton(
                 onPressed: canGoNext ? onNext : null,
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     disabledBackgroundColor: AppColors.divider,
                     padding: const EdgeInsets.symmetric(vertical: 12),

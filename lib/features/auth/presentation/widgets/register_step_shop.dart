@@ -32,50 +32,58 @@ class _StepShop extends StatelessWidget {
           if (state._shopNameError != null)
             _ErrText(state._shopNameError!),
           const SizedBox(height: 14),
-          // Secteur d'activité — masqué en mode e-commerce unique (réversible :
-          // kEcommerceOnlyMode). Code conservé pour réactivation future.
-          if (!kEcommerceOnlyMode) ...[
-            const AppFieldLabel('Type d\'activité', required: true),
-            DropdownButtonFormField<String>(
-              initialValue: state._sector,
-              items: _kSectors
-                  .map((o) => DropdownMenuItem(
-                      value: o.value,
-                      child: Text(o.label, style: AppTextStyles.body)))
-                  .toList(),
-              onChanged: (v) {
-                if (v != null) {
-                  // ignore: invalid_use_of_protected_member
-                  state.setState(() => state._sector = v);
-                }
-              },
-              decoration: InputDecoration(
-                prefixIcon: Icon(Icons.category_outlined,
-                    size: 18, color: AppColors.textSecondary),
-                isDense: true,
-                filled: true,
-                fillColor: const Color(0xFFF9FAFB),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        const BorderSide(color: Color(0xFFE5E7EB))),
-                enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        const BorderSide(color: Color(0xFFE5E7EB))),
-              ),
+          // Type d'établissement — choix DÉFINITIF, non modifiable après
+          // création (cf. kCreationSectors dans restaurant_mode.dart).
+          //
+          // LE DIRE À L'ÉCRAN, et pas seulement ici. `create_shop_page` le
+          // disait ; ce tunnel — le chemin RÉEL par lequel une boutique naît —
+          // ne le disait pas. Le commerçant choisissait entre « E-commerce »
+          // et « Restaurant » sans savoir qu'il ne reviendrait pas dessus, et
+          // le découvrait en cherchant le réglage qui n'existe pas.
+          //
+          // Il y avait ici un `...[` sans condition, vestige d'un
+          // `if (!kEcommerceOnlyMode)` retiré. Il ne faisait rien, sinon
+          // laisser croire qu'un garde subsistait.
+          const AppFieldLabel('Type d\'établissement', required: true),
+          DropdownButtonFormField<String>(
+            initialValue: state._sector,
+            items: _kSectors
+                .map((o) => DropdownMenuItem(
+                    value: o.value,
+                    child: Text(o.label, style: AppTextStyles.body)))
+                .toList(),
+            onChanged: (v) {
+              if (v != null) {
+                // ignore: invalid_use_of_protected_member
+                state.setState(() => state._sector = v);
+              }
+            },
+            decoration: InputDecoration(
+              prefixIcon: Icon(Icons.category_outlined,
+                  size: 18, color: AppColors.textSecondary),
+              isDense: true,
+              filled: true,
+              fillColor: AppColors.inputFill,
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      BorderSide(color: AppColors.divider)),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      BorderSide(color: AppColors.divider)),
             ),
-            const SizedBox(height: 14),
-          ],
-          // Adresse / Ville (désormais obligatoire)
-          const AppFieldLabel('Adresse / Ville', required: true),
-          AppField(
-            controller:  state._shopAddressCtrl,
-            hint:        'Ex : Bonanjo, Douala',
-            prefixIcon:  Icons.location_on_outlined,
           ),
-          if (state._shopAddressError != null)
-            _ErrText(state._shopAddressError!),
+          // L'avertissement est en `captionHint` et non en `micro` comme
+          // ailleurs : dix points pour dire « irréversible », c'est le
+          // chuchoter. Il reste calme — l'alarmer à chaque inscription
+          // ferait hésiter sur un choix qui, lui, est simple.
+          const SizedBox(height: 6),
+          Text(
+              'Ce choix est définitif : le type d\'établissement ne pourra '
+              'plus être modifié après la création.',
+              style: AppTextStyles.captionHint),
+          const SizedBox(height: 14),
         ],
       ),
     );

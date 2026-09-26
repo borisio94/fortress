@@ -7,6 +7,9 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/currency_formatter.dart';
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/form_sheet.dart';
+import '../../../../core/database/app_database.dart';
+import '../../../../core/storage/local_storage_service.dart';
+import '../../../inventaire/domain/entities/stock_location.dart';
 import '../../domain/entities/sale.dart';
 
 /// Résultat du sheet "Démarrer traitement" (passage scheduled → processing).
@@ -83,6 +86,10 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
   // versement (acompte ou solde) au passage scheduled → processing.
   _ProcessingPaymentChoice _paymentChoice = _ProcessingPaymentChoice.keepCurrent;
   late final TextEditingController _addedAmountCtrl;
+  /// Vrai si la boutique a au moins un dépôt PARTENAIRE actif. Sinon, la
+  /// livraison est gérée par la boutique (retrait / livreur interne /
+  /// expédition) et le mode « Livraison partenaire » est masqué.
+  late final bool _hasPartners;
 
   @override
   void initState() {
@@ -91,6 +98,9 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
     _mode       = widget.defaultMode;
     _personCtrl = TextEditingController(text: widget.initialPersonName ?? '');
     _addedAmountCtrl = TextEditingController();
+    final userId = LocalStorageService.getCurrentUser()?.id ?? '';
+    _hasPartners = AppDatabase.getStockLocationsForOwner(userId)
+        .any((l) => l.type == StockLocationType.partner && l.isActive);
   }
 
   @override
@@ -178,15 +188,15 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFECFDF5),
+                      color: AppColors.secondary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color: const Color(0xFF10B981)
+                          color: AppColors.secondary
                               .withValues(alpha: 0.3)),
                     ),
                     child: Row(children: [
                       const Icon(Icons.check_circle_rounded,
-                          size: 14, color: Color(0xFF10B981)),
+                          size: 14, color: AppColors.secondary),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -208,24 +218,30 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                       Icon(_mode == DeliveryMode.partner
                               ? Icons.handshake_outlined
                               : Icons.storefront_outlined,
-                          size: 13, color: const Color(0xFF6B7280)),
+                          size: 13, color: AppColors.textSecondary),
                       const SizedBox(width: 4),
                       Flexible(
                         child: Text(
                           'Origine : ${widget.originLocationName}',
                           maxLines: 1, overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 11, color: Color(0xFF6B7280)),
+                          style: TextStyle(
+                              fontSize: 11, color: AppColors.textSecondary),
                         ),
                       ),
                     ]),
                   ),
                 ],
                 _ChipsRow<DeliveryMode>(
-                  values: const [
+                  // « Livraison partenaire » n'apparaît que si la boutique a un
+                  // dépôt partenaire. Sinon : retrait / livreur interne /
+                  // expédition (livraison gérée par la boutique). On garde le
+                  // chip si la commande est DÉJÀ en mode partenaire, pour ne pas
+                  // perdre la sélection courante.
+                  values: [
                     DeliveryMode.pickup,
                     DeliveryMode.inHouse,
-                    DeliveryMode.partner,
+                    if (_hasPartners || widget.defaultMode == DeliveryMode.partner)
+                      DeliveryMode.partner,
                     DeliveryMode.shipment,
                   ],
                   selected: _mode,
@@ -242,14 +258,13 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                       : 'Contact partenaire (optionnel)'),
                   TextField(
                     controller: _personCtrl,
-                    style: const TextStyle(
-                        fontSize: 13, color: Color(0xFF111827)),
+                    style: TextStyle(fontSize: 13, color: AppColors.onSurface),
                     decoration: InputDecoration(
                       hintText: _mode == DeliveryMode.inHouse
                           ? 'Nom du livreur'
                           : 'Contact chez le partenaire',
-                      hintStyle: const TextStyle(
-                          color: Color(0xFFBBBBBB), fontSize: 12),
+                      hintStyle: TextStyle(
+                          color: AppColors.textHint, fontSize: 12),
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 11),
@@ -293,7 +308,7 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                         suffixText: CurrencyFormatter.currentSymbol,
                         isDense: true,
                         filled: true,
-                        fillColor: const Color(0xFFF9FAFB),
+                        fillColor: AppColors.inputFill,
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: BorderSide(
@@ -324,7 +339,7 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                   icon: const Icon(Icons.play_arrow_rounded, size: 18),
                   label: const Text('Démarrer'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(0, 44),
                   ),
@@ -397,7 +412,7 @@ class _ChipsRow<T> extends StatelessWidget {
             decoration: BoxDecoration(
               color: v == selected
                   ? sem.brandSurface
-                  : const Color(0xFFF9FAFB),
+                  : AppColors.inputFill,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
                   color: v == selected
@@ -408,7 +423,7 @@ class _ChipsRow<T> extends StatelessWidget {
               Icon(iconOf(v), size: 14,
                   color: v == selected
                       ? sem.brandText
-                      : const Color(0xFF6B7280)),
+                      : AppColors.textSecondary),
               const SizedBox(width: 6),
               Text(labelOf(v),
                   style: TextStyle(
@@ -417,7 +432,7 @@ class _ChipsRow<T> extends StatelessWidget {
                           ? FontWeight.w700 : FontWeight.w500,
                       color: v == selected
                           ? sem.brandText
-                          : const Color(0xFF111827))),
+                          : AppColors.onSurface)),
             ]),
           ),
         ),
@@ -493,7 +508,7 @@ class _ProcChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
-          color: active ? sem.brandSurface : const Color(0xFFF9FAFB),
+          color: active ? sem.brandSurface : AppColors.inputFill,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
               color: active
@@ -503,13 +518,13 @@ class _ProcChip extends StatelessWidget {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon,
               size: 14,
-              color: active ? sem.brandText : const Color(0xFF6B7280)),
+              color: active ? sem.brandText : AppColors.textSecondary),
           const SizedBox(width: 6),
           Text(label,
               style: TextStyle(
                   fontSize: 12,
                   fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                  color: active ? sem.brandText : const Color(0xFF111827))),
+                  color: active ? sem.brandText : AppColors.onSurface)),
         ]),
       ),
     );

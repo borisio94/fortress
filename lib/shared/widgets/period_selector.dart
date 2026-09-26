@@ -140,7 +140,7 @@ class _Chips extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                       color: active
                           ? Colors.white
-                          : const Color(0xFF6B7280))),
+                          : AppColors.textSecondary)),
             ),
           ),
         );
@@ -256,7 +256,7 @@ class _BottomSheetState extends State<_BottomSheet> {
               padding: const EdgeInsets.symmetric(
                   horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: active ? AppColors.primary : const Color(0xFFF3F4F6),
+                color: active ? AppColors.primaryFill : AppColors.inputFill,
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(p.$2,
@@ -264,7 +264,7 @@ class _BottomSheetState extends State<_BottomSheet> {
                       fontWeight: FontWeight.w600,
                       color: active
                           ? Colors.white
-                          : const Color(0xFF374151))),
+                          : AppColors.onSurface)),
             ),
           );
         }).toList()),
@@ -280,7 +280,7 @@ class _BottomSheetState extends State<_BottomSheet> {
             width: double.infinity, height: 42,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10)),
               ),
@@ -351,7 +351,7 @@ class _DateBtn extends StatelessWidget {
         Expanded(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label, style: AppTextStyles.micro.copyWith(
-              color: const Color(0xFF9CA3AF))),
+              color: AppColors.textHint)),
           Text('${date.day}/${date.month}/${date.year}',
               style: AppTextStyles.bodySm.copyWith(
                   fontWeight: FontWeight.w600,

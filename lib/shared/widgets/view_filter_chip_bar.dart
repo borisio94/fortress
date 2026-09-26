@@ -7,6 +7,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../features/dashboard/data/dashboard_providers.dart';
 import '../../features/inventaire/domain/entities/stock_location.dart';
+import '../../features/restaurant/presentation/widgets/resto_surfaces.dart';
 
 /// Barre de chips « Vue » partagée entre Dashboard, Produits, Vente, Commandes.
 ///
@@ -27,15 +28,21 @@ import '../../features/inventaire/domain/entities/stock_location.dart';
 /// icône, indicateur souligné sur l'élément actif, sans cadre encadrant) au
 /// lieu de chips arrondies. Utilisé sur Produits / Vente / Commandes ; le
 /// dashboard garde le rendu chip historique.
+///
+/// `compactPills` (false par défaut) : rangée de pastilles défilant
+/// horizontalement, sans cadre ni label « Vue ». Prioritaire sur `useTabs`.
+/// Utilisé sur Commandes ; les autres pages gardent leur rendu.
 class ViewFilterChipBar extends ConsumerStatefulWidget {
   final String shopId;
   final bool showGlobal;
   final bool useTabs;
+  final bool compactPills;
   const ViewFilterChipBar({
     super.key,
     required this.shopId,
     this.showGlobal = true,
     this.useTabs = false,
+    this.compactPills = false,
   });
 
   @override
@@ -93,9 +100,14 @@ class _ViewFilterChipBarState extends ConsumerState<ViewFilterChipBar> {
     final sem      = theme.semantic;
     final selected = ref.watch(dashViewFilterProvider);
     final partners = _partners();
-    // Sécurité : sur les pages où « Globale » est masqué (ex. Vente),
-    // un état null laisserait aucun chip actif. On force '_base'.
-    if (!widget.showGlobal && selected == null) {
+    // « Globale » (boutique + partenaires agrégés) n'a de sens QUE s'il y a
+    // plus d'un emplacement à agréger : la boutique + au moins un partenaire.
+    // Avec la seule boutique (aucun partenaire), « Globale » est identique à
+    // l'onglet boutique → on le masque (demande utilisateur).
+    final effectiveShowGlobal = widget.showGlobal && partners.isNotEmpty;
+    // Sécurité : sur les pages/cas où « Globale » est masqué, un état null
+    // laisserait aucun chip actif. On force '_base'.
+    if (!effectiveShowGlobal && selected == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         if (ref.read(dashViewFilterProvider) == null) {
@@ -156,7 +168,9 @@ class _ViewFilterChipBarState extends ConsumerState<ViewFilterChipBar> {
             duration: const Duration(milliseconds: 150),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: active ? cs.primary : cs.surface,
+              color: active
+                  ? cs.primary
+                  : (restoDecorActive ? restoGlassFill(context) : cs.surface),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
                   color: active ? cs.primary : sem.borderSubtle),
@@ -178,7 +192,7 @@ class _ViewFilterChipBarState extends ConsumerState<ViewFilterChipBar> {
     // Construit la liste des items dans un ordre stable :
     // [Globale (optionnel)] · Boutique · Partenaires…
     final builders = <Widget Function(bool useTabs)>[
-      if (widget.showGlobal)
+      if (effectiveShowGlobal)
         (useTabs) {
           final args = (
             label:  'Globale',
@@ -221,11 +235,33 @@ class _ViewFilterChipBarState extends ConsumerState<ViewFilterChipBar> {
         },
     ];
 
+    if (widget.compactPills) {
+      // Pastilles défilantes : chaque libellé garde sa largeur naturelle et
+      // la rangée défile, au lieu de se partager une largeur contrainte.
+      return Container(
+        width: double.infinity,
+        color: restoDecorActive ? restoGlassFill(context) : null,
+        alignment: Alignment.centerLeft,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+          child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [for (final b in builders) b(false)]),
+        ),
+      );
+    }
+
     if (widget.useTabs) {
       // Rendu onglets : groupe compact aligné à gauche, scrollable
       // horizontalement si trop large. Pas de border pleine largeur —
       // l'indicateur souligné par onglet suffit comme repère visuel.
-      return Align(
+      // En restauration, la bande reçoit la teinte des cartes sur TOUTE sa
+      // largeur : sans fond, c'était le décor brut qui passait entre les
+      // onglets, seule zone de la page à ne rien avoir derrière le texte.
+      return Container(
+        width: double.infinity,
+        color: restoDecorActive ? restoGlassFill(context) : null,
         alignment: Alignment.centerLeft,
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -241,7 +277,7 @@ class _ViewFilterChipBarState extends ConsumerState<ViewFilterChipBar> {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        color: cs.surface,
+        color: restoDecorActive ? restoGlassFill(context) : cs.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: sem.borderSubtle),
       ),

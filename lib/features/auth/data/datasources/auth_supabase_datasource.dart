@@ -129,9 +129,27 @@ class AuthSupabaseDataSource {
             profileData?['created_at'] ?? DateTime.now().toIso8601String()),
       );
 
+      // ISOLATION (anti-fuite inter-comptes, appareil partagé) — si des
+      // données locales d'un AUTRE compte subsistent (logout précédent non
+      // effectué/non terminé : crash, fermeture d'onglet, purge async
+      // interrompue), on PURGE tout avant de charger ce compte. Symétrique de
+      // purgeOnLogout : ferme la fenêtre où des commandes/clients/notifs d'un
+      // autre compte fuiteraient dans cette session.
+      final previousOwner = LocalStorageService.getLocalDataOwnerId();
+      if (previousOwner != null && previousOwner != userId) {
+        debugPrint('[Auth] données locales d\'un autre compte '
+            '($previousOwner ≠ $userId) → purge anti-fuite avant login');
+        // Son mot de passe caché part AVANT la purge : c'est la fiche qu'elle
+        // va effacer qui porte l'e-mail sous lequel il est rangé. Après, on ne
+        // saurait plus quel secret supprimer, et il resterait indéfiniment.
+        await _forgetOfflineSecretOf(previousOwner);
+        await LocalStorageService.purgeOnLogout();
+      }
+
       // Cache local
       await LocalStorageService.saveUser(model.toEntity());
       await LocalStorageService.setCurrentUserId(userId);
+      await LocalStorageService.setLocalDataOwnerId(userId);
       await _cachePwdForOffline(email.trim().toLowerCase(), password);
 
       // Sync en arrière-plan — ne bloque PAS le login
@@ -238,6 +256,23 @@ class AuthSupabaseDataSource {
   }
 
   bool get isAuthenticated => _auth.currentUser != null;
+
+  /// Oublie le mot de passe hors ligne du compte [userId], s'il est connu.
+  ///
+  /// La contrepartie de « l'appareil garde de quoi rouvrir la session du
+  /// dernier compte » : dès qu'un autre se connecte, le précédent est oublié —
+  /// sa fiche par la purge, son secret par ici.
+  Future<void> _forgetOfflineSecretOf(String userId) async {
+    try {
+      final previous = LocalStorageService.getUser(userId);
+      final mail = previous?.email.trim().toLowerCase() ?? '';
+      if (mail.isEmpty) return;
+      await SecureStorageService.deletePassword(mail);
+      debugPrint('[Auth] mot de passe hors ligne du compte précédent effacé');
+    } catch (e) {
+      debugPrint('[Auth] _forgetOfflineSecretOf: $e');
+    }
+  }
 
   // ── Mot de passe pour login offline ──────────────────────────────────────
   // Stocké UNIQUEMENT dans le keystore système (Android Keystore / iOS

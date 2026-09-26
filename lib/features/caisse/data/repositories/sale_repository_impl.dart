@@ -17,7 +17,7 @@ class SaleRepositoryImpl implements SaleRepository {
       'op':    'upsert',
       'data':  _saleToMap(sale),
     });
-    await local.clearCart();
+    await local.clearCart(sale.shopId);
     return sale;
   }
 

@@ -94,4 +94,21 @@ class StorageService {
   /// Vérifier si une URL est un chemin local
   static bool isLocalPath(String? url) =>
       url != null && !isRemoteUrl(url) && url.isNotEmpty;
+
+  /// Renvoie une URL de VIGNETTE redimensionnée côté serveur via l'endpoint
+  /// de transformation d'image Supabase (actif sur ce projet), au lieu de
+  /// l'image brute haute résolution. Charger une image ~2048 px puis la
+  /// réduire à une vignette de 32-80 px produit de l'aliasing (« grain »)
+  /// sur le web (downscale à fort ratio en une passe). En demandant
+  /// directement une image proche de la taille d'affichage, le rendu est net.
+  ///
+  /// No-op (retourne [url] tel quel) si ce n'est pas une URL de stockage
+  /// public Supabase — l'appelant peut donc l'utiliser sans condition.
+  static String thumbUrl(String url, {int width = 240, int quality = 80}) {
+    const marker = '/storage/v1/object/public/';
+    if (!url.contains(marker)) return url;
+    final sep = url.contains('?') ? '&' : '?';
+    return '${url.replaceFirst(marker, '/storage/v1/render/image/public/')}'
+        '${sep}width=$width&quality=$quality&resize=contain';
+  }
 }

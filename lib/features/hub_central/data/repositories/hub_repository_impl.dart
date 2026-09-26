@@ -4,6 +4,7 @@ import '../../domain/entities/global_stats.dart';
 import '../../domain/usecases/get_all_shops_stats_usecase.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/storage/local_storage_service.dart';
+import '../../../../core/utils/date_window.dart';
 
 /// Implémentation offline-first du `HubRepository` : agrège les `orders` de
 /// `HiveBoxes.ordersBox` boutique par boutique, sur la période demandée et
@@ -109,7 +110,7 @@ class HubRepositoryImpl implements HubRepository {
       final effective = _toDateTime(completedRaw)
           ?? _toDateTime(createdRaw);
       if (effective == null) continue;
-      if (effective.isBefore(range.from) || effective.isAfter(range.to)) {
+      if (!range.contains(effective)) {
         continue;
       }
 
@@ -259,9 +260,15 @@ class _Range {
   final DateTime from, to;
   const _Range(this.from, this.to);
 
+  /// Même convention que partout ailleurs : `[from, to)`.
+  ///
+  /// Ce type est propre au hub central — il ne dérive pas de `DashRange` —
+  /// mais il n'a aucune raison de compter ses bornes autrement.
+  bool contains(DateTime at) => withinWindow(at, from, to);
+
   /// Index du bucket auquel appartient `d`. Retourne -1 si hors plage.
   int bucketIndex(DateTime d, int bucketCount) {
-    if (d.isBefore(from) || d.isAfter(to)) return -1;
+    if (!withinWindow(d, from, to)) return -1;
     final total = to.difference(from).inMicroseconds;
     if (total <= 0) return 0;
     final pos = d.difference(from).inMicroseconds;

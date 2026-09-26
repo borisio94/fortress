@@ -24,6 +24,18 @@ class RouteNames {
   static const dashboard = '/shop/:shopId/dashboard';
   static const caisse = '/shop/:shopId/caisse';
   static const inventaire = '/shop/:shopId/inventaire';
+  /// Mise en route d'un restaurant (table puis plat composé).
+  static const restaurantSetup = '/shop/:shopId/restaurant/setup';
+  static const restaurantTables = '/shop/:shopId/restaurant/tables';
+  static const restaurantBill = '/shop/:shopId/restaurant/addition/:tableId';
+  /// Clôture de caisse aveugle X/Z (Lot C).
+  static const restaurantCashClosure = '/shop/:shopId/restaurant/caisse/cloture';
+  /// Personnel du restaurant : équipe, heures, paie (Lot D).
+  static const restaurantStaff = '/shop/:shopId/restaurant/personnel';
+  /// Badgeuse en libre-service (Lot D).
+  static const restaurantTimeclock = '/shop/:shopId/restaurant/pointage';
+  static const restaurantTableOrder =
+      '/shop/:shopId/restaurant/table/:tableId';
   static const crm = '/shop/:shopId/crm';
   static const clientDetail = '/shop/:shopId/crm/client/:clientId';
   static const finances = '/shop/:shopId/finances';
@@ -51,15 +63,12 @@ class RouteNames {
   /// Page centralisée des exports (CSV/PDF) — une card par type.
   static const exportsPage       = '/shop/:shopId/parametres/exports';
 
-  // Onboarding (PR-1 + PR-2) — flow nouveau utilisateur.
-  /// Slides marketing 1ʳᵉ ouverture (3 cartes).
-  static const onboardingSlides     = '/onboarding/slides';
-  /// Choix « créer un compte » / « j'ai déjà un compte ».
-  static const onboardingAuthChoice = '/onboarding/auth-choice';
-  /// Inscription minimale 3 champs (nom · email · password).
-  static const onboardingRegister   = '/onboarding/register';
-  /// Wizard boutique 3 étapes (PR-2) — appelle CreateShopUseCase à la fin.
-  static const onboardingShop       = '/onboarding/shop';
+  // Onboarding — il ne reste que l'ajout éclair.
+  //
+  // Les quatre routes `/onboarding/*` — slides, choix de compte, inscription
+  // simplifiée, assistant boutique — ont été retirées le 21/09/2026 avec les
+  // pages qu'elles servaient : plus rien ne naviguait vers elles. Une route
+  // enregistrée que personne n'appelle est une porte sans gardien.
   /// Ajout produit éclair 3 champs (PR-2). Utilisé par la checklist.
   static const quickAddProduct      = '/shop/:shopId/inventaire/quick-add';
 

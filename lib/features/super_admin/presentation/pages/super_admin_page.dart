@@ -6,6 +6,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../../../../core/router/route_names.dart';
 import 'super_admin_deleted_hub_page.dart' show superAdminDeletedTotalProvider;
+import 'platform_bugs_page.dart';
+import 'sa_tickets_page.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -53,8 +55,16 @@ final _saStatsProvider = FutureProvider.autoDispose<_SAStats>((ref) async {
   final filteredSubs = sL.where((s) =>
       validUserIds.contains(s['user_id'] as String?)).toList();
 
-  final totalUsers   = pL.length;
-  final blocked      = pL.where((u) => u['prof_status'] == 'blocked').length;
+  // « Utilisateurs » = CLIENTS = propriétaires de boutique DISTINCTS (un
+  // client = un owner). Exclut les employés / inscrits sans boutique et le
+  // super-admin (déjà filtré). → le compteur reflète le nombre de clients.
+  final ownerIds = shL
+      .map((s) => s['owner_id'] as String?)
+      .whereType<String>()
+      .toSet();
+  final totalUsers   = ownerIds.length;
+  final blocked      = pL.where((u) =>
+      u['prof_status'] == 'blocked' && ownerIds.contains(u['id'])).length;
   final activeSubs   = filteredSubs.where((s) {
     final exp = s['expires_at'] != null ? DateTime.tryParse(s['expires_at']) : null;
     return s['sub_status'] == 'active' && (exp == null || exp.isAfter(now));
@@ -81,6 +91,11 @@ final _saStatsProvider = FutureProvider.autoDispose<_SAStats>((ref) async {
     recentShops: shL.take(5).toList(),
   );
 });
+
+/// État du MODE GRATUIT GLOBAL (hotfix_136).
+final _freeModeProvider =
+    FutureProvider.autoDispose<({bool enabled, DateTime? until})?>(
+        (ref) async => AppDatabase.getFreeMode());
 
 final _saUsersProvider = FutureProvider.autoDispose<List<Map<String,dynamic>>>((ref) async {
   final rows = await Supabase.instance.client
@@ -203,7 +218,7 @@ class _SAStats {
 // ─── Sections drawer ──────────────────────────────────────────────────────────
 enum _SASection {
   dashboard, users, shops, payments, plans, logs, messages,
-  maintenance, monitoring, settings,
+  maintenance, monitoring, bugs, settings,
 }
 
 extension _SASectionX on _SASection {
@@ -214,9 +229,10 @@ extension _SASectionX on _SASection {
     _SASection.payments     => 'Paiements',
     _SASection.plans        => 'Plans tarifaires',
     _SASection.logs         => 'Logs',
-    _SASection.messages     => 'Messages',
+    _SASection.messages     => 'Tickets',
     _SASection.maintenance  => 'Maintenance',
     _SASection.monitoring   => 'Monitoring',
+    _SASection.bugs         => 'Bugs',
     _SASection.settings     => 'Configuration',
   };
   IconData get icon => switch (this) {
@@ -226,9 +242,10 @@ extension _SASectionX on _SASection {
     _SASection.payments     => Icons.payments_rounded,
     _SASection.plans        => Icons.card_membership_rounded,
     _SASection.logs         => Icons.terminal_rounded,
-    _SASection.messages     => Icons.chat_bubble_outline_rounded,
+    _SASection.messages     => Icons.forum_rounded,
     _SASection.maintenance  => Icons.build_circle_rounded,
     _SASection.monitoring   => Icons.monitor_heart_rounded,
+    _SASection.bugs         => Icons.bug_report_rounded,
     _SASection.settings     => Icons.settings_outlined,
   };
 }
@@ -244,6 +261,11 @@ class SuperAdminPage extends ConsumerStatefulWidget {
 class _SuperAdminPageState extends ConsumerState<SuperAdminPage> {
   _SASection _section = _SASection.dashboard;
   final _scaffoldKey = GlobalKey<ScaffoldState>();
+  // Garde one-shot : empêche de re-planifier `context.go` à CHAQUE build quand
+  // le plan n'est pas (plus) super-admin. Sans elle, au logout depuis le
+  // panneau SA, `reset()` pose UserPlan.empty() (non-SA) → la page replanifie
+  // un addPostFrameCallback→go à chaque frame → boucle qui FIGE la page web.
+  bool _redirectScheduled = false;
 
   void _navigate(_SASection s) {
     setState(() => _section = s);
@@ -278,9 +300,15 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage> {
       );
     }
     if (!plan.isSuperAdmin) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) context.go(RouteNames.shopSelector);
-      });
+      // One-shot : on ne planifie la sortie qu'UNE fois (cf. _redirectScheduled).
+      // Le `go` unique est de toute façon intercepté par le redirect du router
+      // (→ /login si déconnecté, → shop-selector si non-SA authentifié).
+      if (!_redirectScheduled) {
+        _redirectScheduled = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && context.mounted) context.go(RouteNames.shopSelector);
+        });
+      }
       return Scaffold(
         backgroundColor: AppColors.background,
         body: const Center(child: CircularProgressIndicator()),
@@ -336,9 +364,10 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage> {
     _SASection.payments     => const _PaymentsSection(),
     _SASection.plans        => const _PlansSection(),
     _SASection.logs         => const _LogsSection(),
-    _SASection.messages     => const _MessagesSection(),
+    _SASection.messages     => const SaTicketsSection(),
     _SASection.maintenance  => const _MaintenanceSection(),
     _SASection.monitoring   => const _MonitoringSection(),
+    _SASection.bugs         => const PlatformBugsSection(),
     _SASection.settings     => const _SettingsSection(),
   };
 }
@@ -406,7 +435,7 @@ class _SANotifBell extends ConsumerWidget {
             builder: (_) => _SANotifPanel(notifs: notifs),
           );
         },
-        icon: const Icon(Icons.notifications_outlined, size: 20,
+        icon: Icon(Icons.notifications_outlined, size: 20,
             color: AppColors.textSecondary),
         padding: EdgeInsets.zero,
         constraints: const BoxConstraints(minWidth: 32, minHeight: 32)),
@@ -447,7 +476,7 @@ class _SANotifPanel extends StatelessWidget {
         ]),
         const SizedBox(height: 10),
         if (notifs.isEmpty)
-          const Padding(padding: EdgeInsets.symmetric(vertical: 28),
+          Padding(padding: const EdgeInsets.symmetric(vertical: 28),
               child: Text('Aucune notification pour le moment.',
                   style: AppTextStyles.bodySmSecondary))
         else
@@ -482,7 +511,7 @@ class _SAAppBar extends StatelessWidget {
       child: Row(children: [
         if (!isDesktop) ...[
           IconButton(onPressed: onMenuTap,
-              icon: const Icon(Icons.menu_rounded, size: 22, color: Color(0xFF374151)),
+              icon: Icon(Icons.menu_rounded, size: 22, color: AppColors.onSurface),
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32)),
           const SizedBox(width: 8),
@@ -490,7 +519,7 @@ class _SAAppBar extends StatelessWidget {
         Text(section.label, style: AppTextStyles.subtitleBold),
         const Spacer(),
         IconButton(onPressed: onRefresh,
-            icon: const Icon(Icons.refresh_rounded, size: 20,
+            icon: Icon(Icons.refresh_rounded, size: 20,
                 color: AppColors.textSecondary),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32)),
@@ -600,7 +629,7 @@ class _SADrawerContent extends ConsumerWidget {
               child: Row(children: [
                 Container(width: 28, height: 28,
                     decoration: BoxDecoration(
-                        color: AppColors.primary,
+                        color: AppColors.primaryFill,
                         borderRadius: BorderRadius.circular(7)),
                     child: const Icon(Icons.admin_panel_settings_rounded,
                         size: 14, color: Colors.white)),
@@ -608,7 +637,7 @@ class _SADrawerContent extends ConsumerWidget {
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('Super Admin', style: AppTextStyles.captionBold
                       .copyWith(color: AppColors.primary)),
-                  const Text('Panneau principal',
+                  Text('Panneau principal',
                       style: AppTextStyles.microSecondary),
                 ]),
               ]),
@@ -645,10 +674,17 @@ class _SADrawerContent extends ConsumerWidget {
             const _Divider(),
             _DrawerLabel('Outils'),
             ...[ _SASection.logs, _SASection.messages,
-              _SASection.maintenance, _SASection.monitoring,
-            ].map((s) => _DrawerTile(
-              section: s, current: current, onTap: () => onNavigate(s),
-            )),
+              _SASection.maintenance, _SASection.monitoring, _SASection.bugs,
+            ].map((s) {
+              // Badge temps réel sur « Tickets » : nombre de tickets ouverts
+              // remontés au support (escaladés à super_admin).
+              final escalated = ref.watch(saTicketBadgeProvider).valueOrNull ?? 0;
+              return _DrawerTile(
+                section: s, current: current, onTap: () => onNavigate(s),
+                badge: s == _SASection.messages && escalated > 0
+                    ? escalated : null,
+              );
+            }),
           ],
         )),
 
@@ -696,7 +732,7 @@ class _SADrawerContent extends ConsumerWidget {
         title: const Text('Déconnexion',
             textAlign: TextAlign.center,
             style: AppTextStyles.subtitleBold),
-        content: const Text(
+        content: Text(
             'Vous allez quitter le panneau administrateur.\n\nÊtes-vous sûr de vouloir vous déconnecter ?',
             textAlign: TextAlign.center,
             style: AppTextStyles.bodySecondary),
@@ -710,7 +746,7 @@ class _SADrawerContent extends ConsumerWidget {
                     borderRadius: BorderRadius.circular(10)),
                 padding: const EdgeInsets.symmetric(
                     horizontal: 24, vertical: 10)),
-            child: const Text('Annuler',
+            child: Text('Annuler',
                 style: AppTextStyles.bodySecondary),
           ),
           ElevatedButton(
@@ -799,7 +835,7 @@ class _DrawerTile extends StatelessWidget {
             Expanded(child: Text(section.label, style: AppTextStyles.body
                 .copyWith(
                     fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                    color: active ? AppColors.primary : const Color(0xFF374151)))),
+                    color: active ? AppColors.primary : AppColors.onSurface))),
             if (badge != null && badge! > 0)
               Container(width: 18, height: 18,
                   decoration: const BoxDecoration(
@@ -854,6 +890,8 @@ class _DashboardSection extends ConsumerWidget {
                   message: '${s.blocked} compte(s) bloqué(s)',
                   onTap: () => onNavigate(_SASection.users)),
             ],
+            const SizedBox(height: 12),
+            const _FreeModeCard(),
             const SizedBox(height: 14),
             // KPI
             SizedBox(
@@ -1203,9 +1241,73 @@ class _ShopsSectionState extends ConsumerState<_ShopsSection> {
             TextButton(onPressed: () => Navigator.of(c).pop(),
                 child: const Text('Annuler')),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.primaryFill),
               onPressed: () => Navigator.of(c).pop(days),
               child: const Text('Prolonger'),
+            ),
+          ],
+        );
+      }),
+    );
+  }
+
+  /// Démarre (ou relance) un essai Business pour le propriétaire de la
+  /// boutique — même sans abonnement, ou pour réactiver un essai expiré.
+  Future<void> _startTrial(Map<String, dynamic> shop) async {
+    final id   = shop['id'] as String;
+    final days = await _promptTrialDays();
+    if (days == null) return;
+    try {
+      final exp = await AppDatabase.startTrial(id, days);
+      if (mounted) {
+        AppSnack.success(context, exp != null
+            ? 'Essai démarré jusqu\'au ${DateFormat('dd/MM/yyyy').format(exp.toLocal())}'
+            : 'Essai démarré');
+      }
+      ref.invalidate(_saShopsProvider);
+      ref.invalidate(_saStatsProvider);
+    } catch (e) {
+      if (mounted) AppSnack.error(context, 'Échec : $e');
+    }
+  }
+
+  Future<int?> _promptTrialDays() async {
+    int days = 14;
+    final fmt = DateFormat('dd/MM/yyyy');
+    final theme = Theme.of(context);
+    return showDialog<int>(
+      context: context,
+      builder: (c) => StatefulBuilder(builder: (c, setLocal) {
+        final newDate = DateTime.now().add(Duration(days: days));
+        return AlertDialog(
+          backgroundColor: theme.colorScheme.surface,
+          title: const Text('Démarrer un essai'),
+          content: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Un essai Business (accès complet) sera activé pour ce '
+                'compte, et le compte sera débloqué s\'il l\'était.',
+                style: AppTextStyles.bodySmSecondary),
+            const SizedBox(height: 6),
+            Text('Expiration : ${fmt.format(newDate.toLocal())}',
+                style: AppTextStyles.bodyBold
+                    .copyWith(color: AppColors.secondary)),
+            const SizedBox(height: 14),
+            Wrap(spacing: 8, children: [
+              for (final d in [7, 14, 30])
+                ChoiceChip(
+                  label: Text('$d j'),
+                  selected: days == d,
+                  onSelected: (_) => setLocal(() => days = d),
+                ),
+            ]),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(c).pop(),
+                child: const Text('Annuler')),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.primaryFill),
+              onPressed: () => Navigator.of(c).pop(days),
+              child: const Text('Démarrer'),
             ),
           ],
         );
@@ -1367,6 +1469,7 @@ class _ShopsSectionState extends ConsumerState<_ShopsSection> {
               },
               onToggleSuspend: () => _toggleSuspend(s),
               onExtendTrial: () => _extendTrial(s),
+              onStartTrial: () => _startTrial(s),
               onPayments: () => _showPayments(s),
               onBackups: () => _showBackups(s),
             ));
@@ -1540,7 +1643,7 @@ class _PlansSection extends ConsumerWidget {
                         overflow: TextOverflow.ellipsis,
                         style: AppTextStyles.bodySmBold),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
+                      backgroundColor: AppColors.primaryFill,
                       foregroundColor: Colors.white,
                       elevation: 0,
                       padding: const EdgeInsets.symmetric(
@@ -1695,27 +1798,6 @@ class _LogsSectionState extends ConsumerState<_LogsSection> {
   }
 }
 
-// ─── Messages ─────────────────────────────────────────────────────────────────
-class _MessagesSection extends StatelessWidget {
-  const _MessagesSection();
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(padding: const EdgeInsets.all(32),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.chat_bubble_outline_rounded, size: 48, color: Color(0xFFD1D5DB)),
-          const SizedBox(height: 12),
-          Text('Messagerie — Prochaine version',
-              style: AppTextStyles.label
-                  .copyWith(color: AppColors.textSecondary)),
-          const SizedBox(height: 6),
-          Text('Les messages des utilisateurs apparaîtront ici.',
-              style: AppTextStyles.bodySm
-                  .copyWith(color: AppColors.textHint),
-              textAlign: TextAlign.center),
-        ])),
-  );
-}
-
 // ─── Configuration ────────────────────────────────────────────────────────────
 class _SettingsSection extends ConsumerWidget {
   const _SettingsSection();
@@ -1790,6 +1872,7 @@ class _SettingsSection extends ConsumerWidget {
           backgroundColor: AppColors.secondary,
           behavior: SnackBarBehavior.floating,
         ));
+        return false; // message déjà affiché ci-dessus
       },
     ));
   }
@@ -1913,6 +1996,7 @@ class _SettingsSection extends ConsumerWidget {
             ctx.read<AuthBloc>().add(AuthLogoutRequested());
           }
         }
+        return false; // succès/avertissement déjà affichés ci-dessus
       },
     ));
   }
@@ -1922,6 +2006,95 @@ class _SettingsSection extends ConsumerWidget {
 // ════════════════════════════════════════════════════════════════════════════
 // WIDGETS RÉUTILISABLES
 // ════════════════════════════════════════════════════════════════════════════
+
+/// Interrupteur du MODE GRATUIT GLOBAL (période de test). Quand actif, tous les
+/// comptes passent en accès Business gratuit (hotfix_136).
+class _FreeModeCard extends ConsumerWidget {
+  const _FreeModeCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme   = Theme.of(context);
+    final fm      = ref.watch(_freeModeProvider).valueOrNull;
+    final enabled = fm?.enabled ?? false;
+    final until   = fm?.until;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: enabled
+            ? AppColors.secondary.withValues(alpha: 0.10)
+            : theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+            color: enabled ? AppColors.secondary : theme.semantic.borderSubtle),
+      ),
+      child: Row(children: [
+        Icon(enabled
+                ? Icons.rocket_launch_rounded
+                : Icons.rocket_launch_outlined,
+            size: 20,
+            color: enabled ? AppColors.secondary : AppColors.textHint),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Mode gratuit global', style: AppTextStyles.bodyBold),
+            const SizedBox(height: 2),
+            Text(
+              enabled
+                  ? 'ACTIF — tous les comptes ont l\'accès Business gratuit'
+                    '${until != null ? ' jusqu\'au ${DateFormat('dd/MM/yyyy').format(until.toLocal())}' : ''}.'
+                  : 'Inactif — la facturation normale s\'applique.',
+              style: AppTextStyles.captionHint,
+            ),
+          ]),
+        ),
+        Switch(
+          value: enabled,
+          activeColor: AppColors.secondary,
+          onChanged: (v) => _confirmToggle(context, ref, v),
+        ),
+      ]),
+    );
+  }
+
+  Future<void> _confirmToggle(
+      BuildContext context, WidgetRef ref, bool enable) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        title: Text(enable
+            ? 'Activer le mode gratuit global ?'
+            : 'Désactiver le mode gratuit ?'),
+        content: Text(enable
+            ? 'TOUS les comptes (anciens et nouveaux) passeront en accès '
+              'Business gratuit tant que le mode est actif. Les comptes '
+              'bloqués manuellement le restent.'
+            : 'La facturation normale reprendra pour tous les comptes.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(c).pop(false),
+              child: const Text('Annuler')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.secondary),
+            onPressed: () => Navigator.of(c).pop(true),
+            child: Text(enable ? 'Activer' : 'Désactiver'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await AppDatabase.setFreeMode(enable);
+      ref.invalidate(_freeModeProvider);
+      if (context.mounted) {
+        AppSnack.success(context,
+            enable ? 'Mode gratuit activé' : 'Mode gratuit désactivé');
+      }
+    } catch (e) {
+      if (context.mounted) AppSnack.error(context, 'Échec : $e');
+    }
+  }
+}
 
 class _KpiCard extends StatelessWidget {
   final String label, value;
@@ -2130,7 +2303,7 @@ class _FilterBar extends StatelessWidget {
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: AppTextStyles.inputHint,
-            prefixIcon: const Icon(Icons.search, size: 16, color: AppColors.textSecondary),
+            prefixIcon: Icon(Icons.search, size: 16, color: AppColors.textSecondary),
             filled: true, fillColor: AppColors.inputFill,
             isDense: true, contentPadding: EdgeInsets.zero,
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8),
@@ -2161,7 +2334,7 @@ class _FilterBar extends StatelessWidget {
               ),
               child: Text(filters[i], style: AppTextStyles.caption.copyWith(
                   fontWeight: sel ? FontWeight.w700 : FontWeight.w400,
-                  color: sel ? AppColors.primary : const Color(0xFF374151))),
+                  color: sel ? AppColors.primary : AppColors.onSurface)),
             ),
           );
         },
@@ -2207,7 +2380,7 @@ class _UserCard extends StatelessWidget {
       decoration: BoxDecoration(
           // Grisé quand bloqué.
           color: isBlocked
-              ? const Color(0xFFF1F1F4)
+              ? AppColors.inputFill
               : Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
@@ -2371,15 +2544,18 @@ class _UserCard extends StatelessWidget {
         //    reset-platform (service_role) — sinon le compte peut encore se
         //    connecter. Même schéma que la réinitialisation globale.
         final authDeleted = (res is Map) ? (res['auth_deleted'] == true) : true;
+        var authOk = authDeleted;
         if (!authDeleted) {
           try {
             await Supabase.instance.client.functions.invoke(
               'reset-platform',
               body: {'mode': 'delete-user', 'user_id': uid},
             );
+            authOk = true;
           } catch (_) {
             // Edge function absente/non déployée : la donnée est purgée mais le
             // compte auth survit. On le signale plutôt que d'échouer en silence.
+            authOk = false;
             if (ctx.mounted) {
               AppSnack.warning(ctx,
                   'Données supprimées, mais le compte Auth n\'a pas pu être '
@@ -2388,6 +2564,9 @@ class _UserCard extends StatelessWidget {
           }
         }
         onRefresh();
+        // Succès vert générique UNIQUEMENT si l'Auth a bien été effacé. Sinon,
+        // l'avertissement orange ci-dessus suffit — plus de message opposé.
+        return authOk;
       },
     ));
   }
@@ -2427,10 +2606,10 @@ class _ShopRow extends StatelessWidget {
   final String? planLabel;     // plan de l'owner (affiché sur la boutique)
   final bool planExpired;
   final VoidCallback? onToggle, onToggleSuspend,
-      onExtendTrial, onPayments, onBackups, onSubscription;
+      onExtendTrial, onStartTrial, onPayments, onBackups, onSubscription;
   const _ShopRow({required this.shop, required this.onToggle,
       this.onToggleSuspend,
-      this.onExtendTrial, this.onPayments, this.onBackups,
+      this.onExtendTrial, this.onStartTrial, this.onPayments, this.onBackups,
       this.onSubscription, this.planLabel, this.planExpired = false});
 
   @override
@@ -2496,7 +2675,7 @@ class _ShopRow extends StatelessWidget {
                 style: AppTextStyles.micro.copyWith(color: AppColors.error))
           else if (created != null)
             Text('Créée le ${fmt.format(created)}', style: AppTextStyles
-                .micro.copyWith(color: const Color(0xFFD1D5DB))),
+                .micro.copyWith(color: AppColors.textHint)),
         ])),
         if (onToggle != null)
           PopupMenuButton<String>(
@@ -2504,6 +2683,7 @@ class _ShopRow extends StatelessWidget {
               if (v == 't') onToggle?.call();
               if (v == 's') onToggleSuspend?.call();
               if (v == 'x') onExtendTrial?.call();
+              if (v == 'st') onStartTrial?.call();
               if (v == 'p') onPayments?.call();
               if (v == 'b') onBackups?.call();
               if (v == 'sub') onSubscription?.call();
@@ -2527,6 +2707,14 @@ class _ShopRow extends StatelessWidget {
                   Text(planExpired ? 'Réactiver l\'abonnement' : 'Abonnement',
                       style: AppTextStyles.bodySm.copyWith(
                           color: planExpired ? AppColors.secondary : AppColors.primary)),
+                ])),
+              if (onStartTrial != null)
+                PopupMenuItem(value: 'st', child: Row(children: [
+                  const Icon(Icons.rocket_launch_rounded, size: 15,
+                      color: AppColors.secondary),
+                  const SizedBox(width: 8),
+                  Text('Démarrer un essai', style: AppTextStyles.bodySm
+                      .copyWith(color: AppColors.secondary)),
                 ])),
               if (onExtendTrial != null)
                 PopupMenuItem(value: 'x', child: Row(children: [
@@ -2602,7 +2790,7 @@ class _OwnerGroupHeader extends StatelessWidget {
       child: Row(children: [
         Container(width: 28, height: 28,
             decoration: BoxDecoration(
-                color: AppColors.primary, shape: BoxShape.circle),
+                color: AppColors.primaryFill, shape: BoxShape.circle),
             child: Center(child: Text(initial,
                 style: AppTextStyles.captionBold.copyWith(color: Colors.white)))),
         const SizedBox(width: 10),
@@ -2617,7 +2805,7 @@ class _OwnerGroupHeader extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
           decoration: BoxDecoration(
-              color: AppColors.primary,
+              color: AppColors.primaryFill,
               borderRadius: BorderRadius.circular(20)),
           child: Text('$count', style: AppTextStyles.microBold
               .copyWith(color: Colors.white)),
@@ -2712,7 +2900,7 @@ class _PaymentCard extends StatelessWidget {
           Text([if (date != null) 'Du ${fmt.format(date)}',
             if (exp != null) 'au ${fmt.format(exp)}'].join(' '),
               style: AppTextStyles.micro
-                  .copyWith(color: const Color(0xFFD1D5DB))),
+                  .copyWith(color: AppColors.textHint)),
         ],
         if (status != 'active') ...[
           const SizedBox(height: 8),
@@ -2824,7 +3012,7 @@ _LogMeta _metaFor(String action) {
     case 'platform_reset':
       return const _LogMeta('alert', Icons.restart_alt_rounded, AppColors.error);
     default:
-      return const _LogMeta('other', Icons.info_outline_rounded, AppColors.textSecondary);
+      return _LogMeta('other', Icons.info_outline_rounded, AppColors.textSecondary);
   }
 }
 
@@ -3000,7 +3188,7 @@ class _SubSheetState extends State<_SubSheet> {
   }
 
   Widget _sectionLabel(String t) => Text(t,
-      style: AppTextStyles.captionBold.copyWith(color: const Color(0xFF6B7280)));
+      style: AppTextStyles.captionBold.copyWith(color: AppColors.textSecondary));
 
   @override
   Widget build(BuildContext context) => Container(
@@ -3140,7 +3328,7 @@ class _SubSheetState extends State<_SubSheet> {
           SizedBox(width: double.infinity, child: ElevatedButton(
             onPressed: _saving ? null : _save,
             style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                backgroundColor: AppColors.primaryFill, foregroundColor: Colors.white,
                 elevation: 0, padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
             child: _saving
@@ -3306,7 +3494,7 @@ class _EditPlanSheetState extends State<_EditPlanSheet> {
       SizedBox(width: double.infinity, child: ElevatedButton(
         onPressed: _saving ? null : _save,
         style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+            backgroundColor: AppColors.primaryFill, foregroundColor: Colors.white,
             elevation: 0, padding: const EdgeInsets.symmetric(vertical: 13),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
         child: _saving
@@ -3439,12 +3627,12 @@ class _Btn extends StatelessWidget {
         duration: const Duration(milliseconds: 120),
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-            color: sel ? AppColors.primary : Theme.of(context).colorScheme.surface,
+            color: sel ? AppColors.primaryFill : Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: sel ? AppColors.primary : AppColors.inputBorder)),
+            border: Border.all(color: sel ? AppColors.primaryFill : AppColors.inputBorder)),
         child: Text(label, textAlign: TextAlign.center,
             style: AppTextStyles.bodySmBold.copyWith(
-                color: sel ? Colors.white : const Color(0xFF374151))),
+                color: sel ? Colors.white : AppColors.onSurface)),
       ),
     );
   }
@@ -3497,7 +3685,7 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Center(
     child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const Icon(Icons.inbox_rounded, size: 40, color: Color(0xFFD1D5DB)),
+      Icon(Icons.inbox_rounded, size: 40, color: AppColors.textHint),
       const SizedBox(height: 10),
       Text(message, style: AppTextStyles.bodySecondary),
     ]),
@@ -3611,13 +3799,13 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
               side: BorderSide(color: AppColors.inputBorder),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10))),
-          child: const Text('Annuler',
+          child: Text('Annuler',
               style: TextStyle(color: AppColors.textSecondary)),
         ),
         ElevatedButton(
           onPressed: _loading ? null : (_verified ? _sendReset : _verifySA),
           style: ElevatedButton.styleFrom(
-              backgroundColor: _verified ? AppColors.warning : AppColors.primary,
+              backgroundColor: _verified ? AppColors.warning : AppColors.primaryFill,
               foregroundColor: Colors.white, elevation: 0,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10))),
@@ -3657,12 +3845,12 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: AppColors.inputBorder)),
         child: Row(children: [
-          const Icon(Icons.person_outline_rounded,
+          Icon(Icons.person_outline_rounded,
               size: 15, color: AppColors.textSecondary),
           const SizedBox(width: 8),
           Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Compte cible',
+            Text('Compte cible',
                 style: AppTextStyles.microSecondary),
             Text(widget.targetEmail, style: AppTextStyles.captionBold),
           ])),
@@ -3684,12 +3872,12 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
             controller: _pwdCtrl,
             obscureText: _obscure,
             style: AppTextStyles.input,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               hintText: 'Votre mot de passe super admin',
               hintStyle: AppTextStyles.inputHint,
               border: InputBorder.none,
               isDense: true,
-              contentPadding: EdgeInsets.symmetric(vertical: 8),
+              contentPadding: const EdgeInsets.symmetric(vertical: 8),
             ),
           )),
           GestureDetector(
@@ -3772,7 +3960,12 @@ class _SaDangerReauthDialog extends StatefulWidget {
   final String      warningTitle;
   final String      warningMessage;
   final String      confirmLabel;
-  final Future<void> Function() onConfirmed;
+  /// Exécuté après ré-authentification. Retourne `true` pour laisser le
+  /// dialogue afficher le succès générique vert (« <titre> — terminé ») ;
+  /// `false` si l'appelant a DÉJÀ affiché son propre message (succès détaillé,
+  /// OU succès partiel type « données supprimées mais compte Auth survit ») —
+  /// évite deux snackbars contradictoires.
+  final Future<bool> Function() onConfirmed;
 
   const _SaDangerReauthDialog({
     required this.icon,
@@ -3807,19 +4000,24 @@ class _SaDangerReauthDialogState extends State<_SaDangerReauthDialog> {
       final saEmail = Supabase.instance.client.auth.currentUser?.email ?? '';
       await Supabase.instance.client.auth.signInWithPassword(
           email: saEmail, password: _pwdCtrl.text.trim());
-      await widget.onConfirmed();
+      final showGenericSuccess = await widget.onConfirmed();
       if (!mounted) return;
       Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Row(children: [
-          const Icon(Icons.check_circle_outline, color: Colors.white, size: 18),
-          const SizedBox(width: 8),
-          Expanded(child: Text('${widget.title} — terminé',
-              style: AppTextStyles.bodySm)),
-        ]),
-        backgroundColor: AppColors.secondary,
-        behavior: SnackBarBehavior.floating,
-      ));
+      // Succès générique vert UNIQUEMENT si l'appelant ne s'est pas déjà chargé
+      // du message — sinon deux snackbars, parfois contradictoires (ex.
+      // « Auth non effacé » orange + « terminé » vert).
+      if (showGenericSuccess) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Row(children: [
+            const Icon(Icons.check_circle_outline, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Expanded(child: Text('${widget.title} — terminé',
+                style: AppTextStyles.bodySm)),
+          ]),
+          backgroundColor: AppColors.secondary,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
     } on AuthException catch (e) {
       setState(() { _loading = false;
           _error = 'Mot de passe incorrect. ${e.message}'; });
@@ -3860,7 +4058,7 @@ class _SaDangerReauthDialogState extends State<_SaDangerReauthDialog> {
               side: BorderSide(color: AppColors.inputBorder),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10))),
-          child: const Text('Annuler',
+          child: Text('Annuler',
               style: TextStyle(color: AppColors.textSecondary)),
         ),
         ElevatedButton(
@@ -3938,12 +4136,12 @@ class _SaDangerReauthDialogState extends State<_SaDangerReauthDialog> {
             controller: _pwdCtrl,
             obscureText: _obscure,
             style: AppTextStyles.input,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               hintText: 'Votre mot de passe super admin',
               hintStyle: AppTextStyles.inputHint,
               border: InputBorder.none,
               isDense: true,
-              contentPadding: EdgeInsets.symmetric(vertical: 8),
+              contentPadding: const EdgeInsets.symmetric(vertical: 8),
             ),
           )),
           GestureDetector(
@@ -3976,7 +4174,7 @@ void _showLogoutConfirm(BuildContext context) {
   showDialog(
     context: context,
     builder: (ctx) => AlertDialog(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       icon: Container(width: 48, height: 48,
           decoration: BoxDecoration(
@@ -3987,7 +4185,7 @@ void _showLogoutConfirm(BuildContext context) {
       title: const Text('Déconnexion',
           textAlign: TextAlign.center,
           style: AppTextStyles.subtitleBold),
-      content: const Text(
+      content: Text(
           'Vous allez quitter le panneau administrateur.\n\nÊtes-vous sûr de vouloir vous déconnecter ?',
           textAlign: TextAlign.center,
           style: AppTextStyles.bodySecondary),
@@ -4000,7 +4198,7 @@ void _showLogoutConfirm(BuildContext context) {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10)),
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10)),
-          child: const Text('Annuler',
+          child: Text('Annuler',
               style: AppTextStyles.bodySecondary),
         ),
         ElevatedButton(
@@ -4249,12 +4447,12 @@ class _MaintenanceSectionState extends State<_MaintenanceSection> {
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: _criticals > 0 ? const Color(0xFFFEF2F2)
-                : _warnings > 0 ? const Color(0xFFFFFBEB)
-                : const Color(0xFFF0FDF4),
+            color: _criticals > 0 ? AppColors.error.withValues(alpha: 0.12)
+                : _warnings > 0 ? AppColors.warning.withValues(alpha: 0.12)
+                : AppColors.secondary.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: _criticals > 0 ? const Color(0xFFFCA5A5)
-                : _warnings > 0 ? const Color(0xFFFDE68A) : const Color(0xFFA7F3D0)),
+            border: Border.all(color: _criticals > 0 ? AppColors.error.withValues(alpha: 0.35)
+                : _warnings > 0 ? AppColors.warning.withValues(alpha: 0.35) : AppColors.secondary.withValues(alpha: 0.35)),
           ),
           child: Row(children: [
             Icon(_criticals > 0 ? Icons.error_rounded
@@ -4283,7 +4481,7 @@ class _MaintenanceSectionState extends State<_MaintenanceSection> {
               : const Icon(Icons.play_arrow_rounded, size: 18),
           label: Text(_running ? 'Vérification...' : 'Lancer la vérification'),
           style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+            backgroundColor: AppColors.primaryFill, foregroundColor: Colors.white,
             elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           ),
         )),
@@ -4313,7 +4511,7 @@ class _MaintenanceSectionState extends State<_MaintenanceSection> {
             margin: const EdgeInsets.only(bottom: 6),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.white, borderRadius: BorderRadius.circular(10),
+              color: AppColors.surface, borderRadius: BorderRadius.circular(10),
               border: Border.all(color: AppColors.divider),
             ),
             child: Row(children: [
@@ -4347,7 +4545,7 @@ class _MaintenanceSectionState extends State<_MaintenanceSection> {
   }
 
   Widget _statusIcon(_CheckStatus s) => switch (s) {
-    _CheckStatus.pending  => const Icon(Icons.radio_button_unchecked, size: 18, color: Color(0xFFD1D5DB)),
+    _CheckStatus.pending  => Icon(Icons.radio_button_unchecked, size: 18, color: AppColors.textHint),
     _CheckStatus.running  => const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
     _CheckStatus.ok       => const Icon(Icons.check_circle_rounded, size: 18, color: AppColors.secondary),
     _CheckStatus.warning  => const Icon(Icons.warning_rounded, size: 18, color: AppColors.warning),
@@ -4449,7 +4647,7 @@ class _MonitoringSectionState extends State<_MonitoringSection>
     return Column(children: [
       // Tabs
       Container(
-        color: Colors.white,
+        color: AppColors.surface,
         child: TabBar(
           controller: _tab,
           labelColor: AppColors.primary,
@@ -4538,7 +4736,7 @@ class _MetricsTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (rowCounts.isEmpty) {
-      return const Center(child: Text('Aucune donnée', style: TextStyle(color: AppColors.textHint)));
+      return Center(child: Text('Aucune donnée', style: TextStyle(color: AppColors.textHint)));
     }
     final sorted = rowCounts.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
     final maxVal = sorted.first.value.clamp(1, 999999999);
@@ -4550,7 +4748,7 @@ class _MetricsTab extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.white, borderRadius: BorderRadius.circular(10),
+            color: AppColors.surface, borderRadius: BorderRadius.circular(10),
             border: Border.all(color: AppColors.divider)),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
@@ -4644,7 +4842,7 @@ class _OfflineQueueTab extends StatelessWidget {
         const SizedBox(height: 4),
         Text('Toutes les opérations sont synchronisées',
             style: AppTextStyles.caption
-                .copyWith(color: const Color(0xFFD1D5DB))),
+                .copyWith(color: AppColors.textHint)),
       ]));
     }
     return ListView.builder(
@@ -4658,13 +4856,13 @@ class _OfflineQueueTab extends StatelessWidget {
               Expanded(child: Text(
                   '${queue.length} opération${queue.length > 1 ? 's' : ''} en attente',
                   style: AppTextStyles.bodySmBold
-                      .copyWith(color: const Color(0xFF374151)))),
+                      .copyWith(color: AppColors.onSurface))),
               ElevatedButton.icon(
                 onPressed: onFlush,
                 icon: const Icon(Icons.cloud_upload_rounded, size: 14),
                 label: const Text('Synchroniser'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                  backgroundColor: AppColors.primaryFill, foregroundColor: Colors.white,
                   elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   textStyle: AppTextStyles.captionBold,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -4692,8 +4890,8 @@ class _OfflineQueueTab extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 6),
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: Colors.white, borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFFF0F0F0))),
+            color: AppColors.surface, borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.divider)),
           child: Row(children: [
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -4712,7 +4910,7 @@ class _OfflineQueueTab extends StatelessWidget {
             ])),
             if (queuedAt.isNotEmpty)
               Text(_fmtTime(queuedAt), style: AppTextStyles.micro
-                  .copyWith(color: const Color(0xFFD1D5DB))),
+                  .copyWith(color: AppColors.textHint)),
           ]),
         );
       },
@@ -4754,8 +4952,8 @@ class _SyncErrorsTab extends StatelessWidget {
         return Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: const Color(0xFFFEF2F2), borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFFFCA5A5))),
+            color: AppColors.error.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.error.withValues(alpha: 0.35))),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               const Icon(Icons.error_outline_rounded, size: 14, color: AppColors.error),

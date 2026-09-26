@@ -22,9 +22,10 @@ import 'features/caisse/presentation/bloc/caisse_bloc.dart';
 import 'features/hub_central/presentation/bloc/hub_bloc.dart';
 import 'shared/widgets/alerts/scheduled_alerts_overlay.dart';
 import 'shared/widgets/demo_tap_indicator.dart';
+import 'features/hr/data/providers/employees_provider.dart'
+    show permissionsSignalProvider;
 import 'core/services/notification_service.dart';
 import 'core/services/stock_service.dart';
-import 'features/onboarding/presentation/providers/onboarding_seen_provider.dart';
 import 'core/providers/demo_mode_provider.dart';
 import 'core/providers/text_scale_provider.dart';
 
@@ -60,12 +61,13 @@ class _PosAppState extends ConsumerState<PosApp>
     _caisseBloc = CaisseBloc();
     _hubBloc    = ref.read(hubBlocProvider);
 
-    // Amorçage du cache `onboarding_seen` (PR-1). Lu en async depuis
-    // SharedPreferences puis rendu disponible synchroniquement au
-    // `redirect` GoRouter pour décider d'afficher les slides marketing
-    // au tout premier lancement.
-    // ignore: discarded_futures
-    primeOnboardingSeenCache(ref);
+    // RELIRE SES DROITS QUAND LE RÉSEAU REVIENT.
+    //
+    // `_onNetworkRestored` notifie `shop_memberships` après une coupure : les
+    // permissions ont pu être modifiées pendant qu'on ne regardait pas. Le
+    // provider ne sait pas se redemander tout seul, c'est ce compteur qui l'y
+    // oblige.
+    AppDatabase.addListener(_onPermissionsMayHaveChanged);
 
     // Écoute les deep-links (fortress://reset-password, universal links)
     // une fois le router construit — ref.read est sûr dans addPostFrameCallback.
@@ -81,12 +83,27 @@ class _PosAppState extends ConsumerState<PosApp>
       // Fire-and-forget : ne bloque pas le thread UI au réveil.
       // ignore: discarded_futures
       AppDatabase.onAppResumed();
+      // Le second des deux moments où l'on relit ses droits. Sur le web,
+      // c'est le retour sur l'onglet — l'instant exact où quelqu'un revient
+      // après qu'on a pu modifier ses permissions ailleurs.
+      _bumpPermissions();
     }
+  }
+
+  /// Relit les permissions de l'utilisateur courant au prochain rendu.
+  void _bumpPermissions() {
+    if (!mounted) return;
+    ref.read(permissionsSignalProvider.notifier).state++;
+  }
+
+  void _onPermissionsMayHaveChanged(String table, String shopId) {
+    if (table == 'shop_memberships') _bumpPermissions();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    AppDatabase.removeListener(_onPermissionsMayHaveChanged);
     DeepLinkService.dispose();
     _shopSelectorBloc.close();
     _caisseBloc.close();
@@ -97,29 +114,26 @@ class _PosAppState extends ConsumerState<PosApp>
   Widget build(BuildContext context) {
     final locale   = ref.watch(localeProvider);
     final palette  = ref.watch(themePaletteProvider);
-    // Observé pour déclencher un rebuild si l'utilisateur change le mode,
-    // mais ignoré au rendu tant que le mode sombre est désactivé (cf.
-    // `themeMode: ThemeMode.light` plus bas).
-    // ignore: unused_local_variable
     final themeMode = ref.watch(themeModeProvider);
     // Applique les couleurs primaires globales AVANT de construire l'UI —
     // tous les widgets qui lisent AppColors.primary verront la bonne couleur
     // au prochain build.
     AppColors.applyPalette(palette);
-    // ── Mode sombre TEMPORAIREMENT DÉSACTIVÉ ──────────────────────────
-    // L'implémentation dark existe (AppTheme.dark + tokens brightness-aware)
-    // mais n'est pas finalisée → on force le rendu clair quel que soit le
-    // choix de l'utilisateur (light / dark / système-sombre). Le choix
-    // reste mémorisé (themeModeProvider intact) pour la réactivation.
-    // POUR RÉACTIVER : restaurer le calcul `effectiveBrightness` ci-dessous
-    // (switch sur themeMode) et remettre `themeMode: themeMode` dans
-    // MaterialApp.router.
-    //   final effectiveBrightness = switch (themeMode) {
-    //     ThemeMode.light  => Brightness.light,
-    //     ThemeMode.dark   => Brightness.dark,
-    //     ThemeMode.system => MediaQuery.platformBrightnessOf(context),
-    //   };
-    AppColors.applyBrightness(Brightness.light);
+    // ── Mode sombre ACTIF (opt-in via Paramètres → Thème) ─────────────
+    // Le thème dark complet existe (AppTheme.dark + tokens brightness-aware).
+    // On résout le brightness EFFECTIVEMENT affiché (light / dark / système)
+    // et on l'applique aux tokens AppColors AVANT le build, afin que les
+    // widgets qui lisent AppColors.surface/inputFill/… obtiennent la bonne
+    // couleur sans passer par Theme.of(context). MaterialApp.router reçoit le
+    // même `themeMode` → cohérence parfaite des deux côtés.
+    // NB : certaines pages feature ont encore des couleurs en dur à migrer ;
+    // le sombre s'améliore au fur et à mesure de cette migration.
+    final effectiveBrightness = switch (themeMode) {
+      ThemeMode.light  => Brightness.light,
+      ThemeMode.dark   => Brightness.dark,
+      ThemeMode.system => MediaQuery.platformBrightnessOf(context),
+    };
+    AppColors.applyBrightness(effectiveBrightness);
     final notifier = ref.watch(authRouterNotifierProvider);
     final authBloc = ref.watch(authBlocProvider);
     final router   = ref.watch(appRouterProvider);
@@ -183,9 +197,7 @@ class _PosAppState extends ConsumerState<PosApp>
           debugShowCheckedModeBanner: false,
           theme: AppTheme.light(palette: palette),
           darkTheme: AppTheme.dark(palette: palette),
-          // Forcé clair tant que le mode sombre n'est pas finalisé.
-          // Réactiver : remettre `themeMode: themeMode`.
-          themeMode: ThemeMode.light,
+          themeMode: themeMode,
           routerConfig: router,
           locale: locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,

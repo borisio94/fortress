@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 
 import '../../../../core/services/partner_ledger_service.dart';
 import '../../../../core/storage/hive_boxes.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/utils/currency_formatter.dart';
 import '../../../../features/inventaire/domain/entities/stock_location.dart';
+import '../../../../shared/providers/current_shop_provider.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
 // PartnerDebtsBanner — bandeau visible en haut du dashboard quand au moins
@@ -31,19 +33,27 @@ class PartnerDebtsBanner extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final balances = PartnerLedgerService.balancesForShop(shopId);
+    // Ancienneté de la plus vieille vente non reversée, par partenaire.
+    final ages = PartnerLedgerService.debtAgeByPartner(shopId);
+    // Seuil réglé par le commerçant (en-tête de la page Partenaires).
+    final alertDays =
+        ref.watch(currentShopProvider)?.partnerDebtAlertDays ?? 30;
     // Garde uniquement les partenaires qui DOIVENT à la boutique (solde > 0).
     final owed = <_PartnerOwed>[];
     balances.forEach((partnerId, balance) {
       if (balance <= 0) return;
       final name = _locationName(partnerId);
-      owed.add(_PartnerOwed(name: name, amount: balance));
+      owed.add(_PartnerOwed(
+          name: name, amount: balance, days: ages[partnerId]));
     });
     if (owed.isEmpty) return const SizedBox.shrink();
     owed.sort((a, b) => b.amount.compareTo(a.amount));
     final total = owed.fold<double>(0, (s, o) => s + o.amount);
     final top3  = owed.take(3).toList();
+    // Compté sur TOUS les partenaires, pas seulement le top 3 : un retard
+    // sur une petite somme resterait sinon invisible derrière trois grosses.
+    final lateCount = owed.where((o) => (o.days ?? 0) > alertDays).length;
 
-    final fmt = NumberFormat('#,###', 'fr_FR');
     final theme = Theme.of(context);
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
@@ -83,11 +93,9 @@ class PartnerDebtsBanner extends ConsumerWidget {
                   Expanded(
                     child: Text(
                         'Vos partenaires vous doivent '
-                        '${fmt.format(total)} FCFA',
-                        style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                            color: theme.colorScheme.onSurface)),
+                        '${CurrencyFormatter.format(total)}',
+                        style: AppTextStyles.bodyBold
+                            .copyWith(color: theme.colorScheme.onSurface)),
                   ),
                   InkWell(
                     onTap: () => context.go(
@@ -98,10 +106,8 @@ class PartnerDebtsBanner extends ConsumerWidget {
                           horizontal: 8, vertical: 4),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         Text('Voir',
-                            style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.primary)),
+                            style: AppTextStyles.bodySmBold
+                                .copyWith(color: AppColors.primary)),
                         const SizedBox(width: 2),
                         Icon(Icons.arrow_forward_rounded,
                             size: 14, color: AppColors.primary),
@@ -109,6 +115,23 @@ class PartnerDebtsBanner extends ConsumerWidget {
                     ),
                   ),
                 ]),
+                if (lateCount > 0) ...[
+                  const SizedBox(height: 4),
+                  Row(children: [
+                    const Icon(Icons.schedule_rounded,
+                        size: 13, color: AppColors.error),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                          lateCount == 1
+                              ? 'Un partenaire dépasse $alertDays jours'
+                              : '$lateCount partenaires dépassent '
+                                  '$alertDays jours',
+                          style: AppTextStyles.caption
+                              .copyWith(color: AppColors.error)),
+                    ),
+                  ]),
+                ],
                 const SizedBox(height: 6),
                 for (final p in top3)
                   Padding(
@@ -125,16 +148,23 @@ class PartnerDebtsBanner extends ConsumerWidget {
                         child: Text(p.name,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                fontSize: 12,
+                            style: AppTextStyles.bodySm.copyWith(
                                 color: theme.colorScheme.onSurface
                                     .withValues(alpha: 0.75))),
                       ),
-                      Text('${fmt.format(p.amount)} FCFA',
-                          style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: theme.colorScheme.onSurface)),
+                      // Âge absent = rien qui vieillisse (tout est couvert,
+                      // ou le solde ne tient qu'à une avance consentie).
+                      if (p.days != null) ...[
+                        Text('${p.days} j',
+                            style: AppTextStyles.caption.copyWith(
+                                color: p.days! > alertDays
+                                    ? AppColors.error
+                                    : null)),
+                        const SizedBox(width: 8),
+                      ],
+                      Text(CurrencyFormatter.format(p.amount),
+                          style: AppTextStyles.bodySmBold
+                              .copyWith(color: theme.colorScheme.onSurface)),
                     ]),
                   ),
                 if (owed.length > 3) ...[
@@ -142,8 +172,7 @@ class PartnerDebtsBanner extends ConsumerWidget {
                   Text('+ ${owed.length - 3} autre'
                       '${owed.length - 3 > 1 ? 's' : ''} '
                       'partenaire${owed.length - 3 > 1 ? 's' : ''}',
-                      style: TextStyle(
-                          fontSize: 11,
+                      style: AppTextStyles.caption.copyWith(
                           fontStyle: FontStyle.italic,
                           color: theme.colorScheme.onSurface
                               .withValues(alpha: 0.55))),
@@ -179,5 +208,8 @@ class PartnerDebtsBanner extends ConsumerWidget {
 class _PartnerOwed {
   final String name;
   final double amount;
-  const _PartnerOwed({required this.name, required this.amount});
+  /// Ancienneté en jours de la plus vieille vente non reversée. `null` =
+  /// rien qui vieillisse (cf. `PartnerLedgerService.debtAgeByPartner`).
+  final int? days;
+  const _PartnerOwed({required this.name, required this.amount, this.days});
 }

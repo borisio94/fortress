@@ -31,7 +31,7 @@ import '../../features/shop_selector/domain/usecases/update_shop_usecase.dart';
 // ─── Auth ──────────────────────────────────────────────────────────────────────
 // Supabase Auth — production ready, pas de Dio
 final authRemoteDsProvider = Provider<AuthRemoteDataSource>((_) =>
-    AuthRemoteDataSourceMock());
+    AuthRemoteDataSourceImpl());
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) =>
     AuthRepositoryImpl(ref.read(authRemoteDsProvider)));

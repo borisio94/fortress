@@ -44,6 +44,13 @@ class OrderReceiptUseCase {
   static final _orange      = PdfColor.fromHex('#F59E0B');
 
   // ── Générer le PDF ──────────────────────────────────────────────────────────
+  /// Rouleau thermique 80 mm, hauteur libre.
+  static const PdfPageFormat _roll80 = PdfPageFormat(
+    80 * PdfPageFormat.mm,
+    double.infinity,
+    marginAll: 6 * PdfPageFormat.mm,
+  );
+
   static Future<Uint8List> generatePdf(Sale order, {
     ShopSummary? shop,
     String? currency,
@@ -57,7 +64,9 @@ class OrderReceiptUseCase {
     final shopEmail = s?.email;
     final pdf      = pw.Document();
     final fmt      = NumberFormat('#,###', 'fr_FR');
-    final pFormat  = pageFormat ?? PdfPageFormat.a4;
+    // 80 mm par défaut : le reçu part sur le rouleau thermique de la
+    // caisse, pas sur une imprimante bureautique.
+    final pFormat  = pageFormat ?? _roll80;
     final isTicket = (pFormat.availableWidth) < 200;
 
     pdf.addPage(pw.Page(
@@ -450,6 +459,10 @@ class OrderReceiptUseCase {
                           _recapRow(
                               'TVA (${order.taxRate.toStringAsFixed(0)}%)',
                               '${fmt.format(order.taxAmount)} $currency',
+                              isTicket: isTicket),
+                        if ((order.deliveryPrice ?? 0) > 0)
+                          _recapRow('Livraison',
+                              '${fmt.format(order.deliveryPrice!)} $currency',
                               isTicket: isTicket),
                         pw.Container(
                             height: 0.5,

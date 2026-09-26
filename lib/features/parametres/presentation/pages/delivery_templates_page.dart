@@ -406,7 +406,7 @@ class _EmptyHint extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
             color: Theme.of(context).semantic.borderSubtle,

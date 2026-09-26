@@ -18,6 +18,7 @@ import '../../../../core/services/external_launcher.dart';
 import '../../../parametres/domain/entities/whatsapp_template.dart';
 import '../../../parametres/presentation/providers/whatsapp_template_provider.dart';
 import '../../domain/entities/client.dart';
+import '../../../caisse/data/repositories/sale_local_datasource.dart';
 import '../../../inventaire/domain/stock_at_location.dart' as stock_loc;
 import '../../../../shared/widgets/adaptive_form_frame.dart';
 import '../../../../shared/widgets/form_sheet.dart';
@@ -33,6 +34,8 @@ class ClientDetailPage extends StatefulWidget {
 
 class _ClientDetailPageState extends State<ClientDetailPage> {
   Client? _client;
+  /// Créance du client (solde dû sur ses ventes à crédit complétées).
+  double _debt = 0;
   /// Lien court du catalogue pré-généré à l'ouverture de la fiche. L'URL
   /// catalogue est fixe (dépend du shop, pas du client) → on la raccourcit
   /// une seule fois ici pour que `_sendCatalogue` puisse l'utiliser
@@ -145,6 +148,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
     final clients = AppDatabase.getClientsForShop(widget.shopId);
     setState(() {
       _client = clients.where((c) => c.id == widget.clientId).firstOrNull;
+      _debt = SaleLocalDatasource().clientDebt(widget.shopId, widget.clientId);
     });
   }
 
@@ -181,7 +185,10 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
           onPressed: () => _showEdit(context, client),
         ),
       ],
-      body: ListView(padding: EdgeInsets.zero, children: [
+      // Défilable même contenu court : geste « tirer pour actualiser ».
+      body: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.zero, children: [
         // ── Hero ────────────────────────────────────────────────────
         _HeroHeader(client: client, color: color, initial: initial,
             daysAgo: daysAgo),
@@ -213,6 +220,37 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
                     : '—',
               )),
             ]),
+            // Créance (vente à crédit non soldée) — bandeau warning.
+            if (_debt > 0) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.warning.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: AppColors.warning.withValues(alpha: 0.3)),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.account_balance_wallet_rounded,
+                      size: 16, color: AppColors.warning),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text('Créance en cours',
+                        style: AppTextStyles.bodySm.copyWith(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withValues(alpha: 0.8))),
+                  ),
+                  Text(CurrencyFormatter.format(_debt),
+                      style: AppTextStyles.bodyBold
+                          .copyWith(color: AppColors.warning)),
+                ]),
+              ),
+            ],
             const SizedBox(height: 16),
 
             // ── Coordonnées ──────────────────────────────────────────
@@ -228,7 +266,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
                     padding: const EdgeInsets.all(14),
                     child: Text(client.notes!,
                         style: AppTextStyles.body.copyWith(
-                            color: const Color(0xFF374151))),
+                            color: AppColors.onSurface)),
                   )),
             ],
             const SizedBox(height: 16),
@@ -249,7 +287,7 @@ class _ClientDetailPageState extends State<ClientDetailPage> {
                   onTap: () => _sendCatalogue(context, client)),
               const _Div(),
               _ActionTile(icon: Icons.edit_outlined,
-                  color: const Color(0xFF6B7280),
+                  color: AppColors.textSecondary,
                   label: 'Modifier les informations',
                   onTap: () => _showEdit(context, client)),
             ])),
@@ -389,7 +427,7 @@ class _CoordinatesContent extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Center(child: Text('Aucune coordonnée renseignée',
             style: AppTextStyles.bodySm.copyWith(
-                color: const Color(0xFF9CA3AF)))),
+                color: AppColors.textHint))),
       );
     }
     return Column(children: tiles);
@@ -445,20 +483,20 @@ class _HeroHeader extends StatelessWidget {
             decoration: BoxDecoration(
               color: daysAgo! <= 7
                   ? AppColors.secondary.withValues(alpha:0.1)
-                  : const Color(0xFFF3F4F6),
+                  : AppColors.inputFill,
               borderRadius: BorderRadius.circular(20),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Icon(Icons.access_time_rounded, size: 11,
                   color: daysAgo! <= 7 ? AppColors.secondary
-                      : const Color(0xFF9CA3AF)),
+                      : AppColors.textHint),
               const SizedBox(width: 4),
               Text(daysAgo == 0 ? "Actif aujourd'hui"
                   : daysAgo == 1 ? 'Actif hier'
                   : 'Inactif $daysAgo j',
                   style: AppTextStyles.captionBold.copyWith(
                       color: daysAgo! <= 7 ? AppColors.secondary
-                          : const Color(0xFF9CA3AF))),
+                          : AppColors.textHint)),
             ]),
           ),
       ]),
@@ -486,7 +524,7 @@ class _KpiCard extends StatelessWidget {
       const SizedBox(height: 2),
       Text(label, textAlign: TextAlign.center,
           style: AppTextStyles.micro.copyWith(
-              color: const Color(0xFF9CA3AF))),
+              color: AppColors.textHint)),
     ]),
   );
 }
@@ -503,7 +541,7 @@ class _Section extends StatelessWidget {
       Icon(icon, size: 14, color: AppColors.primary),
       const SizedBox(width: 6),
       Text(title, style: AppTextStyles.bodySmBold.copyWith(
-          color: const Color(0xFF374151))),
+          color: AppColors.onSurface)),
       if (trailing != null) ...[const Spacer(), trailing!],
     ]),
     const SizedBox(height: 8),
@@ -523,12 +561,12 @@ class _InfoTile extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
     child: Row(children: [
-      Icon(icon, size: 15, color: const Color(0xFF9CA3AF)),
+      Icon(icon, size: 15, color: AppColors.textHint),
       const SizedBox(width: 12),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
           children: [
         Text(label, style: AppTextStyles.micro.copyWith(
-            color: const Color(0xFF9CA3AF))),
+            color: AppColors.textHint)),
         const SizedBox(height: 2),
         Text(value, style: AppTextStyles.bodyBold.copyWith(
             color: Theme.of(context).colorScheme.onSurface)),
@@ -555,8 +593,8 @@ class _ActionTile extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(child: Text(label, style: AppTextStyles.bodyBold.copyWith(
             color: Theme.of(context).colorScheme.onSurface))),
-        const Icon(Icons.chevron_right_rounded,
-            size: 16, color: Color(0xFFD1D5DB)),
+        Icon(Icons.chevron_right_rounded,
+            size: 16, color: AppColors.textHint),
       ]),
     ),
   );
@@ -590,7 +628,7 @@ class _Div extends StatelessWidget {
   const _Div();
   @override
   Widget build(BuildContext context) =>
-      const Divider(height: 1, color: Color(0xFFF3F4F6), indent: 16);
+      Divider(height: 1, color: AppColors.inputFill, indent: 16);
 }
 
 // ─── Dialog : composer un message WhatsApp pour le client ─────────────────
@@ -677,7 +715,7 @@ class _WhatsappComposeDialogState extends State<_WhatsappComposeDialog> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF25D366),
                       foregroundColor: Colors.white,
-                      disabledBackgroundColor: const Color(0xFFE5E7EB),
+                      disabledBackgroundColor: AppColors.divider,
                       minimumSize: const Size(0, 44),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10)),

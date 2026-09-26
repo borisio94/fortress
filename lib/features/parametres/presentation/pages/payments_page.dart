@@ -186,7 +186,7 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
                   width: double.infinity,
                   child: FilledButton(
                     style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.primary,
+                      backgroundColor: AppColors.primaryFill,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
                     onPressed: _save,
