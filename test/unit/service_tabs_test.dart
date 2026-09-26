@@ -208,4 +208,20 @@ void main() {
       }
     });
   });
+
+  group('Le badge nomme UNE commande (26/09/2026)', () {
+    test('« Encaissée » au singulier, l\u2019onglet garde son pluriel', () {
+      expect(ServiceTab.encaissees.badgeLabel, 'Encaissée');
+      expect(ServiceTab.encaissees.label, 'Encaissées');
+    });
+
+    test('les six autres rangs d\u2019une carte gardent le libellé de '
+        'l\u2019onglet', () {
+      for (final t in ServiceTab.values) {
+        if (t == ServiceTab.encaissees || t == ServiceTab.toutes) continue;
+        expect(t.badgeLabel, t.label);
+      }
+    });
+  });
 }
+

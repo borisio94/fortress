@@ -373,6 +373,35 @@ carte par ligne (Stock `_StockLines`, Accès à l'app `_RestoLines`).
 **NON TRANCHÉ** : aucun widget partagé ne porte ce motif ; il est refait à la
 main, avec des filets de 0,5 à 1 px et des retraits de 0 à 56 selon l'écran.
 
+### La grammaire du panier — EN VIGUEUR AU RESTAURANT (Commandes, 26/09/2026)
+
+Relevée dans le panier restaurant (`cart_widget.dart`), appliquée d'abord à
+l'écran Commandes, à étendre écran par écran si elle tient. TROIS principes,
+et non cinq : deux de la première description n'étaient pas dans le panier.
+
+1. **La couleur de marque réservée à ce qui compte** — le montant dû, le
+   reste à encaisser, l'action. Écrite en `brandText`. Ce qui est payé ou clos
+   s'atténue (`textSecondary`) ; libellés, compteurs et heures restent
+   atténués (`caisse_page.dart`, `_amountColor`).
+2. **Une seule action en fond plein par bloc.** Sur la carte de commande,
+   l'action reste le PETIT bouton en fond teinté (`_StateButton`) : le bouton
+   pleine largeur a été écarté, deux commandes visibles sur téléphone avant
+   comme après, gain non démontré.
+3. **Un filet, pas une surface de plus.** Le relief du panier vient du filet
+   de son pied, pas d'un bloc creusé : sur la carte de grille, un filet
+   `borderSubtle` sépare où en est la commande de ce qu'elle contient et
+   coûte. Les totaux de la sélection vont sur le panneau de verre du module
+   (`RestoGlassPanel`) — un composant qui existe, pas un niveau de plus.
+
+**Écartés, et pourquoi** : le « bloc creusé » (aucun token de surface plus
+sombre que la carte : `trackMuted` = la carte en sombre, 1,00:1 ;
+`scaffoldBackgroundColor` = déjà la carte TERMINÉE) — on ne crée pas un
+token au fil des besoins ; le bouton pleine largeur (ci-dessus).
+
+**Grille et liste divergent, à dessein** : la grille sert à agir (filet,
+trois lignes), la liste à voir beaucoup (une ligne alignée, sans filet). Elles
+partagent le badge d'état et la couleur du montant.
+
 ---
 
 ## 8. Disposition et points de rupture

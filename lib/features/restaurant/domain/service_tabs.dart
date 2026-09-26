@@ -81,8 +81,17 @@ enum ServiceTab {
   /// confondre avec le badge, et il couvre les trois sans en accuser aucune.
   sansSuite('Sans suite');
 
+  /// Le libellé de l'ONGLET — il compte plusieurs commandes.
   final String label;
   const ServiceTab(this.label);
+
+  /// Le libellé d'UNE commande, pour le badge de sa carte — au SINGULIER.
+  ///
+  /// « Encaissées » est juste sur l'onglet, faux sur une carte. Seul ce rang
+  /// porte un pluriel : les autres sont des verbes (« À servir ») ou
+  /// invariables (« Sans suite ») (26/09/2026).
+  String get badgeLabel =>
+      this == ServiceTab.encaissees ? 'Encaissée' : label;
 
   /// La commande est-elle SOLDÉE — plus rien à faire, ni en salle ni en
   /// caisse ?

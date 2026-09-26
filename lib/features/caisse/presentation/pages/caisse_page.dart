@@ -1731,16 +1731,28 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
           ),
         );
 
+    // SUR SA PROPRE SURFACE (26/09/2026, grammaire du panier) : un bloc à
+    // part, pas deux chiffres posés sur le décor. Le panneau de verre du
+    // module (`RestoGlassPanel`) — aux mesures de l'en-tête du Personnel —,
+    // pas une surface de plus.
+    //
+    // « Reste à encaisser » en PRIMAIRE (texte de marque, `brandText`) : c'est
+    // l'argent qui reste dû, le seul chiffre qui appelle un geste. L'ambre
+    // d'attente est réservé aux alertes.
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 2, 16, 8),
-      child: IntrinsicHeight(
-        child: Row(children: [
-          block('Encaissé', totalPaid, cs.onSurface),
-          VerticalDivider(
-              width: 24, thickness: 1, color: sem.borderSubtle),
-          block('Reste à encaisser', totalDue,
-              totalDue > 0 ? sem.warningText : cs.onSurface),
-        ]),
+      child: RestoGlassPanel(
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+        radius: 12,
+        child: IntrinsicHeight(
+          child: Row(children: [
+            block('Encaissé', totalPaid, cs.onSurface),
+            VerticalDivider(
+                width: 24, thickness: 1, color: sem.borderSubtle),
+            block('Reste à encaisser', totalDue,
+                totalDue > 0 ? sem.brandText : cs.onSurface),
+          ]),
+        ),
       ),
     );
   }
@@ -4782,7 +4794,21 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
   /// taille de la commande, pour la même largeur.
   String _contenuCourt() => orderContentsShort(widget.order.items);
 
-  /// TUILE DE GRILLE — TROIS LIGNES, ~92 px (refonte du 25/09/2026).
+  /// Couleur du MONTANT d'une commande — la même en grille et en liste.
+  ///
+  /// DÛ (ni payé, ni hors service) : en PRIMAIRE, texte de marque — c'est
+  /// l'argent qui reste à prendre. PAYÉ, ou commande close : atténué, il n'y a
+  /// plus rien à faire de ce chiffre. Grammaire du panier (26/09/2026) : la
+  /// couleur de marque réservée à ce qui compte.
+  Color _amountColor(BuildContext context) {
+    final paid = widget.order.paymentStatus == PaymentStatus.paid;
+    return (_tab.isSettled || paid)
+        ? AppColors.textSecondary
+        : Theme.of(context).semantic.brandText;
+  }
+
+  /// TUILE DE GRILLE — TROIS LIGNES, ~92 px (refonte du 25/09/2026) ; ~109
+  /// depuis le filet du 26/09/2026 (8 + 1 + 8, grammaire du panier).
   ///
   ///     Table 2  [En préparation]                    24 min  ⌄
   ///     4 couverts · 19:36 · en retard
@@ -4851,6 +4877,13 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: AppTextStyles.microSecondary),
+      // LE FILET, repris du pied du panier (26/09/2026) : il sépare ce qui
+      // dit OÙ en est la commande (table, état, heure) de ce qu'elle CONTIENT
+      // et COÛTE. Un filet et non un bloc creusé : aucun token de surface
+      // plus sombre que la carte n'existe, et le panier n'en a pas — son
+      // relief vient de ce même filet.
+      const SizedBox(height: 8),
+      Divider(height: 1, thickness: 1, color: sem.borderSubtle),
       const SizedBox(height: 8),
       // ── LIGNE 3 : contenu · montant + paiement · action ──────────────
       Row(children: [
@@ -4865,7 +4898,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         RestoAmountText(widget.order.total,
             style: AppTextStyles.subtitle.copyWith(
                 fontWeight: FontWeight.w600,
-                color: settled ? AppColors.textSecondary : cs.onSurface)),
+                color: _amountColor(context))),
         // L'état de paiement QUALIFIE le montant : il le suit, en texte.
         if (s != SaleStatus.cancelled && s != SaleStatus.refused) ...[
           const SizedBox(width: 6),
@@ -4908,8 +4941,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
         style: AppTextStyles.caption);
     final montant = RestoAmountText(widget.order.total,
         style: AppTextStyles.bodyBold.copyWith(
-            fontWeight: FontWeight.w600,
-            color: settled ? AppColors.textSecondary : cs.onSurface));
+            fontWeight: FontWeight.w600, color: _amountColor(context)));
     final chevron = AnimatedRotation(
       turns: _expanded ? 0.5 : 0,
       duration: const Duration(milliseconds: 200),
@@ -6607,7 +6639,9 @@ class _StateBadge extends StatelessWidget {
         Icon(tab.icon, size: 11, color: fg),
         const SizedBox(width: 4),
         Flexible(
-          child: Text(tab.label,
+          // `badgeLabel` et non `label` : le badge nomme UNE commande
+          // (« Encaissée »), l'onglet en compte plusieurs (« Encaissées »).
+          child: Text(tab.badgeLabel,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: AppTextStyles.microBold.copyWith(color: fg)),

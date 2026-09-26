@@ -25,8 +25,11 @@ import 'package:fortress/core/permisions/subscription_provider.dart';
 import 'package:fortress/core/permisions/user_plan.dart';
 import 'package:fortress/core/storage/hive_boxes.dart';
 import 'package:fortress/core/storage/local_storage_service.dart';
+import 'package:fortress/core/theme/app_colors.dart';
 import 'package:fortress/core/theme/app_theme.dart';
 import 'package:fortress/features/caisse/presentation/pages/caisse_page.dart';
+import 'package:fortress/features/restaurant/presentation/widgets/resto_amount_text.dart';
+import 'package:fortress/features/restaurant/presentation/widgets/resto_surfaces.dart';
 import 'package:fortress/features/restaurant/presentation/widgets/state_stripe.dart';
 import 'package:fortress/features/shop_selector/domain/entities/shop_summary.dart';
 
@@ -121,6 +124,9 @@ void main() {
           'served': false,
           'finished': done,
           'service_state_at': now.toIso8601String(),
+          // Un montant, et son état de paiement : c1 est due, c2 payée.
+          'total': 4500.0,
+          'payment_status': done ? 'paid' : 'unpaid',
         };
     await HiveBoxes.ordersBox.put('c1', order('c1'));
     await HiveBoxes.ordersBox.put('c2', order('c2', done: true));
@@ -217,4 +223,51 @@ void main() {
               'marqué de l\'écran');
     });
   }
+
+  // ── Grammaire du panier (26/09/2026) ─────────────────────────────────
+  for (final mode in ['list', 'grid']) {
+    testWidgets('$mode : montant dû en primaire, payé atténué ; badge au '
+        'singulier', (tester) async {
+      await pumpAt(tester, 1200, mode: mode);
+      final theme = Theme.of(tester.element(find.byType(OrdersTab)));
+      final amounts = tester
+          .widgetList<RestoAmountText>(find.byType(RestoAmountText))
+          .map((w) => w.style.color)
+          .toList();
+      // Les deux totaux de la sélection, puis les deux commandes.
+      expect(amounts, contains(theme.semantic.brandText),
+          reason: 'c1 est due : son montant est en primaire');
+      expect(amounts, contains(AppColors.textSecondary),
+          reason: 'c2 est payée : son montant s\u2019efface');
+      expect(find.text('Encaissée'), findsOneWidget,
+          reason: 'le badge nomme UNE commande');
+      expect(find.text('Encaissées'), findsNothing);
+    });
+  }
+
+  testWidgets('grille : un filet par carte au-dessus du contenu et du '
+      'montant', (tester) async {
+    await pumpAt(tester, 1200, mode: 'grid');
+    final theme = Theme.of(tester.element(find.byType(OrdersTab)));
+    final filets = tester
+        .widgetList<Divider>(find.byType(Divider))
+        .where((d) =>
+            d.height == 1 &&
+            d.thickness == 1 &&
+            d.color == theme.semantic.borderSubtle)
+        .length;
+    expect(filets, greaterThanOrEqualTo(2),
+        reason: 'une carte active + une terminée = deux filets');
+  });
+
+  testWidgets('les totaux de la sélection sont sur un panneau de verre',
+      (tester) async {
+    await pumpAt(tester, 1200);
+    expect(
+        find.ancestor(
+            of: find.text('Reste à encaisser'),
+            matching: find.byType(RestoGlassPanel)),
+        findsOneWidget);
+  });
 }
+
