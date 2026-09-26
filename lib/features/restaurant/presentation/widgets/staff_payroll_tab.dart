@@ -1,18 +1,44 @@
-part of 'restaurant_staff_page.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 
-// L'onglet Paie.
+import '../../../../core/services/cash_closure_service.dart';
+import '../../../../core/services/staff_service.dart';
+import '../../../../core/theme/app_text_styles.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/utils/currency_formatter.dart';
+import '../../../../shared/widgets/adaptive_form_frame.dart';
+import '../../../../shared/widgets/app_confirm_dialog.dart';
+import '../../../../shared/widgets/app_primary_button.dart';
+import '../../../../shared/widgets/app_snack.dart';
+import '../../domain/entities/payslip.dart';
+import '../../domain/entities/salary_advance.dart';
+import '../../domain/entities/staff_absence.dart';
+import '../../domain/entities/staff_member.dart';
+import '../../domain/entities/staff_penalty.dart';
+import '../../domain/entities/time_record.dart';
+import 'resto_empty_state.dart';
+import 'resto_surfaces.dart';
+import 'resto_table_listener.dart';
+
+// L'onglet PAIE de la page Personnel.
+//
+// Sorti de `restaurant_staff_page.dart` (où il était un `part`) le 26/09/2026,
+// lot « classes géantes » : une classe privée d'une page sous `AppScaffold` ne
+// se monte pas en test. Public et dans son fichier, comme Notation
+// (`StaffRatingTab`) et Primes (`StaffContestTab`), il reçoit un banc de test
+// avant qu'on découpe sa classe d'état.
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Onglet PAIE
 // ═══════════════════════════════════════════════════════════════════════
-class _PayrollTab extends StatefulWidget {
+class StaffPayrollTab extends StatefulWidget {
   final String shopId;
-  const _PayrollTab({required this.shopId});
+  const StaffPayrollTab({super.key, required this.shopId});
   @override
-  State<_PayrollTab> createState() => _PayrollTabState();
+  State<StaffPayrollTab> createState() => _PayrollTabState();
 }
 
-class _PayrollTabState extends _StaffTabState<_PayrollTab> {
+class _PayrollTabState extends RestoTableListenerState<StaffPayrollTab> {
   @override
   List<String> get tables => const [
         'payroll', 'salary_advances', 'employees', 'time_records',
@@ -138,7 +164,7 @@ class _PayrollTabState extends _StaffTabState<_PayrollTab> {
     }
     return [
       for (final a in list)
-        _Row(
+        RestoListCard(
           onTap: () => _advanceActions(a),
           child: Row(children: [
             Expanded(
@@ -539,7 +565,7 @@ class _PayrollTabState extends _StaffTabState<_PayrollTab> {
     }
     return [
       for (final p in list)
-        _Row(
+        RestoListCard(
           onTap: () => _penaltyActions(p),
           child: Row(children: [
             Expanded(
@@ -587,7 +613,7 @@ class _PayrollTabState extends _StaffTabState<_PayrollTab> {
     }
     return [
       for (final a in list.take(20))
-        _Row(
+        RestoListCard(
           onTap: () => _absenceActions(a),
           child: Row(children: [
             Icon(
@@ -1076,7 +1102,7 @@ class _PayrollRow extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final sem = Theme.of(context).semantic;
     final s = slip;
-    return _Row(
+    return RestoListCard(
       onTap: () => s == null ? onGenerate() : onOpen(s),
       child: Row(children: [
         Expanded(

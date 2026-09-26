@@ -476,8 +476,10 @@ caractère changé dans une chaîne est détecté).
 **Restent — les classes géantes** (un `part` découpe un fichier, pas une
 classe ; les réduire, c'est extraire de vrais composants, avec un risque sur
 le comportement : un lot à part, AVEC des tests d'écran d'abord) :
-l'état de la fiche plat (≈ 1 260 l. ; banc de test
-`test/widget/dish_form_sheet_test.dart` posé le 26/09/2026), l'onglet Paie (≈ 1 030), la fiche
+l'état de la fiche plat (≈ 1 260 l. → 696 le 26/09/2026 : sections
+d'affichage et enregistrement extraits sous un banc de 12 tests,
+`test/widget/dish_form_sheet_test.dart` — FAIT), l'onglet Paie (sorti de la
+page Personnel dans `widgets/staff_payroll_tab.dart` pour être testable) (≈ 1 030), la fiche
 employé (≈ 760), la page Menu (≈ 655), la page Plan de salle (≈ 600).
 
 **Restent — les grands fichiers hors restaurant**, à reprendre quand l'autre
@@ -487,6 +489,23 @@ chantier aura commité (la plupart portent ses modifications) :
 `catalogue_page` 2 913 (M), `adaptive_scaffold` 2 727 (M), `parametres_page`
 2 050 (M), `product_grid_widget` 1 942 (M), `employees_page` 1 819,
 `caisse_bloc` 1 508 (M).
+
+### Onglet Paie — la saisie perdue sur un champ oublié
+
+*Inscrit le 26/09/2026, en préparant l'extraction de l'onglet Paie.*
+« Avance sur salaire » et « Imputer une casse » vérifient le motif, le bien,
+la valeur et les circonstances APRÈS la fermeture de la feuille : un champ
+oublié ferme la feuille sur un message, et toute la saisie est à refaire.
+La vérification devrait se faire dans la feuille, bouton grisé ou message
+sous le champ. Changement de comportement : hors du lot d'extraction.
+
+### Carte de liste du restaurant recopiée dans Notation et Primes
+
+*Inscrit le 26/09/2026.* `RestoListCard` (`resto_surfaces.dart`) est la carte
+de liste de la page Personnel, rendue publique avec la sortie de l'onglet
+Paie. `staff_rating_tab.dart` et `staff_contest_tab.dart` en gardent chacun
+une copie à la main ; Notation colore sa bordure selon le score — il faudrait
+un paramètre de bordure avant de les rebrancher.
 
 ## Code mort
 

@@ -4,6 +4,7 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart';
 
 /// Socle visuel du mode restaurant : un fond géométrique dessiné et des
 /// panneaux translucides posés dessus.
@@ -558,4 +559,41 @@ BoxDecoration restoReliefDecoration(
       ),
     ],
   );
+}
+
+/// Carte de liste standard du restaurant — panneau translucide, filet
+/// discret, toute la carte cliquable. Alignée sur le hub Finances.
+///
+/// Était `_Row`, privée de la page Personnel ; rendue publique le 26/09/2026
+/// quand l'onglet Paie est sorti de la page (lot « classes géantes »).
+/// Notation et Primes en gardent chacune une copie — l'une colore sa bordure
+/// selon le score : au backlog.
+class RestoListCard extends StatelessWidget {
+  final Widget child;
+  final VoidCallback onTap;
+  const RestoListCard({super.key, required this.child, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final sem = Theme.of(context).semantic;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: restoGlassFill(context),
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: sem.borderSubtle),
+            ),
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
 }

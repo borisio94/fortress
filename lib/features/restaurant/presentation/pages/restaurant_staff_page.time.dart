@@ -69,7 +69,7 @@ class _TimeTabState extends _StaffTabState<_TimeTab> {
                     // pointage qui attend une décision doit se repérer sans
                     // lire, au milieu de soixante lignes identiques.
                     final needsCall = r.excuseToJudge || r.overtimeToSettle;
-                    return _Row(
+                    return RestoListCard(
                       onTap: () => _recordActions(r),
                       child: Row(children: [
                         Icon(

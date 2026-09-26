@@ -18,16 +18,13 @@ import '../../../../core/storage/local_storage_service.dart';
 import '../../../hr/data/providers/employees_provider.dart';
 import '../../../hr/domain/models/employee.dart';
 import '../../../hr/domain/models/job_titles.dart';
-import '../../../../core/services/cash_closure_service.dart';
-import '../../domain/entities/payslip.dart';
-import '../../domain/entities/salary_advance.dart';
 import '../../domain/entities/shift_evaluation.dart';
 import '../../domain/entities/staff_absence.dart';
 import '../../domain/entities/staff_member.dart';
 import '../../domain/staff_account_link.dart';
-import '../../domain/entities/staff_penalty.dart';
 import '../../domain/entities/time_record.dart';
 import '../widgets/resto_empty_state.dart';
+import '../widgets/staff_payroll_tab.dart';
 import '../widgets/resto_surfaces.dart';
 import '../widgets/resto_table_listener.dart';
 import '../widgets/staff_contest_tab.dart';
@@ -38,7 +35,6 @@ import '../widgets/resto_underline_tabs.dart';
 
 part 'restaurant_staff_page.team.dart';
 part 'restaurant_staff_page.time.dart';
-part 'restaurant_staff_page.payroll.dart';
 
 /// Personnel du restaurant (Lot D) : fiches, heures pointées et paie.
 ///
@@ -102,7 +98,7 @@ class RestaurantStaffPage extends StatelessWidget {
                 children: [
                   _StaffTab(shopId: shopId),
                   _TimeTab(shopId: shopId),
-                  _PayrollTab(shopId: shopId),
+                  StaffPayrollTab(shopId: shopId),
                   StaffRatingTab(shopId: shopId),
                   StaffContestTab(shopId: shopId),
                 ],
@@ -157,37 +153,6 @@ class _StaffHeaderState extends RestoTableListenerState<_StaffHeader> {
 /// même besoin et ne pouvaient pas hériter d'une classe privée.
 abstract class _StaffTabState<T extends StatefulWidget>
     extends RestoTableListenerState<T> {}
-
-/// Carte de liste standard, alignée sur le hub Finances.
-class _Row extends StatelessWidget {
-  final Widget child;
-  final VoidCallback onTap;
-  const _Row({required this.child, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final sem = Theme.of(context).semantic;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: restoGlassFill(context),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: sem.borderSubtle),
-            ),
-            child: child,
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 /// Sélecteur de jour au gabarit d'un champ de formulaire.
 class _DayField extends StatelessWidget {

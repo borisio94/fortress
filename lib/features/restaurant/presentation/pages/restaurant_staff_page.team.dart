@@ -93,7 +93,7 @@ class _StaffTabState2 extends _StaffTabState<_StaffTab> {
                     // Sans elle, le gérant la croit en fuite.
                     final away =
                         StaffService.absenceOn(widget.shopId, m.id);
-                    return _Row(
+                    return RestoListCard(
                       onTap: () => _edit(m),
                       child: Row(children: [
                         Expanded(
