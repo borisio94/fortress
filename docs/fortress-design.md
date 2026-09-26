@@ -982,7 +982,7 @@ commentaire ET ce registre**, sinon l'un des deux ment.
 | ~~Pas de contour sur les cartes~~ — **LEVÉE pour les cartes ACTIVES de Commandes le 26/09/2026** (même raison) : contour d'état peint par-dessus, `foregroundDecoration` | `caisse_page.dart` (`_buildRestoCard`) | 3 |
 | ~~Pas de bouton pleine largeur en fond plein~~ — **LEVÉE pour Commandes le 26/09/2026**, non appliquée : 30 px par carte, écartée sur mesure | `caisse_page.dart` (`_StateButton`) | 12 |
 | La hiérarchie par le fond, l'espace et la typographie — **ÉLARGIE pour Commandes le 26/09/2026** : le contour et le liseré y participent aussi | `caisse_page.dart` | 2 |
-| Les largeurs se MESURENT en Inter : la police de test gonfle les largeurs de ~40 % | `orders_list_view_test.dart` (`FontLoader('Inter')`) | 22 |
+| Les largeurs se MESURENT en Inter : la police de test gonfle les largeurs de ~40 % — chargée pour TOUS les tests | `test/flutter_test_config.dart` | 22 |
 | Un grand écran se découpe en `part` / `part of` par unité naturelle (onglet, bloc), la même bibliothèque — prouvé sans effet sur le programme compilé | en-tête de chaque fichier `*.xxx.dart` du restaurant ; backlog « Grands fichiers » | — |
 | Le domaine est du Dart pur : la couleur et l'icône d'un état vivent en présentation (extensions `*Visuals`) | `table_status_visuals.dart`, `expense_kind_visuals.dart`, `service_tab_visuals.dart` ; garde-fou `domain_pure_dart_guard_test` | — |
 

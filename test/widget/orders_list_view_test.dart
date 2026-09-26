@@ -17,7 +17,6 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -96,16 +95,9 @@ void main() {
   late Directory tmp;
 
   setUpAll(() async {
-    // LA POLICE DE L'APP, pas celle de test (26/09/2026). La police de test
-    // dessine chaque caractère comme un carré de la taille de la police : les
-    // LARGEURS y sont gonflées de ~40 %, et une ligne qui tient en Inter y
-    // déborde. Les mesures de largeur de ce banc sont donc celles de l'app.
-    final inter = FontLoader('Inter');
-    for (final w in [400, 500, 600, 700, 800]) {
-      final bytes = File('assets/fonts/Inter-$w.ttf').readAsBytesSync();
-      inter.addFont(Future.value(ByteData.view(bytes.buffer)));
-    }
-    await inter.load();
+    // Inter, la police de l'app, est chargée pour TOUS les tests par
+    // `test/flutter_test_config.dart` : les largeurs de ce banc sont celles
+    // de l'app (la police de test les gonfle de ~40 %).
     tmp = Directory.systemTemp.createTempSync('fortress_orders_list');
     Hive.init(tmp.path);
     for (final name in _allBoxes) {
