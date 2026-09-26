@@ -198,7 +198,11 @@ void main() {
 
     await press(tester, find.text('Awa'));
     expect(find.text('Paie ${monthLabel(now)}'), findsOneWidget);
+    // Le net se vérifie après CHAQUE champ : chacun doit le recalculer seul.
     await tester.enterText(field('Primes / heures supplémentaires'), '5000');
+    await tester.pumpAndSettle();
+    expect(find.text(money(105000)), findsOneWidget,
+        reason: 'net = 100 000 + 5 000');
     await tester.enterText(field('Retenues (retards, casse…)'), '2000');
     await tester.pumpAndSettle();
     expect(find.text(money(103000)), findsOneWidget,
