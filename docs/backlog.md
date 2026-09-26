@@ -400,10 +400,12 @@ dans `CurrencyFormatter.compact` ; le restaurant est en règle).*
 
 ## Disposition
 
-### Zones hybrides entre 720 et 900 px — Menu TRANCHÉ, caisse e-commerce ouverte
+### ~~Zones hybrides entre 720 et 900 px~~ — TRANCHÉES
 
-*26/09/2026 :* la zone du Menu est TRANCHÉE « voulue » (document de design
-§ 8, mesures à l'appui). Reste la caisse e-commerce (ci-dessous).
+*26/09/2026 :* les deux zones sont TRANCHÉES « voulues » (document de design
+§ 8, mesures à l'appui) : le Menu (`cartPaneLayout`) et la caisse e-commerce
+(`caisseCartInline`) décident désormais sur le CORPS de page, ce qui corrige
+au passage la barre latérale dépliée au-dessus de 900. Historique :
 
 
 *Laissé NON TRANCHÉ le 26/09/2026 (lot « seuils de largeur »).* Entre 720 et
@@ -417,6 +419,15 @@ le 900 du shell.
 `_PrincipalTab`) n'est plus atteinte par le restaurant — « Modifier la
 commande » ne lui est plus proposé, et « Nouvelle vente » ramène au Menu. Ce
 cas (audit N6) est désormais purement e-commerce.
+
+### Caisse e-commerce : le bouton panier ouvre un second panier
+
+*Inscrit le 26/09/2026, en tranchant la zone 800–900 (non vérifié à
+l'écran).* En e-commerce, le bouton 🛒 de la barre du haut ouvre TOUJOURS une
+feuille contenant un panier (`adaptive_scaffold.dart`, `_openCart`) — y
+compris sur la caisse quand le panier y est déjà intégré à côté des produits.
+Deux paniers à l'écran, le même contenu. `adaptive_scaffold.dart` porte des
+modifications d'un autre chantier.
 
 ### ~~Menu, barre latérale dépliée entre 900 et ~1 060 px~~ — CORRIGÉ
 

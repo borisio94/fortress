@@ -59,6 +59,7 @@ import '../../../../core/storage/local_storage_service.dart';
 import '../../../../shared/widgets/export_scope_selector.dart';
 import '../../data/exports/orders_export_source.dart';
 import '../../../../shared/providers/current_shop_provider.dart';
+import '../../domain/caisse_layout.dart';
 import '../../domain/entities/sale.dart';
 import '../../data/repositories/sale_local_datasource.dart';
 import '../../../../core/database/app_database.dart';
@@ -312,9 +313,18 @@ class _PrincipalTab extends StatelessWidget {
     required this.isEcommerce, required this.onNewOrder});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      // Le CORPS de page, et non l'écran (26/09/2026) : barre latérale
+      // dépliée — le défaut de l'e-commerce —, la décision `écran > 800`
+      // laissait aux produits 2 colonnes de 116 px à 900. La règle et ses
+      // mesures : `caisseCartInline` (domaine, sous test). En shell mobile,
+      // rien ne change (bascule à 800 / 801).
+      LayoutBuilder(
+          builder: (context, c) =>
+              _layout(context, caisseCartInline(c.maxWidth)));
+
+  Widget _layout(BuildContext context, bool isWide) {
     final theme  = Theme.of(context);
-    final isWide = MediaQuery.of(context).size.width > 800;
     // Fond identique aux autres pages (dashboard, inventaire) — repose sur
     // le `scaffoldBackgroundColor` du thème pour cohérence visuelle. La
     // chaleur vient des cards (ombre tintée primary sur ProductGridCard),
@@ -335,9 +345,11 @@ class _PrincipalTab extends StatelessWidget {
                   color: bg,
                   child: PosProductPanel(shopId: shopId)),
             ),
-            Container(width: 1, color: theme.semantic.borderSubtle),
+            Container(
+                width: kCaisseCartDivider,
+                color: theme.semantic.borderSubtle),
             SizedBox(
-              width: 380,
+              width: kCaisseCartWidth,
               child: CartWidget(shopId: shopId, isEcommerce: isEcommerce),
             ),
           ]),

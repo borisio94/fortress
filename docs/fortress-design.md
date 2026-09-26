@@ -439,8 +439,15 @@ page. En shell mobile rien ne change (bascule à 720). Barre latérale DÉPLIÉE
 Recouvrant, le volet prend le corps entier sans écart : l'écart ajouté le
 faisait déborder de 10 px.
 
-**NON TRANCHÉ — la caisse e-commerce entre 800 et 900** : panier en ligne sous
-une barre du bas (backlog).
+**TRANCHÉ — la caisse e-commerce intègre son panier tant que les produits
+gardent 420 px à côté** (26/09/2026, `caisseCartInline`, domaine de la
+caisse, sous test). 420 = 801 − 381 : la place qu'ils gardaient à la bascule
+d'origine (`écran > 800`), 2 colonnes de 190 px. En dessous : onglets Panier /
+Produits. La décision lit le CORPS de page. En shell mobile rien ne change
+(bascule à 800 / 801) : la zone 800–900 garde son panier intégré, voulue
+comme celle du Menu. Barre latérale DÉPLIÉE — le défaut de l'e-commerce —,
+les produits tombaient à 2 colonnes de 116 px à 900 : onglets désormais
+jusqu'à 1 047 px d'écran, panier intégré au-delà.
 
 ### Le conteneur, pas l'écran — TRANCHÉ
 
@@ -450,7 +457,8 @@ largeur utile est l'écran moins la barre latérale (247 px) : lire l'écran a
 fait prendre la branche « large » à une tuile de 342 px, et déborder de 70 px
 (`caisse_page.dart`, commit `2d57517`). Seules les décisions qui portent sur
 l'écran ENTIER lisent l'écran : le shell, et la LARGEUR du volet panier — sa
-décision de recouvrir la carte lit le corps de page (ci-dessus).
+décision de recouvrir la carte lit le corps de page, comme celle de la caisse
+e-commerce (ci-dessus).
 
 ---
 
