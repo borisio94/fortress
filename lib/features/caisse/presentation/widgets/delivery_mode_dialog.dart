@@ -235,7 +235,7 @@ class _DeliveryModeSheetState extends State<_DeliveryModeSheet> {
                       icon: const Icon(Icons.check_rounded, size: 16),
                       label: const Text('Confirmer'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: AppColors.primaryFill,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8)),

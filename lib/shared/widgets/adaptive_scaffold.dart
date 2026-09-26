@@ -892,8 +892,10 @@ class _DrawerActionBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Fond PLEIN sous un contenu blanc : `primaryFill` (lot 1b) — en sombre,
+    // `primary` est la variante texte, claire, où le blanc ne tenait pas.
     final bg = filled
-        ? AppColors.primary
+        ? AppColors.primaryFill
         : Theme.of(context).colorScheme.surface;
     final fg = filled
         ? Colors.white

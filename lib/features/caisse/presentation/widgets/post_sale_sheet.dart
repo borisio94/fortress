@@ -180,7 +180,7 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
                   : const Icon(Icons.share_rounded, size: 18),
               label: const Text('Partager le reçu'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
                 elevation: 0,
                 shape: RoundedRectangleBorder(

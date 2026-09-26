@@ -313,7 +313,7 @@ class _QtyEditorSheetState extends State<_QtyEditorSheet> {
               child: ElevatedButton(
                 onPressed: _confirm,
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(0, 46)),
                 child: const Text('Valider'),
@@ -419,7 +419,7 @@ class _CartHeader extends ConsumerWidget {
                 padding: EdgeInsets.symmetric(
                     horizontal: isCompact ? 7 : 8,
                     vertical: isCompact ? 2 : 3),
-                decoration: BoxDecoration(color: AppColors.primary,
+                decoration: BoxDecoration(color: AppColors.primaryFill,
                     borderRadius: BorderRadius.circular(12)),
                 child: Text('${state.itemCount}',
                     style: AppTextStyles.microBold
@@ -1146,7 +1146,7 @@ class _FeesSection extends StatelessWidget {
                   const SizedBox(width: 8),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: AppColors.primaryFill,
                         foregroundColor: Colors.white, elevation: 0,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10))),
@@ -1215,7 +1215,7 @@ class _FeesSection extends StatelessWidget {
                   const SizedBox(width: 8),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: AppColors.primaryFill,
                         foregroundColor: Colors.white, elevation: 0,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10))),
@@ -1341,7 +1341,7 @@ class _ClientPickerSheetState extends State<_ClientPickerSheet> {
               padding: const EdgeInsets.symmetric(
                   horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                  color: AppColors.primary,
+                  color: AppColors.primaryFill,
                   borderRadius: BorderRadius.circular(8)),
               child: Row(
                   mainAxisSize: MainAxisSize.min, children: [
@@ -2147,7 +2147,7 @@ class _TvaLine extends StatelessWidget {
                   const SizedBox(width: 8),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: AppColors.primaryFill,
                         foregroundColor: Colors.white,
                         elevation: 0,
                         shape: RoundedRectangleBorder(
@@ -2683,7 +2683,7 @@ class _PriceEditorSheetState extends ConsumerState<_PriceEditorSheet> {
                 // désormais AUTORISÉE après confirmation (déstockage).
                 onPressed: _apply,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
+                  backgroundColor: AppColors.primaryFill,
                   foregroundColor: Colors.white,
                   disabledBackgroundColor:
                       AppColors.primary.withValues(alpha:0.35),

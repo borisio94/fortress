@@ -61,43 +61,37 @@ graisse et la couleur de son libellé ; les montants sont en texte primaire et
 non en couleur de marque) restent en place : ils ne dépendaient pas du
 contraste de la primaire et n'ont rien à défaire.
 
-### Lot 1b — fonds pleins peints à la main en primaire, sous du texte blanc
+### ~~Lot 1b — fonds pleins peints à la main en primaire, sous du texte blanc~~ — RÉSOLU
 
-> **Mise à jour du 26/09/2026 (lot 1 clair)** : EN CLAIR, la dette est
-> soldée — la primaire claire dérivée porte le blanc à ≥ 5,84:1 sur les huit
-> palettes. Ce qui suit ne vaut plus que pour le mode SOMBRE.
+*Compromis accepté le 25/09/2026 avec le lot 1 ; soldé en clair par le lot 1
+clair, puis en sombre par le lot 1b (26/09/2026).*
 
-*Compromis ACCEPTÉ le 25/09/2026 avec le lot 1 (tokens de marque en sombre).
-Inscrit le jour même pour ne pas devenir une dette oubliée.*
+Token `AppColors.primaryFill` : le fond des boutons du thème en sombre
+(`fillUnderWhite(primaryLight)`, ≥ 4,5:1 sous le blanc), `primary` en clair.
+144 fonds pleins en primaire inventoriés dans 78 fichiers ; **124 repointés**
+(dont le bouton plein du tiroir, caché dans un ternaire, et 2 boutons de
+`shop_settings_page` que seul HEAD contient encore — un autre chantier les
+supprime)
+(113 à contenu blanc, et 13 `FilledButton` dont le libellé venait du thème —
+blanc lui aussi — moins les cas écartés). Restent sur `primary`, à raison :
+16 à contenu `onPrimary` (5,49–7,04:1), 3 sans contenu (points « filtre
+actif », barre du tiroir super-admin), le bouton de connexion (`onPrimary`
+revendiqué). Garde-fou : `primary_fill_guard_test` (boutons `styleFrom`).
 
-Le lot 1 fait de `AppColors.primary` et `colorScheme.primary`, en sombre, une
-variante « texte » DÉRIVÉE (cf. `core/theme/brand_contrast.dart`) : lisible à
-4,5:1 comme texte, icône ou trait sur la carte sombre. Une même couleur ne peut
-pas être aussi un fond sous du texte blanc — les deux conditions sont
-incompatibles (luminance ≥ 0,273 pour la première, ≤ 0,183 pour la seconde).
+### `printer_page.dart` — un bouton à repointer vers `primaryFill`
 
-Les boutons du THÈME (Elevated, Filled) ont reçu leur propre fond dérivé. Mais
-les fonds peints À LA MAIN en primaire (`backgroundColor: AppColors.primary`,
-`BoxDecoration(color: AppColors.primary)`, `Material(color: cs.primary)`…) avec
-un contenu blanc ne sont pas couverts :
+*Inscrit le 26/09/2026 avec le lot 1b.* Fichier NON SUIVI d'un autre chantier
+(`lib/features/parametres/presentation/pages/printer_page.dart`), laissé
+intact : un `styleFrom(backgroundColor: primary)` sous un libellé blanc, à la
+ligne ≈ 181. Le garde-fou `primary_fill_guard_test` le signale dans le dossier
+de travail tant qu'il n'est pas corrigé — c'est voulu.
 
-- **≈ 153 sites dans 79 fichiers** (heuristique, HEAD `19d0048`) : 128 en
-  `AppColors.primary` — tous hors du module restaurant —, 25 en
-  `colorScheme.primary` dont 3 au restaurant. Les plus chargés :
-  `super_admin_page` 12, `catalogue_page` 10, `cart_widget` 8,
-  `shop_settings_page` 6, `inventaire_page` 5, `product_form_page` 5.
-- **Régression, en sombre seulement, sur quatre palettes : Violet, Rose,
-  Midnight, Indigo.** Le blanc sur ces fonds passe d'environ 6:1 à environ
-  3,2:1 — lisible, mais sous l'AA du petit texte. C'est le prix accepté pour
-  sortir environ 590 textes, icônes et traits de 1,00:1 (Midnight) ou 2,2:1
-  (Violet, Indigo).
-- **Déjà en échec AVANT le lot 1, inchangé** : Ocean, Emerald, Sunset, Amber —
-  le blanc sur leur primaire ne fait que 2,5 à 3,2:1, en clair comme en sombre.
+### Midnight en sombre — le fond de marque se confond avec la carte
 
-À faire : repointer ces sites vers un token de FOND dérivé (la fonction
-`BrandContrast.fillUnderWhite` existe déjà), un par un, en vérifiant ce qui est
-posé dessus. Ne PAS « corriger » en remettant une valeur de palette dans
-`AppColors.primary` : c'est elle qui rendait le texte invisible.
+*Inscrit le 26/09/2026.* Le fond des boutons sombres de Midnight (`#475569`)
+ne se distingue de la carte qu'à 1,93:1 (les sept autres palettes : 3,25). Le
+bouton reste reconnaissable par son libellé blanc (7,58:1) ; défaut antérieur
+au lot 1b, partagé avec les boutons du thème.
 
 ### Texte en primaire sur `AppColors.primarySurface` en sombre — sous l'AA
 

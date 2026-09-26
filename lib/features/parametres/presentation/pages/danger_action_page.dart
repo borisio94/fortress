@@ -459,7 +459,7 @@ class _Footer extends StatelessWidget {
             ? ElevatedButton(
                 onPressed: canGoNext ? onNext : null,
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     disabledBackgroundColor: AppColors.divider,
                     padding: const EdgeInsets.symmetric(vertical: 12),

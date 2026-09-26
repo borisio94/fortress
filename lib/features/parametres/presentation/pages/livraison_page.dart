@@ -104,7 +104,7 @@ class _LivraisonPageState extends State<LivraisonPage> {
               child: const Text('Annuler')),
           FilledButton(
             style: FilledButton.styleFrom(
-                backgroundColor: theme.colorScheme.primary),
+                backgroundColor: AppColors.primaryFill),
             onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
             child: const Text('Renommer'),
           ),
@@ -305,7 +305,7 @@ class _SectionHeader extends StatelessWidget {
           label: Text(actionLabel,
               style: AppTextStyles.bodySmBold.copyWith(color: Colors.white)),
           style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
+            backgroundColor: AppColors.primaryFill,
             foregroundColor: Colors.white,
             elevation: 0,
             // CRITIQUE : sans ce minimumSize, le thème global impose
@@ -684,7 +684,7 @@ class _FormFooter extends StatelessWidget {
         child: ElevatedButton(
           onPressed: saving ? null : onSave,
           style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
+            backgroundColor: AppColors.primaryFill,
             foregroundColor: Colors.white,
             elevation: 0,
             shape: RoundedRectangleBorder(

@@ -358,7 +358,7 @@ class _OrderFeesSheetState extends State<_OrderFeesSheet> {
                   icon: const Icon(Icons.check_rounded, size: 18),
                   label: const Text('Enregistrer'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(0, 44),
                   ),

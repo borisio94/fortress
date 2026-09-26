@@ -301,6 +301,28 @@ void main() {
       }
     });
 
+    test('primaryFill (lot 1b) : le blanc y tient 4,5:1 dans les deux modes, '
+        'et c\'est le fond des boutons du thème', () {
+      for (final p in all) {
+        AppColors.applyPalette(p);
+        for (final b in Brightness.values) {
+          AppColors.applyBrightness(b);
+          final t = b == Brightness.dark
+              ? AppTheme.dark(palette: p)
+              : AppTheme.light(palette: p);
+          expect(AppColors.primaryFill,
+              t.elevatedButtonTheme.style!.backgroundColor!.resolve({}),
+              reason: '${p.id} ${b.name}');
+          expect(BrandContrast.contrast(white, AppColors.primaryFill),
+              greaterThanOrEqualTo(4.5),
+              reason: '${p.id} ${b.name}');
+        }
+        // En clair, rien ne change : c'est la primaire elle-même.
+        AppColors.applyBrightness(Brightness.light);
+        expect(AppColors.primaryFill, AppColors.primary, reason: p.id);
+      }
+    });
+
     test('changer de palette EN SOMBRE met la variante à jour', () {
       AppColors.applyBrightness(Brightness.dark);
       AppColors.applyPalette(paletteById('violet'));

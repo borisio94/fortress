@@ -153,7 +153,7 @@ class _FirstSaleTooltipBannerState extends State<FirstSaleTooltipBanner> {
               ElevatedButton(
                 onPressed: _next,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
+                  backgroundColor: AppColors.primaryFill,
                   foregroundColor: Colors.white,
                   elevation: 0,
                   padding: const EdgeInsets.symmetric(

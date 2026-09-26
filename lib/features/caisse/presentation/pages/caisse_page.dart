@@ -2446,7 +2446,7 @@ class _OrdersTabState extends ConsumerState<OrdersTab>
                       Navigator.of(ctx).pop(v ?? 0.0);
                     },
                     style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.primary),
+                        backgroundColor: AppColors.primaryFill),
                     child: const Text('Enregistrer la charge'),
                   ),
                 ],
@@ -4499,7 +4499,7 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       Navigator.of(ctx).pop(v);
                     },
                     style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.primary),
+                        backgroundColor: AppColors.primaryFill),
                     child: const Text('Enregistrer'),
                   ),
                 ],
@@ -5948,7 +5948,7 @@ class _FormatPickerSheetState extends State<_FormatPickerSheet> {
                       pageFormat: _formats[_selected].toPdfFormat());
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
+                  backgroundColor: AppColors.primaryFill,
                   foregroundColor: Colors.white,
                   elevation: 0,
                   padding: const EdgeInsets.symmetric(vertical: 13),
@@ -6015,7 +6015,7 @@ class _FormatPreview extends StatelessWidget {
       child: Column(children: [
         // En-tête violet
         Container(
-          color: AppColors.primary,
+          color: AppColors.primaryFill,
           padding: const EdgeInsets.symmetric(vertical: 5),
           child: Center(
             child: Text('REÇU',

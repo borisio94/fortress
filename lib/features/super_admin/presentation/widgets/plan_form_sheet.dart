@@ -280,7 +280,7 @@ class _PlanFormSheetState extends State<PlanFormSheet> {
               child: FilledButton(
                 onPressed: _saving ? null : _submit,
                 style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     padding: const EdgeInsets.symmetric(vertical: 14)),
                 child: _saving
                     ? const SizedBox(width: 18, height: 18,

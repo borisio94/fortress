@@ -666,7 +666,7 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
                   child: ElevatedButton(
                     onPressed: _addManualQuartier,
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: AppColors.primaryFill,
                         foregroundColor: Colors.white,
                         elevation: 0),
                     child: const Text('Ajouter et sélectionner'),
@@ -855,7 +855,7 @@ class _OrderCreationSheetState extends State<_OrderCreationSheet> {
             icon: const Icon(Icons.check_rounded, size: 18),
             label: const Text('Enregistrer la commande'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
+              backgroundColor: AppColors.primaryFill,
               foregroundColor: Colors.white,
               elevation: 0,
               minimumSize: const Size.fromHeight(48),

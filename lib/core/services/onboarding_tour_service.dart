@@ -224,7 +224,7 @@ class _OnboardingDialogState extends State<_OnboardingDialog> {
                 ElevatedButton(
                   onPressed: _next,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     elevation: 0,
                     // Sans ça, le minimumSize Size(double.infinity, 52)

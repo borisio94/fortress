@@ -691,7 +691,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
                 child: ElevatedButton(
                   onPressed: () => Navigator.of(dc).pop('stay'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white, elevation: 0,
                     minimumSize: const Size(0, 46),
                     shape: RoundedRectangleBorder(
@@ -1248,7 +1248,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
                     Expanded(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
+                          backgroundColor: AppColors.primaryFill,
                           foregroundColor: Colors.white,
                           minimumSize: const Size(0, 44),
                           elevation: 0,
@@ -1691,7 +1691,7 @@ class _ProductFormPageState extends State<ProductFormPage> {
                           child: Container(
                             width: 20, height: 20,
                             decoration: BoxDecoration(
-                                color: AppColors.primary, shape: BoxShape.circle),
+                                color: AppColors.primaryFill, shape: BoxShape.circle),
                             child: const Icon(Icons.star_rounded,
                                 size: 12, color: Colors.white),
                           )),
@@ -1975,7 +1975,7 @@ class _VariantFullCard extends StatelessWidget {
                           child: Container(
                             width: 18, height: 18,
                             decoration: BoxDecoration(
-                                color: AppColors.primary, shape: BoxShape.circle),
+                                color: AppColors.primaryFill, shape: BoxShape.circle),
                             child: const Icon(Icons.edit_rounded,
                                 size: 10, color: Colors.white),
                           )),
@@ -2305,7 +2305,7 @@ class _StockArrivalsSectionState extends State<_StockArrivalsSection> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                    color: AppColors.primary, borderRadius: BorderRadius.circular(6)),
+                    color: AppColors.primaryFill, borderRadius: BorderRadius.circular(6)),
                 child: Row(mainAxisSize: MainAxisSize.min,
                     mainAxisAlignment: MainAxisAlignment.center, children: [
                   const Icon(Icons.add_rounded, size: 12, color: Colors.white),

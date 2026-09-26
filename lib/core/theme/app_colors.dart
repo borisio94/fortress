@@ -28,6 +28,11 @@ class AppColors {
   static Color _primaryOnDark =
       BrandContrast.darkText(kDefaultPalette.primary);
 
+  /// Fond sous du BLANC en sombre — la valeur des boutons du thème
+  /// ([BrandContrast.fillUnderWhite] de `primaryLight`).
+  static Color _primaryFillOnDark =
+      BrandContrast.fillUnderWhite(kDefaultPalette.primaryLight);
+
   /// La primaire de la palette — en SOMBRE, sa variante lisible.
   ///
   /// En sombre, ce getter ne rend PAS la valeur de la palette : il rend
@@ -36,11 +41,23 @@ class AppColors {
   /// Midnight elle était IDENTIQUE à la carte (1,00:1) : quelque 590 textes,
   /// icônes et traits invisibles. Ne pas y remettre `_primary`.
   ///
-  /// Contrepartie connue, inscrite au backlog (lot 1b) : les FONDS peints à la
-  /// main en `AppColors.primary` sous du texte blanc perdent du contraste en
-  /// sombre — un fond et un texte ne peuvent pas partager une valeur (voir
-  /// `brand_contrast.dart`). Les boutons du thème ont leur propre fond.
+  /// ⚠ Ce n'est PAS un fond sous du blanc en sombre : c'est [primaryFill].
+  /// Un fond et un texte ne peuvent pas partager une valeur en sombre (voir
+  /// `brand_contrast.dart`).
   static Color get primary        => _isDark ? _primaryOnDark : _primary;
+
+  /// LE FOND DE MARQUE SOUS DU BLANC — bouton plein, pastille, bulle peints à
+  /// la main avec un contenu blanc (lot 1b, 26/09/2026).
+  ///
+  /// En CLAIR, c'est [primary] : la primaire claire dérivée porte déjà le
+  /// blanc (≥ 5,84:1) — rien ne change à l'écran. En SOMBRE, c'est le fond des
+  /// boutons du thème (`fillUnderWhite(primaryLight)`, ≥ 4,5:1 sous le blanc) :
+  /// [primary] y est la variante TEXTE, claire, et le blanc n'y tenait que
+  /// 2,54 à 3,25:1 sur les huit palettes.
+  ///
+  /// Un contenu en `onPrimary` (texte foncé en sombre) reste sur [primary] :
+  /// il y tient déjà (5,49–7,04:1), et ce fond-ci le casserait.
+  static Color get primaryFill    => _isDark ? _primaryFillOnDark : _primary;
   static Color get primaryLight   => _primaryLight;
   static Color get primaryDark    => _primaryDark;
   static Color get primarySurface => _primarySurface;
@@ -57,6 +74,7 @@ class AppColors {
     _primaryLight   = p.primaryLight;
     _primaryDark    = p.primaryDark;
     _primaryOnDark  = BrandContrast.darkText(p.primary);
+    _primaryFillOnDark = BrandContrast.fillUnderWhite(p.primaryLight);
     _refreshPrimarySurface();
   }
 

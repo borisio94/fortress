@@ -629,7 +629,7 @@ class _SADrawerContent extends ConsumerWidget {
               child: Row(children: [
                 Container(width: 28, height: 28,
                     decoration: BoxDecoration(
-                        color: AppColors.primary,
+                        color: AppColors.primaryFill,
                         borderRadius: BorderRadius.circular(7)),
                     child: const Icon(Icons.admin_panel_settings_rounded,
                         size: 14, color: Colors.white)),
@@ -1241,7 +1241,7 @@ class _ShopsSectionState extends ConsumerState<_ShopsSection> {
             TextButton(onPressed: () => Navigator.of(c).pop(),
                 child: const Text('Annuler')),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.primaryFill),
               onPressed: () => Navigator.of(c).pop(days),
               child: const Text('Prolonger'),
             ),
@@ -1305,7 +1305,7 @@ class _ShopsSectionState extends ConsumerState<_ShopsSection> {
             TextButton(onPressed: () => Navigator.of(c).pop(),
                 child: const Text('Annuler')),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.primaryFill),
               onPressed: () => Navigator.of(c).pop(days),
               child: const Text('Démarrer'),
             ),
@@ -1643,7 +1643,7 @@ class _PlansSection extends ConsumerWidget {
                         overflow: TextOverflow.ellipsis,
                         style: AppTextStyles.bodySmBold),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
+                      backgroundColor: AppColors.primaryFill,
                       foregroundColor: Colors.white,
                       elevation: 0,
                       padding: const EdgeInsets.symmetric(
@@ -2790,7 +2790,7 @@ class _OwnerGroupHeader extends StatelessWidget {
       child: Row(children: [
         Container(width: 28, height: 28,
             decoration: BoxDecoration(
-                color: AppColors.primary, shape: BoxShape.circle),
+                color: AppColors.primaryFill, shape: BoxShape.circle),
             child: Center(child: Text(initial,
                 style: AppTextStyles.captionBold.copyWith(color: Colors.white)))),
         const SizedBox(width: 10),
@@ -2805,7 +2805,7 @@ class _OwnerGroupHeader extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
           decoration: BoxDecoration(
-              color: AppColors.primary,
+              color: AppColors.primaryFill,
               borderRadius: BorderRadius.circular(20)),
           child: Text('$count', style: AppTextStyles.microBold
               .copyWith(color: Colors.white)),
@@ -3328,7 +3328,7 @@ class _SubSheetState extends State<_SubSheet> {
           SizedBox(width: double.infinity, child: ElevatedButton(
             onPressed: _saving ? null : _save,
             style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                backgroundColor: AppColors.primaryFill, foregroundColor: Colors.white,
                 elevation: 0, padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
             child: _saving
@@ -3494,7 +3494,7 @@ class _EditPlanSheetState extends State<_EditPlanSheet> {
       SizedBox(width: double.infinity, child: ElevatedButton(
         onPressed: _saving ? null : _save,
         style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+            backgroundColor: AppColors.primaryFill, foregroundColor: Colors.white,
             elevation: 0, padding: const EdgeInsets.symmetric(vertical: 13),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
         child: _saving
@@ -4481,7 +4481,7 @@ class _MaintenanceSectionState extends State<_MaintenanceSection> {
               : const Icon(Icons.play_arrow_rounded, size: 18),
           label: Text(_running ? 'Vérification...' : 'Lancer la vérification'),
           style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+            backgroundColor: AppColors.primaryFill, foregroundColor: Colors.white,
             elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           ),
         )),
@@ -4862,7 +4862,7 @@ class _OfflineQueueTab extends StatelessWidget {
                 icon: const Icon(Icons.cloud_upload_rounded, size: 14),
                 label: const Text('Synchroniser'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                  backgroundColor: AppColors.primaryFill, foregroundColor: Colors.white,
                   elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   textStyle: AppTextStyles.captionBold,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),

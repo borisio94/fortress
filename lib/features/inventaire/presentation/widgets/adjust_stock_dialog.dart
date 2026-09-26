@@ -276,7 +276,7 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
             child: ElevatedButton(
               onPressed: _submitting ? null : _submit,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
                 minimumSize: const Size(0, 44),
                 shape: RoundedRectangleBorder(

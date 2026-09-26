@@ -209,7 +209,7 @@ class _ClientsPageState extends State<ClientsPage> {
               child: SizedBox(
                 width: 42, height: 42,
                 child: Material(
-                  color: AppColors.primary,
+                  color: AppColors.primaryFill,
                   borderRadius: BorderRadius.circular(10),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(10),
@@ -737,7 +737,7 @@ class _EmptyState extends StatelessWidget {
                   style: AppTextStyles.bodySmBold.copyWith(
                       color: Colors.white)),
               style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
                 // Bouton confortable : hauteur mini + padding généreux pour que
                 // le texte ne soit pas serré (le thème global met minimumSize 0).

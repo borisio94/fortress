@@ -34,7 +34,7 @@ class SendNotificationPage extends StatelessWidget {
         SizedBox(width: double.infinity, height: 43,
           child: ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
+              backgroundColor: AppColors.primaryFill,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             icon: const Icon(Icons.send_rounded, color: Colors.white, size: 16),

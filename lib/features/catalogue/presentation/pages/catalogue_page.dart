@@ -903,7 +903,7 @@ class _BannerLogo extends StatelessWidget {
   Widget _initial() => Container(
         width: _size, height: _size,
         decoration: BoxDecoration(
-          color: AppColors.primary,
+          color: AppColors.primaryFill,
           borderRadius: BorderRadius.circular(6),
         ),
         alignment: Alignment.center,
@@ -1032,7 +1032,7 @@ class _SearchRow extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 4, vertical: 1),
                         decoration: BoxDecoration(
-                          color: AppColors.primary,
+                          color: AppColors.primaryFill,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text('$selectedCount',
@@ -1776,7 +1776,7 @@ class _PlaceOrderSheetState extends State<_PlaceOrderSheet> {
                   child: ElevatedButton(
                     onPressed: _submitting ? null : _submit,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: theme.colorScheme.primary,
+                      backgroundColor: AppColors.primaryFill,
                       foregroundColor: theme.colorScheme.onPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
@@ -2173,7 +2173,7 @@ class _CatalogueCard extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           if (item.isRecent) ...[
-                            _Badge(label: 'Nouveau', color: AppColors.primary),
+                            _Badge(label: 'Nouveau', color: AppColors.primaryFill),
                             const SizedBox(height: 4),
                           ],
                           if (outOfStock || lowStock)
@@ -2228,7 +2228,7 @@ class _CatalogueCard extends StatelessWidget {
                                     .copyWith(color: AppColors.textHint)),
                           )
                         : Material(
-                            color: AppColors.primary,
+                            color: AppColors.primaryFill,
                             borderRadius: BorderRadius.circular(8),
                             child: InkWell(
                               onTap: onOrder,
@@ -2381,7 +2381,7 @@ class _DeliveryCard extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: AppColors.primary,
+                  color: AppColors.primaryFill,
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [
                     BoxShadow(
@@ -2699,7 +2699,7 @@ class _ProductDetailSheetState extends State<_ProductDetailSheet> {
                 child: ElevatedButton(
                   onPressed: () => widget.onOrder(_active, _qty),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
@@ -2789,7 +2789,7 @@ class _VariantThumb extends StatelessWidget {
                     child: Container(
                       padding: const EdgeInsets.all(3),
                       decoration: BoxDecoration(
-                        color: AppColors.primary,
+                        color: AppColors.primaryFill,
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(Icons.star_rounded,
@@ -2803,7 +2803,7 @@ class _VariantThumb extends StatelessWidget {
                     child: Container(
                       padding: const EdgeInsets.all(2),
                       decoration: BoxDecoration(
-                        color: AppColors.primary,
+                        color: AppColors.primaryFill,
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(Icons.check_rounded,

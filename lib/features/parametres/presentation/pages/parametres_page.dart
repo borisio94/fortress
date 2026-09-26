@@ -1429,7 +1429,7 @@ class _SuperAdminSection extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(
                   horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
-                  color: AppColors.primary,
+                  color: AppColors.primaryFill,
                   borderRadius: BorderRadius.circular(20)),
               child: Text('Super Admin',
                   style: AppTextStyles.microBold.copyWith(
@@ -1692,7 +1692,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
                   ? ElevatedButton(
                       onPressed: _canGoNext ? () => _goTo(_page + 1) : null,
                       style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
+                          backgroundColor: AppColors.primaryFill,
                           foregroundColor: Colors.white,
                           disabledBackgroundColor: AppColors.divider,
                           padding: const EdgeInsets.symmetric(vertical: 12),

@@ -288,7 +288,7 @@ class _PartnerLedgerViewState
                   icon: const Icon(Icons.south_west_rounded, size: 18),
                   label: const Text('Régler le partenaire'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(0, 44),
                   ),
@@ -732,7 +732,7 @@ class _RemittanceSheetState extends State<_RemittanceSheet> {
                   icon: const Icon(Icons.check_rounded, size: 18),
                   label: const Text('Enregistrer'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(0, 44),
                   ),
@@ -963,7 +963,7 @@ class _ChargeSheetState extends State<_ChargeSheet> {
                   icon: const Icon(Icons.check_rounded, size: 18),
                   label: const Text('Enregistrer'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(0, 44),
                   ),
@@ -1273,7 +1273,7 @@ class _EditEntrySheetState extends State<_EditEntrySheet> {
                   icon: const Icon(Icons.check_rounded, size: 18),
                   label: const Text('Enregistrer'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(0, 44),
                   ),

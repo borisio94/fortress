@@ -339,7 +339,7 @@ class _OrderProcessingSheetState extends State<_OrderProcessingSheet> {
                   icon: const Icon(Icons.play_arrow_rounded, size: 18),
                   label: const Text('Démarrer'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(0, 44),
                   ),

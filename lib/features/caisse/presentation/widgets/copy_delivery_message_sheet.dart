@@ -333,7 +333,7 @@ class _CopyDeliveryMessageSheetState
                     style: const TextStyle(
                         fontSize: 13, fontWeight: FontWeight.w700)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
+                  backgroundColor: AppColors.primaryFill,
                   foregroundColor: Colors.white,
                   disabledBackgroundColor:
                       AppColors.primary.withValues(alpha: 0.4),

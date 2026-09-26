@@ -887,7 +887,7 @@ class _PeriodPickerState extends State<_PeriodPicker> {
             width: double.infinity, height: 42,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
               onPressed: () => widget.onCustom(DateTimeRange(start: _from, end: _to)),
@@ -1111,7 +1111,7 @@ class _SalesBarChart extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: AppColors.primary,
+                color: AppColors.primaryFill,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [

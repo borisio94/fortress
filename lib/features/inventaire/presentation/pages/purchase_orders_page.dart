@@ -97,7 +97,7 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                       decoration: BoxDecoration(
-                          color: AppColors.primary, borderRadius: BorderRadius.circular(8)),
+                          color: AppColors.primaryFill, borderRadius: BorderRadius.circular(8)),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         const Icon(Icons.add_rounded, size: 15, color: Colors.white),
                         const SizedBox(width: 6),
@@ -272,7 +272,7 @@ class _PurchaseOrdersPageState extends State<PurchaseOrdersPage> {
                     icon: const Icon(Icons.check_rounded, size: 18),
                     label: Text('Créer (${items.length} produit${items.length > 1 ? 's' : ''})'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                      backgroundColor: AppColors.primaryFill, foregroundColor: Colors.white,
                       elevation: 0, disabledBackgroundColor: AppColors.divider,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                   ),

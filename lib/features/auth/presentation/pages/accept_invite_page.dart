@@ -328,7 +328,7 @@ class _AcceptInvitePageState extends ConsumerState<AcceptInvitePage> {
           child: ElevatedButton(
             onPressed: _submitAuth,
             style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                backgroundColor: AppColors.primaryFill, foregroundColor: Colors.white,
                 elevation: 0, shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10))),
             child: Text(

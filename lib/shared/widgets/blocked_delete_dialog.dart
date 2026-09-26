@@ -115,7 +115,7 @@ Future<BlockedDeleteChoice?> showBlockedDeleteDialog(
                           const Icon(Icons.archive_outlined, size: 16),
                       label: const Text('Archiver'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: AppColors.primaryFill,
                         foregroundColor: Colors.white,
                         elevation: 0,
                         minimumSize: const Size(0, 44),

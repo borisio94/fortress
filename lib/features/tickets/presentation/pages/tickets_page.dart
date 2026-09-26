@@ -400,7 +400,7 @@ class _CreateTicketSheetState extends State<_CreateTicketSheet> {
           Expanded(child: FilledButton(
             onPressed: _submitting ? null : _submit,
             style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 padding: const EdgeInsets.symmetric(vertical: 12)),
             child: Text(_submitting ? 'Envoi…' : 'Envoyer',
                 style: const TextStyle(

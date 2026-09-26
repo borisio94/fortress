@@ -875,7 +875,7 @@ class _ArrivalSheetState extends State<_ArrivalSheet> {
                       ? 'Imputer les frais ($_lineCount)'
                       : 'Enregistrer l\'arrivage ($_lineCount)'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
                 elevation: 0, disabledBackgroundColor: AppColors.divider,
                 shape: RoundedRectangleBorder(

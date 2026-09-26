@@ -1118,7 +1118,7 @@ class _ExpenseFormSheetState extends State<ExpenseFormSheet> {
             SizedBox(width: double.infinity, child: ElevatedButton(
               onPressed: _saving ? null : _save,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(

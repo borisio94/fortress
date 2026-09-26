@@ -696,7 +696,7 @@ class _DeliveryDetailsSheetState extends State<_DeliveryDetailsSheet> {
           icon: const Icon(Icons.check_rounded, size: 16),
           label: const Text('Confirmer'),
           style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
+            backgroundColor: AppColors.primaryFill,
             foregroundColor: Colors.white,
             minimumSize: const Size(0, 44),
             padding: const EdgeInsets.symmetric(horizontal: 18),

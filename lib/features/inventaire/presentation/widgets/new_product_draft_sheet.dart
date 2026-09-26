@@ -199,7 +199,7 @@ class _NewProductDraftFormState extends State<_NewProductDraftForm> {
             icon: const Icon(Icons.check_rounded, size: 18),
             label: Text(editing ? 'Enregistrer' : 'Ajouter à l\'arrivage'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
+              backgroundColor: AppColors.primaryFill,
               foregroundColor: Colors.white,
               elevation: 0,
               disabledBackgroundColor: AppColors.divider,
@@ -265,7 +265,7 @@ class NewProductDraftCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                 decoration: BoxDecoration(
-                  color: AppColors.primary,
+                  color: AppColors.primaryFill,
                   borderRadius: BorderRadius.circular(4)),
                 child: Text('Nouveau',
                     style: AppTextStyles.micro.copyWith(

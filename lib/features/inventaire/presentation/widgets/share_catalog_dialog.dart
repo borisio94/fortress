@@ -596,7 +596,7 @@ class _RecipientsStep extends StatelessWidget {
             ElevatedButton(
               onPressed: totalSelected >= maxRecipients ? null : onAddFree,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(
                     horizontal: 14, vertical: 10),

@@ -236,7 +236,7 @@ class _OverviewTabState extends ConsumerState<_OverviewTab> {
               label: const Text('Réessayer'),
               onPressed: () => ref.invalidate(currentShopProvider),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
               ),
             ),
@@ -661,7 +661,7 @@ class _ShopHeroCardState extends ConsumerState<_ShopHeroCard> {
                 icon: const Icon(Icons.edit_rounded, size: 16),
                 label: Text(l.shopActionEdit),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
+                  backgroundColor: AppColors.primaryFill,
                   foregroundColor: Colors.white,
                   elevation: 0,
                   minimumSize: const Size(0, 38),
@@ -726,7 +726,7 @@ class _LogoAvatar extends StatelessWidget {
               child: Container(
                 width: 22, height: 22,
                 decoration: BoxDecoration(
-                  color: AppColors.primary,
+                  color: AppColors.primaryFill,
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white, width: 2),
                 ),
@@ -1069,7 +1069,7 @@ class _CopyTab extends StatelessWidget {
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
                 elevation: 0,
                 padding: const EdgeInsets.symmetric(
@@ -1637,7 +1637,7 @@ class _PrimaryBtn extends StatelessWidget {
       icon: Icon(icon, size: 16),
       label: Text(label),
       style: ElevatedButton.styleFrom(
-        backgroundColor: AppColors.primary,
+        backgroundColor: AppColors.primaryFill,
         foregroundColor: Colors.white,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),

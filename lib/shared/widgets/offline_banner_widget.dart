@@ -411,7 +411,7 @@ class OfflineBlockGuard extends ConsumerWidget {
                         fontWeight: FontWeight.w700,
                         color: Colors.white)),
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     elevation: 0,
                     padding: const EdgeInsets.symmetric(vertical: 13),

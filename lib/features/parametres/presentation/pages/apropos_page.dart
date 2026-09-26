@@ -37,7 +37,7 @@ class AProposPage extends StatelessWidget {
                 width: 80,
                 height: 80,
                 decoration: BoxDecoration(
-                  color: AppColors.primary,
+                  color: AppColors.primaryFill,
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: const Icon(Icons.shield_rounded,

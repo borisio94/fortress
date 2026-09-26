@@ -1451,7 +1451,7 @@ class _InventairePageState extends ConsumerState<InventairePage>
               child: SizedBox(
                 width: 38, height: 38,
                 child: Material(
-                  color: AppColors.primary,
+                  color: AppColors.primaryFill,
                   borderRadius: BorderRadius.circular(10),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(10),
@@ -4068,7 +4068,7 @@ class _QuickPromoDialogState extends State<_QuickPromoDialog> {
         FilledButton(
           onPressed: _saving ? null : _save,
           style: FilledButton.styleFrom(
-              backgroundColor: AppColors.primary),
+              backgroundColor: AppColors.primaryFill),
           child: _saving
               ? const SizedBox(width: 16, height: 16,
                   child: CircularProgressIndicator(
@@ -4615,7 +4615,7 @@ class _CatalogueShareDialogState extends State<_CatalogueShareDialog> {
                 Expanded(flex: 2, child: ElevatedButton(
                   onPressed: _canContinue ? _onContinue : null,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: AppColors.primaryFill,
                     foregroundColor: Colors.white,
                     disabledBackgroundColor: AppColors.divider,
                     elevation: 0,

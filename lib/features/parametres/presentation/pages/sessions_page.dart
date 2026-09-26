@@ -241,7 +241,7 @@ class _SessionTile extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: AppColors.primary,
+                    color: AppColors.primaryFill,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Text('Cet appareil',

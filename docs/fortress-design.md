@@ -168,7 +168,7 @@ couleur BRUTE : les teintes gardent leur aspect.
 |---|---|---|---|
 | Texte, icône, trait, indicateur | `BrandContrast.lightText(primary)` | `BrandContrast.darkText(primary)` — éclaircie jusqu'à 4,5:1 sur carte, piste, fond | `AppColors.primary`, `colorScheme.primary` |
 | `brand` / `brandText` (vivent sur `brandSurface`) | `BrandContrast.lightText(primary)` | `BrandContrast.darkBrandText(primary)` — tenu aussi sur `brandSurface` | `theme.semantic` |
-| Fond d'un bouton plein, sous du blanc | `BrandContrast.lightText(primary)` (la même) | `BrandContrast.fillUnderWhite(primaryLight)` | thème des Elevated / FilledButton |
+| Fond d'un bouton plein, sous du blanc | `BrandContrast.lightText(primary)` (la même) | `BrandContrast.fillUnderWhite(primaryLight)` | thème des Elevated / FilledButton ; **`AppColors.primaryFill`** pour un fond peint à la main (lot 1b) |
 | Contenu posé SUR la primaire (sombre) | blanc | `#0F172A` (fond du thème) | `colorScheme.onPrimary` |
 
 **⚠ Ne jamais remettre une valeur de palette dans un getter sombre.** C'est
@@ -264,9 +264,16 @@ est imposée d'office quand le logo est monochrome.
 ### La dette ouverte (backlog)
 
 `textHint` en sombre (3,07:1) ; texte en primaire sur `primarySurface` en
-sombre (3,4 à 3,96:1) ; fonds pleins peints à la main en primaire sous du
-blanc (lot 1b) — EN SOMBRE seulement depuis le lot 1 clair. Voir la
-section 21.
+sombre (3,4 à 3,96:1). Voir la section 21.
+
+**TRANCHÉ — un fond de marque sous du BLANC s'écrit `AppColors.primaryFill`**
+(lot 1b, 26/09/2026). En sombre, `AppColors.primary` est la variante TEXTE,
+claire : le blanc n'y tenait que 2,54 à 3,25:1 sur les huit palettes.
+`primaryFill` est le fond des boutons du thème (≥ 4,5:1 sous le blanc) ; en
+clair il vaut `primary`, rien n'y change. 124 fonds repointés. Un contenu en
+`onPrimary` (texte foncé en sombre) reste sur `primary` : il y tient (5,49 à
+7,04:1), et le fond foncé le casserait. Garde-fou :
+`test/theme/primary_fill_guard_test.dart` (boutons `styleFrom`).
 
 ---
 
@@ -809,8 +816,9 @@ Le détail vit dans `docs/backlog.md` ; ici, l'index.
 **Dette ouverte :**
 
 - Palette : `textHint` en sombre (3,07:1) ; texte sur `primarySurface` en
-  sombre (3,4–3,96:1) ; lot 1b (≈ 153 fonds pleins en primaire sous du blanc,
-  ≈ 3,2:1 sur Violet, Rose, Midnight, Indigo).
+  sombre (3,4–3,96:1) ; fond de marque sombre de Midnight à 1,93:1 contre la
+  carte (bord du bouton) ; `printer_page.dart` (fichier d'un autre chantier,
+  un bouton à repointer vers `primaryFill`).
 - Cibles tactiles : ≈ 154 sites hors lot, comptés par feature.
 - Code mort : `KitchenTicketCard` (écran Préparation supprimé),
   `ExpenseFormSheet`, `PartnerLedgerDetailPage`, `DottedBorderBox`.

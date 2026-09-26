@@ -210,7 +210,7 @@ class _TicketDetailPageState extends ConsumerState<TicketDetailPage> {
                   const SizedBox(width: 8),
                   FilledButton(
                       style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.primary),
+                          backgroundColor: AppColors.primaryFill),
                       onPressed: () => Navigator.of(c).pop(ctrl.text.trim()),
                       child: const Text('Escalader',
                           style: TextStyle(color: Colors.white))),
@@ -536,7 +536,7 @@ class _MessageComposer extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Material(
-            color: AppColors.primary,
+            color: AppColors.primaryFill,
             borderRadius: BorderRadius.circular(20),
             child: InkWell(
               borderRadius: BorderRadius.circular(20),

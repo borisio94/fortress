@@ -106,7 +106,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                   decoration: BoxDecoration(
-                      color: AppColors.primary, borderRadius: BorderRadius.circular(8)),
+                      color: AppColors.primaryFill, borderRadius: BorderRadius.circular(8)),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
                     const Icon(Icons.tune_rounded, size: 15, color: Colors.white),
                     const SizedBox(width: 6),
@@ -277,7 +277,7 @@ class _StockMovementsPageState extends State<StockMovementsPage> {
                   icon: const Icon(Icons.check_rounded, size: 18),
                   label: const Text('Enregistrer'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary, foregroundColor: Colors.white,
+                    backgroundColor: AppColors.primaryFill, foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                 ),

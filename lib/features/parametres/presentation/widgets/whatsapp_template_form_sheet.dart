@@ -258,7 +258,7 @@ class _WhatsappTemplateFormSheetState
                   style: AppTextStyles.bodyBold.copyWith(
                       color: Colors.white)),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10)),

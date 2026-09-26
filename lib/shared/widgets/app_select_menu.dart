@@ -425,7 +425,7 @@ class _MenuContainerState extends State<_MenuContainer> {
                       Container(
                         width: 20, height: 20,
                         decoration: BoxDecoration(
-                          color: AppColors.primary,
+                          color: AppColors.primaryFill,
                           borderRadius: BorderRadius.circular(5),
                         ),
                         child: const Icon(Icons.add_rounded,
@@ -772,7 +772,7 @@ class _AppSelectWidgetState extends State<AppSelectWidget> {
                     Expanded(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primary,
+                          backgroundColor: AppColors.primaryFill,
                           foregroundColor: Colors.white,
                           elevation: 0,
                           minimumSize: const Size(0, 44),
@@ -969,7 +969,7 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
             ElevatedButton(
               onPressed: () => Navigator.of(dc).pop(temp),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
+                backgroundColor: AppColors.primaryFill,
                 foregroundColor: Colors.white,
                 minimumSize: Size.zero,
                 padding: const EdgeInsets.symmetric(
@@ -1028,7 +1028,7 @@ class _AppMultiSelectWidgetState extends State<AppMultiSelectWidget> {
               padding: const EdgeInsets.symmetric(
                   horizontal: 5, vertical: 1),
               decoration: BoxDecoration(
-                  color: AppColors.primary,
+                  color: AppColors.primaryFill,
                   borderRadius: BorderRadius.circular(10)),
               child: Text('$count',
                   style: AppTextStyles.micro.copyWith(
