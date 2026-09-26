@@ -2734,9 +2734,10 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
 
             // ── Ligne résumé, en DENSE ───────────────────────────────
             //
-            // Une seule ligne par commande sur large écran, deux sous
-            // `kCartPaneFullWidthBelow` — le seuil déjà partagé avec le volet
-            // panier, pour ne pas en inventer un troisième (l'app en a deux).
+            // Une seule ligne par commande quand la LISTE est assez large, deux
+            // sinon : `kOrderListRowMin`, un seuil de CONTENU déduit des
+            // colonnes et mesuré par la liste elle-même (`_OrderCard.listWide`),
+            // pas un seuil d'écran (document de design § 8).
             //
             // LE LISERÉ COURT SUR LES DEUX LIGNES : il enveloppe tout le bloc,
             // pas la première ligne seule.

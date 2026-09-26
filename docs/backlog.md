@@ -381,6 +381,28 @@ dans `CurrencyFormatter.compact` ; le restaurant est en règle).*
   séparation des milliers (`subscription_page`, `super_admin_page`,
   `delivery_message_builder`).
 
+## Disposition
+
+### Zones hybrides entre 720 et 900 px — à trancher sur pièce
+
+*Laissé NON TRANCHÉ le 26/09/2026 (lot « seuils de largeur »).* Entre 720 et
+900 px, le Menu du restaurant ouvre son panier en volet LATÉRAL alors que le
+shell est déjà en disposition « téléphone » (barre du bas, tiroir) ; entre
+800 et 900, la caisse e-commerce met son panier en ligne sous une barre du
+bas. À juger à l'œil, à ~800 px, avant de décider : voulu, ou à aligner sur
+le 900 du shell.
+
+### Seuils de largeur en dur hors du restaurant
+
+*Inscrit le 26/09/2026.* Le restaurant n'a plus que des seuils nommés (§ 8).
+Ailleurs : le **600** écrit dix-sept fois à côté de `kFormMobileBreakpoint`
+(`dashboard_page`, `employees_page`, `forgot_password_page`,
+`product_grid_widget`…), les **900** du panier e-commerce (`cart_widget` ×4,
+`product_grid_widget`) à côté de la constante du shell, 700 (`catalogue_page`,
+`inventaire_page`, `super_admin_page`), 800 (`caisse_page`, `login_page`),
+340, 500, 720 en dur (`landing_page`, `public_footer`). À classer en seuils
+d'écran (→ constante officielle) ou de contenu (→ nommé et justifié).
+
 ## Code mort
 
 ### `_ServiceChip` — une pastille que plus rien ne rend

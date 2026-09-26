@@ -59,6 +59,11 @@ Future<bool?> showDishForm({
 /// un carré ne laisse pas croire qu'on attend une image en paysage.
 const double _kPhotoTile = 88;
 
+/// SEUIL DE CONTENU (document de design § 8) : à partir de 560 px de
+/// CONTENEUR, le nom et le prix se posent À CÔTÉ de la vignette — une colonne
+/// d'au moins 456 px (560 − 88 de photo − 16 d'écart) ; empilés en dessous.
+const double kDishIdentitySideBySideMin = 560;
+
 /// Placeholder du formulaire, remonté d'un cran de contraste.
 ///
 /// `AppTextStyles.inputHint` est en `textHint`, qui vaut `slate-500` en mode
@@ -975,11 +980,11 @@ class _DishFormSheetState extends State<DishFormSheet> {
             // sans lesquels l'enregistrement est refusé tiennent ainsi dans le
             // premier regard.
             //
-            // Le seuil de 560 px est conservé : sous cette largeur, une colonne
-            // de champs à côté d'une vignette redevient trop étroite pour un
-            // prix et un nom, et l'on empile.
+            // Sous [kDishIdentitySideBySideMin], une colonne de champs à côté
+            // d'une vignette redevient trop étroite pour un prix et un nom, et
+            // l'on empile.
             LayoutBuilder(builder: (_, c) {
-              final side = c.maxWidth >= 560;
+              final side = c.maxWidth >= kDishIdentitySideBySideMin;
               final photo = _photoPicker(context);
               final fields = Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

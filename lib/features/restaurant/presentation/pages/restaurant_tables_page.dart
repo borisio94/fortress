@@ -626,7 +626,7 @@ class _RestaurantTablesPageState
             headline: headline,
             // La légende n'a sa place À DROITE que si la ligne est large ;
             // sinon elle passe sous le décompte.
-            wide: constraints.maxWidth >= 640,
+            wide: constraints.maxWidth >= kRoomLegendBesideMin,
           ),
           Expanded(
             child: GridView.builder(
@@ -667,6 +667,11 @@ class _RestaurantTablesPageState
 ///
 /// PAS DE BOUTON « + TABLE » ICI : la création passe par le bouton flottant
 /// (cf. `RestoFab`), seul appel de l'écran. L'état vide garde son propre bouton.
+/// SEUIL DE CONTENU (document de design § 8) : à partir de 640 px de
+/// CONTENEUR, la légende des statuts tient À DROITE du décompte de salle ; en
+/// dessous, elle passe dessous plutôt que d'écraser le décompte.
+const double kRoomLegendBesideMin = 640;
+
 class _RoomHeader extends StatelessWidget {
   final String headline;
   final bool wide;

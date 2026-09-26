@@ -277,7 +277,7 @@ class _TopKpiRow extends ConsumerWidget {
     ];
 
     return LayoutBuilder(builder: (_, c) {
-      final wide = c.maxWidth >= 760;
+      final wide = c.maxWidth >= kRestoKpiFourColumnsMin;
       return GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
@@ -504,7 +504,7 @@ class _ServiceRow extends StatelessWidget {
     // DEUX cartes depuis que « Menu du jour » est remontée en tête d'écran :
     // le palier à 1040 px, qui servait à loger trois colonnes, n'a plus d'objet.
     return LayoutBuilder(builder: (_, c) {
-      if (c.maxWidth >= 700) {
+      if (c.maxWidth >= kRestoServiceRowSideBySideMin) {
         return IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1072,7 +1072,7 @@ class _FinanceKpiRowState extends State<_FinanceKpiRow> {
         ]),
         const SizedBox(height: 4),
         LayoutBuilder(builder: (_, c) {
-          final wide = c.maxWidth >= 760;
+          final wide = c.maxWidth >= kRestoKpiFourColumnsMin;
           return GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -2421,7 +2421,28 @@ class _EmptyBlock extends StatelessWidget {
   }
 }
 
-/// Deux cartes côte à côte sur large écran, empilées sinon.
+/// SEUILS DE CONTENU du tableau de bord (document de design § 8). Chacun lit
+/// la largeur de son CONTENEUR (`LayoutBuilder`), jamais l'écran, et dit ce
+/// qu'il garantit au-dessus. Ce ne sont pas des seuils d'écran : ceux-là sont
+/// les trois officiels (600, 720, 900).
+///
+/// Tuiles d'indicateurs (ventes et finances) : QUATRE colonnes à partir de
+/// 760 px, soit des tuiles d'au moins 181 px — (760 − 3 × 12 d'écart) / 4 ;
+/// deux en dessous.
+const double kRestoKpiFourColumnsMin = 760;
+
+/// Rangée Service : « Commandes en cours » (3) et « Stock » (2) CÔTE À CÔTE à
+/// partir de 700 px — au moins 410 px pour la liste des commandes et 274 pour
+/// le stock, une fois les 16 px d'écart retirés ; empilées en dessous.
+const double kRestoServiceRowSideBySideMin = 700;
+
+/// Paire de cartes (`_TwoCol` : canaux de service, semaine) CÔTE À CÔTE à
+/// partir de 860 px — au moins 422 px chacune, l'anneau et sa légende n'y
+/// tiennent pas plus étroits ; empilées en dessous.
+const double kRestoCardPairSideBySideMin = 860;
+
+/// Deux cartes côte à côte sur un conteneur large, empilées sinon
+/// (cf. [kRestoCardPairSideBySideMin]).
 class _TwoCol extends StatelessWidget {
   final Widget first;
   final Widget second;
@@ -2430,7 +2451,7 @@ class _TwoCol extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-        builder: (_, c) => c.maxWidth >= 860
+        builder: (_, c) => c.maxWidth >= kRestoCardPairSideBySideMin
             ? IntrinsicHeight(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,

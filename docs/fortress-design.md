@@ -385,15 +385,37 @@ main, avec des filets de 0,5 à 1 px et des retraits de 0 à 56 selon l'écran.
 | **720** | `kCartPaneFullWidthBelow` (`cart_pane_provider.dart`) | Volet panier en plein écran, disposition « téléphone » des écrans du restaurant |
 | **600** | `kFormMobileBreakpoint` (`adaptive_form_frame.dart`) | Feuille en page pleine ou en dialogue |
 
-**Ce sont les seuls qu'un nouvel écran doit employer.** L'application en
-compte douze autres, écrits en dur (340, 500, 560, 640, 700, 760, 800, 860,
-1100…) : dette, pas modèle. Le commentaire qui affirmait « l'app en a deux »
-était faux.
+**Ce sont les seuls seuils d'ÉCRAN** — ils décident de l'écran entier
+(shell, volet panier, feuille). Le commentaire qui affirmait « l'app en a
+deux » était faux (corrigé le 26/09/2026).
 
-**NON TRANCHÉ — les zones hybrides.** Entre 720 et 900 px, le volet panier
-est latéral alors que le shell est celui du mobile ; entre 800 et 900, la
-caisse e-commerce met son panier en ligne sous une barre du bas. Personne n'a
-décidé si c'est voulu.
+### Seuils de CONTENU — TRANCHÉ (26/09/2026)
+
+Un seuil qui dispose un CONTENU (colonnes d'une grille, deux cartes côte à
+côte, légende à droite) n'est pas un seuil d'écran : il **lit son conteneur**,
+**porte un nom**, est **posé à côté de son composant** et **dit ce qu'il
+garantit au-dessus** — au mieux, il se DÉDUIT de ce que le contenu doit tenir
+(`kOrderTileMin`, `kOrderListRowMin` : « déduits des colonnes, pas
+choisis »). Au restaurant :
+
+| Constante | Valeur | Garantit au-dessus |
+|---|---|---|
+| `kRestoKpiFourColumnsMin` | 760 | 4 tuiles d'indicateurs d'au moins 181 px |
+| `kRestoServiceRowSideBySideMin` | 700 | Commandes (≥ 410 px) et Stock (≥ 274) côte à côte |
+| `kRestoCardPairSideBySideMin` | 860 | deux cartes d'au moins 422 px |
+| `kRoomLegendBesideMin` | 640 | la légende à droite du décompte de salle |
+| `kDishIdentitySideBySideMin` | 560 | nom et prix (≥ 456 px) à côté de la photo |
+
+Garde-fou : `test/theme/width_threshold_guard_test.dart` — au restaurant,
+aucune largeur comparée à un nombre en dur, et seule la décision du volet
+panier (Menu) lit la largeur d'écran. Hors du restaurant, les seuils en dur
+(le 600 répété dix-sept fois, les 900 du panier e-commerce…) restent au
+backlog.
+
+**NON TRANCHÉ — les zones hybrides** (laissé ouvert le 26/09/2026, au
+backlog). Entre 720 et 900 px, le volet panier est latéral alors que le shell
+est celui du mobile ; entre 800 et 900, la caisse e-commerce met son panier en
+ligne sous une barre du bas. Personne n'a décidé si c'est voulu.
 
 ### Le conteneur, pas l'écran — TRANCHÉ
 
