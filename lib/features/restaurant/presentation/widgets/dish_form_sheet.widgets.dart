@@ -2,6 +2,59 @@ part of 'dish_form_sheet.dart';
 
 // Les petites pièces de la fiche plat.
 
+/// Saisie d'une nouvelle catégorie ; rend le nom tapé (rogné).
+///
+/// Un widget À ÉTAT, propriétaire de son contrôleur : il le libère dans son
+/// propre `dispose`, quand la route a vraiment disparu. La fiche le libérait
+/// dès que la feuille rendait son résultat, alors que l'animation de
+/// fermeture reconstruisait encore le champ (« TextEditingController was used
+/// after being disposed » — trouvé par le banc de test le 26/09/2026).
+class _NewCategorySheet extends StatefulWidget {
+  const _NewCategorySheet();
+
+  @override
+  State<_NewCategorySheet> createState() => _NewCategorySheetState();
+}
+
+class _NewCategorySheetState extends State<_NewCategorySheet> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AdaptiveFormFrame(
+      title: 'Nouvelle catégorie',
+      icon: Icons.category_outlined,
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppField(
+              controller: _ctrl,
+              hint: 'Entrées, Plats, Boissons…',
+              autofocus: true,
+            ),
+            const SizedBox(height: 18),
+            AppPrimaryButton(
+              label: 'Ajouter',
+              icon: Icons.check_rounded,
+              fullWidth: true,
+              onTap: () => Navigator.of(context).pop(_ctrl.text.trim()),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Puce de sélection (catégorie ou groupe d'options).
 /// Puce de choix — sélectionnée en ACCENT PLEIN, sinon en simple contour.
 ///
