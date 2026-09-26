@@ -1340,7 +1340,7 @@ class _StockItemsTabState extends RestoTabState<_StockItemsTab> {
 /// ─── SECONDE EXCEPTION À LA RÈGLE DU 16/09 — CET ONGLET SEULEMENT ─────────
 ///
 /// La règle : « un état vide est une CARTE, pas un texte flottant »
-/// (`RestoEmptyState`, qui sert seize états vides du module et n'est PAS
+/// (`RestoEmptyState`, qui sert les écrans vides du module et n'est PAS
 /// modifié). Elle a deux raisons, et elles ne tombent pas ensemble :
 ///
 ///   • la LISIBILITÉ du texte sur le décor — levée par la première exception

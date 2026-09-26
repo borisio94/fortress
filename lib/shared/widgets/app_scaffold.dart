@@ -127,8 +127,9 @@ class _AppScaffoldState extends ConsumerState<AppScaffold> {
 
   /// Couleur de fond du Scaffold.
   ///
-  /// TRANSPARENTE quand un [RestoBackdrop] est monté au-dessus (sous-pages
-  /// restaurant hors shell : addition, prise de commande). Un fond opaque y
+  /// TRANSPARENTE quand un [RestoBackdrop] est monté au-dessus — celui que
+  /// pose le shell du restaurant (`adaptive_scaffold.dart`) : toute page du
+  /// restaurant DANS le shell, l'Addition comprise. Un fond opaque y
   /// masquerait entièrement le décor, et la page jurerait avec le reste du
   /// mode restaurant.
   ///

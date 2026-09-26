@@ -92,16 +92,91 @@ List<String> offenders(Map<String, String> sources) {
   return out;
 }
 
-void main() {
-  test('aucun bouton ne peint la primaire sous un libellé blanc', () {
-    final sources = {
+// ─── FONDS PEINTS À LA MAIN (nettoyage de forme, 26/09/2026) ───────────────
+//
+// Le lot 1b a laissé passer 17 fonds écrits en TERNAIRE
+// (`color: selected ? cs.primary : …`) : la règle ci-dessus ne lisait que les
+// `styleFrom`. Celle-ci lit le `color:` d'une décoration, d'un `Container`,
+// d'un `Material`… dès que la primaire y figure, ternaire compris, et le
+// signale si du blanc est posé dans les 25 lignes qui suivent. Une couleur
+// passée par une variable lui échappe (la priorité « normal » des tickets en
+// était un cas, corrigé à la main).
+
+final _paintedPrimary = RegExp(
+    r'\b(?:color|backgroundColor):[^,;\n]*?(?:AppColors|cs|colorScheme|scheme|'
+    r'Theme\.of\(\w+\)\.colorScheme|theme\.colorScheme)'
+    r'\.primary\b(?!Fill|Container|Fixed|Light|Dark|Surface)(?!\s*\.withValues)');
+const _fillCallees = [
+  'BoxDecoration', 'Container', 'AnimatedContainer', 'Material', 'Ink',
+  'CircleAvatar', 'ColoredBox', 'DecoratedBox',
+];
+final _whiteContent =
+    RegExp(r'Colors\.white\b(?!\.withValues\(alpha:\s*0\.[0-4])');
+
+List<String> paintedOffenders(Map<String, String> sources) {
+  final out = <String>[];
+  sources.forEach((path, src) {
+    for (final m in _paintedPrimary.allMatches(src)) {
+      final open = _enclosingOpen(src, m.start);
+      final head = src.substring(open < 40 ? 0 : open - 40, open);
+      if (!_fillCallees.any((c) => head.endsWith(c))) continue;
+      final lineStart = '\n'.allMatches(src.substring(0, m.start)).length;
+      final lines = src.split('\n');
+      final window = lines
+          .sublist(lineStart, (lineStart + 25).clamp(0, lines.length))
+          .join('\n');
+      if (!_whiteContent.hasMatch(window)) continue;
+      out.add('${path.replaceAll(r'\', '/')}:${lineStart + 1}');
+    }
+  });
+  return out;
+}
+
+Map<String, String> _libSources() => {
       for (final f in Directory('lib')
           .listSync(recursive: true)
           .whereType<File>()
           .where((f) => f.path.endsWith('.dart'))
-          .where((f) => !f.path.replaceAll('\\', '/').contains('lib/core/theme/')))
+          .where((f) =>
+              !f.path.replaceAll(r'\', '/').contains('lib/core/theme/')))
         f.path: f.readAsStringSync(),
     };
+
+void main() {
+  test('aucun fond peint en primaire sous du blanc (ternaires compris)', () {
+    expect(paintedOffenders(_libSources()), isEmpty,
+        reason: 'un fond de marque sous du blanc s\'écrit '
+            'AppColors.primaryFill, aussi dans un ternaire');
+  });
+
+  test('la règle des fonds peints voit bien ce qu\'elle doit voir', () {
+    const ternaire = '''
+      Container(
+        decoration: BoxDecoration(
+          color: selected ? cs.primary : null),
+        child: Text('Table 1', style: TextStyle(color: Colors.white)))''';
+    const fill = '''
+      Container(
+        decoration: BoxDecoration(
+          color: selected ? AppColors.primaryFill : null),
+        child: Text('Table 1', style: TextStyle(color: Colors.white)))''';
+    const onPrimary = '''
+      Container(
+        decoration: BoxDecoration(color: cs.primary),
+        child: Text('OK', style: TextStyle(color: cs.onPrimary)))''';
+    const teinte = '''
+      Container(
+        decoration: BoxDecoration(
+          color: cs.primary.withValues(alpha: 0.12)),
+        child: Icon(Icons.x, color: Colors.white))''';
+    expect(paintedOffenders({'a': ternaire}), hasLength(1));
+    expect(paintedOffenders({'b': fill}), isEmpty);
+    expect(paintedOffenders({'c': onPrimary}), isEmpty);
+    expect(paintedOffenders({'d': teinte}), isEmpty);
+  });
+
+  test('aucun bouton ne peint la primaire sous un libellé blanc', () {
+    final sources = _libSources();
     expect(offenders(sources), isEmpty,
         reason: 'un fond de marque sous du blanc s\'écrit '
             'AppColors.primaryFill ; la primaire ne reste en fond que sous '

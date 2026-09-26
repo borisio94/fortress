@@ -196,12 +196,9 @@ fait DÉBORDER (tuile de table, `mainAxisExtent: 82` — d'où la zone superpos�
 du ⋮) ; un parent à hauteur fixe qui contraint PLAFONNE la cible sans erreur
 (puce de date de 38 px dans les Commandes e-commerce).
 
-Code mort signalé en passant : `KitchenTicketCard`
-(`restaurant/presentation/widgets/kitchen_ticket_card.dart`, ≈ 230 lignes)
-n'a plus aucun appelant depuis la suppression de l'écran Préparation
-(`66c6c2f`, 07/08/2026). L'audit UI du 24/09 l'avait compté comme geste
-fréquent (§4b) et comme couleur seule (§4c-1) : ces deux constats portent sur
-du code mort.
+Code mort signalé en passant : `KitchenTicketCard` — **supprimé le
+26/09/2026** (lot « nettoyage de forme ») ; il n'avait plus d'appelant depuis
+la suppression de l'écran Préparation (`66c6c2f`, 07/08/2026).
 
 ## Shell
 
@@ -403,15 +400,33 @@ Ailleurs : le **600** écrit dix-sept fois à côté de `kFormMobileBreakpoint`
 340, 500, 720 en dur (`landing_page`, `public_footer`). À classer en seuils
 d'écran (→ constante officielle) ou de contenu (→ nommé et justifié).
 
+## Nettoyage de forme
+
+### Fonds colorés sous du blanc, hors de la primaire
+
+*Inscrit le 26/09/2026 avec le lot « nettoyage de forme ».* En complétant le
+lot 1b (18 fonds primaires en ternaire, plus le cercle d'option des
+Paramètres), deux fonds d'une AUTRE couleur sous du blanc sont apparus :
+
+- `shop_list_page` : le bouton « Nouvelle boutique » a, hors survol, un fond
+  `textPrimary` — clair en sombre — sous une icône et un texte blancs ;
+- `tickets_page` : la priorité « haute » d'un ticket peint `danger` sous du
+  texte blanc (3,76:1 en clair, sous le seuil du petit texte).
+
+### La route `/dev/alerts-demo` n'est PAS en production
+
+*Constat du 26/09/2026, qui corrige l'audit du 24/09.* L'audit la disait
+« présente en prod » (garde non déterminée). Elle est enregistrée sous
+`if (kDebugMode)` et sa chaîne est ABSENTE du `main.dart.js` servi en
+production (vérifié). Rien à faire.
+
 ## Code mort
 
-### `_ServiceChip` — une pastille que plus rien ne rend
+### ~~`_ServiceChip` — une pastille que plus rien ne rend~~ — SUPPRIMÉ
 
-*Inscrit le 26/09/2026.* `_ServiceChip`, `_channelChip` et `_serviceStateChip`
-(`caisse_page.dart`) ne s'affichent plus nulle part : les deux fonctions
-rendent `[]` hors du restaurant, et au restaurant la carte est toujours en
-grille ou en liste dense, jamais dans la branche qui les appelle. Elles
-portaient encore des tokens de base en texte ; laissées en l'état.
+*Inscrit et supprimé le 26/09/2026.* `_ServiceChip`, `_channelChip` et
+`_serviceStateChip` (`caisse_page.dart`, 92 lignes) ne s'affichaient plus
+nulle part.
 
 ### `EmptyCartDashboard` — un réglage qui ne commandait rien
 

@@ -338,23 +338,36 @@ class _DishFormSheetState extends State<DishFormSheet> {
 
   Future<void> _addCategory() async {
     final ctrl = TextEditingController();
-    final name = await showDialog<String>(
+    // Le châssis CANONIQUE d'une saisie (`AdaptiveFormFrame`), pas un
+    // `AlertDialog` : page pleine sur téléphone, où le clavier ne recouvre
+    // plus le champ ; feuille sur ordinateur. Fermer la feuille vaut
+    // « Annuler », comme l'ancien bouton du même nom.
+    final name = await showAdaptiveFormSheet<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Nouvelle catégorie'),
-        content: AppField(
-          controller: ctrl,
-          hint: 'Entrées, Plats, Boissons…',
-          autofocus: true,
+      builder: (sheetCtx) => AdaptiveFormFrame(
+        title: 'Nouvelle catégorie',
+        icon: Icons.category_outlined,
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AppField(
+                controller: ctrl,
+                hint: 'Entrées, Plats, Boissons…',
+                autofocus: true,
+              ),
+              const SizedBox(height: 18),
+              AppPrimaryButton(
+                label: 'Ajouter',
+                icon: Icons.check_rounded,
+                fullWidth: true,
+                onTap: () => Navigator.of(sheetCtx).pop(ctrl.text.trim()),
+              ),
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Annuler')),
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
-              child: const Text('Ajouter')),
-        ],
       ),
     );
     ctrl.dispose();

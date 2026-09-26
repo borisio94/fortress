@@ -330,10 +330,10 @@ class _FilterBar extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: active ? AppColors.primary : Theme.of(context).colorScheme.surface,
+              color: active ? AppColors.primaryFill : Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: active
-                  ? AppColors.primary
+                  ? AppColors.primaryFill
                   : Theme.of(context).semantic.borderSubtle),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [

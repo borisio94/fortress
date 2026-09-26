@@ -23,9 +23,6 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-/// Code mort, laissé tel quel (écran Préparation supprimé, au backlog).
-const _deadCode = {'kitchen_ticket_card.dart'};
-
 final _base = RegExp(
     r'(?:foregroundColor|color):\s*(?:\w+\.|Theme\.of\(\w+\)\.)?semantic\.'
     r'(danger|warning|success|info)\b(?!Text|Surface)'
@@ -65,7 +62,6 @@ void main() {
       .listSync(recursive: true)
       .whereType<File>()
       .where((f) => f.path.endsWith('.dart'))
-      .where((f) => !_deadCode.any((d) => f.path.endsWith(d)))
       .toList();
 
   List<String> offenders(RegExp pattern) {

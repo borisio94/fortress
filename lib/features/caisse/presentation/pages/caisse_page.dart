@@ -299,7 +299,7 @@ class _CaissePageState extends ConsumerState<CaissePage> {
 }
 
 // ─── Layout principal Caisse ──────────────────────────────────────────────────
-/// Desktop : split produits (Expanded) + panier 280px FIXE, **toujours visible**
+/// Desktop : split produits (Expanded) + panier 380px FIXE, **toujours visible**
 /// (cartouche vide _EmptyCart si aucun article). Mobile : grille produits
 /// pleine largeur. Le panier mobile s'ouvre via l'icône topbar (bottom sheet
 /// CartWidget) — cf. AdaptiveScaffold._CartBadgeBtn. Le FAB historique a été
@@ -2792,13 +2792,6 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
                       if ((widget.order.rescheduleReason ?? '').isNotEmpty)
                         Icon(Icons.event_repeat_rounded,
                             size: 12, color: color),
-                      // ÉTAT DE SERVICE (restauration) — « En cuisine »,
-                      // « Prête », « Servie ». Le statut commercial seul
-                      // (« Programmée ») ne dit rien de l'avancement du plat :
-                      // deux commandes programmées peuvent être, l'une encore
-                      // au piano, l'autre déjà sur la table.
-                      ..._channelChip(),
-                      ..._serviceStateChip(),
                       // Chip « À choisir sur place » — visible uniquement
                       // pour les ventes d'approbation (tournée à réconcilier).
                       if (widget.order.isApprovalSale)
@@ -4739,29 +4732,6 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
     }
   }
 
-  /// CANAL de la commande — « Emporter » ou « Livraison », dès le premier
-  /// état et jusqu'au bout.
-  ///
-  /// Sur place n'a PAS de pastille : c'est le cas par défaut d'un restaurant,
-  /// et l'étiqueter reviendrait à baliser toute la liste pour ne rien
-  /// distinguer. Le nom de la table le dit déjà.
-  ///
-  /// Elle se lit avant tout le reste parce que c'est elle qui commande le
-  /// geste : une commande à emporter s'emballe, une commande sur place se
-  /// sert.
-  List<Widget> _channelChip() {
-    if (!_isResto) return const [];
-    final (String label, IconData icon) = switch (widget.order.orderType) {
-      'takeaway' => ('Emporter', Icons.takeout_dining_outlined),
-      'delivery' => ('Livraison', Icons.local_shipping_outlined),
-      _ => ('', Icons.circle),
-    };
-    if (label.isEmpty) return const [];
-    return [
-      _ServiceChip(label: label, icon: icon, color: AppColors.primary),
-    ];
-  }
-
   /// LE REPÈRE d'une commande : la table et le compte, ou le client.
   ///
   /// `saveTableOrder` écrit le nom de la table dans `clientName` — c'est ce que
@@ -5031,43 +5001,6 @@ class _OrderCardState extends ConsumerState<_OrderCard> {
       _hhmm(),
       if (_isLate()) 'en retard',
     ].join(' · ');
-  }
-
-  /// ÉTAT DE SERVICE — le même rang, le même mot et la même couleur que
-  /// l'onglet qui contient cette carte.
-  ///
-  /// La pastille tenait sa propre cascade et son propre vocabulaire :
-  /// « En préparation », « Prête », « Servie », « Terminée ». Deux problèmes,
-  /// et le second est le pire :
-  ///
-  ///   1. un onglet nommé autrement l'aurait CONTREDITE à trois centimètres —
-  ///      « À servir » au-dessus d'une carte marquée « Prête » ;
-  ///   2. elle écrivait « Terminée » pour `finished` ET pour `completed`. Une
-  ///      commande servie et une commande payée portaient le même mot, alors
-  ///      que l'une attend encore l'argent.
-  ///
-  /// `serviceTabOf` tranche désormais les deux, pour l'onglet comme pour la
-  /// pastille. Elles ne peuvent plus diverger : c'est le même appel.
-  ///
-  /// UNE COMMANDE ENCAISSÉE est traitée par son STATUT, quoi qu'en disent ses
-  /// drapeaux — on ne fait pas payer un client dont l'assiette n'est pas
-  /// arrivée. C'est la première marche de la cascade, et cette garantie-là est
-  /// conservée telle quelle.
-  ///
-  /// SEUL CHANGEMENT DE COMPORTEMENT : la pastille s'affiche désormais AUSSI
-  /// sur une commande pas encore envoyée en préparation (« À envoyer »), là où
-  /// elle se taisait. C'est délibéré — une commande du catalogue web que
-  /// personne n'a acquittée est précisément celle qu'il faut voir.
-  List<Widget> _serviceStateChip() {
-    if (!_isResto) return const [];
-    final tab = serviceTabOf(widget.order);
-    return [
-      _ServiceChip(
-        label: tab.label,
-        icon: tab.icon,
-        color: tab.color(context),
-      ),
-    ];
   }
 
   /// AVANCEMENT DU SERVICE — un bouton, celui de l'étape suivante.
@@ -6639,8 +6572,8 @@ abstract final class _ListCols {
 ///
 /// LE TOKEN SUIT SON FOND : le fond est la couleur de BASE de l'état à faible
 /// opacité, le libellé sa variante TEXTE (`textColor`). `warning` en texte
-/// sur une teinte claire ne ferait que ~2:1 — c'est l'erreur que porte encore
-/// `_ServiceChip`, qui n'est plus rendu nulle part (code mort, au backlog).
+/// sur une teinte claire ne ferait que ~2:1 — c'était l'erreur de l'ancienne
+/// pastille de service, supprimée le 26/09/2026 (code mort).
 ///
 /// « À encaisser » s'écrit en `onSurface` depuis le 26/09/2026 : c'est une
 /// information, et la primaire en texte échouait (2,38–3,31 en clair sur
@@ -6781,31 +6714,6 @@ class _OrdersListHeader extends StatelessWidget {
             color: Theme.of(context).semantic.borderSubtle),
       ]);
   }
-}
-
-class _ServiceChip extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color color;
-
-  const _ServiceChip({
-    required this.label,
-    required this.icon,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(6)),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 10, color: color),
-          const SizedBox(width: 3),
-          Text(label, style: AppTextStyles.microBold.copyWith(color: color)),
-        ]),
-      );
 }
 
 class _StatusChip extends StatelessWidget {

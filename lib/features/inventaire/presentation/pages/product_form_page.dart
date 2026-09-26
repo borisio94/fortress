@@ -1829,7 +1829,7 @@ class _VariantFullCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                    color: isMain ? AppColors.primary : AppColors.primarySurface,
+                    color: isMain ? AppColors.primaryFill : AppColors.primarySurface,
                     borderRadius: BorderRadius.circular(12)),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   if (isMain) ...[
@@ -3242,7 +3242,7 @@ class _StepBar extends StatelessWidget {
             Container(
               width: 26, height: 26,
               decoration: BoxDecoration(
-                color: active ? AppColors.primary
+                color: active ? AppColors.primaryFill
                     : done ? AppColors.secondary.withValues(alpha:0.12)
                     : AppColors.inputFill,
                 shape: BoxShape.circle,
@@ -3307,7 +3307,7 @@ class _BottomNav extends StatelessWidget {
         ElevatedButton(
           onPressed: (isLast && isSaving) ? null : (isLast ? onSubmit : onNext),
           style: ElevatedButton.styleFrom(
-            backgroundColor: isLast ? AppColors.secondary : AppColors.primary,
+            backgroundColor: isLast ? AppColors.secondary : AppColors.primaryFill,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             minimumSize: Size.zero,

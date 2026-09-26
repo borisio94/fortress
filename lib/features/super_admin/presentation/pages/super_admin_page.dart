@@ -3627,9 +3627,9 @@ class _Btn extends StatelessWidget {
         duration: const Duration(milliseconds: 120),
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-            color: sel ? AppColors.primary : Theme.of(context).colorScheme.surface,
+            color: sel ? AppColors.primaryFill : Theme.of(context).colorScheme.surface,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: sel ? AppColors.primary : AppColors.inputBorder)),
+            border: Border.all(color: sel ? AppColors.primaryFill : AppColors.inputBorder)),
         child: Text(label, textAlign: TextAlign.center,
             style: AppTextStyles.bodySmBold.copyWith(
                 color: sel ? Colors.white : AppColors.onSurface)),
@@ -3805,7 +3805,7 @@ class _ResetPasswordDialogState extends State<_ResetPasswordDialog> {
         ElevatedButton(
           onPressed: _loading ? null : (_verified ? _sendReset : _verifySA),
           style: ElevatedButton.styleFrom(
-              backgroundColor: _verified ? AppColors.warning : AppColors.primary,
+              backgroundColor: _verified ? AppColors.warning : AppColors.primaryFill,
               foregroundColor: Colors.white, elevation: 0,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10))),

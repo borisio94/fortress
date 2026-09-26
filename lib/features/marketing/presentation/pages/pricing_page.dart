@@ -147,7 +147,7 @@ class _ToggleButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(
             horizontal: 18, vertical: 9),
         decoration: BoxDecoration(
-            color: active ? AppColors.primary : Colors.transparent,
+            color: active ? AppColors.primaryFill : Colors.transparent,
             borderRadius: BorderRadius.circular(7)),
         child: Text(label,
             style: AppTextStyles.body.copyWith(

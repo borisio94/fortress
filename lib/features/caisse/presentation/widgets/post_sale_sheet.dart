@@ -123,11 +123,11 @@ class _PostSaleSheetState extends State<PostSaleSheet> {
                   duration: const Duration(milliseconds: 150),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   decoration: BoxDecoration(
-                    color: sel ? AppColors.primary : AppColors.inputFill,
+                    color: sel ? AppColors.primaryFill : AppColors.inputFill,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
                         color: sel
-                            ? AppColors.primary
+                            ? AppColors.primaryFill
                             : Theme.of(context).semantic.borderSubtle),
                   ),
                   child: Column(mainAxisSize: MainAxisSize.min, children: [

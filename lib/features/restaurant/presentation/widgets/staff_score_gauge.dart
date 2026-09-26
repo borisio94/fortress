@@ -4,6 +4,12 @@ import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../domain/entities/staff_rating.dart';
 
+/// L'OR du podium de la notation (trophée du premier) — une seule valeur,
+/// partagée par la page Personnel et le tableau de bord. Couleur d'objet (un
+/// trophée), pas d'état : elle ne suit pas le thème, comme les teintes de
+/// données de `RestoSeriesColors`.
+const Color kRestoPodiumGold = Color(0xFFD4A017);
+
 /// LA JAUGE DE NOTATION d'un employé — page Personnel et tableau de bord.
 ///
 /// Une barre plutôt qu'un chiffre seul : « 7 » ne dit rien, une barre aux

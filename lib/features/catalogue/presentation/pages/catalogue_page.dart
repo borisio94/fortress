@@ -1071,10 +1071,10 @@ class _CategoryChips extends StatelessWidget {
         alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
-          color: selected ? AppColors.primary : AppColors.surface,
+          color: selected ? AppColors.primaryFill : AppColors.surface,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-              color: selected ? AppColors.primary : AppColors.divider),
+              color: selected ? AppColors.primaryFill : AppColors.divider),
         ),
         child: Text(label,
             maxLines: 1, overflow: TextOverflow.ellipsis,

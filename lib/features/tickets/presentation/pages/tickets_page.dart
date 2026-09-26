@@ -342,10 +342,10 @@ class _CreateTicketSheetState extends State<_CreateTicketSheet> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: active ? AppColors.primary : theme.colorScheme.surface,
+                color: active ? AppColors.primaryFill : theme.colorScheme.surface,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                    color: active ? AppColors.primary : sem.borderSubtle),
+                    color: active ? AppColors.primaryFill : sem.borderSubtle),
               ),
               child: Text(TicketCategory.labelFr(c),
                   style: AppTextStyles.captionBold.copyWith(
@@ -365,7 +365,7 @@ class _CreateTicketSheetState extends State<_CreateTicketSheet> {
           final active = p == _priority;
           final col = switch (p) {
             TicketPriority.low    => sem.borderSubtle,
-            TicketPriority.normal => AppColors.primary,
+            TicketPriority.normal => AppColors.primaryFill,
             TicketPriority.high   => sem.danger,
           };
           return Padding(

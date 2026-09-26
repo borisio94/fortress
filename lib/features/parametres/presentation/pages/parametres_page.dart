@@ -1917,9 +1917,9 @@ class _ReasonTile extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               border: Border.all(
-                  color: selected ? AppColors.primary : AppColors.textHint,
+                  color: selected ? AppColors.primaryFill : AppColors.textHint,
                   width: 2),
-              color: selected ? AppColors.primary : Theme.of(context).colorScheme.surface,
+              color: selected ? AppColors.primaryFill : Theme.of(context).colorScheme.surface,
             ),
             child: selected
                 ? const Icon(Icons.check_rounded, size: 10, color: Colors.white)

@@ -2302,7 +2302,7 @@ class _StaffScoreCardState extends RestoTableListenerState<_StaffScoreCard> {
                     width: 22,
                     child: i == 0
                         ? const Icon(Icons.emoji_events_rounded,
-                            size: 16, color: Color(0xFFD4A017))
+                            size: 16, color: kRestoPodiumGold)
                         : Text('${i + 1}',
                             style: AppTextStyles.micro),
                   ),

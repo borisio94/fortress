@@ -256,7 +256,7 @@ class _BottomSheetState extends State<_BottomSheet> {
               padding: const EdgeInsets.symmetric(
                   horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: active ? AppColors.primary : AppColors.inputFill,
+                color: active ? AppColors.primaryFill : AppColors.inputFill,
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(p.$2,

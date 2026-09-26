@@ -607,8 +607,9 @@ Trois portes de sortie d'argent sous PIN gérant au restaurant.
 
 **TRANCHÉ — toute boîte avec un champ de saisie passe par
 `showAdaptiveFormSheet` + `AdaptiveFormFrame`**, jamais par un `AlertDialog` :
-le clavier y est géré, la feuille devient une page pleine sous 600 px. Une
-seule violation au restaurant (`dish_form_sheet.dart`).
+le clavier y est géré, la feuille devient une page pleine sous 600 px. Le
+restaurant n'en a plus aucune : la dernière (« Nouvelle catégorie » de la
+fiche plat) a été convertie le 26/09/2026.
 
 | Cas | Châssis |
 |---|---|
@@ -881,8 +882,9 @@ Le détail vit dans `docs/backlog.md` ; ici, l'index.
   carte (bord du bouton) ; `printer_page.dart` (fichier d'un autre chantier,
   un bouton à repointer vers `primaryFill`).
 - Cibles tactiles : ≈ 154 sites hors lot, comptés par feature.
-- Code mort : `KitchenTicketCard` (écran Préparation supprimé),
-  `ExpenseFormSheet`, `PartnerLedgerDetailPage`, `DottedBorderBox`.
+- Code mort : `ExpenseFormSheet`, `PartnerLedgerDetailPage`,
+  `DottedBorderBox` (e-commerce). Au restaurant, supprimé le 26/09/2026 :
+  `KitchenTicketCard` et la pastille de service de `caisse_page`.
 - Shell : titres de page de l'e-commerce (backlog) ; édition d'une commande
   selon la largeur (section 19).
 - Doublons de mécanisme (section 10) : onglets, périodes, étiquettes d'état,

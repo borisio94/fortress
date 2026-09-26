@@ -1081,10 +1081,10 @@ class _PlanBtn extends StatelessWidget {
         duration: const Duration(milliseconds: 120),
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: sel ? AppColors.primary : Theme.of(context).colorScheme.surface,
+          color: sel ? AppColors.primaryFill : Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-              color: sel ? AppColors.primary
+              color: sel ? AppColors.primaryFill
                   : Theme.of(context).semantic.borderSubtle),
         ),
         child: Text(label, textAlign: TextAlign.center,

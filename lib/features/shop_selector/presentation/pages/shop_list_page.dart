@@ -563,7 +563,7 @@ class _NewShopBtnState extends State<_NewShopBtn> {
               ? const EdgeInsets.symmetric(horizontal: 24, vertical: 12)
               : const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
           decoration: BoxDecoration(
-            color: _h ? AppColors.primary : AppColors.textPrimary,
+            color: _h ? AppColors.primaryFill : AppColors.textPrimary,
             borderRadius: BorderRadius.circular(10),
           ),
           child: Row(

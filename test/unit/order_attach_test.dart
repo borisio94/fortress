@@ -77,7 +77,7 @@ void main() {
     });
 
     test('une table occupée SANS couverts renseignés n\'imprime pas « 0 »', () {
-      // `kitchen_ticket_card` affiche « ${order.covers} couverts » dès que le
+      // Un bon de cuisine écrit « ${order.covers} couverts » dès que le
       // champ n'est pas nul. Zéro s'imprimerait, et un cuisinier lirait
       // « 0 couverts » avec du monde en salle.
       final r = coversForTableOrder(

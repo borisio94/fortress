@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../core/theme/app_colors.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/services/restaurant_order_service.dart';
@@ -1248,10 +1249,10 @@ class _TableChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? cs.primary : null,
+          color: selected ? AppColors.primaryFill : null,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-              color: selected ? cs.primary : sem.borderSubtle),
+              color: selected ? AppColors.primaryFill : sem.borderSubtle),
         ),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Row(mainAxisSize: MainAxisSize.min, children: [

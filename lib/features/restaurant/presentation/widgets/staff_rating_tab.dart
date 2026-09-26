@@ -371,7 +371,7 @@ class _RankRow extends StatelessWidget {
                       ? Icon(Icons.emoji_events_rounded,
                           size: 18,
                           color: rank == 1
-                              ? const Color(0xFFD4A017)
+                              ? kRestoPodiumGold
                               : cs.onSurface.withValues(alpha: 0.45))
                       : Text('$rank',
                           style: AppTextStyles.bodySmBold.copyWith(

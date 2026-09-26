@@ -313,12 +313,17 @@ class _SetupStepCard extends StatelessWidget {
               height: 30,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: done ? sem.success : accent.withValues(alpha: 0.15),
+                // Étape FAITE : pastille teintée (`successSurface`) et coche
+                // en `successText` — le token suit son fond. La coche blanche
+                // sur `success` ne tenait que 2,54:1, sous le 3:1 d'une icône.
+                color: done
+                    ? sem.successSurface
+                    : accent.withValues(alpha: 0.15),
                 shape: BoxShape.circle,
               ),
               child: done
-                  ? const Icon(Icons.check_rounded, size: 18,
-                      color: Colors.white)
+                  ? Icon(Icons.check_rounded,
+                      size: 18, color: sem.successText)
                   : Text('$rank',
                       // L'étape active s'écrit en `onSurface` : la primaire en
                       // texte, sur sa propre teinte, échoue dans les deux modes.
